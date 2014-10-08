@@ -113,6 +113,7 @@ class CodeGenFunction : public CodeGenTypeCache {
   void operator=(const CodeGenFunction &) LLVM_DELETED_FUNCTION;
 
   friend class CGCXXABI;
+  friend class CGOpenMPRegionInfo;
 public:
   /// A jump destination is an abstract label, branching to which may
   /// require a jump out through normal cleanups.
@@ -1826,6 +1827,10 @@ public:
   typedef void SpecialInitFn(CodeGenFunction &Init, const VarDecl &D,
                              llvm::Value *Address);
 
+  /// \brief Determine whether the given initializer is trivial in the sense
+  /// that it requires no code to be generated.
+  bool isTrivialInitializer(const Expr *Init);
+
   /// EmitAutoVarDecl - Emit an auto variable declaration.
   ///
   /// This function can be called with a null (unreachable) insert point.
@@ -1991,8 +1996,16 @@ public:
                            ArrayRef<const Attr *> Attrs = None);
 
   llvm::Function *EmitCapturedStmt(const CapturedStmt &S, CapturedRegionKind K);
+  void GenerateCapturedStmtFunctionProlog(const CapturedStmt &S);
+  llvm::Function *GenerateCapturedStmtFunctionEpilog(const CapturedStmt &S);
   llvm::Function *GenerateCapturedStmtFunction(const CapturedStmt &S);
   llvm::Value *GenerateCapturedStmtArgument(const CapturedStmt &S);
+  typedef llvm::DenseMap<const Decl *, llvm::Value *> OuterDeclMapTy;
+  void EmitOMPAggregateAssign(LValue OriginalAddr, llvm::Value *PrivateAddr,
+                              const Expr *AssignExpr, QualType Type,
+                              const VarDecl *VDInit);
+  void EmitOMPFirstprivateClause(const OMPExecutableDirective &D,
+                                 OuterDeclMapTy &OuterDeclMap);
 
   void EmitOMPParallelDirective(const OMPParallelDirective &S);
   void EmitOMPSimdDirective(const OMPSimdDirective &S);
@@ -2016,9 +2029,10 @@ public:
   void EmitOMPTargetDirective(const OMPTargetDirective &S);
 
   /// Helpers for 'omp simd' directive.
-  void EmitOMPSimdBody(const OMPLoopDirective &Directive, bool SeparateIter);
-  void EmitOMPSimdLoop(const OMPLoopDirective &S, OMPPrivateScope &LoopScope,
-                       bool SeparateIter);
+  void EmitOMPLoopBody(const OMPLoopDirective &Directive,
+                       bool SeparateIter = false);
+  void EmitOMPInnerLoop(const OMPLoopDirective &S, OMPPrivateScope &LoopScope,
+                        bool SeparateIter = false);
   void EmitOMPSimdFinal(const OMPLoopDirective &S);
 
   //===--------------------------------------------------------------------===//
@@ -2492,11 +2506,6 @@ public:
 
   /// EmitLoadOfComplex - Load a complex number from the specified l-value.
   ComplexPairTy EmitLoadOfComplex(LValue src, SourceLocation loc);
-
-  /// CreateStaticVarDecl - Create a zero-initialized LLVM global for
-  /// a static local variable.
-  llvm::Constant *CreateStaticVarDecl(const VarDecl &D,
-                                      llvm::GlobalValue::LinkageTypes Linkage);
 
   /// AddInitializerToStaticVarDecl - Add the initializer for 'D' to the
   /// global variable that has already been created for it.  If the initializer
