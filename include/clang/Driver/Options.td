@@ -526,6 +526,9 @@ def fsanitize_memory_track_origins : Flag<["-"], "fsanitize-memory-track-origins
 def fno_sanitize_memory_track_origins : Flag<["-"], "fno-sanitize-memory-track-origins">,
                                         Group<f_clang_Group>, Flags<[CC1Option]>,
                                         HelpText<"Disable origins tracking in MemorySanitizer">;
+def fsanitize_address_field_padding : Joined<["-"], "fsanitize-address-field-padding=">,
+                                        Group<f_clang_Group>, Flags<[CC1Option]>,
+                                        HelpText<"Level of field padding for AddressSanitizer">;
 def fsanitize_recover : Flag<["-"], "fsanitize-recover">,
                         Group<f_clang_Group>;
 def fno_sanitize_recover : Flag<["-"], "fno-sanitize-recover">,
@@ -1168,6 +1171,10 @@ def mgeneral_regs_only : Flag<["-"], "mgeneral-regs-only">, Group<m_aarch64_Feat
 
 def mvsx : Flag<["-"], "mvsx">, Group<m_ppc_Features_Group>;
 def mno_vsx : Flag<["-"], "mno-vsx">, Group<m_ppc_Features_Group>;
+def mpower8_vector : Flag<["-"], "mpower8-vector">,
+    Group<m_ppc_Features_Group>;
+def mno_power8_vector : Flag<["-"], "mno-power8-vector">,
+    Group<m_ppc_Features_Group>;
 def mfprnd : Flag<["-"], "mfprnd">, Group<m_ppc_Features_Group>;
 def mno_fprnd : Flag<["-"], "mno-fprnd">, Group<m_ppc_Features_Group>;
 def mmfcrf : Flag<["-"], "mmfcrf">, Group<m_ppc_Features_Group>;

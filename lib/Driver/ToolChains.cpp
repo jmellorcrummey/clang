@@ -474,13 +474,10 @@ void Darwin::AddDeploymentTarget(DerivedArgList &Args) const {
     // environment defines.
     StringRef OSXTarget;
     StringRef iOSTarget;
-    StringRef iOSSimTarget;
     if (char *env = ::getenv("MACOSX_DEPLOYMENT_TARGET"))
       OSXTarget = env;
     if (char *env = ::getenv("IPHONEOS_DEPLOYMENT_TARGET"))
       iOSTarget = env;
-    if (char *env = ::getenv("IOS_SIMULATOR_DEPLOYMENT_TARGET"))
-      iOSSimTarget = env;
 
     // If no '-miphoneos-version-min' specified on the command line and
     // IPHONEOS_DEPLOYMENT_TARGET is not defined, see if we can set the default
@@ -503,18 +500,6 @@ void Darwin::AddDeploymentTarget(DerivedArgList &Args) const {
          MachOArchName == "arm64"))
         iOSTarget = iOSVersionMin;
 
-    // Handle conflicting deployment targets
-    //
-    // FIXME: Don't hardcode default here.
-
-    // Do not allow conflicts with the iOS simulator target.
-    if (!iOSSimTarget.empty() && (!OSXTarget.empty() || !iOSTarget.empty())) {
-      getDriver().Diag(diag::err_drv_conflicting_deployment_targets)
-        << "IOS_SIMULATOR_DEPLOYMENT_TARGET"
-        << (!OSXTarget.empty() ? "MACOSX_DEPLOYMENT_TARGET" :
-            "IPHONEOS_DEPLOYMENT_TARGET");
-    }
-
     // Allow conflicts among OSX and iOS for historical reasons, but choose the
     // default platform.
     if (!OSXTarget.empty() && !iOSTarget.empty()) {
@@ -534,11 +519,6 @@ void Darwin::AddDeploymentTarget(DerivedArgList &Args) const {
       const Option O = Opts.getOption(options::OPT_miphoneos_version_min_EQ);
       iOSVersion = Args.MakeJoinedArg(nullptr, O, iOSTarget);
       Args.append(iOSVersion);
-    } else if (!iOSSimTarget.empty()) {
-      const Option O = Opts.getOption(
-        options::OPT_mios_simulator_version_min_EQ);
-      iOSSimVersion = Args.MakeJoinedArg(nullptr, O, iOSSimTarget);
-      Args.append(iOSSimVersion);
     } else if (MachOArchName != "armv6m" && MachOArchName != "armv7m" &&
                MachOArchName != "armv7em") {
       // Otherwise, assume we are targeting OS X.
@@ -1000,14 +980,7 @@ void Darwin::addMinVersionArgs(const llvm::opt::ArgList &Args,
                                llvm::opt::ArgStringList &CmdArgs) const {
   VersionTuple TargetVersion = getTargetVersion();
 
-  // If we had an explicit -mios-simulator-version-min argument, honor that,
-  // otherwise use the traditional deployment targets. We can't just check the
-  // is-sim attribute because existing code follows this path, and the linker
-  // may not handle the argument.
-  //
-  // FIXME: We may be able to remove this, once we can verify no one depends on
-  // it.
-  if (Args.hasArg(options::OPT_mios_simulator_version_min_EQ))
+  if (isTargetIOSSimulator())
     CmdArgs.push_back("-ios_simulator_version_min");
   else if (isTargetIOSBased())
     CmdArgs.push_back("-iphoneos_version_min");
@@ -2152,7 +2125,8 @@ bool Generic_GCC::IsIntegratedAssemblerDefault() const {
          getTriple().getArch() == llvm::Triple::thumb ||
          getTriple().getArch() == llvm::Triple::thumbeb ||
          getTriple().getArch() == llvm::Triple::ppc64 ||
-         getTriple().getArch() == llvm::Triple::ppc64le;
+         getTriple().getArch() == llvm::Triple::ppc64le ||
+         getTriple().getArch() == llvm::Triple::systemz;
 }
 
 void Generic_ELF::addClangTargetOptions(const ArgList &DriverArgs,
