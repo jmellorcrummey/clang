@@ -638,7 +638,7 @@ public:
     // RegParmMax is inherited from the underlying architecture
     this->LongDoubleFormat = &llvm::APFloat::IEEEdouble;
     if (Triple.getArch() == llvm::Triple::arm) {
-      this->DescriptionString = "e-m:e-p:32:32-i64:64-v128:64:128-n32-S128";
+      this->DescriptionString = "e-m:e-p:32:32-i64:64-v128:64:128-a:0:32-n32-S128";
     } else if (Triple.getArch() == llvm::Triple::x86) {
       this->DescriptionString = "e-m:e-p:32:32-i64:64-n8:16:32-S128";
     } else if (Triple.getArch() == llvm::Triple::x86_64) {
@@ -1288,18 +1288,25 @@ public:
     IntMaxType = SignedLong;
     Int64Type = SignedLong;
 
-    if (getTriple().getOS() == llvm::Triple::FreeBSD) {
+    if ((Triple.getArch() == llvm::Triple::ppc64le)) {
+      DescriptionString = "e-m:e-i64:64-n32:64";
+      ABI = "elfv2";
+    } else {
+      DescriptionString = "E-m:e-i64:64-n32:64";
+      ABI = "elfv1";
+    }
+
+    switch (getTriple().getOS()) {
+    case llvm::Triple::FreeBSD:
       LongDoubleWidth = LongDoubleAlign = 64;
       LongDoubleFormat = &llvm::APFloat::IEEEdouble;
-      DescriptionString = "E-m:e-i64:64-n32:64";
-    } else {
-      if ((Triple.getArch() == llvm::Triple::ppc64le)) {
-        DescriptionString = "e-m:e-i64:64-n32:64";
-        ABI = "elfv2";
-      } else {
-        DescriptionString = "E-m:e-i64:64-n32:64";
-        ABI = "elfv1";
-      }
+      break;
+    case llvm::Triple::NetBSD:
+      IntMaxType = SignedLongLong;
+      Int64Type = SignedLongLong;
+      break;
+    default:
+      break;
     }
 
     // PPC64 supports atomics up to 8 bytes.
@@ -3728,42 +3735,27 @@ class ARMTargetInfo : public TargetInfo {
 
     ZeroLengthBitfieldBoundary = 0;
 
-    if (IsThumb) {
-      // Thumb1 add sp, #imm requires the immediate value be multiple of 4,
-      // so set preferred for small types to 32.
-      if (T.isOSBinFormatMachO()) {
-        DescriptionString = BigEndian ?
-                              "E-m:o-p:32:32-i1:8:32-i8:8:32-i16:16:32-i64:64-"
-                              "v128:64:128-a:0:32-n32-S64" :
-                              "e-m:o-p:32:32-i1:8:32-i8:8:32-i16:16:32-i64:64-"
-                              "v128:64:128-a:0:32-n32-S64";
-      } else if (T.isOSWindows()) {
-        // FIXME: this is invalid for WindowsCE
-        assert(!BigEndian && "Windows on ARM does not support big endian");
-        DescriptionString = "e"
-                            "-m:e"
-                            "-p:32:32"
-                            "-i1:8:32-i8:8:32-i16:16:32-i64:64"
-                            "-v128:64:128"
-                            "-a:0:32"
-                            "-n32"
-                            "-S64";
-      } else {
-        DescriptionString = BigEndian ?
-                              "E-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-i64:64-"
-                              "v128:64:128-a:0:32-n32-S64" :
-                              "e-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-i64:64-"
-                              "v128:64:128-a:0:32-n32-S64";
-      }
+    // Thumb1 add sp, #imm requires the immediate value be multiple of 4,
+    // so set preferred for small types to 32.
+    if (T.isOSBinFormatMachO()) {
+      DescriptionString =
+          BigEndian ? "E-m:o-p:32:32-i64:64-v128:64:128-a:0:32-n32-S64"
+                    : "e-m:o-p:32:32-i64:64-v128:64:128-a:0:32-n32-S64";
+    } else if (T.isOSWindows()) {
+      // FIXME: this is invalid for WindowsCE
+      assert(!BigEndian && "Windows on ARM does not support big endian");
+      DescriptionString = "e"
+                          "-m:e"
+                          "-p:32:32"
+                          "-i64:64"
+                          "-v128:64:128"
+                          "-a:0:32"
+                          "-n32"
+                          "-S64";
     } else {
-      if (T.isOSBinFormatMachO())
-        DescriptionString = BigEndian ?
-                              "E-m:o-p:32:32-i64:64-v128:64:128-n32-S64" :
-                              "e-m:o-p:32:32-i64:64-v128:64:128-n32-S64";
-      else
-        DescriptionString = BigEndian ?
-                              "E-m:e-p:32:32-i64:64-v128:64:128-n32-S64" :
-                              "e-m:e-p:32:32-i64:64-v128:64:128-n32-S64";
+      DescriptionString =
+          BigEndian ? "E-m:e-p:32:32-i64:64-v128:64:128-a:0:32-n32-S64"
+                    : "e-m:e-p:32:32-i64:64-v128:64:128-a:0:32-n32-S64";
     }
 
     // FIXME: Enumerated types are variable width in straight AAPCS.
@@ -3794,31 +3786,16 @@ class ARMTargetInfo : public TargetInfo {
     /// gcc.
     ZeroLengthBitfieldBoundary = 32;
 
-    if (IsThumb) {
-      // Thumb1 add sp, #imm requires the immediate value be multiple of 4,
-      // so set preferred for small types to 32.
-      if (T.isOSBinFormatMachO())
-        DescriptionString = BigEndian ?
-            "E-m:o-p:32:32-i1:8:32-i8:8:32-i16:16:32-f64:32:64"
-            "-v64:32:64-v128:32:128-a:0:32-n32-S32" :
-            "e-m:o-p:32:32-i1:8:32-i8:8:32-i16:16:32-f64:32:64"
-            "-v64:32:64-v128:32:128-a:0:32-n32-S32";
-      else
-        DescriptionString = BigEndian ?
-            "E-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-f64:32:64"
-            "-v64:32:64-v128:32:128-a:0:32-n32-S32" :
-            "e-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-f64:32:64"
-            "-v64:32:64-v128:32:128-a:0:32-n32-S32";
-    } else {
-      if (T.isOSBinFormatMachO())
-        DescriptionString = BigEndian ?
-            "E-m:o-p:32:32-f64:32:64-v64:32:64-v128:32:128-a:0:32-n32-S32" :
-            "e-m:o-p:32:32-f64:32:64-v64:32:64-v128:32:128-a:0:32-n32-S32";
-      else
-        DescriptionString = BigEndian ?
-            "E-m:e-p:32:32-f64:32:64-v64:32:64-v128:32:128-a:0:32-n32-S32" :
-            "e-m:e-p:32:32-f64:32:64-v64:32:64-v128:32:128-a:0:32-n32-S32";
-    }
+    if (T.isOSBinFormatMachO())
+      DescriptionString =
+          BigEndian
+              ? "E-m:o-p:32:32-f64:32:64-v64:32:64-v128:32:128-a:0:32-n32-S32"
+              : "e-m:o-p:32:32-f64:32:64-v64:32:64-v128:32:128-a:0:32-n32-S32";
+    else
+      DescriptionString =
+          BigEndian
+              ? "E-m:e-p:32:32-f64:32:64-v64:32:64-v128:32:128-a:0:32-n32-S32"
+              : "e-m:e-p:32:32-f64:32:64-v64:32:64-v128:32:128-a:0:32-n32-S32";
 
     // FIXME: Override "preferred align" for double and long long.
   }
@@ -3899,7 +3876,7 @@ public:
       Features["neon"] = true;
     } else if (CPU == "swift" || CPU == "cortex-a7" ||
                CPU == "cortex-a12" || CPU == "cortex-a15" ||
-               CPU == "krait") {
+               CPU == "cortex-a17" || CPU == "krait") {
       Features["vfp4"] = true;
       Features["neon"] = true;
       Features["hwdiv"] = true;
@@ -4020,7 +3997,7 @@ public:
       .Cases("arm1136jf-s", "mpcorenovfp", "mpcore", "6K")
       .Cases("arm1156t2-s", "arm1156t2f-s", "6T2")
       .Cases("cortex-a5", "cortex-a7", "cortex-a8", "cortex-a9-mp", "7A")
-      .Cases("cortex-a9", "cortex-a12", "cortex-a15", "krait", "7A")
+      .Cases("cortex-a9", "cortex-a12", "cortex-a15", "cortex-a17", "krait", "7A")
       .Cases("cortex-r4", "cortex-r5", "7R")
       .Case("swift", "7S")
       .Case("cyclone", "8A")
@@ -4033,7 +4010,7 @@ public:
   static const char *getCPUProfile(StringRef Name) {
     return llvm::StringSwitch<const char*>(Name)
       .Cases("cortex-a5", "cortex-a7", "cortex-a8", "A")
-      .Cases("cortex-a9", "cortex-a12", "cortex-a15", "krait", "A")
+      .Cases("cortex-a9", "cortex-a12", "cortex-a15", "cortex-a17", "krait", "A")
       .Cases("cortex-a53", "cortex-a57", "A")
       .Cases("cortex-m3", "cortex-m4", "cortex-m0", "cortex-m7", "M")
       .Cases("cortex-r4", "cortex-r5", "R")

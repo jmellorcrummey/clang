@@ -377,7 +377,7 @@ LValue CodeGenFunction::EmitMaterializeTemporaryExpr(
           GetAddressOfBaseClass(Object, Adjustment.DerivedToBase.DerivedClass,
                                 Adjustment.DerivedToBase.BasePath->path_begin(),
                                 Adjustment.DerivedToBase.BasePath->path_end(),
-                                /*NullCheckValue=*/ false);
+                                /*NullCheckValue=*/ false, E->getExprLoc());
       break;
 
     case SubobjectAdjustment::FieldAdjustment: {
@@ -448,8 +448,8 @@ bool CodeGenFunction::sanitizePerformTypeCheck() const {
 }
 
 void CodeGenFunction::EmitTypeCheck(TypeCheckKind TCK, SourceLocation Loc,
-                                    llvm::Value *Address,
-                                    QualType Ty, CharUnits Alignment) {
+                                    llvm::Value *Address, QualType Ty,
+                                    CharUnits Alignment, bool SkipNullCheck) {
   if (!sanitizePerformTypeCheck())
     return;
 
@@ -464,13 +464,15 @@ void CodeGenFunction::EmitTypeCheck(TypeCheckKind TCK, SourceLocation Loc,
   llvm::Value *Cond = nullptr;
   llvm::BasicBlock *Done = nullptr;
 
-  if (SanOpts->Null || TCK == TCK_DowncastPointer) {
+  bool AllowNullPointers = TCK == TCK_DowncastPointer || TCK == TCK_Upcast ||
+                           TCK == TCK_UpcastToVirtualBase;
+  if ((SanOpts->Null || AllowNullPointers) && !SkipNullCheck) {
     // The glvalue must not be an empty glvalue.
     Cond = Builder.CreateICmpNE(
         Address, llvm::Constant::getNullValue(Address->getType()));
 
-    if (TCK == TCK_DowncastPointer) {
-      // When performing a pointer downcast, it's OK if the value is null.
+    if (AllowNullPointers) {
+      // When performing pointer casts, it's OK if the value is null.
       // Skip the remaining checks in that case.
       Done = createBasicBlock("null");
       llvm::BasicBlock *Rest = createBasicBlock("not.null");
@@ -536,7 +538,8 @@ void CodeGenFunction::EmitTypeCheck(TypeCheckKind TCK, SourceLocation Loc,
   CXXRecordDecl *RD = Ty->getAsCXXRecordDecl();
   if (SanOpts->Vptr &&
       (TCK == TCK_MemberAccess || TCK == TCK_MemberCall ||
-       TCK == TCK_DowncastPointer || TCK == TCK_DowncastReference) &&
+       TCK == TCK_DowncastPointer || TCK == TCK_DowncastReference ||
+       TCK == TCK_UpcastToVirtualBase) &&
       RD && RD->hasDefinition() && RD->isDynamicClass()) {
     // Compute a hash of the mangled name of the type.
     //
@@ -549,7 +552,8 @@ void CodeGenFunction::EmitTypeCheck(TypeCheckKind TCK, SourceLocation Loc,
                                                      Out);
 
     // Blacklist based on the mangled type.
-    if (!CGM.getSanitizerBlacklist().isBlacklistedType(Out.str())) {
+    if (!CGM.getContext().getSanitizerBlacklist().isBlacklistedType(
+            Out.str())) {
       llvm::hash_code TypeHash = hash_value(Out.str());
 
       // Load the vptr, and compute hash_16_bytes(TypeHash, vptr).
@@ -710,35 +714,6 @@ EmitComplexPrePostIncDec(const UnaryOperator *E, LValue LV,
   // If this is a postinc, return the value read from memory, otherwise use the
   // updated value.
   return isPre ? IncVal : InVal;
-}
-
-void CodeGenFunction::EmitAlignmentAssumption(llvm::Value *PtrValue,
-                                              unsigned Alignment,
-                                              llvm::Value *OffsetValue) {
-  llvm::Value *PtrIntValue =
-    Builder.CreatePtrToInt(PtrValue, IntPtrTy, "ptrint");
-
-  llvm::Value *Mask = llvm::ConstantInt::get(IntPtrTy,
-    Alignment > 0 ? Alignment - 1 : 0);
-  if (OffsetValue) {
-    bool IsOffsetZero = false;
-    if (llvm::ConstantInt *CI = dyn_cast<llvm::ConstantInt>(OffsetValue))
-      IsOffsetZero = CI->isZero();
-
-    if (!IsOffsetZero) {
-      if (OffsetValue->getType() != IntPtrTy)
-        OffsetValue = Builder.CreateIntCast(OffsetValue, IntPtrTy,
-                        /*isSigned*/true, "offsetcast");
-      PtrIntValue = Builder.CreateSub(PtrIntValue, OffsetValue, "offsetptr");
-    }
-  }
-
-  llvm::Value *Zero = llvm::ConstantInt::get(IntPtrTy, 0);
-  llvm::Value *MaskedPtr = Builder.CreateAnd(PtrIntValue, Mask, "maskedptr");
-  llvm::Value *InvCond = Builder.CreateICmpEQ(MaskedPtr, Zero, "maskcond");
-
-  llvm::Value *FnAssume = CGM.getIntrinsic(llvm::Intrinsic::assume);
-  Builder.CreateCall(FnAssume, InvCond);
 }
 
 //===----------------------------------------------------------------------===//
@@ -2874,10 +2849,9 @@ LValue CodeGenFunction::EmitCastLValue(const CastExpr *E) {
     llvm::Value *This = LV.getAddress();
 
     // Perform the derived-to-base conversion
-    llvm::Value *Base =
-      GetAddressOfBaseClass(This, DerivedClassDecl,
-                            E->path_begin(), E->path_end(),
-                            /*NullCheckValue=*/false);
+    llvm::Value *Base = GetAddressOfBaseClass(
+        This, DerivedClassDecl, E->path_begin(), E->path_end(),
+        /*NullCheckValue=*/false, E->getExprLoc());
 
     return MakeAddrLValue(Base, E->getType());
   }
