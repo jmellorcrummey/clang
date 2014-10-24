@@ -588,15 +588,28 @@ void Parser::ParseMicrosoftDeclSpec(ParsedAttributes &Attrs) {
 
 void Parser::ParseMicrosoftTypeAttributes(ParsedAttributes &attrs) {
   // Treat these like attributes
-  while (Tok.is(tok::kw___fastcall) || Tok.is(tok::kw___stdcall) ||
-         Tok.is(tok::kw___thiscall) || Tok.is(tok::kw___cdecl)   ||
-         Tok.is(tok::kw___ptr64) || Tok.is(tok::kw___w64) ||
-         Tok.is(tok::kw___ptr32) || Tok.is(tok::kw___unaligned) ||
-         Tok.is(tok::kw___sptr) || Tok.is(tok::kw___uptr)) {
-    IdentifierInfo *AttrName = Tok.getIdentifierInfo();
-    SourceLocation AttrNameLoc = ConsumeToken();
-    attrs.addNew(AttrName, AttrNameLoc, nullptr, AttrNameLoc, nullptr, 0,
-                 AttributeList::AS_Keyword);
+  while (true) {
+    switch (Tok.getKind()) {
+    case tok::kw___fastcall:
+    case tok::kw___stdcall:
+    case tok::kw___thiscall:
+    case tok::kw___cdecl:
+    case tok::kw___vectorcall:
+    case tok::kw___ptr64:
+    case tok::kw___w64:
+    case tok::kw___ptr32:
+    case tok::kw___unaligned:
+    case tok::kw___sptr:
+    case tok::kw___uptr: {
+      IdentifierInfo *AttrName = Tok.getIdentifierInfo();
+      SourceLocation AttrNameLoc = ConsumeToken();
+      attrs.addNew(AttrName, AttrNameLoc, nullptr, AttrNameLoc, nullptr, 0,
+                   AttributeList::AS_Keyword);
+      break;
+    }
+    default:
+      return;
+    }
   }
 }
 
@@ -1308,8 +1321,7 @@ void Parser::ProhibitCXX11Attributes(ParsedAttributesWithRange &attrs) {
 /// [C++11/C11] static_assert-declaration
 ///         others... [FIXME]
 ///
-Parser::DeclGroupPtrTy Parser::ParseDeclaration(StmtVector &Stmts,
-                                                unsigned Context,
+Parser::DeclGroupPtrTy Parser::ParseDeclaration(unsigned Context,
                                                 SourceLocation &DeclEnd,
                                           ParsedAttributesWithRange &attrs) {
   ParenBraceBracketBalancer BalancerRAIIObj(*this);
@@ -1333,7 +1345,7 @@ Parser::DeclGroupPtrTy Parser::ParseDeclaration(StmtVector &Stmts,
       SingleDecl = ParseNamespace(Context, DeclEnd, InlineLoc);
       break;
     }
-    return ParseSimpleDeclaration(Stmts, Context, DeclEnd, attrs,
+    return ParseSimpleDeclaration(Context, DeclEnd, attrs,
                                   true);
   case tok::kw_namespace:
     ProhibitAttributes(attrs);
@@ -1349,7 +1361,7 @@ Parser::DeclGroupPtrTy Parser::ParseDeclaration(StmtVector &Stmts,
     SingleDecl = ParseStaticAssertDeclaration(DeclEnd);
     break;
   default:
-    return ParseSimpleDeclaration(Stmts, Context, DeclEnd, attrs, true);
+    return ParseSimpleDeclaration(Context, DeclEnd, attrs, true);
   }
 
   // This routine returns a DeclGroup, if the thing we parsed only contains a
@@ -1375,7 +1387,7 @@ Parser::DeclGroupPtrTy Parser::ParseDeclaration(StmtVector &Stmts,
 /// of a simple-declaration. If we find that we are, we also parse the
 /// for-range-initializer, and place it here.
 Parser::DeclGroupPtrTy
-Parser::ParseSimpleDeclaration(StmtVector &Stmts, unsigned Context,
+Parser::ParseSimpleDeclaration(unsigned Context,
                                SourceLocation &DeclEnd,
                                ParsedAttributesWithRange &Attrs,
                                bool RequireSemi, ForRangeInit *FRI) {
@@ -2877,6 +2889,7 @@ void Parser::ParseDeclarationSpecifiers(DeclSpec &DS,
     case tok::kw___stdcall:
     case tok::kw___fastcall:
     case tok::kw___thiscall:
+    case tok::kw___vectorcall:
     case tok::kw___unaligned:
       ParseMicrosoftTypeAttributes(DS.getAttributes());
       continue;
@@ -4067,6 +4080,7 @@ bool Parser::isTypeSpecifierQualifier() {
   case tok::kw___stdcall:
   case tok::kw___fastcall:
   case tok::kw___thiscall:
+  case tok::kw___vectorcall:
   case tok::kw___w64:
   case tok::kw___ptr64:
   case tok::kw___ptr32:
@@ -4235,6 +4249,7 @@ bool Parser::isDeclarationSpecifier(bool DisambiguatingWithExpression) {
   case tok::kw___stdcall:
   case tok::kw___fastcall:
   case tok::kw___thiscall:
+  case tok::kw___vectorcall:
   case tok::kw___w64:
   case tok::kw___sptr:
   case tok::kw___uptr:
@@ -4458,6 +4473,7 @@ void Parser::ParseTypeQualifierListOpt(DeclSpec &DS, unsigned AttrReqs,
     case tok::kw___stdcall:
     case tok::kw___fastcall:
     case tok::kw___thiscall:
+    case tok::kw___vectorcall:
     case tok::kw___unaligned:
       if (AttrReqs & AR_DeclspecAttributesParsed) {
         ParseMicrosoftTypeAttributes(DS.getAttributes());
@@ -5120,6 +5136,7 @@ void Parser::ParseFunctionDeclarator(Declarator &D,
   SourceLocation RefQualifierLoc;
   SourceLocation ConstQualifierLoc;
   SourceLocation VolatileQualifierLoc;
+  SourceLocation RestrictQualifierLoc;
   ExceptionSpecificationType ESpecType = EST_None;
   SourceRange ESpecRange;
   SmallVector<ParsedType, 2> DynamicExceptions;
@@ -5173,6 +5190,7 @@ void Parser::ParseFunctionDeclarator(Declarator &D,
         EndLoc = DS.getSourceRange().getEnd();
         ConstQualifierLoc = DS.getConstSpecLoc();
         VolatileQualifierLoc = DS.getVolatileSpecLoc();
+        RestrictQualifierLoc = DS.getRestrictSpecLoc();
       }
 
       // Parse ref-qualifier[opt].
@@ -5245,6 +5263,7 @@ void Parser::ParseFunctionDeclarator(Declarator &D,
                                              RefQualifierIsLValueRef,
                                              RefQualifierLoc, ConstQualifierLoc,
                                              VolatileQualifierLoc,
+                                             RestrictQualifierLoc,
                                              /*MutableLoc=*/SourceLocation(),
                                              ESpecType, ESpecRange.getBegin(),
                                              DynamicExceptions.data(),

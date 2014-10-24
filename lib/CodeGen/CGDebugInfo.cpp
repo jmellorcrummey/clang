@@ -1255,17 +1255,18 @@ CollectTemplateParams(const TemplateParameterList *TPList,
     } break;
     case TemplateArgument::Declaration: {
       const ValueDecl *D = TA.getAsDecl();
-      QualType T = TA.getParamTypeForDecl();
+      QualType T = TA.getParamTypeForDecl().getDesugaredType(CGM.getContext());
       llvm::DIType TTy = getOrCreateType(T, Unit);
       llvm::Value *V = nullptr;
+      const CXXMethodDecl *MD;
       // Variable pointer template parameters have a value that is the address
       // of the variable.
       if (const auto *VD = dyn_cast<VarDecl>(D))
         V = CGM.GetAddrOfGlobalVar(VD);
       // Member function pointers have special support for building them, though
       // this is currently unsupported in LLVM CodeGen.
-      else if (const auto *method = dyn_cast<CXXMethodDecl>(D))
-          V = CGM.getCXXABI().EmitMemberPointer(method);
+      else if ((MD = dyn_cast<CXXMethodDecl>(D)) && MD->isInstance())
+        V = CGM.getCXXABI().EmitMemberPointer(MD);
       else if (const auto *FD = dyn_cast<FunctionDecl>(D))
         V = CGM.GetAddrOfFunction(FD);
       // Member data pointers have special handling too to compute the fixed
@@ -1323,6 +1324,8 @@ CollectTemplateParams(const TemplateParameterList *TPList,
     case TemplateArgument::Expression: {
       const Expr *E = TA.getAsExpr();
       QualType T = E->getType();
+      if (E->isGLValue())
+        T = CGM.getContext().getLValueReferenceType(T);
       llvm::Value *V = CGM.EmitConstantExpr(E, T);
       assert(V && "Expression in template argument isn't constant");
       llvm::DIType TTy = getOrCreateType(T, Unit);
@@ -2605,13 +2608,16 @@ void CGDebugInfo::EmitLexicalBlockStart(CGBuilderTy &Builder,
   // Set our current location.
   setLocation(Loc);
 
-  // Create a new lexical block and push it on the stack.
-  CreateLexicalBlock(Loc);
-
   // Emit a line table change for the current location inside the new scope.
   Builder.SetCurrentDebugLocation(llvm::DebugLoc::get(getLineNumber(Loc),
                                   getColumnNumber(Loc),
                                   LexicalBlockStack.back()));
+
+  if (DebugKind <= CodeGenOptions::DebugLineTablesOnly)
+    return;
+
+  // Create a new lexical block and push it on the stack.
+  CreateLexicalBlock(Loc);
 }
 
 /// EmitLexicalBlockEnd - Constructs the debug code for exiting a declarative
@@ -2623,6 +2629,9 @@ void CGDebugInfo::EmitLexicalBlockEnd(CGBuilderTy &Builder,
   // Provide an entry in the line table for the end of the block.
   EmitLocation(Builder, Loc);
 
+  if (DebugKind <= CodeGenOptions::DebugLineTablesOnly)
+    return;
+
   LexicalBlockStack.pop_back();
 }
 
@@ -2633,8 +2642,11 @@ void CGDebugInfo::EmitFunctionEnd(CGBuilderTy &Builder) {
   assert(RCount <= LexicalBlockStack.size() && "Region stack mismatch");
 
   // Pop all regions for this function.
-  while (LexicalBlockStack.size() != RCount)
-    EmitLexicalBlockEnd(Builder, CurLoc);
+  while (LexicalBlockStack.size() != RCount) {
+    // Provide an entry in the line table for the end of the block.
+    EmitLocation(Builder, CurLoc);
+    LexicalBlockStack.pop_back();
+  }
   FnBeginRegionCount.pop_back();
 }
 
@@ -3176,8 +3188,15 @@ void CGDebugInfo::EmitGlobalVariable(llvm::GlobalVariable *Var,
   if (LinkageName == DeclName)
     LinkageName = StringRef();
 
-  llvm::DIDescriptor DContext =
-    getContextDescriptor(dyn_cast<Decl>(D->getDeclContext()));
+  // Since we emit declarations (DW_AT_members) for static members, place the
+  // definition of those static members in the namespace they were declared in
+  // in the source code (the lexical decl context).
+  // FIXME: Generalize this for even non-member global variables where the
+  // declaration and definition may have different lexical decl contexts, once
+  // we have support for emitting declarations of (non-member) global variables.
+  llvm::DIDescriptor DContext = getContextDescriptor(
+      dyn_cast<Decl>(D->isStaticDataMember() ? D->getLexicalDeclContext()
+                                             : D->getDeclContext()));
 
   // Attempt to store one global variable for the declaration - even if we
   // emit a lot of fields.
@@ -3191,7 +3210,7 @@ void CGDebugInfo::EmitGlobalVariable(llvm::GlobalVariable *Var,
     assert(RD->isAnonymousStructOrUnion() && "unnamed non-anonymous struct or union?");
     GV = CollectAnonRecordDecls(RD, Unit, LineNo, LinkageName, Var, DContext);
   } else {
-      GV = DBuilder.createGlobalVariable(
+    GV = DBuilder.createGlobalVariable(
         DContext, DeclName, LinkageName, Unit, LineNo, getOrCreateType(T, Unit),
         Var->hasInternalLinkage(), Var,
         getOrCreateStaticDataMemberDeclarationOrNull(D));

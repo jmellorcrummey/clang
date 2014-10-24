@@ -107,6 +107,7 @@ static void diagnoseBadTypeAttribute(Sema &S, const AttributeList &attr,
     case AttributeList::AT_StdCall: \
     case AttributeList::AT_ThisCall: \
     case AttributeList::AT_Pascal: \
+    case AttributeList::AT_VectorCall: \
     case AttributeList::AT_MSABI: \
     case AttributeList::AT_SysVABI: \
     case AttributeList::AT_Regparm: \
@@ -672,6 +673,7 @@ static void maybeSynthesizeBlockSignature(TypeProcessingState &state,
                              /*RefQualifierLoc=*/NoLoc,
                              /*ConstQualifierLoc=*/NoLoc,
                              /*VolatileQualifierLoc=*/NoLoc,
+                             /*RestrictQualifierLoc=*/NoLoc,
                              /*MutableLoc=*/NoLoc,
                              EST_None,
                              /*ESpecLoc=*/NoLoc,
@@ -3121,9 +3123,8 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
           RemovalLocs.push_back(Chunk.Fun.getConstQualifierLoc());
         if (Chunk.Fun.TypeQuals & Qualifiers::Volatile)
           RemovalLocs.push_back(Chunk.Fun.getVolatileQualifierLoc());
-        // FIXME: We do not track the location of the __restrict qualifier.
-        //if (Chunk.Fun.TypeQuals & Qualifiers::Restrict)
-        //  RemovalLocs.push_back(Chunk.Fun.getRestrictQualifierLoc());
+        if (Chunk.Fun.TypeQuals & Qualifiers::Restrict)
+          RemovalLocs.push_back(Chunk.Fun.getRestrictQualifierLoc());
         if (!RemovalLocs.empty()) {
           std::sort(RemovalLocs.begin(), RemovalLocs.end(),
                     BeforeThanCompare<SourceLocation>(S.getSourceManager()));
@@ -3418,6 +3419,8 @@ static AttributeList::Kind getAttrListKind(AttributedType::Kind kind) {
     return AttributeList::AT_ThisCall;
   case AttributedType::attr_pascal:
     return AttributeList::AT_Pascal;
+  case AttributedType::attr_vectorcall:
+    return AttributeList::AT_VectorCall;
   case AttributedType::attr_pcs:
   case AttributedType::attr_pcs_vfp:
     return AttributeList::AT_Pcs;
@@ -4434,6 +4437,8 @@ static AttributedType::Kind getCCTypeAttrKind(AttributeList &Attr) {
     return AttributedType::attr_thiscall;
   case AttributeList::AT_Pascal:
     return AttributedType::attr_pascal;
+  case AttributeList::AT_VectorCall:
+    return AttributedType::attr_vectorcall;
   case AttributeList::AT_Pcs: {
     // The attribute may have had a fixit applied where we treated an
     // identifier as a string literal.  The contents of the string are valid,
@@ -4551,7 +4556,7 @@ static bool handleFunctionTypeAttr(TypeProcessingState &state,
   }
 
   // Diagnose use of callee-cleanup calling convention on variadic functions.
-  if (isCalleeCleanup(CC)) {
+  if (!supportsVariadicCall(CC)) {
     const FunctionProtoType *FnP = dyn_cast<FunctionProtoType>(fn);
     if (FnP && FnP->isVariadic()) {
       unsigned DiagID = diag::err_cconv_varargs;

@@ -531,8 +531,8 @@ protected:
     // Solaris headers require _XOPEN_SOURCE to be set to 600 for C99 and
     // newer, but to 500 for everything else.  feature_test.h has a check to
     // ensure that you are not using C99 with an old version of X/Open or C89
-    // with a new version.  
-    if (Opts.C99 || Opts.C11)
+    // with a new version.
+    if (Opts.C99)
       Builder.defineMacro("_XOPEN_SOURCE", "600");
     else
       Builder.defineMacro("_XOPEN_SOURCE", "500");
@@ -2095,8 +2095,9 @@ public:
     // We accept all non-ARM calling conventions
     return (CC == CC_X86ThisCall ||
             CC == CC_X86FastCall ||
-            CC == CC_X86StdCall || 
-            CC == CC_C || 
+            CC == CC_X86StdCall ||
+            CC == CC_X86VectorCall ||
+            CC == CC_C ||
             CC == CC_X86Pascal ||
             CC == CC_IntelOclBicc) ? CCCR_OK : CCCR_Warning;
   }
@@ -3589,7 +3590,7 @@ public:
     MaxVectorAlign = 256;
     // The 64-bit iOS simulator uses the builtin bool type for Objective-C.
     llvm::Triple T = llvm::Triple(Triple);
-    if (T.getOS() == llvm::Triple::IOS)
+    if (T.isiOS())
       UseSignedCharForObjCBool = false;
     DescriptionString = "e-m:o-i64:64-f80:128-n8:16:32:64-S128";
   }
@@ -4584,7 +4585,7 @@ public:
     if (Opts.FastMath || Opts.FiniteMathOnly)
       Builder.defineMacro("__ARM_FP_FAST");
 
-    if ((Opts.C99 || Opts.C11) && !Opts.Freestanding)
+    if (Opts.C99 && !Opts.Freestanding)
       Builder.defineMacro("__ARM_FP_FENV_ROUNDING");
 
     Builder.defineMacro("__ARM_SIZEOF_WCHAR_T", Opts.ShortWChar ? "2" : "4");
