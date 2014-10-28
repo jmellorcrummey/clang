@@ -1744,10 +1744,11 @@ HandleExprPropertyRefExpr(const ObjCObjectPointerType *OPT,
   }
 
   // Attempt to correct for typos in property names.
-  DeclFilterCCC<ObjCPropertyDecl> Validator;
-  if (TypoCorrection Corrected = CorrectTypo(
-          DeclarationNameInfo(MemberName, MemberLoc), LookupOrdinaryName,
-          nullptr, nullptr, Validator, CTK_ErrorRecovery, IFace, false, OPT)) {
+  if (TypoCorrection Corrected =
+          CorrectTypo(DeclarationNameInfo(MemberName, MemberLoc),
+                      LookupOrdinaryName, nullptr, nullptr,
+                      llvm::make_unique<DeclFilterCCC<ObjCPropertyDecl>>(),
+                      CTK_ErrorRecovery, IFace, false, OPT)) {
     diagnoseTypo(Corrected, PDiag(diag::err_property_not_found_suggest)
                               << MemberName << QualType(OPT, 0));
     DeclarationName TypoResult = Corrected.getCorrection();
@@ -1972,11 +1973,10 @@ Sema::ObjCMessageKind Sema::getObjCMessageKind(Scope *S,
   }
   }
 
-  ObjCInterfaceOrSuperCCC Validator(getCurMethodDecl());
-  if (TypoCorrection Corrected =
-          CorrectTypo(Result.getLookupNameInfo(), Result.getLookupKind(), S,
-                      nullptr, Validator, CTK_ErrorRecovery, nullptr, false,
-                      nullptr, false)) {
+  if (TypoCorrection Corrected = CorrectTypo(
+          Result.getLookupNameInfo(), Result.getLookupKind(), S, nullptr,
+          llvm::make_unique<ObjCInterfaceOrSuperCCC>(getCurMethodDecl()),
+          CTK_ErrorRecovery, nullptr, false, nullptr, false)) {
     if (Corrected.isKeyword()) {
       // If we've found the keyword "super" (the only keyword that would be
       // returned by CorrectTypo), this is a send to super.
@@ -4075,11 +4075,22 @@ ExprResult Sema::BuildObjCBridgedCast(SourceLocation LParenLoc,
     // Okay: id -> CF
     CK = CK_BitCast;
     switch (Kind) {
-    case OBC_Bridge:
-      // Reclaiming a value that's going to be __bridge-casted to CF
-      // is very dangerous, so we don't do it.
-      SubExpr = maybeUndoReclaimObject(SubExpr);
-      break;
+      case OBC_Bridge: {
+        const ImplicitCastExpr *implCE = dyn_cast<ImplicitCastExpr>(SubExpr);
+        while (implCE && implCE->getCastKind() ==  CK_BitCast)
+          implCE = dyn_cast<ImplicitCastExpr>(implCE->getSubExpr());
+        if (implCE && (implCE->getCastKind() == CK_ARCConsumeObject))
+          if (const Expr *LitExp = implCE->getSubExpr())
+            if ((isa<ObjCArrayLiteral>(LitExp) ||
+                 isa<ObjCDictionaryLiteral>(LitExp)) &&
+                T->isCARCBridgableType())
+              Diag(BridgeKeywordLoc, diag::warn_arc_consumed_object_released)
+                << T << implCE->getType();
+        // Reclaiming a value that's going to be __bridge-casted to CF
+        // is very dangerous, so we don't do it.
+        SubExpr = maybeUndoReclaimObject(SubExpr);
+        break;
+      }
       
     case OBC_BridgeRetained:        
       // Produce the object before casting it.
