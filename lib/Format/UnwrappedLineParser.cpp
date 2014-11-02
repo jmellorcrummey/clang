@@ -1174,7 +1174,8 @@ void UnwrappedLineParser::parseTryCatch() {
     --Line->Level;
   }
   while (FormatTok->is(tok::kw_catch) ||
-         (Style.Language == FormatStyle::LK_JavaScript &&
+         ((Style.Language == FormatStyle::LK_Java ||
+           Style.Language == FormatStyle::LK_JavaScript) &&
           FormatTok->TokenText == "finally")) {
     nextToken();
     while (FormatTok->isNot(tok::l_brace)) {
@@ -1375,10 +1376,10 @@ void UnwrappedLineParser::parseRecord() {
     }
     // The actual identifier can be a nested name specifier, and in macros
     // it is often token-pasted.
-    while (
-        FormatTok->is(tok::identifier) || FormatTok->is(tok::coloncolon) ||
-        FormatTok->is(tok::hashhash) ||
-        (Style.Language == FormatStyle::LK_Java && FormatTok->is(tok::period)))
+    while (FormatTok->is(tok::identifier) || FormatTok->is(tok::coloncolon) ||
+           FormatTok->is(tok::hashhash) ||
+           (Style.Language == FormatStyle::LK_Java &&
+            FormatTok->isOneOf(tok::period, tok::comma)))
       nextToken();
 
     // Note that parsing away template declarations here leads to incorrectly
