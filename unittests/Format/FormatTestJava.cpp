@@ -77,6 +77,25 @@ TEST_F(FormatTestJava, ClassDeclarations) {
                "    implements SomeInterface,\n"
                "               AnotherInterface {}",
                getStyleWithColumns(40));
+  verifyFormat("@SomeAnnotation()\n"
+               "abstract class aaaaaaaaaaaa extends bbbbbbbbbbbbbbb\n"
+               "    implements cccccccccccc {\n"
+               "}",
+               getStyleWithColumns(76));
+}
+
+TEST_F(FormatTestJava, EnumDeclarations) {
+  verifyFormat("enum SomeThing { ABC, CDE }");
+  verifyFormat("enum SomeThing { ABC, CDE };");
+  verifyFormat("enum SomeThing {\n"
+               "  ABC,\n"
+               "  CDE,\n"
+               "}");
+  verifyFormat("public class SomeClass {\n"
+               "  enum SomeThing { ABC, CDE }\n"
+               "  void f() {\n"
+               "  }\n"
+               "}");
 }
 
 TEST_F(FormatTestJava, ThrowsDeclarations) {
@@ -120,6 +139,12 @@ TEST_F(FormatTestJava, Generics) {
   verifyFormat("Iterable<? extends SomeObject> a;");
 
   verifyFormat("A.<B>doSomething();");
+
+  verifyFormat("@Override\n"
+               "public Map<String, ?> getAll() {\n}");
+
+  verifyFormat("public static <R> ArrayList<R> get() {\n}");
+  verifyFormat("<T extends B> T getInstance(Class<T> type);");
 }
 
 TEST_F(FormatTestJava, StringConcatenation) {
@@ -151,6 +176,17 @@ TEST_F(FormatTestJava, TryCatchFinally) {
                "} catch (SomeException | OtherException e) {\n"
                "  HandleException(e);\n"
                "}");
+}
+
+TEST_F(FormatTestJava, SynchronizedKeyword) {
+  verifyFormat("synchronized (mData) {\n"
+               "  // ...\n"
+               "}");
+}
+
+TEST_F(FormatTestJava, ImportDeclarations) {
+  verifyFormat("import some.really.loooooooooooooooooooooong.imported.Class;",
+               getStyleWithColumns(50));
 }
 
 } // end namespace tooling

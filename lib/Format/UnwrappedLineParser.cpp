@@ -849,7 +849,8 @@ bool UnwrappedLineParser::tryToParseLambda() {
   // FIXME: This is a dirty way to access the previous token. Find a better
   // solution.
   if (!Line->Tokens.empty() &&
-      (Line->Tokens.back().Tok->isOneOf(tok::identifier, tok::kw_operator) ||
+      (Line->Tokens.back().Tok->isOneOf(tok::identifier, tok::kw_operator,
+                                        tok::kw_new, tok::kw_delete) ||
        Line->Tokens.back().Tok->closesScope() ||
        Line->Tokens.back().Tok->isSimpleTypeSpecifier())) {
     nextToken();
@@ -1353,15 +1354,17 @@ void UnwrappedLineParser::parseEnum() {
   if (FormatTok->Tok.is(tok::l_brace)) {
     FormatTok->BlockKind = BK_Block;
     bool HasError = !parseBracedList(/*ContinueOnSemicolons=*/true);
-    if (HasError) {
-      if (FormatTok->is(tok::semi))
-        nextToken();
+    if (FormatTok->is(tok::semi))
+      nextToken();
+    if (HasError)
       addUnwrappedLine();
-    }
   }
   // We fall through to parsing a structural element afterwards, so that in
   // enum A {} n, m;
   // "} n, m;" will end up in one unwrapped line.
+  // This does not apply for Java.
+  if (Style.Language == FormatStyle::LK_Java)
+    addUnwrappedLine();
 }
 
 void UnwrappedLineParser::parseRecord() {
