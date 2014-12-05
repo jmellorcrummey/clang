@@ -353,12 +353,10 @@ static void SetInstallDir(SmallVectorImpl<const char *> &argv,
   SmallString<128> InstalledPath(argv[0]);
 
   // Do a PATH lookup, if there are no directory components.
-  if (llvm::sys::path::filename(InstalledPath) == InstalledPath) {
-    auto Tmp = llvm::sys::findProgramByName(
-      llvm::sys::path::filename(InstalledPath.str()));
-    if (Tmp)
+  if (llvm::sys::path::filename(InstalledPath) == InstalledPath)
+    if (llvm::ErrorOr<std::string> Tmp = llvm::sys::findProgramByName(
+            llvm::sys::path::filename(InstalledPath.str())))
       InstalledPath = *Tmp;
-  }
   llvm::sys::fs::make_absolute(InstalledPath);
   InstalledPath = llvm::sys::path::parent_path(InstalledPath);
   if (llvm::sys::fs::exists(InstalledPath.c_str()))
@@ -453,8 +451,7 @@ int main(int argc_, const char **argv_) {
         clang::serialized_diags::create(DiagOpts->DiagnosticSerializationFile,
                                         &*DiagOpts, /*MergeChildRecords=*/true);
     Diags.setClient(new ChainedDiagnosticConsumer(
-        std::unique_ptr<DiagnosticConsumer>(Diags.takeClient()),
-        std::move(SerializedConsumer)));
+        Diags.takeClient(), std::move(SerializedConsumer)));
   }
 
   ProcessWarningOptions(Diags, *DiagOpts, /*ReportDiags=*/false);

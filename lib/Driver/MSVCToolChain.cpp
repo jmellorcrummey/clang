@@ -31,7 +31,9 @@
 #ifdef USE_WIN32
   #define WIN32_LEAN_AND_MEAN
   #define NOGDI
-  #define NOMINMAX
+  #ifndef NOMINMAX
+    #define NOMINMAX
+  #endif
   #include <windows.h>
 #endif
 
@@ -43,6 +45,9 @@ using namespace llvm::opt;
 MSVCToolChain::MSVCToolChain(const Driver &D, const llvm::Triple& Triple,
                              const ArgList &Args)
   : ToolChain(D, Triple, Args) {
+  getProgramPaths().push_back(getDriver().getInstalledDir());
+  if (getDriver().getInstalledDir() != getDriver().Dir)
+    getProgramPaths().push_back(getDriver().Dir);
 }
 
 Tool *MSVCToolChain::buildLinker() const {
@@ -117,7 +122,6 @@ static bool getSystemRegistryString(const char *keyPath, const char *valueName,
 #else
   HKEY hRootKey = HKEY_LOCAL_MACHINE;
   HKEY hKey = NULL;
-  DWORD valueSize = 0;
   long lResult;
   bool returnValue = false;
 

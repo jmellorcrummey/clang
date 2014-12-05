@@ -150,6 +150,8 @@ struct CodeGenTypeCache {
 
   llvm::CallingConv::ID RuntimeCC;
   llvm::CallingConv::ID getRuntimeCC() const { return RuntimeCC; }
+  llvm::CallingConv::ID BuiltinCC;
+  llvm::CallingConv::ID getBuiltinCC() const { return BuiltinCC; }
 };
 
 struct RREntrypoints {
@@ -874,6 +876,11 @@ public:
                                         StringRef Name,
                                         llvm::AttributeSet ExtraAttrs =
                                           llvm::AttributeSet());
+  /// Create a new compiler builtin function with the specified type and name.
+  llvm::Constant *CreateBuiltinFunction(llvm::FunctionType *Ty,
+                                        StringRef Name,
+                                        llvm::AttributeSet ExtraAttrs =
+                                          llvm::AttributeSet());
   /// Create a new runtime global variable with the specified type and name.
   llvm::Constant *CreateRuntimeVariable(llvm::Type *Ty,
                                         StringRef Name);
@@ -1087,6 +1094,11 @@ public:
   void setAliasAttributes(const Decl *D, llvm::GlobalValue *GV);
 
   void addReplacement(StringRef Name, llvm::Constant *C);
+
+  /// \brief Emit a code for threadprivate directive.
+  /// \param D Threadprivate declaration.
+  void EmitOMPThreadPrivateDecl(const OMPThreadPrivateDecl *D);
+
 private:
   llvm::Constant *
   GetOrCreateLLVMFunction(StringRef MangledName, llvm::Type *Ty, GlobalDecl D,

@@ -446,11 +446,8 @@ CodeGenTypes::arrangeLLVMFunctionInfo(CanQualType resultType,
                                       ArrayRef<CanQualType> argTypes,
                                       FunctionType::ExtInfo info,
                                       RequiredArgs required) {
-#ifndef NDEBUG
-  for (ArrayRef<CanQualType>::const_iterator
-         I = argTypes.begin(), E = argTypes.end(); I != E; ++I)
-    assert(I->isCanonicalAsParam());
-#endif
+  assert(std::all_of(argTypes.begin(), argTypes.end(),
+                     std::mem_fun_ref(&CanQualType::isCanonicalAsParam)));
 
   unsigned CC = ClangCallConvToLLVMCallConv(info.getCC());
 
@@ -469,7 +466,8 @@ CodeGenTypes::arrangeLLVMFunctionInfo(CanQualType resultType,
                               required);
   FunctionInfos.InsertNode(FI, insertPos);
 
-  bool inserted = FunctionsBeingProcessed.insert(FI); (void)inserted;
+  bool inserted = FunctionsBeingProcessed.insert(FI).second;
+  (void)inserted;
   assert(inserted && "Recursively being processed?");
   
   // Compute ABI information.
@@ -1202,7 +1200,8 @@ llvm::FunctionType *CodeGenTypes::GetFunctionType(GlobalDecl GD) {
 llvm::FunctionType *
 CodeGenTypes::GetFunctionType(const CGFunctionInfo &FI) {
 
-  bool Inserted = FunctionsBeingProcessed.insert(&FI); (void)Inserted;
+  bool Inserted = FunctionsBeingProcessed.insert(&FI).second;
+  (void)Inserted;
   assert(Inserted && "Recursively being processed?");
 
   llvm::Type *resultType = nullptr;
@@ -2291,7 +2290,7 @@ void CodeGenFunction::EmitFunctionEpilog(const CGFunctionInfo &FI,
 
   llvm::Instruction *Ret;
   if (RV) {
-    if (SanOpts.ReturnsNonnullAttribute) {
+    if (SanOpts.has(SanitizerKind::ReturnsNonnullAttribute)) {
       if (auto RetNNAttr = CurGD.getDecl()->getAttr<ReturnsNonNullAttr>()) {
         SanitizerScope SanScope(this);
         llvm::Value *Cond = Builder.CreateICmpNE(
@@ -2300,7 +2299,8 @@ void CodeGenFunction::EmitFunctionEpilog(const CGFunctionInfo &FI,
             EmitCheckSourceLocation(EndLoc),
             EmitCheckSourceLocation(RetNNAttr->getLocation()),
         };
-        EmitCheck(Cond, "nonnull_return", StaticData, None, CRK_Recoverable);
+        EmitCheck(std::make_pair(Cond, SanitizerKind::ReturnsNonnullAttribute),
+                  "nonnull_return", StaticData, None);
       }
     }
     Ret = Builder.CreateRet(RV);
@@ -2618,7 +2618,7 @@ void CallArgList::freeArgumentMemory(CodeGenFunction &CGF) const {
 static void emitNonNullArgCheck(CodeGenFunction &CGF, RValue RV,
                                 QualType ArgType, SourceLocation ArgLoc,
                                 const FunctionDecl *FD, unsigned ParmNum) {
-  if (!CGF.SanOpts.NonnullAttribute || !FD)
+  if (!CGF.SanOpts.has(SanitizerKind::NonnullAttribute) || !FD)
     return;
   auto PVD = ParmNum < FD->getNumParams() ? FD->getParamDecl(ParmNum) : nullptr;
   unsigned ArgNo = PVD ? PVD->getFunctionScopeIndex() : ParmNum;
@@ -2635,8 +2635,8 @@ static void emitNonNullArgCheck(CodeGenFunction &CGF, RValue RV,
       CGF.EmitCheckSourceLocation(NNAttr->getLocation()),
       llvm::ConstantInt::get(CGF.Int32Ty, ArgNo + 1),
   };
-  CGF.EmitCheck(Cond, "nonnull_arg", StaticData, None,
-                CodeGenFunction::CRK_Recoverable);
+  CGF.EmitCheck(std::make_pair(Cond, SanitizerKind::NonnullAttribute),
+                "nonnull_arg", StaticData, None);
 }
 
 void CodeGenFunction::EmitCallArgs(CallArgList &Args,

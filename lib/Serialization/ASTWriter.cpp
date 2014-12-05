@@ -1203,8 +1203,9 @@ void ASTWriter::WriteControlBlock(Preprocessor &PP, ASTContext &Context,
   Record.push_back(LangOpts.Name);
 #define ENUM_LANGOPT(Name, Type, Bits, Default, Description) \
   Record.push_back(static_cast<unsigned>(LangOpts.get##Name()));
-#include "clang/Basic/LangOptions.def"  
-#define SANITIZER(NAME, ID) Record.push_back(LangOpts.Sanitize.ID);
+#include "clang/Basic/LangOptions.def"
+#define SANITIZER(NAME, ID)                                                    \
+  Record.push_back(LangOpts.Sanitize.has(SanitizerKind::ID));
 #include "clang/Basic/Sanitizers.def"
 
   Record.push_back((unsigned) LangOpts.ObjCRuntime.getKind());
@@ -2510,24 +2511,31 @@ void ASTWriter::WriteSubmodules(Module *WritingModule) {
 
     // Emit the headers.
     struct {
-      unsigned Kind;
+      unsigned RecordKind;
       unsigned Abbrev;
-      ArrayRef<const FileEntry*> Headers;
+      Module::HeaderKind HeaderKind;
     } HeaderLists[] = {
-      {SUBMODULE_HEADER, HeaderAbbrev, Mod->NormalHeaders},
-      {SUBMODULE_TEXTUAL_HEADER, TextualHeaderAbbrev, Mod->TextualHeaders},
-      {SUBMODULE_PRIVATE_HEADER, PrivateHeaderAbbrev, Mod->PrivateHeaders},
+      {SUBMODULE_HEADER, HeaderAbbrev, Module::HK_Normal},
+      {SUBMODULE_TEXTUAL_HEADER, TextualHeaderAbbrev, Module::HK_Textual},
+      {SUBMODULE_PRIVATE_HEADER, PrivateHeaderAbbrev, Module::HK_Private},
       {SUBMODULE_PRIVATE_TEXTUAL_HEADER, PrivateTextualHeaderAbbrev,
-       Mod->PrivateTextualHeaders},
-      {SUBMODULE_EXCLUDED_HEADER, ExcludedHeaderAbbrev, Mod->ExcludedHeaders},
-      {SUBMODULE_TOPHEADER, TopHeaderAbbrev,
-       Mod->getTopHeaders(PP->getFileManager())}
+        Module::HK_PrivateTextual},
+      {SUBMODULE_EXCLUDED_HEADER, ExcludedHeaderAbbrev, Module::HK_Excluded}
     };
     for (auto &HL : HeaderLists) {
       Record.clear();
-      Record.push_back(HL.Kind);
-      for (auto *H : HL.Headers)
-        Stream.EmitRecordWithBlob(HL.Abbrev, Record, H->getName());
+      Record.push_back(HL.RecordKind);
+      for (auto &H : Mod->Headers[HL.HeaderKind])
+        Stream.EmitRecordWithBlob(HL.Abbrev, Record, H.NameAsWritten);
+    }
+
+    // Emit the top headers.
+    {
+      auto TopHeaders = Mod->getTopHeaders(PP->getFileManager());
+      Record.clear();
+      Record.push_back(SUBMODULE_TOPHEADER);
+      for (auto *H : TopHeaders)
+        Stream.EmitRecordWithBlob(TopHeaderAbbrev, Record, H->getName());
     }
 
     // Emit the imports. 
@@ -3679,7 +3687,7 @@ static void visitLocalLookupResults(const DeclContext *ConstDC,
 }
 
 void ASTWriter::AddUpdatedDeclContext(const DeclContext *DC) {
-  if (UpdatedDeclContexts.insert(DC) && WritingAST) {
+  if (UpdatedDeclContexts.insert(DC).second && WritingAST) {
     // Ensure we emit all the visible declarations.
     visitLocalLookupResults(DC, DC->NeedToReconcileExternalVisibleStorage,
                             [&](DeclarationName Name,
@@ -4787,6 +4795,10 @@ void ASTWriter::WriteDeclUpdatesBlocks(RecordDataImpl &OffsetsRecord) {
       case UPD_STATIC_LOCAL_NUMBER:
         Record.push_back(Update.getNumber());
         break;
+      case UPD_DECL_MARKED_OPENMP_THREADPRIVATE:
+        AddSourceRange(D->getAttr<OMPThreadPrivateDeclAttr>()->getRange(),
+                       Record);
+        break;
       }
     }
 
@@ -5879,4 +5891,12 @@ void ASTWriter::DeclarationMarkedUsed(const Decl *D) {
     return;
 
   DeclUpdates[D].push_back(DeclUpdate(UPD_DECL_MARKED_USED));
+}
+
+void ASTWriter::DeclarationMarkedOpenMPThreadPrivate(const Decl *D) {
+  assert(!WritingAST && "Already writing the AST!");
+  if (!D->isFromASTFile())
+    return;
+
+  DeclUpdates[D].push_back(DeclUpdate(UPD_DECL_MARKED_OPENMP_THREADPRIVATE));
 }

@@ -67,6 +67,13 @@ ModuleManager::addModule(StringRef FileName, ModuleKind Type,
   // Look for the file entry. This only fails if the expected size or
   // modification time differ.
   const FileEntry *Entry;
+  if (Type == MK_ExplicitModule) {
+    // If we're not expecting to pull this file out of the module cache, it
+    // might have a different mtime due to being moved across filesystems in
+    // a distributed build. The size must still match, though. (As must the
+    // contents, but we can't check that.)
+    ExpectedModTime = 0;
+  }
   if (lookupModuleFile(FileName, ExpectedSize, ExpectedModTime, Entry)) {
     ErrorStr = "module file out of date";
     return OutOfDate;
@@ -132,21 +139,27 @@ ModuleManager::addModule(StringRef FileName, ModuleKind Type,
     // Initialize the stream
     New->StreamFile.init((const unsigned char *)New->Buffer->getBufferStart(),
                          (const unsigned char *)New->Buffer->getBufferEnd());
+  }
 
-    if (ExpectedSignature) {
-      New->Signature = ReadSignature(New->StreamFile);
-      if (New->Signature != ExpectedSignature) {
-        ErrorStr = New->Signature ? "signature mismatch"
-                                  : "could not read module signature";
+  if (ExpectedSignature) {
+    if (NewModule)
+      ModuleEntry->Signature = ReadSignature(ModuleEntry->StreamFile);
+    else
+      assert(ModuleEntry->Signature == ReadSignature(ModuleEntry->StreamFile));
 
+    if (ModuleEntry->Signature != ExpectedSignature) {
+      ErrorStr = ModuleEntry->Signature ? "signature mismatch"
+                                        : "could not read module signature";
+
+      if (NewModule) {
         // Remove the module file immediately, since removeModules might try to
         // invalidate the file cache for Entry, and that is not safe if this
         // module is *itself* up to date, but has an out-of-date importer.
         Modules.erase(Entry);
         Chain.pop_back();
-        delete New;
-        return OutOfDate;
+        delete ModuleEntry;
       }
+      return OutOfDate;
     }
   }
   

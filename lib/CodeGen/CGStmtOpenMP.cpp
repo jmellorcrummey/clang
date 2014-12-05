@@ -490,26 +490,22 @@ void CodeGenFunction::EmitOMPSingleDirective(const OMPSingleDirective &) {
   llvm_unreachable("CodeGen for 'omp single' is not supported yet.");
 }
 
-void CodeGenFunction::EmitOMPMasterDirective(const OMPMasterDirective &) {
-  llvm_unreachable("CodeGen for 'omp master' is not supported yet.");
-}
-
-void CodeGenFunction::EmitOMPCriticalDirective(const OMPCriticalDirective &S) {
-  // __kmpc_critical();
-  // <captured_body>
-  // __kmpc_end_critical();
-  //
-
-  auto Lock = CGM.getOpenMPRuntime().GetCriticalRegionLock(
-      S.getDirectiveName().getAsString());
-  CGM.getOpenMPRuntime().EmitOMPCriticalRegionStart(*this, Lock,
-                                                    S.getLocStart());
-  {
+void CodeGenFunction::EmitOMPMasterDirective(const OMPMasterDirective &S) {
+  CGM.getOpenMPRuntime().EmitOMPMasterRegion(
+      *this, [&]() -> void {
     RunCleanupsScope Scope(*this);
     EmitStmt(cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
     EnsureInsertPoint();
-  }
-  CGM.getOpenMPRuntime().EmitOMPCriticalRegionEnd(*this, Lock, S.getLocEnd());
+  }, S.getLocStart());
+}
+
+void CodeGenFunction::EmitOMPCriticalDirective(const OMPCriticalDirective &S) {
+  CGM.getOpenMPRuntime().EmitOMPCriticalRegion(
+      *this, S.getDirectiveName().getAsString(), [&]() -> void {
+    RunCleanupsScope Scope(*this);
+    EmitStmt(cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
+    EnsureInsertPoint();
+  }, S.getLocStart());
 }
 
 void
@@ -535,16 +531,25 @@ void CodeGenFunction::EmitOMPTaskyieldDirective(const OMPTaskyieldDirective &) {
   llvm_unreachable("CodeGen for 'omp taskyield' is not supported yet.");
 }
 
-void CodeGenFunction::EmitOMPBarrierDirective(const OMPBarrierDirective &) {
-  llvm_unreachable("CodeGen for 'omp barrier' is not supported yet.");
+void CodeGenFunction::EmitOMPBarrierDirective(const OMPBarrierDirective &S) {
+  CGM.getOpenMPRuntime().EmitOMPBarrierCall(*this, S.getLocStart());
 }
 
 void CodeGenFunction::EmitOMPTaskwaitDirective(const OMPTaskwaitDirective &) {
   llvm_unreachable("CodeGen for 'omp taskwait' is not supported yet.");
 }
 
-void CodeGenFunction::EmitOMPFlushDirective(const OMPFlushDirective &) {
-  llvm_unreachable("CodeGen for 'omp flush' is not supported yet.");
+void CodeGenFunction::EmitOMPFlushDirective(const OMPFlushDirective &S) {
+  CGM.getOpenMPRuntime().EmitOMPFlush(
+      *this, [&]() -> ArrayRef<const Expr *> {
+               if (auto C = S.getSingleClause(/*K*/ OMPC_flush)) {
+                 auto FlushClause = cast<OMPFlushClause>(C);
+                 return llvm::makeArrayRef(FlushClause->varlist_begin(),
+                                           FlushClause->varlist_end());
+               }
+               return llvm::None;
+             }(),
+      S.getLocStart());
 }
 
 void CodeGenFunction::EmitOMPOrderedDirective(const OMPOrderedDirective &) {
