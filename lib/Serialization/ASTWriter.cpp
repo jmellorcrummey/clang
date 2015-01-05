@@ -1058,6 +1058,21 @@ void ASTWriter::WriteBlockInfoBlock() {
   Stream.ExitBlock();
 }
 
+/// \brief Prepares a path for being written to an AST file by converting it
+/// to an absolute path and removing nested './'s.
+///
+/// \return \c true if the path was changed.
+bool cleanPathForOutput(FileManager &FileMgr, SmallVectorImpl<char> &Path) {
+  bool Changed = false;
+
+  if (!llvm::sys::path::is_absolute(StringRef(Path.data(), Path.size()))) {
+    llvm::sys::fs::make_absolute(Path);
+    Changed = true;
+  }
+
+  return Changed | FileMgr.removeDotPaths(Path);
+}
+
 /// \brief Adjusts the given filename to only write out the portion of the
 /// filename that is not part of the system root directory.
 ///
@@ -1170,8 +1185,7 @@ void ASTWriter::WriteControlBlock(Preprocessor &PP, ASTContext &Context,
     Record.push_back(MODULE_DIRECTORY);
 
     SmallString<128> BaseDir(WritingModule->Directory->getName());
-    Context.getSourceManager().getFileManager().FixupRelativePath(BaseDir);
-    llvm::sys::fs::make_absolute(BaseDir);
+    cleanPathForOutput(Context.getSourceManager().getFileManager(), BaseDir);
     Stream.EmitRecordWithBlob(AbbrevCode, Record, BaseDir);
 
     // Write out all other paths relative to the base directory if possible.
@@ -2881,11 +2895,11 @@ public:
     unsigned DataLen = 4 + 2 + 2; // 2 bytes for each of the method counts
     for (const ObjCMethodList *Method = &Methods.Instance; Method;
          Method = Method->getNext())
-      if (Method->Method)
+      if (Method->getMethod())
         DataLen += 4;
     for (const ObjCMethodList *Method = &Methods.Factory; Method;
          Method = Method->getNext())
-      if (Method->Method)
+      if (Method->getMethod())
         DataLen += 4;
     LE.write<uint16_t>(DataLen);
     return std::make_pair(KeyLen, DataLen);
@@ -2915,32 +2929,39 @@ public:
     unsigned NumInstanceMethods = 0;
     for (const ObjCMethodList *Method = &Methods.Instance; Method;
          Method = Method->getNext())
-      if (Method->Method)
+      if (Method->getMethod())
         ++NumInstanceMethods;
 
     unsigned NumFactoryMethods = 0;
     for (const ObjCMethodList *Method = &Methods.Factory; Method;
          Method = Method->getNext())
-      if (Method->Method)
+      if (Method->getMethod())
         ++NumFactoryMethods;
 
     unsigned InstanceBits = Methods.Instance.getBits();
     assert(InstanceBits < 4);
-    unsigned NumInstanceMethodsAndBits =
-        (NumInstanceMethods << 2) | InstanceBits;
+    unsigned InstanceHasMoreThanOneDeclBit =
+        Methods.Instance.hasMoreThanOneDecl();
+    unsigned FullInstanceBits = (NumInstanceMethods << 3) |
+                                (InstanceHasMoreThanOneDeclBit << 2) |
+                                InstanceBits;
     unsigned FactoryBits = Methods.Factory.getBits();
     assert(FactoryBits < 4);
-    unsigned NumFactoryMethodsAndBits = (NumFactoryMethods << 2) | FactoryBits;
-    LE.write<uint16_t>(NumInstanceMethodsAndBits);
-    LE.write<uint16_t>(NumFactoryMethodsAndBits);
+    unsigned FactoryHasMoreThanOneDeclBit =
+        Methods.Factory.hasMoreThanOneDecl();
+    unsigned FullFactoryBits = (NumFactoryMethods << 3) |
+                               (FactoryHasMoreThanOneDeclBit << 2) |
+                               FactoryBits;
+    LE.write<uint16_t>(FullInstanceBits);
+    LE.write<uint16_t>(FullFactoryBits);
     for (const ObjCMethodList *Method = &Methods.Instance; Method;
          Method = Method->getNext())
-      if (Method->Method)
-        LE.write<uint32_t>(Writer.getDeclID(Method->Method));
+      if (Method->getMethod())
+        LE.write<uint32_t>(Writer.getDeclID(Method->getMethod()));
     for (const ObjCMethodList *Method = &Methods.Factory; Method;
          Method = Method->getNext())
-      if (Method->Method)
-        LE.write<uint32_t>(Writer.getDeclID(Method->Method));
+      if (Method->getMethod())
+        LE.write<uint32_t>(Writer.getDeclID(Method->getMethod()));
 
     assert(Out.tell() - Start == DataLen && "Data length is wrong");
   }
@@ -2986,19 +3007,19 @@ void ASTWriter::WriteSelectors(Sema &SemaRef) {
       if (Chain && I->second < FirstSelectorID) {
         // Selector already exists. Did it change?
         bool changed = false;
-        for (ObjCMethodList *M = &Data.Instance; !changed && M && M->Method;
-             M = M->getNext()) {
-          if (!M->Method->isFromASTFile())
+        for (ObjCMethodList *M = &Data.Instance;
+             !changed && M && M->getMethod(); M = M->getNext()) {
+          if (!M->getMethod()->isFromASTFile())
             changed = true;
         }
-        for (ObjCMethodList *M = &Data.Factory; !changed && M && M->Method;
+        for (ObjCMethodList *M = &Data.Factory; !changed && M && M->getMethod();
              M = M->getNext()) {
-          if (!M->Method->isFromASTFile())
+          if (!M->getMethod()->isFromASTFile())
             changed = true;
         }
         if (!changed)
           continue;
-      } else if (Data.Instance.Method || Data.Factory.Method) {
+      } else if (Data.Instance.getMethod() || Data.Factory.getMethod()) {
         // A new method pool entry.
         ++NumTableEntries;
       }
@@ -4076,20 +4097,10 @@ void ASTWriter::AddString(StringRef Str, RecordDataImpl &Record) {
 }
 
 bool ASTWriter::PreparePathForOutput(SmallVectorImpl<char> &Path) {
-  bool Changed = false;
+  assert(Context && "should have context when outputting path");
 
-  if (!llvm::sys::path::is_absolute(StringRef(Path.data(), Path.size()))) {
-    // Ask the file manager to fixup the relative path for us. This will
-    // honor the working directory.
-    if (Context)
-      Context->getSourceManager().getFileManager().FixupRelativePath(Path);
-
-    // We want an absolute path even if we weren't given a spelling for the
-    // current working directory.
-    llvm::sys::fs::make_absolute(Path);
-
-    Changed = true;
-  }
+  bool Changed =
+      cleanPathForOutput(Context->getSourceManager().getFileManager(), Path);
 
   // Remove a prefix to make the path relative, if relevant.
   const char *PathBegin = Path.data();

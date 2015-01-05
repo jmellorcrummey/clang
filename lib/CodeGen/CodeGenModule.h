@@ -261,6 +261,7 @@ class CodeGenModule : public CodeGenTypeCache {
   CodeGenModule(const CodeGenModule &) LLVM_DELETED_FUNCTION;
   void operator=(const CodeGenModule &) LLVM_DELETED_FUNCTION;
 
+public:
   struct Structor {
     Structor() : Priority(0), Initializer(nullptr), AssociatedData(nullptr) {}
     Structor(int Priority, llvm::Constant *Initializer,
@@ -274,6 +275,7 @@ class CodeGenModule : public CodeGenTypeCache {
 
   typedef std::vector<Structor> CtorList;
 
+private:
   ASTContext &Context;
   const LangOptions &LangOpts;
   const CodeGenOptions &CodeGenOpts;
@@ -421,7 +423,7 @@ class CodeGenModule : public CodeGenTypeCache {
   llvm::SetVector<clang::Module *> ImportedModules;
 
   /// \brief A vector of metadata strings.
-  SmallVector<llvm::Value *, 16> LinkerOptionsMetadata;
+  SmallVector<llvm::Metadata *, 16> LinkerOptionsMetadata;
 
   /// @name Cache for Objective-C runtime types
   /// @{
@@ -591,9 +593,7 @@ public:
 
   llvm::MDNode *getNoObjCARCExceptionsMetadata() {
     if (!NoObjCARCExceptionsMetadata)
-      NoObjCARCExceptionsMetadata =
-        llvm::MDNode::get(getLLVMContext(),
-                          SmallVector<llvm::Value*,1>());
+      NoObjCARCExceptionsMetadata = llvm::MDNode::get(getLLVMContext(), None);
     return NoObjCARCExceptionsMetadata;
   }
 
@@ -625,6 +625,9 @@ public:
   MicrosoftVTableContext &getMicrosoftVTableContext() {
     return VTables.getMicrosoftVTableContext();
   }
+
+  CtorList &getGlobalCtors() { return GlobalCtors; }
+  CtorList &getGlobalDtors() { return GlobalDtors; }
 
   llvm::MDNode *getTBAAInfo(QualType QTy);
   llvm::MDNode *getTBAAInfoForVTablePtr();

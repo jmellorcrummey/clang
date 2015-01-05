@@ -912,6 +912,7 @@ static bool HasFeature(const Preprocessor &PP, const IdentifierInfo *II) {
       .Case("objc_dictionary_literals", LangOpts.ObjC2)
       .Case("objc_boxed_expressions", LangOpts.ObjC2)
       .Case("arc_cf_code_audited", true)
+      .Case("objc_bridge_id", LangOpts.ObjC2)
       // C11 features
       .Case("c_alignas", LangOpts.C11)
       .Case("c_alignof", LangOpts.C11)
@@ -1414,6 +1415,10 @@ void Preprocessor::ExpandBuiltinMacro(Token &Tok) {
         if (IsScopeValid && Tok.is(tok::r_paren))
           IsValid = true;
       }
+      // Eat tokens until ')'.
+      while (Tok.isNot(tok::r_paren) && Tok.isNot(tok::eod) &&
+             Tok.isNot(tok::eof))
+        LexUnexpandedToken(Tok);
     }
 
     int Value = 0;
@@ -1440,9 +1445,10 @@ void Preprocessor::ExpandBuiltinMacro(Token &Tok) {
       Value = HasFeature(*this, FeatureII);
     }
 
+    if (!IsValid)
+      return;
     OS << Value;
-    if (IsValid)
-      Tok.setKind(tok::numeric_constant);
+    Tok.setKind(tok::numeric_constant);
   } else if (II == Ident__has_include ||
              II == Ident__has_include_next) {
     // The argument to these two builtins should be a parenthesized
@@ -1506,9 +1512,10 @@ void Preprocessor::ExpandBuiltinMacro(Token &Tok) {
                               WarningName.substr(2), Diags);
     } while (false);
 
+    if (!IsValid)
+      return;
     OS << (int)Value;
-    if (IsValid)
-      Tok.setKind(tok::numeric_constant);
+    Tok.setKind(tok::numeric_constant);
   } else if (II == Ident__building_module) {
     // The argument to this builtin should be an identifier. The
     // builtin evaluates to 1 when that identifier names the module we are

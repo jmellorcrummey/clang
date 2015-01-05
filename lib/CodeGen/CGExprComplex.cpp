@@ -333,8 +333,7 @@ ComplexPairTy ComplexExprEmitter::EmitLoadOfLValue(LValue lvalue,
 
 /// EmitStoreOfComplex - Store the specified real/imag parts into the
 /// specified value pointer.
-void ComplexExprEmitter::EmitStoreOfComplex(ComplexPairTy Val,
-                                            LValue lvalue,
+void ComplexExprEmitter::EmitStoreOfComplex(ComplexPairTy Val, LValue lvalue,
                                             bool isInit) {
   if (lvalue.getType()->isAtomicType())
     return CGF.EmitAtomicStore(RValue::getComplex(Val), lvalue, isInit);

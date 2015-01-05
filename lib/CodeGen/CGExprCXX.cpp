@@ -757,9 +757,8 @@ static void StoreAnyExprIntoOneUnit(CodeGenFunction &CGF, const Expr *Init,
   CharUnits Alignment = CGF.getContext().getTypeAlignInChars(AllocType);
   switch (CGF.getEvaluationKind(AllocType)) {
   case TEK_Scalar:
-    CGF.EmitScalarInit(Init, nullptr, CGF.MakeAddrLValue(NewPtr, AllocType,
-                                                         Alignment),
-                       false);
+    CGF.EmitScalarInit(Init, nullptr,
+                       CGF.MakeAddrLValue(NewPtr, AllocType, Alignment), false);
     return;
   case TEK_Complex:
     CGF.EmitComplexExprIntoLValue(Init, CGF.MakeAddrLValue(NewPtr, AllocType,
@@ -1017,6 +1016,7 @@ static void EmitNewInitializer(CodeGenFunction &CGF, const CXXNewExpr *E,
                                llvm::Value *NewPtr,
                                llvm::Value *NumElements,
                                llvm::Value *AllocSizeWithoutCookie) {
+  ApplyDebugLocation DL(CGF, E->getStartLoc());
   if (E->isArray())
     CGF.EmitNewArrayInitializer(E, ElementType, NewPtr, NumElements,
                                 AllocSizeWithoutCookie);
@@ -1033,9 +1033,9 @@ static RValue EmitNewDeleteCall(CodeGenFunction &CGF,
   llvm::Instruction *CallOrInvoke;
   llvm::Value *CalleeAddr = CGF.CGM.GetAddrOfFunction(Callee);
   RValue RV =
-      CGF.EmitCall(CGF.CGM.getTypes().arrangeFreeFunctionCall(Args, CalleeType),
-                   CalleeAddr, ReturnValueSlot(), Args,
-                   Callee, &CallOrInvoke);
+      CGF.EmitCall(CGF.CGM.getTypes().arrangeFreeFunctionCall(
+                       Args, CalleeType, /*chainCall=*/false),
+                   CalleeAddr, ReturnValueSlot(), Args, Callee, &CallOrInvoke);
 
   /// C++1y [expr.new]p10:
   ///   [In a new-expression,] an implementation is allowed to omit a call

@@ -20,7 +20,9 @@
 #include "clang/Basic/TargetBuiltins.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/CodeGen/CGFunctionInfo.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Intrinsics.h"
 
 using namespace clang;
@@ -185,7 +187,8 @@ static llvm::Value *EmitOverflowIntrinsic(CodeGenFunction &CGF,
 }
 
 RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
-                                        unsigned BuiltinID, const CallExpr *E) {
+                                        unsigned BuiltinID, const CallExpr *E,
+                                        ReturnValueSlot ReturnValue) {
   // See if we can constant fold this builtin.  If so, don't emit it at all.
   Expr::EvalResult Result;
   if (E->EvaluateAsRValue(Result, CGM.getContext()) &&
@@ -1566,6 +1569,13 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
   case Builtin::BI__noop:
     // __noop always evaluates to an integer literal zero.
     return RValue::get(ConstantInt::get(IntTy, 0));
+  case Builtin::BI__builtin_call_with_static_chain: {
+    const CallExpr *Call = cast<CallExpr>(E->getArg(0));
+    const Expr *Chain = E->getArg(1);
+    return EmitCall(Call->getCallee()->getType(),
+                    EmitScalarExpr(Call->getCallee()), Call, ReturnValue,
+                    Call->getCalleeDecl(), EmitScalarExpr(Chain));
+  }
   case Builtin::BI_InterlockedExchange:
   case Builtin::BI_InterlockedExchangePointer:
     return EmitBinaryAtomic(*this, llvm::AtomicRMWInst::Xchg, E);
@@ -3156,6 +3166,26 @@ Value *CodeGenFunction::EmitARMBuiltinExpr(unsigned BuiltinID,
                                            const CallExpr *E) {
   if (auto Hint = GetValueForARMHint(BuiltinID))
     return Hint;
+
+  if (BuiltinID == ARM::BI__emit) {
+    bool IsThumb = getTarget().getTriple().getArch() == llvm::Triple::thumb;
+    llvm::FunctionType *FTy =
+        llvm::FunctionType::get(VoidTy, /*Variadic=*/false);
+
+    APSInt Value;
+    if (!E->getArg(0)->EvaluateAsInt(Value, CGM.getContext()))
+      llvm_unreachable("Sema will ensure that the parameter is constant");
+
+    uint64_t ZExtValue = Value.zextOrTrunc(IsThumb ? 16 : 32).getZExtValue();
+
+    llvm::InlineAsm *Emit =
+        IsThumb ? InlineAsm::get(FTy, ".inst.n 0x" + utohexstr(ZExtValue), "",
+                                 /*SideEffects=*/true)
+                : InlineAsm::get(FTy, ".inst 0x" + utohexstr(ZExtValue), "",
+                                 /*SideEffects=*/true);
+
+    return Builder.CreateCall(Emit);
+  }
 
   if (BuiltinID == ARM::BI__builtin_arm_dbg) {
     Value *Option = EmitScalarExpr(E->getArg(0));
@@ -5932,8 +5962,8 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
   case X86::BI__builtin_ia32_movntdq256:
   case X86::BI__builtin_ia32_movnti:
   case X86::BI__builtin_ia32_movnti64: {
-    llvm::MDNode *Node = llvm::MDNode::get(getLLVMContext(),
-                                           Builder.getInt32(1));
+    llvm::MDNode *Node = llvm::MDNode::get(
+        getLLVMContext(), llvm::ConstantAsMetadata::get(Builder.getInt32(1)));
 
     // Convert the type of the pointer to a pointer to the stored type.
     Value *BC = Builder.CreateBitCast(Ops[0],
@@ -5956,8 +5986,8 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
   // 3DNow!
   case X86::BI__builtin_ia32_pswapdsf:
   case X86::BI__builtin_ia32_pswapdsi: {
-    const char *name = nullptr;
-    Intrinsic::ID ID = Intrinsic::not_intrinsic;
+    const char *name;
+    Intrinsic::ID ID;
     switch(BuiltinID) {
     default: llvm_unreachable("Unsupported intrinsic!");
     case X86::BI__builtin_ia32_pswapdsf:
@@ -6011,6 +6041,154 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
     Value *F = CGM.getIntrinsic(Intrinsic::x86_avx2_vbroadcasti128);
     return Builder.CreateCall(F, Builder.CreateBitCast(VecTmp, Int8PtrTy));
   }
+  // SSE comparison intrisics
+  case X86::BI__builtin_ia32_cmpeqps:
+  case X86::BI__builtin_ia32_cmpltps:
+  case X86::BI__builtin_ia32_cmpleps:
+  case X86::BI__builtin_ia32_cmpunordps:
+  case X86::BI__builtin_ia32_cmpneqps:
+  case X86::BI__builtin_ia32_cmpnltps:
+  case X86::BI__builtin_ia32_cmpnleps:
+  case X86::BI__builtin_ia32_cmpordps:
+  case X86::BI__builtin_ia32_cmpeqss:
+  case X86::BI__builtin_ia32_cmpltss:
+  case X86::BI__builtin_ia32_cmpless:
+  case X86::BI__builtin_ia32_cmpunordss:
+  case X86::BI__builtin_ia32_cmpneqss:
+  case X86::BI__builtin_ia32_cmpnltss:
+  case X86::BI__builtin_ia32_cmpnless:
+  case X86::BI__builtin_ia32_cmpordss:
+  case X86::BI__builtin_ia32_cmpeqpd:
+  case X86::BI__builtin_ia32_cmpltpd:
+  case X86::BI__builtin_ia32_cmplepd:
+  case X86::BI__builtin_ia32_cmpunordpd:
+  case X86::BI__builtin_ia32_cmpneqpd:
+  case X86::BI__builtin_ia32_cmpnltpd:
+  case X86::BI__builtin_ia32_cmpnlepd:
+  case X86::BI__builtin_ia32_cmpordpd:
+  case X86::BI__builtin_ia32_cmpeqsd:
+  case X86::BI__builtin_ia32_cmpltsd:
+  case X86::BI__builtin_ia32_cmplesd:
+  case X86::BI__builtin_ia32_cmpunordsd:
+  case X86::BI__builtin_ia32_cmpneqsd:
+  case X86::BI__builtin_ia32_cmpnltsd:
+  case X86::BI__builtin_ia32_cmpnlesd:
+  case X86::BI__builtin_ia32_cmpordsd:
+    // These exist so that the builtin that takes an immediate can be bounds
+    // checked by clang to avoid passing bad immediates to the backend. Since
+    // AVX has a larger immediate than SSE we would need separate builtins to
+    // do the different bounds checking. Rather than create a clang specific
+    // SSE only builtin, this implements eight separate builtins to match gcc
+    // implementation.
+
+    // Choose the immediate.
+    unsigned Imm;
+    switch (BuiltinID) {
+    default: llvm_unreachable("Unsupported intrinsic!");
+    case X86::BI__builtin_ia32_cmpeqps:
+    case X86::BI__builtin_ia32_cmpeqss:
+    case X86::BI__builtin_ia32_cmpeqpd:
+    case X86::BI__builtin_ia32_cmpeqsd:
+      Imm = 0;
+      break;
+    case X86::BI__builtin_ia32_cmpltps:
+    case X86::BI__builtin_ia32_cmpltss:
+    case X86::BI__builtin_ia32_cmpltpd:
+    case X86::BI__builtin_ia32_cmpltsd:
+      Imm = 1;
+      break;
+    case X86::BI__builtin_ia32_cmpleps:
+    case X86::BI__builtin_ia32_cmpless:
+    case X86::BI__builtin_ia32_cmplepd:
+    case X86::BI__builtin_ia32_cmplesd:
+      Imm = 2;
+      break;
+    case X86::BI__builtin_ia32_cmpunordps:
+    case X86::BI__builtin_ia32_cmpunordss:
+    case X86::BI__builtin_ia32_cmpunordpd:
+    case X86::BI__builtin_ia32_cmpunordsd:
+      Imm = 3;
+      break;
+    case X86::BI__builtin_ia32_cmpneqps:
+    case X86::BI__builtin_ia32_cmpneqss:
+    case X86::BI__builtin_ia32_cmpneqpd:
+    case X86::BI__builtin_ia32_cmpneqsd:
+      Imm = 4;
+      break;
+    case X86::BI__builtin_ia32_cmpnltps:
+    case X86::BI__builtin_ia32_cmpnltss:
+    case X86::BI__builtin_ia32_cmpnltpd:
+    case X86::BI__builtin_ia32_cmpnltsd:
+      Imm = 5;
+      break;
+    case X86::BI__builtin_ia32_cmpnleps:
+    case X86::BI__builtin_ia32_cmpnless:
+    case X86::BI__builtin_ia32_cmpnlepd:
+    case X86::BI__builtin_ia32_cmpnlesd:
+      Imm = 6;
+      break;
+    case X86::BI__builtin_ia32_cmpordps:
+    case X86::BI__builtin_ia32_cmpordss:
+    case X86::BI__builtin_ia32_cmpordpd:
+    case X86::BI__builtin_ia32_cmpordsd:
+      Imm = 7;
+      break;
+    }
+
+    // Choose the intrinsic ID.
+    const char *name;
+    Intrinsic::ID ID;
+    switch (BuiltinID) {
+    default: llvm_unreachable("Unsupported intrinsic!");
+    case X86::BI__builtin_ia32_cmpeqps:
+    case X86::BI__builtin_ia32_cmpltps:
+    case X86::BI__builtin_ia32_cmpleps:
+    case X86::BI__builtin_ia32_cmpunordps:
+    case X86::BI__builtin_ia32_cmpneqps:
+    case X86::BI__builtin_ia32_cmpnltps:
+    case X86::BI__builtin_ia32_cmpnleps:
+    case X86::BI__builtin_ia32_cmpordps:
+      name = "cmpps";
+      ID = Intrinsic::x86_sse_cmp_ps;
+      break;
+    case X86::BI__builtin_ia32_cmpeqss:
+    case X86::BI__builtin_ia32_cmpltss:
+    case X86::BI__builtin_ia32_cmpless:
+    case X86::BI__builtin_ia32_cmpunordss:
+    case X86::BI__builtin_ia32_cmpneqss:
+    case X86::BI__builtin_ia32_cmpnltss:
+    case X86::BI__builtin_ia32_cmpnless:
+    case X86::BI__builtin_ia32_cmpordss:
+      name = "cmpss";
+      ID = Intrinsic::x86_sse_cmp_ss;
+      break;
+    case X86::BI__builtin_ia32_cmpeqpd:
+    case X86::BI__builtin_ia32_cmpltpd:
+    case X86::BI__builtin_ia32_cmplepd:
+    case X86::BI__builtin_ia32_cmpunordpd:
+    case X86::BI__builtin_ia32_cmpneqpd:
+    case X86::BI__builtin_ia32_cmpnltpd:
+    case X86::BI__builtin_ia32_cmpnlepd:
+    case X86::BI__builtin_ia32_cmpordpd:
+      name = "cmppd";
+      ID = Intrinsic::x86_sse2_cmp_pd;
+      break;
+    case X86::BI__builtin_ia32_cmpeqsd:
+    case X86::BI__builtin_ia32_cmpltsd:
+    case X86::BI__builtin_ia32_cmplesd:
+    case X86::BI__builtin_ia32_cmpunordsd:
+    case X86::BI__builtin_ia32_cmpneqsd:
+    case X86::BI__builtin_ia32_cmpnltsd:
+    case X86::BI__builtin_ia32_cmpnlesd:
+    case X86::BI__builtin_ia32_cmpordsd:
+      name = "cmpsd";
+      ID = Intrinsic::x86_sse2_cmp_sd;
+      break;
+    }
+
+    Ops.push_back(llvm::ConstantInt::get(Int8Ty, Imm));
+    llvm::Function *F = CGM.getIntrinsic(ID);
+    return Builder.CreateCall(F, Ops, name);
   }
 }
 
