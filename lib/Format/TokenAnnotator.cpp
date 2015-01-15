@@ -305,7 +305,7 @@ private:
           (Left->is(TT_ArraySubscriptLSquare) ||
            (Left->is(TT_ObjCMethodExpr) && !ColonFound)))
         Left->Type = TT_ArrayInitializerLSquare;
-      FormatToken* Tok = CurrentToken;
+      FormatToken *Tok = CurrentToken;
       if (!consumeToken())
         return false;
       updateParameterCount(Left, Tok);
@@ -458,7 +458,8 @@ private:
         return false;
       if (Line.MustBeDeclaration && Contexts.size() == 1 &&
           !Contexts.back().IsExpression && Line.First->isNot(TT_ObjCProperty) &&
-          (!Tok->Previous || Tok->Previous->isNot(tok::kw_decltype)))
+          (!Tok->Previous ||
+           !Tok->Previous->isOneOf(tok::kw_decltype, TT_LeadingJavaAnnotation)))
         Line.MightBeFunctionDecl = true;
       break;
     case tok::l_square:
@@ -620,7 +621,8 @@ public:
          CurrentToken->is(Keywords.kw_package)) ||
         (Info && Info->getPPKeywordID() == tok::pp_import &&
          CurrentToken->Next &&
-         CurrentToken->Next->isOneOf(tok::string_literal, tok::identifier))) {
+         CurrentToken->Next->isOneOf(tok::string_literal, tok::identifier,
+                                     tok::kw_static))) {
       next();
       parseIncludeDirective();
       return LT_ImportStatement;
@@ -861,6 +863,11 @@ private:
       if (PreviousNoComment &&
           PreviousNoComment->isOneOf(tok::comma, tok::l_brace))
         Current.Type = TT_DesignatedInitializerPeriod;
+      else if (Style.Language == FormatStyle::LK_Java && Current.Previous &&
+               Current.Previous->isOneOf(TT_JavaAnnotation,
+                                         TT_LeadingJavaAnnotation)) {
+        Current.Type = Current.Previous->Type;
+      }
     } else if (Current.isOneOf(tok::identifier, tok::kw_const) &&
                Current.Previous &&
                !Current.Previous->isOneOf(tok::equal, tok::at) &&
@@ -868,15 +875,20 @@ private:
       // Line.MightBeFunctionDecl can only be true after the parentheses of a
       // function declaration have been found.
       Current.Type = TT_TrailingAnnotation;
-    } else if (Style.Language == FormatStyle::LK_Java && Current.Previous &&
-               Current.Previous->is(tok::at) &&
-               Current.isNot(Keywords.kw_interface)) {
-      const FormatToken &AtToken = *Current.Previous;
-      const FormatToken *Previous = AtToken.getPreviousNonComment();
-      if (!Previous || Previous->is(TT_LeadingJavaAnnotation))
-        Current.Type = TT_LeadingJavaAnnotation;
-      else
-        Current.Type = TT_JavaAnnotation;
+    } else if (Style.Language == FormatStyle::LK_Java && Current.Previous) {
+      if (Current.Previous->is(tok::at) &&
+          Current.isNot(Keywords.kw_interface)) {
+        const FormatToken &AtToken = *Current.Previous;
+        const FormatToken *Previous = AtToken.getPreviousNonComment();
+        if (!Previous || Previous->is(TT_LeadingJavaAnnotation))
+          Current.Type = TT_LeadingJavaAnnotation;
+        else
+          Current.Type = TT_JavaAnnotation;
+      } else if (Current.Previous->is(tok::period) &&
+                 Current.Previous->isOneOf(TT_JavaAnnotation,
+                                           TT_LeadingJavaAnnotation)) {
+        Current.Type = Current.Previous->Type;
+      }
     }
   }
 
@@ -888,6 +900,9 @@ private:
   bool isStartOfName(const FormatToken &Tok) {
     if (Tok.isNot(tok::identifier) || !Tok.Previous)
       return false;
+
+    if (Tok.Previous->is(TT_LeadingJavaAnnotation))
+        return false;
 
     // Skip "const" as it does not have an influence on whether this is a name.
     FormatToken *PreviousNotConst = Tok.Previous;
@@ -1281,8 +1296,8 @@ private:
 
 } // end anonymous namespace
 
-void
-TokenAnnotator::setCommentLineLevels(SmallVectorImpl<AnnotatedLine *> &Lines) {
+void TokenAnnotator::setCommentLineLevels(
+    SmallVectorImpl<AnnotatedLine *> &Lines) {
   const AnnotatedLine *NextNonCommentLine = nullptr;
   for (SmallVectorImpl<AnnotatedLine *>::reverse_iterator I = Lines.rbegin(),
                                                           E = Lines.rend();
@@ -1408,9 +1423,9 @@ void TokenAnnotator::calculateFormattingInformation(AnnotatedLine &Line) {
     Current->MustBreakBefore =
         Current->MustBreakBefore || mustBreakBefore(Line, *Current);
 
-    if (Style.AlwaysBreakAfterDefinitionReturnType &&
-        InFunctionDecl && Current->is(TT_FunctionDeclarationName) &&
-        !Line.Last->isOneOf(tok::semi, tok::comment))  // Only for definitions.
+    if (Style.AlwaysBreakAfterDefinitionReturnType && InFunctionDecl &&
+        Current->is(TT_FunctionDeclarationName) &&
+        !Line.Last->isOneOf(tok::semi, tok::comment)) // Only for definitions.
       // FIXME: Line.Last points to other characters than tok::semi
       // and tok::lbrace.
       Current->MustBreakBefore = true;
@@ -1423,7 +1438,7 @@ void TokenAnnotator::calculateFormattingInformation(AnnotatedLine &Line) {
       ChildSize = LastOfChild.isTrailingComment() ? Style.ColumnLimit
                                                   : LastOfChild.TotalLength + 1;
     }
-    const FormatToken *Prev= Current->Previous;
+    const FormatToken *Prev = Current->Previous;
     if (Current->MustBreakBefore || Prev->Children.size() > 1 ||
         (Prev->Children.size() == 1 &&
          Prev->Children[0]->First->MustBreakBefore) ||
@@ -1572,6 +1587,8 @@ unsigned TokenAnnotator::splitPenalty(const AnnotatedLine &Line,
     return Left.ParameterCount > 1 ? Style.PenaltyBreakBeforeFirstCallParameter
                                    : 19;
   }
+  if (Left.is(TT_JavaAnnotation))
+    return 50;
 
   if (Right.is(tok::lessless)) {
     if (Left.is(tok::string_literal)) {
@@ -1612,7 +1629,7 @@ bool TokenAnnotator::spaceRequiredBetween(const AnnotatedLine &Line,
   if (Left.is(tok::l_paren) && Right.is(tok::r_paren))
     return Style.SpaceInEmptyParentheses;
   if (Left.is(tok::l_paren) || Right.is(tok::r_paren))
-    return (Right.is(TT_CastRParen )||
+    return (Right.is(TT_CastRParen) ||
             (Left.MatchingParen && Left.MatchingParen->is(TT_CastRParen)))
                ? Style.SpacesInCStyleCastParentheses
                : Style.SpacesInParentheses;
@@ -1684,7 +1701,8 @@ bool TokenAnnotator::spaceRequiredBetween(const AnnotatedLine &Line,
            (Style.SpaceBeforeParens != FormatStyle::SBPO_Never &&
             (Left.isOneOf(tok::kw_if, tok::kw_for, tok::kw_while,
                           tok::kw_switch, tok::kw_case) ||
-             (Left.isOneOf(tok::kw_catch, tok::kw_new, tok::kw_delete) &&
+             (Left.isOneOf(tok::kw_try, tok::kw_catch, tok::kw_new,
+                           tok::kw_delete) &&
               (!Left.Previous || Left.Previous->isNot(tok::period))) ||
              Left.IsForEachMacro)) ||
            (Style.SpaceBeforeParens == FormatStyle::SBPO_Always &&
@@ -1739,7 +1757,8 @@ bool TokenAnnotator::spaceRequiredBefore(const AnnotatedLine &Line,
       return Style.SpaceBeforeParens != FormatStyle::SBPO_Never;
     if ((Left.isOneOf(tok::kw_static, tok::kw_public, tok::kw_private,
                       tok::kw_protected) ||
-         Left.isOneOf(Keywords.kw_final, Keywords.kw_abstract)) &&
+         Left.isOneOf(Keywords.kw_final, Keywords.kw_abstract,
+                      Keywords.kw_native)) &&
         Right.is(TT_TemplateOpener))
       return true;
   }
@@ -1897,7 +1916,8 @@ bool TokenAnnotator::mustBreakBefore(const AnnotatedLine &Line,
         Left.NestingLevel == 0)
       return true;
   } else if (Style.Language == FormatStyle::LK_Java) {
-    if (Left.is(TT_LeadingJavaAnnotation) && Right.isNot(tok::l_paren) &&
+    if (Left.is(TT_LeadingJavaAnnotation) &&
+        Right.isNot(TT_LeadingJavaAnnotation) && Right.isNot(tok::l_paren) &&
         Line.Last->is(tok::l_brace))
       return true;
     if (Right.is(tok::plus) && Left.is(tok::string_literal) && Right.Next &&
@@ -1926,7 +1946,7 @@ bool TokenAnnotator::canBreakBefore(const AnnotatedLine &Line,
   if (Left.Tok.getObjCKeywordID() == tok::objc_interface)
     return false;
   if (Left.isOneOf(TT_JavaAnnotation, TT_LeadingJavaAnnotation))
-    return true;
+    return !Right.is(tok::l_paren);
   if (Right.isOneOf(TT_StartOfName, TT_FunctionDeclarationName) ||
       Right.is(tok::kw_operator))
     return true;

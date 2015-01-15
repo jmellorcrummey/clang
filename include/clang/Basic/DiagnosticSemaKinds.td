@@ -4701,6 +4701,9 @@ def warn_addition_in_bitshift : Warning<
 def warn_self_assignment : Warning<
   "explicitly assigning value of variable of type %0 to itself">,
   InGroup<SelfAssignment>, DefaultIgnore;
+def warn_self_move : Warning<
+  "explicitly moving variable of type %0 to itself">,
+  InGroup<SelfMove>, DefaultIgnore;
 
 def warn_string_plus_int : Warning<
   "adding %0 to a string does not append to the string">,
@@ -7223,7 +7226,7 @@ def err_omp_var_scope : Error<
 def err_omp_var_used : Error<
   "'#pragma omp %0' must precede all references to variable %q1">;
 def err_omp_var_thread_local : Error<
-  "variable %0 cannot be threadprivate because it is thread-local">;
+  "variable %0 cannot be threadprivate because it is %select{thread-local|a global named register variable}1">;
 def err_omp_private_incomplete_type : Error<
   "a private variable with incomplete type %0">;
 def err_omp_firstprivate_incomplete_type : Error<

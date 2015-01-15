@@ -1,5 +1,5 @@
-// RUN: %clang_cc1 -g -std=c++11 -S -emit-llvm %s -o - | FileCheck %s
-// RUN: %clang_cc1 -triple i686-linux-gnu -g -std=c++11 -S -emit-llvm %s -o - | FileCheck %s
+// RUN: %clang_cc1 -gline-tables-only -std=c++11 -fexceptions -fcxx-exceptions -S -emit-llvm %s -o - | FileCheck %s
+// RUN: %clang_cc1 -gline-tables-only -std=c++11 -fexceptions -fcxx-exceptions -S -emit-llvm %s -o - -triple i686-linux-gnu | FileCheck %s
 
 // XFAIL: win32
 
@@ -113,6 +113,33 @@ void f10() {
       new (void_src()) int(src()));
 }
 
+// noexcept just to simplify the codegen a bit
+void fn() noexcept(true);
+
+struct bar {
+  bar();
+  // noexcept(false) to convolute the global dtor
+  ~bar() noexcept(false);
+};
+// global ctor cleanup
+// CHECK-LABEL: define
+// CHECK: invoke{{ }}
+// CHECK: invoke{{ }}
+// CHECK:   to label {{.*}}, !dbg [[DBG_GLBL_CTOR_B:!.*]]
+
+// terminate caller
+// CHECK-LABEL: define
+
+// global dtor cleanup
+// CHECK-LABEL: define
+// CHECK: invoke{{ }}
+// CHECK: invoke{{ }}
+// CHECK:   to label {{.*}}, !dbg [[DBG_GLBL_DTOR_B:!.*]]
+#line 1500
+bar b[1] = { //
+    (fn(),   //
+     bar())};
+
 // CHECK-LABEL: define
 __complex double f11() {
   __complex double f;
@@ -139,20 +166,22 @@ void f13() {
   F13_IMPL;
 }
 
-// CHECK: [[DBG_F1]] = !{i32 100,
-// CHECK: [[DBG_FOO_VALUE]] = !{i32 200,
-// CHECK: [[DBG_FOO_REF]] = !{i32 202,
-// CHECK: [[DBG_FOO_COMPLEX]] = !{i32 204,
-// CHECK: [[DBG_F2]] = !{i32 300,
-// CHECK: [[DBG_F3]] = !{i32 400,
-// CHECK: [[DBG_F4]] = !{i32 500,
-// CHECK: [[DBG_F5]] = !{i32 600,
-// CHECK: [[DBG_F6]] = !{i32 700,
-// CHECK: [[DBG_F7]] = !{i32 800,
-// CHECK: [[DBG_F8]] = !{i32 900,
-// CHECK: [[DBG_F9]] = !{i32 1000,
-// CHECK: [[DBG_F10_ICMP]] = !{i32 1100,
-// CHECK: [[DBG_F10_STORE]] = !{i32 1100,
-// CHECK: [[DBG_F11]] = !{i32 1200,
-// CHECK: [[DBG_F12]] = !{i32 1300,
-// CHECK: [[DBG_F13]] = !{i32 1400,
+// CHECK: [[DBG_F1]] = !MDLocation(line: 100,
+// CHECK: [[DBG_FOO_VALUE]] = !MDLocation(line: 200,
+// CHECK: [[DBG_FOO_REF]] = !MDLocation(line: 202,
+// CHECK: [[DBG_FOO_COMPLEX]] = !MDLocation(line: 204,
+// CHECK: [[DBG_F2]] = !MDLocation(line: 300,
+// CHECK: [[DBG_F3]] = !MDLocation(line: 400,
+// CHECK: [[DBG_F4]] = !MDLocation(line: 500,
+// CHECK: [[DBG_F5]] = !MDLocation(line: 600,
+// CHECK: [[DBG_F6]] = !MDLocation(line: 700,
+// CHECK: [[DBG_F7]] = !MDLocation(line: 800,
+// CHECK: [[DBG_F8]] = !MDLocation(line: 900,
+// CHECK: [[DBG_F9]] = !MDLocation(line: 1000,
+// CHECK: [[DBG_F10_ICMP]] = !MDLocation(line: 1100,
+// CHECK: [[DBG_F10_STORE]] = !MDLocation(line: 1100,
+// CHECK: [[DBG_GLBL_CTOR_B]] = !MDLocation(line: 1500,
+// CHECK: [[DBG_GLBL_DTOR_B]] = !MDLocation(line: 1500,
+// CHECK: [[DBG_F11]] = !MDLocation(line: 1200,
+// CHECK: [[DBG_F12]] = !MDLocation(line: 1300,
+// CHECK: [[DBG_F13]] = !MDLocation(line: 1400,

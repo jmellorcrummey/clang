@@ -388,9 +388,14 @@ void Sema::CheckExtraCXXDefaultArguments(Declarator &D) {
         ParmVarDecl *Param = cast<ParmVarDecl>(chunk.Fun.Params[argIdx].Param);
         if (Param->hasUnparsedDefaultArg()) {
           CachedTokens *Toks = chunk.Fun.Params[argIdx].DefaultArgTokens;
+          SourceRange SR;
+          if (Toks->size() > 1)
+            SR = SourceRange((*Toks)[1].getLocation(),
+                             Toks->back().getLocation());
+          else
+            SR = UnparsedDefaultArgLocs[Param];
           Diag(Param->getLocation(), diag::err_param_default_argument_nonfunc)
-            << SourceRange((*Toks)[1].getLocation(),
-                           Toks->back().getLocation());
+            << SR;
           delete Toks;
           chunk.Fun.Params[argIdx].DefaultArgTokens = nullptr;
         } else if (Param->getDefaultArg()) {
@@ -13117,7 +13122,8 @@ bool Sema::DefineUsedVTables() {
     DefinedAnything = true;
     MarkVirtualMembersReferenced(Loc, Class);
     CXXRecordDecl *Canonical = cast<CXXRecordDecl>(Class->getCanonicalDecl());
-    Consumer.HandleVTable(Class, VTablesUsed[Canonical]);
+    if (VTablesUsed[Canonical])
+      Consumer.HandleVTable(Class);
 
     // Optionally warn if we're emitting a weak vtable.
     if (Class->isExternallyVisible() &&
