@@ -523,6 +523,13 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
     Opts.StackAlignment = StackAlignment;
   }
 
+  if (Arg *A = Args.getLastArg(OPT_mstack_probe_size)) {
+    StringRef Val = A->getValue();
+    unsigned StackProbeSize = Opts.StackProbeSize;
+    Val.getAsInteger(0, StackProbeSize);
+    Opts.StackProbeSize = StackProbeSize;
+  }
+
   if (Arg *A = Args.getLastArg(OPT_fobjc_dispatch_method_EQ)) {
     StringRef Name = A->getValue();
     unsigned Method = llvm::StringSwitch<unsigned>(Name)
@@ -1563,6 +1570,7 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
       Args.getLastArgValue(OPT_fmodule_implementation_of);
   Opts.NativeHalfType = Opts.NativeHalfType;
   Opts.HalfArgsAndReturns = Args.hasArg(OPT_fallow_half_arguments_and_returns);
+  Opts.GNUAsm = !Args.hasArg(OPT_fno_gnu_inline_asm);
 
   if (!Opts.CurrentModule.empty() && !Opts.ImplementationOfModule.empty() &&
       Opts.CurrentModule != Opts.ImplementationOfModule) {

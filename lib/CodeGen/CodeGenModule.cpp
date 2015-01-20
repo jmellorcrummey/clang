@@ -1828,7 +1828,10 @@ CodeGenModule::CreateOrReplaceCXXRuntimeVariable(StringRef Name,
     
     OldGV->eraseFromParent();
   }
-  
+
+  if (supportsCOMDAT() && GV->isWeakForLinker())
+    GV->setComdat(TheModule.getOrInsertComdat(GV->getName()));
+
   return GV;
 }
 
@@ -1951,6 +1954,13 @@ static bool shouldBeInCOMDAT(CodeGenModule &CGM, const Decl &D) {
     return true;
   }
   llvm_unreachable("No such linkage");
+}
+
+void CodeGenModule::maybeSetTrivialComdat(const Decl &D,
+                                          llvm::GlobalObject &GO) {
+  if (!shouldBeInCOMDAT(*this, D))
+    return;
+  GO.setComdat(TheModule.getOrInsertComdat(GO.getName()));
 }
 
 void CodeGenModule::EmitGlobalVarDefinition(const VarDecl *D) {
@@ -2096,8 +2106,7 @@ void CodeGenModule::EmitGlobalVarDefinition(const VarDecl *D) {
     setTLSMode(GV, *D);
   }
 
-  if (shouldBeInCOMDAT(*this, *D))
-    GV->setComdat(TheModule.getOrInsertComdat(GV->getName()));
+  maybeSetTrivialComdat(*D, *GV);
 
   // Emit the initializer function if necessary.
   if (NeedsGlobalCtor || NeedsGlobalDtor)
@@ -2433,8 +2442,7 @@ void CodeGenModule::EmitGlobalFunctionDefinition(GlobalDecl GD,
 
   MaybeHandleStaticInExternC(D, Fn);
 
-  if (shouldBeInCOMDAT(*this, *D))
-    Fn->setComdat(TheModule.getOrInsertComdat(Fn->getName()));
+  maybeSetTrivialComdat(*D, *Fn);
 
   CodeGenFunction(*this).GenerateCode(D, Fn, FI);
 
@@ -2868,12 +2876,18 @@ GenerateStringLiteral(llvm::Constant *C, llvm::GlobalValue::LinkageTypes LT,
   if (CGM.getLangOpts().OpenCL)
     AddrSpace = CGM.getContext().getTargetAddressSpace(LangAS::opencl_constant);
 
+  llvm::Module &M = CGM.getModule();
   // Create a global variable for this string
   auto *GV = new llvm::GlobalVariable(
-      CGM.getModule(), C->getType(), !CGM.getLangOpts().WritableStrings, LT, C,
-      GlobalName, nullptr, llvm::GlobalVariable::NotThreadLocal, AddrSpace);
+      M, C->getType(), !CGM.getLangOpts().WritableStrings, LT, C, GlobalName,
+      nullptr, llvm::GlobalVariable::NotThreadLocal, AddrSpace);
   GV->setAlignment(Alignment);
   GV->setUnnamedAddr(true);
+  if (GV->isWeakForLinker()) {
+    assert(CGM.supportsCOMDAT() && "Only COFF uses weak string literals");
+    GV->setComdat(M.getOrInsertComdat(GV->getName()));
+  }
+
   return GV;
 }
 

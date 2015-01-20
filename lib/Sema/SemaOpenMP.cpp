@@ -421,21 +421,23 @@ DSAStackTy::DSAVarData DSAStackTy::getTopDSA(VarDecl *D, bool FromParent) {
       DVar.CKind = OMPC_private;
       return DVar;
     }
-  }
 
-  // OpenMP [2.9.1.1, Data-sharing Attribute Rules for Variables Referenced
-  // in a Construct, C/C++, predetermined, p.4]
-  //  Static data members are shared.
-  if (D->isStaticDataMember()) {
-    // Variables with const-qualified type having no mutable member may be
-    // listed in a firstprivate clause, even if they are static data members.
-    DSAVarData DVarTemp = hasDSA(D, MatchesAnyClause(OMPC_firstprivate),
-                                 MatchesAlways(), FromParent);
-    if (DVarTemp.CKind == OMPC_firstprivate && DVarTemp.RefExpr)
+    // OpenMP [2.9.1.1, Data-sharing Attribute Rules for Variables Referenced
+    // in a Construct, C/C++, predetermined, p.4]
+    //  Static data members are shared.
+    // OpenMP [2.9.1.1, Data-sharing Attribute Rules for Variables Referenced
+    // in a Construct, C/C++, predetermined, p.7]
+    //  Variables with static storage duration that are declared in a scope
+    //  inside the construct are shared.
+    if (D->isStaticDataMember() || D->isStaticLocal()) {
+      DSAVarData DVarTemp =
+          hasDSA(D, isOpenMPPrivate, MatchesAlways(), FromParent);
+      if (DVarTemp.CKind != OMPC_unknown && DVarTemp.RefExpr)
+        return DVar;
+
+      DVar.CKind = OMPC_shared;
       return DVar;
-
-    DVar.CKind = OMPC_shared;
-    return DVar;
+    }
   }
 
   QualType Type = D->getType().getNonReferenceType().getCanonicalType();
@@ -459,15 +461,6 @@ DSAStackTy::DSAVarData DSAStackTy::getTopDSA(VarDecl *D, bool FromParent) {
     if (DVarTemp.CKind == OMPC_firstprivate && DVarTemp.RefExpr)
       return DVar;
 
-    DVar.CKind = OMPC_shared;
-    return DVar;
-  }
-
-  // OpenMP [2.9.1.1, Data-sharing Attribute Rules for Variables Referenced
-  // in a Construct, C/C++, predetermined, p.7]
-  //  Variables with static storage duration that are declared in a scope
-  //  inside the construct are shared.
-  if (D->isStaticLocal()) {
     DVar.CKind = OMPC_shared;
     return DVar;
   }
@@ -3054,6 +3047,23 @@ StmtResult Sema::ActOnOpenMPSingleDirective(ArrayRef<OMPClause *> Clauses,
   assert(AStmt && isa<CapturedStmt>(AStmt) && "Captured statement expected");
 
   getCurFunction()->setHasBranchProtectedScope();
+
+  // OpenMP [2.7.3, single Construct, Restrictions]
+  // The copyprivate clause must not be used with the nowait clause.
+  OMPClause *Nowait = nullptr;
+  OMPClause *Copyprivate = nullptr;
+  for (auto *Clause : Clauses) {
+    if (Clause->getClauseKind() == OMPC_nowait)
+      Nowait = Clause;
+    else if (Clause->getClauseKind() == OMPC_copyprivate)
+      Copyprivate = Clause;
+    if (Copyprivate && Nowait) {
+      Diag(Copyprivate->getLocStart(),
+           diag::err_omp_single_copyprivate_with_nowait);
+      Diag(Nowait->getLocStart(), diag::note_omp_nowait_clause_here);
+      return StmtError();
+    }
+  }
 
   return OMPSingleDirective::Create(Context, StartLoc, EndLoc, Clauses, AStmt);
 }

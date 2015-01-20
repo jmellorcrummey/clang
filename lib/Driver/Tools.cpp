@@ -3733,6 +3733,15 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(Args.MakeArgString("-mstack-alignment=" + alignment));
   }
 
+  if (Args.hasArg(options::OPT_mstack_probe_size)) {
+    StringRef Size = Args.getLastArgValue(options::OPT_mstack_probe_size);
+
+    if (!Size.empty())
+      CmdArgs.push_back(Args.MakeArgString("-mstack-probe-size=" + Size));
+    else
+      CmdArgs.push_back("-mstack-probe-size=0");
+  }
+
   if (getToolChain().getTriple().getArch() == llvm::Triple::aarch64 ||
       getToolChain().getTriple().getArch() == llvm::Triple::aarch64_be)
     CmdArgs.push_back("-fallow-half-arguments-and-returns");
@@ -4319,6 +4328,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.hasFlag(options::OPT_fasm_blocks, options::OPT_fno_asm_blocks,
                    false))
     CmdArgs.push_back("-fasm-blocks");
+
+  // -fgnu-inline-asm is default.
+  if (!Args.hasFlag(options::OPT_fgnu_inline_asm,
+                    options::OPT_fno_gnu_inline_asm, true))
+    CmdArgs.push_back("-fno-gnu-inline-asm");
 
   // Enable vectorization per default according to the optimization level
   // selected. For optimization levels that want vectorization we use the alias
