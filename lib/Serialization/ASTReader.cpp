@@ -108,9 +108,12 @@ ChainedASTReaderListener::ReadFileSystemOptions(const FileSystemOptions &FSOpts,
 }
 
 bool ChainedASTReaderListener::ReadHeaderSearchOptions(
-    const HeaderSearchOptions &HSOpts, bool Complain) {
-  return First->ReadHeaderSearchOptions(HSOpts, Complain) ||
-         Second->ReadHeaderSearchOptions(HSOpts, Complain);
+    const HeaderSearchOptions &HSOpts, StringRef SpecificModuleCachePath,
+    bool Complain) {
+  return First->ReadHeaderSearchOptions(HSOpts, SpecificModuleCachePath,
+                                        Complain) ||
+         Second->ReadHeaderSearchOptions(HSOpts, SpecificModuleCachePath,
+                                         Complain);
 }
 bool ChainedASTReaderListener::ReadPreprocessorOptions(
     const PreprocessorOptions &PPOpts, bool Complain,
@@ -464,7 +467,7 @@ collectMacroDefinitions(const PreprocessorOptions &PPOpts,
     Macros[MacroName] = std::make_pair(MacroBody, false);
   }
 }
-         
+
 /// \brief Check the preprocessor options deserialized from the control block
 /// against the preprocessor options in an existing preprocessor.
 ///
@@ -588,6 +591,36 @@ bool PCHValidator::ReadPreprocessorOptions(const PreprocessorOptions &PPOpts,
                                   Complain? &Reader.Diags : nullptr,
                                   PP.getFileManager(),
                                   SuggestedPredefines,
+                                  PP.getLangOpts());
+}
+
+/// Check the header search options deserialized from the control block
+/// against the header search options in an existing preprocessor.
+///
+/// \param Diags If non-null, produce diagnostics for any mismatches incurred.
+static bool checkHeaderSearchOptions(const HeaderSearchOptions &HSOpts,
+                                     StringRef SpecificModuleCachePath,
+                                     StringRef ExistingModuleCachePath,
+                                     DiagnosticsEngine *Diags,
+                                     const LangOptions &LangOpts) {
+  if (LangOpts.Modules) {
+    if (SpecificModuleCachePath != ExistingModuleCachePath) {
+      if (Diags)
+        Diags->Report(diag::err_pch_modulecache_mismatch)
+          << SpecificModuleCachePath << ExistingModuleCachePath;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool PCHValidator::ReadHeaderSearchOptions(const HeaderSearchOptions &HSOpts,
+                                           StringRef SpecificModuleCachePath,
+                                           bool Complain) {
+  return checkHeaderSearchOptions(HSOpts, SpecificModuleCachePath,
+                                  PP.getHeaderSearchInfo().getModuleCachePath(),
+                                  Complain ? &Reader.Diags : nullptr,
                                   PP.getLangOpts());
 }
 
@@ -2543,7 +2576,7 @@ ASTReader::ReadControlBlock(ModuleFile &F,
     case INPUT_FILE_OFFSETS:
       NumInputs = Record[0];
       NumUserInputs = Record[1];
-      F.InputFileOffsets = (const uint32_t *)Blob.data();
+      F.InputFileOffsets = (const uint64_t *)Blob.data();
       F.InputFilesLoaded.resize(NumInputs);
       break;
     }
@@ -3435,13 +3468,6 @@ ASTReader::ReadModuleMapFileBlock(RecordData &Record, ModuleFile &F,
           << F.ModuleName << /*not new*/1 << ModMap->getName();
       return OutOfDate;
     }
-
-    // Check whether the 'IsSystem' bit changed.
-    if (M->IsSystem != static_cast<bool>(Record[Idx])) {
-      if ((ClientLoadCapabilities & ARR_OutOfDate) == 0)
-        Diag(diag::err_module_system_change) << F.ModuleName << M->IsSystem;
-      return OutOfDate;
-    }
   }
 
   if (Listener)
@@ -4191,16 +4217,19 @@ namespace {
     const LangOptions &ExistingLangOpts;
     const TargetOptions &ExistingTargetOpts;
     const PreprocessorOptions &ExistingPPOpts;
+    std::string ExistingModuleCachePath;
     FileManager &FileMgr;
-    
+
   public:
     SimplePCHValidator(const LangOptions &ExistingLangOpts,
                        const TargetOptions &ExistingTargetOpts,
                        const PreprocessorOptions &ExistingPPOpts,
+                       StringRef ExistingModuleCachePath,
                        FileManager &FileMgr)
       : ExistingLangOpts(ExistingLangOpts),
         ExistingTargetOpts(ExistingTargetOpts),
         ExistingPPOpts(ExistingPPOpts),
+        ExistingModuleCachePath(ExistingModuleCachePath),
         FileMgr(FileMgr)
     {
     }
@@ -4213,6 +4242,13 @@ namespace {
     bool ReadTargetOptions(const TargetOptions &TargetOpts,
                            bool Complain) override {
       return checkTargetOptions(ExistingTargetOpts, TargetOpts, nullptr);
+    }
+    bool ReadHeaderSearchOptions(const HeaderSearchOptions &HSOpts,
+                                 StringRef SpecificModuleCachePath,
+                                 bool Complain) override {
+      return checkHeaderSearchOptions(HSOpts, SpecificModuleCachePath,
+                                      ExistingModuleCachePath,
+                                      nullptr, ExistingLangOpts);
     }
     bool ReadPreprocessorOptions(const PreprocessorOptions &PPOpts,
                                  bool Complain,
@@ -4350,7 +4386,7 @@ bool ASTReader::readASTFileControlBlock(StringRef Filename,
 
       unsigned NumInputFiles = Record[0];
       unsigned NumUserFiles = Record[1];
-      const uint32_t *InputFileOffs = (const uint32_t *)Blob.data();
+      const uint64_t *InputFileOffs = (const uint64_t *)Blob.data();
       for (unsigned I = 0; I != NumInputFiles; ++I) {
         // Go find this input file.
         bool isSystemFile = I >= NumUserFiles;
@@ -4408,8 +4444,10 @@ bool ASTReader::isAcceptableASTFile(StringRef Filename,
                                     FileManager &FileMgr,
                                     const LangOptions &LangOpts,
                                     const TargetOptions &TargetOpts,
-                                    const PreprocessorOptions &PPOpts) {
-  SimplePCHValidator validator(LangOpts, TargetOpts, PPOpts, FileMgr);
+                                    const PreprocessorOptions &PPOpts,
+                                    std::string ExistingModuleCachePath) {
+  SimplePCHValidator validator(LangOpts, TargetOpts, PPOpts,
+                               ExistingModuleCachePath, FileMgr);
   return !readASTFileControlBlock(Filename, FileMgr, validator);
 }
 
@@ -4780,8 +4818,10 @@ bool ASTReader::ParseHeaderSearchOptions(const RecordData &Record,
   HSOpts.UseStandardSystemIncludes = Record[Idx++];
   HSOpts.UseStandardCXXIncludes = Record[Idx++];
   HSOpts.UseLibcxx = Record[Idx++];
+  std::string SpecificModuleCachePath = ReadString(Record, Idx);
 
-  return Listener.ReadHeaderSearchOptions(HSOpts, Complain);
+  return Listener.ReadHeaderSearchOptions(HSOpts, SpecificModuleCachePath,
+                                          Complain);
 }
 
 bool ASTReader::ParsePreprocessorOptions(const RecordData &Record,
@@ -6483,13 +6523,16 @@ namespace {
     ArrayRef<const DeclContext *> Contexts;
     DeclarationName Name;
     SmallVectorImpl<NamedDecl *> &Decls;
+    llvm::SmallPtrSetImpl<NamedDecl *> &DeclSet;
 
   public:
     DeclContextNameLookupVisitor(ASTReader &Reader,
                                  ArrayRef<const DeclContext *> Contexts,
                                  DeclarationName Name,
-                                 SmallVectorImpl<NamedDecl *> &Decls)
-      : Reader(Reader), Contexts(Contexts), Name(Name), Decls(Decls) { }
+                                 SmallVectorImpl<NamedDecl *> &Decls,
+                                 llvm::SmallPtrSetImpl<NamedDecl *> &DeclSet)
+      : Reader(Reader), Contexts(Contexts), Name(Name), Decls(Decls),
+        DeclSet(DeclSet) { }
 
     static bool visit(ModuleFile &M, void *UserData) {
       DeclContextNameLookupVisitor *This
@@ -6538,7 +6581,8 @@ namespace {
 
         // Record this declaration.
         FoundAnything = true;
-        This->Decls.push_back(ND);
+        if (This->DeclSet.insert(ND).second)
+          This->Decls.push_back(ND);
       }
 
       return FoundAnything;
@@ -6578,6 +6622,7 @@ ASTReader::FindExternalVisibleDeclsByName(const DeclContext *DC,
   Deserializing LookupResults(this);
 
   SmallVector<NamedDecl *, 64> Decls;
+  llvm::SmallPtrSet<NamedDecl*, 64> DeclSet;
 
   // Compute the declaration contexts we need to look into. Multiple such
   // declaration contexts occur when two declaration contexts from disjoint
@@ -6595,7 +6640,7 @@ ASTReader::FindExternalVisibleDeclsByName(const DeclContext *DC,
   }
 
   auto LookUpInContexts = [&](ArrayRef<const DeclContext*> Contexts) {
-    DeclContextNameLookupVisitor Visitor(*this, Contexts, Name, Decls);
+    DeclContextNameLookupVisitor Visitor(*this, Contexts, Name, Decls, DeclSet);
 
     // If we can definitively determine which module file to look into,
     // only look there. Otherwise, look in all module files.
@@ -6623,7 +6668,8 @@ ASTReader::FindExternalVisibleDeclsByName(const DeclContext *DC,
       auto Merged = MergedLookups.find(DC);
       if (Merged != MergedLookups.end()) {
         for (unsigned I = 0; I != Merged->second.size(); ++I) {
-          LookUpInContexts(Merged->second[I]);
+          const DeclContext *Context = Merged->second[I];
+          LookUpInContexts(Context);
           // We might have just added some more merged lookups. If so, our
           // iterator is now invalid, so grab a fresh one before continuing.
           Merged = MergedLookups.find(DC);
@@ -6644,6 +6690,7 @@ namespace {
     ASTReader &Reader;
     SmallVectorImpl<const DeclContext *> &Contexts;
     DeclsMap &Decls;
+    llvm::SmallPtrSet<NamedDecl *, 256> DeclSet;
     bool VisitAll;
 
   public:
@@ -6688,7 +6735,8 @@ namespace {
 
           // Record this declaration.
           FoundAnything = true;
-          This->Decls[ND->getDeclName()].push_back(ND);
+          if (This->DeclSet.insert(ND).second)
+            This->Decls[ND->getDeclName()].push_back(ND);
         }
       }
 
@@ -8468,6 +8516,10 @@ void ASTReader::diagnoseOdrViolations() {
       // completed. We only really need to mark FieldDecls as invalid here.
       if (!isa<TagDecl>(D))
         D->setInvalidDecl();
+      
+      // Ensure we don't accidentally recursively enter deserialization while
+      // we're producing our diagnostic.
+      Deserializing RecursionGuard(this);
 
       std::string CanonDefModule =
           getOwningModuleNameForDiagnostic(cast<Decl>(CanonDef));
@@ -8488,6 +8540,13 @@ void ASTReader::diagnoseOdrViolations() {
       DiagnosedOdrMergeFailures.insert(CanonDef);
     }
   }
+
+  if (OdrMergeFailures.empty())
+    return;
+
+  // Ensure we don't accidentally recursively enter deserialization while
+  // we're producing our diagnostics.
+  Deserializing RecursionGuard(this);
 
   // Issue any pending ODR-failure diagnostics.
   for (auto &Merge : OdrMergeFailures) {

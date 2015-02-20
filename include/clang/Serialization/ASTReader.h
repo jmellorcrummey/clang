@@ -153,6 +153,7 @@ public:
   /// \returns true to indicate the header search options are invalid, or false
   /// otherwise.
   virtual bool ReadHeaderSearchOptions(const HeaderSearchOptions &HSOpts,
+                                       StringRef SpecificModuleCachePath,
                                        bool Complain) {
     return false;
   }
@@ -230,6 +231,7 @@ public:
                              bool Complain) override;
 
   bool ReadHeaderSearchOptions(const HeaderSearchOptions &HSOpts,
+                               StringRef SpecificModuleCachePath,
                                bool Complain) override;
   bool ReadPreprocessorOptions(const PreprocessorOptions &PPOpts,
                                bool Complain,
@@ -261,6 +263,9 @@ public:
                              bool Complain) override;
   bool ReadPreprocessorOptions(const PreprocessorOptions &PPOpts, bool Complain,
                                std::string &SuggestedPredefines) override;
+  bool ReadHeaderSearchOptions(const HeaderSearchOptions &HSOpts,
+                               StringRef SpecificModuleCachePath,
+                               bool Complain) override;
   void ReadCounter(const serialization::ModuleFile &M, unsigned Value) override;
 
 private:
@@ -1077,8 +1082,8 @@ private:
     ASTReader &Reader;
     enum ReadingKind PrevKind;
 
-    ReadingKindTracker(const ReadingKindTracker &) LLVM_DELETED_FUNCTION;
-    void operator=(const ReadingKindTracker &) LLVM_DELETED_FUNCTION;
+    ReadingKindTracker(const ReadingKindTracker &) = delete;
+    void operator=(const ReadingKindTracker &) = delete;
 
   public:
     ReadingKindTracker(enum ReadingKind newKind, ASTReader &reader)
@@ -1275,8 +1280,8 @@ private:
   void Error(unsigned DiagID, StringRef Arg1 = StringRef(),
              StringRef Arg2 = StringRef());
 
-  ASTReader(const ASTReader &) LLVM_DELETED_FUNCTION;
-  void operator=(const ASTReader &) LLVM_DELETED_FUNCTION;
+  ASTReader(const ASTReader &) = delete;
+  void operator=(const ASTReader &) = delete;
 public:
   /// \brief Load the AST file and validate its contents against the given
   /// Preprocessor.
@@ -1496,7 +1501,8 @@ public:
                                   FileManager &FileMgr,
                                   const LangOptions &LangOpts,
                                   const TargetOptions &TargetOpts,
-                                  const PreprocessorOptions &PPOpts);
+                                  const PreprocessorOptions &PPOpts,
+                                  std::string ExistingModuleCachePath);
 
   /// \brief Returns the suggested contents of the predefines buffer,
   /// which contains a (typically-empty) subset of the predefines

@@ -806,6 +806,9 @@ static void EmitSizedDeallocationFunction(CodeGenFunction &CGF,
                                           const FunctionDecl *UnsizedDealloc) {
   // This is a weak discardable definition of the sized deallocation function.
   CGF.CurFn->setLinkage(llvm::Function::LinkOnceAnyLinkage);
+  if (CGF.CGM.supportsCOMDAT())
+    CGF.CurFn->setComdat(
+        CGF.CGM.getModule().getOrInsertComdat(CGF.CurFn->getName()));
 
   // Call the unsized deallocation function and forward the first argument
   // unchanged.
@@ -891,8 +894,11 @@ void CodeGenFunction::GenerateCode(GlobalDecl GD, llvm::Function *Fn,
   } else if (FunctionDecl *UnsizedDealloc =
                  FD->getCorrespondingUnsizedGlobalDeallocationFunction()) {
     // Global sized deallocation functions get an implicit weak definition if
-    // they don't have an explicit definition.
+    // they don't have an explicit definition, if allowed.
+    assert(getLangOpts().DefineSizedDeallocation &&
+           "Can't emit unallowed definition.");
     EmitSizedDeallocationFunction(*this, UnsizedDealloc);
+
   } else
     llvm_unreachable("no definition for emitted function");
 

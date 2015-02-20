@@ -1310,11 +1310,19 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
     // is a base-specifier-list.
     ColonProtectionRAIIObject X(*this);
 
-    if (ParseOptionalCXXScopeSpecifier(SS, ParsedType(), EnteringContext))
+    CXXScopeSpec Spec;
+    bool HasValidSpec = true;
+    if (ParseOptionalCXXScopeSpecifier(Spec, ParsedType(), EnteringContext)) {
       DS.SetTypeSpecError();
-    if (SS.isSet())
-      if (Tok.isNot(tok::identifier) && Tok.isNot(tok::annot_template_id))
+      HasValidSpec = false;
+    }
+    if (Spec.isSet())
+      if (Tok.isNot(tok::identifier) && Tok.isNot(tok::annot_template_id)) {
         Diag(Tok, diag::err_expected) << tok::identifier;
+        HasValidSpec = false;
+      }
+    if (HasValidSpec)
+      SS = Spec;
   }
 
   TemplateParameterLists *TemplateParams = TemplateInfo.TemplateParams;
@@ -1888,13 +1896,16 @@ void Parser::HandleMemberFunctionDeclDelays(Declarator& DeclaratorInfo,
   // late parse
   bool NeedLateParse = FTI.getExceptionSpecType() == EST_Unparsed;
 
-  if (!NeedLateParse)
+  if (!NeedLateParse) {
     // Look ahead to see if there are any default args
-    for (unsigned ParamIdx = 0; ParamIdx < FTI.NumParams; ++ParamIdx)
-      if (FTI.Params[ParamIdx].DefaultArgTokens) {
+    for (unsigned ParamIdx = 0; ParamIdx < FTI.NumParams; ++ParamIdx) {
+      auto Param = cast<ParmVarDecl>(FTI.Params[ParamIdx].Param);
+      if (Param->hasUnparsedDefaultArg()) {
         NeedLateParse = true;
         break;
       }
+    }
+  }
 
   if (NeedLateParse) {
     // Push this method onto the stack of late-parsed method
@@ -3464,7 +3475,6 @@ bool Parser::ParseCXX11AttributeArgs(IdentifierInfo *AttrName,
         // The attribute was allowed to have arguments, but none were provided
         // even though the attribute parsed successfully. This is an error.
         Diag(LParenLoc, diag::err_attribute_requires_arguments) << AttrName;
-        return false;
       } else if (!Attr->getMaxArgs()) {
         // The attribute parsed successfully, but was not allowed to have any
         // arguments. It doesn't matter whether any were provided -- the
@@ -3472,7 +3482,6 @@ bool Parser::ParseCXX11AttributeArgs(IdentifierInfo *AttrName,
         Diag(LParenLoc, diag::err_cxx11_attribute_forbids_arguments)
             << AttrName
             << FixItHint::CreateRemoval(SourceRange(LParenLoc, *EndLoc));
-        return false;
       }
     }
   }
