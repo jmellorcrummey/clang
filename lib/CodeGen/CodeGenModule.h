@@ -1103,6 +1103,14 @@ public:
   /// \param D Threadprivate declaration.
   void EmitOMPThreadPrivateDecl(const OMPThreadPrivateDecl *D);
 
+  /// Emit bit set entries for the given vtable using the given layout if
+  /// vptr CFI is enabled.
+  void EmitVTableBitSetEntries(llvm::GlobalVariable *VTable,
+                               const VTableLayout &VTLayout);
+
+  /// \breif Get the declaration of std::terminate for the platform.
+  llvm::Constant *getTerminateFn();
+
 private:
   llvm::Constant *
   GetOrCreateLLVMFunction(StringRef MangledName, llvm::Type *Ty, GlobalDecl D,

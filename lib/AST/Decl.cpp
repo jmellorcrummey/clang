@@ -1489,6 +1489,11 @@ static bool isRedeclarable(Decl::Kind K) {
 bool NamedDecl::declarationReplaces(NamedDecl *OldD, bool IsKnownNewer) const {
   assert(getDeclName() == OldD->getDeclName() && "Declaration name mismatch");
 
+  // Never replace one imported declaration with another; we need both results
+  // when re-exporting.
+  if (OldD->isFromASTFile() && isFromASTFile())
+    return false;
+
   if (!isKindReplaceableBy(OldD->getKind(), getKind()))
     return false;
 
@@ -2532,8 +2537,8 @@ FunctionDecl::getCorrespondingUnsizedGlobalDeallocationFunction() const {
 
   // This is a sized deallocation function. Find the corresponding unsized
   // deallocation function.
-  lookup_const_result R = getDeclContext()->lookup(getDeclName());
-  for (lookup_const_result::iterator RI = R.begin(), RE = R.end(); RI != RE;
+  lookup_result R = getDeclContext()->lookup(getDeclName());
+  for (lookup_result::iterator RI = R.begin(), RE = R.end(); RI != RE;
        ++RI)
     if (FunctionDecl *FD = dyn_cast<FunctionDecl>(*RI))
       if (FD->getNumParams() == 1 && !FD->isVariadic())
@@ -3792,6 +3797,13 @@ void TranslationUnitDecl::anchor() { }
 
 TranslationUnitDecl *TranslationUnitDecl::Create(ASTContext &C) {
   return new (C, (DeclContext *)nullptr) TranslationUnitDecl(C);
+}
+
+void ExternCContextDecl::anchor() { }
+
+ExternCContextDecl *ExternCContextDecl::Create(const ASTContext &C,
+                                               TranslationUnitDecl *DC) {
+  return new (C, DC) ExternCContextDecl(DC);
 }
 
 void LabelDecl::anchor() { }

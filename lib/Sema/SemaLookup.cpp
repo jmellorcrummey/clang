@@ -415,7 +415,9 @@ void LookupResult::resolveKind() {
       // If it's not unique, pull something off the back (and
       // continue at this index).
       // FIXME: This is wrong. We need to take the more recent declaration in
-      // order to get the right type, default arguments, etc.
+      // order to get the right type, default arguments, etc. We also need to
+      // prefer visible declarations to hidden ones (for redeclaration lookup
+      // in modules builds).
       Decls[I] = Decls[--N];
       continue;
     }
@@ -673,8 +675,8 @@ static bool LookupDirect(Sema &S, LookupResult &R, const DeclContext *DC) {
     DeclareImplicitMemberFunctionsWithName(S, R.getLookupName(), DC);
 
   // Perform lookup into this declaration context.
-  DeclContext::lookup_const_result DR = DC->lookup(R.getLookupName());
-  for (DeclContext::lookup_const_iterator I = DR.begin(), E = DR.end(); I != E;
+  DeclContext::lookup_result DR = DC->lookup(R.getLookupName());
+  for (DeclContext::lookup_iterator I = DR.begin(), E = DR.end(); I != E;
        ++I) {
     NamedDecl *D = *I;
     if ((D = R.getAcceptableDecl(D))) {

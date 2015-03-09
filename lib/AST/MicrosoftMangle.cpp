@@ -110,6 +110,12 @@ public:
   void mangleCXXVBTable(const CXXRecordDecl *Derived,
                         ArrayRef<const CXXRecordDecl *> BasePath,
                         raw_ostream &Out) override;
+  void mangleCXXThrowInfo(QualType T, bool IsConst, bool IsVolatile,
+                          uint32_t NumEntries, raw_ostream &Out) override;
+  void mangleCXXCatchableTypeArray(QualType T, uint32_t NumEntries,
+                                   raw_ostream &Out) override;
+  void mangleCXXCatchableType(QualType T, const CXXConstructorDecl *CD,
+                              uint32_t Size, raw_ostream &Out) override;
   void mangleCXXRTTI(QualType T, raw_ostream &Out) override;
   void mangleCXXRTTIName(QualType T, raw_ostream &Out) override;
   void mangleCXXRTTIBaseClassDescriptor(const CXXRecordDecl *Derived,
@@ -138,6 +144,8 @@ public:
   void mangleSEHFilterExpression(const NamedDecl *EnclosingDecl,
                                  raw_ostream &Out) override;
   void mangleStringLiteral(const StringLiteral *SL, raw_ostream &Out) override;
+  void mangleCXXVTableBitSet(const CXXRecordDecl *RD,
+                             raw_ostream &Out) override;
   bool getNextDiscriminator(const NamedDecl *ND, unsigned &disc) {
     // Lambda closure types are already numbered.
     if (isLambda(ND))
@@ -2276,6 +2284,51 @@ void MicrosoftMangleContextImpl::mangleCXXRTTIName(QualType T,
   Mangler.mangleType(T, SourceRange(), MicrosoftCXXNameMangler::QMM_Result);
 }
 
+void MicrosoftMangleContextImpl::mangleCXXThrowInfo(QualType T,
+                                                    bool IsConst,
+                                                    bool IsVolatile,
+                                                    uint32_t NumEntries,
+                                                    raw_ostream &Out) {
+  MicrosoftCXXNameMangler Mangler(*this, Out);
+  Mangler.getStream() << "_TI";
+  if (IsConst)
+    Mangler.getStream() << 'C';
+  if (IsVolatile)
+    Mangler.getStream() << 'V';
+  Mangler.getStream() << NumEntries;
+  Mangler.mangleType(T, SourceRange(), MicrosoftCXXNameMangler::QMM_Result);
+}
+
+void MicrosoftMangleContextImpl::mangleCXXCatchableTypeArray(
+    QualType T, uint32_t NumEntries, raw_ostream &Out) {
+  MicrosoftCXXNameMangler Mangler(*this, Out);
+  Mangler.getStream() << "_CTA";
+  Mangler.getStream() << NumEntries;
+  Mangler.mangleType(T, SourceRange(), MicrosoftCXXNameMangler::QMM_Result);
+}
+
+void MicrosoftMangleContextImpl::mangleCXXCatchableType(
+    QualType T, const CXXConstructorDecl *CD, uint32_t Size, raw_ostream &Out) {
+  MicrosoftCXXNameMangler Mangler(*this, Out);
+  Mangler.getStream() << "_CT";
+
+  llvm::SmallString<64> RTTIMangling;
+  {
+    llvm::raw_svector_ostream Stream(RTTIMangling);
+    mangleCXXRTTI(T, Stream);
+  }
+  Mangler.getStream() << RTTIMangling.substr(1);
+
+  llvm::SmallString<64> CopyCtorMangling;
+  if (CD) {
+    llvm::raw_svector_ostream Stream(CopyCtorMangling);
+    mangleCXXCtor(CD, Ctor_Complete, Stream);
+  }
+  Mangler.getStream() << CopyCtorMangling.substr(1);
+
+  Mangler.getStream() << Size;
+}
+
 void MicrosoftMangleContextImpl::mangleCXXRTTIBaseClassDescriptor(
     const CXXRecordDecl *Derived, uint32_t NVOffset, int32_t VBPtrOffset,
     uint32_t VBTableOffset, uint32_t Flags, raw_ostream &Out) {
@@ -2565,6 +2618,11 @@ void MicrosoftMangleContextImpl::mangleStringLiteral(const StringLiteral *SL,
       MangleByte(0);
 
   Mangler.getStream() << '@';
+}
+
+void MicrosoftMangleContextImpl::mangleCXXVTableBitSet(const CXXRecordDecl *RD,
+                                                       raw_ostream &Out) {
+  llvm::report_fatal_error("Cannot mangle bitsets yet");
 }
 
 MicrosoftMangleContext *
