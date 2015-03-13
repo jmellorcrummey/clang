@@ -319,6 +319,10 @@ Sema::CheckBuiltinFunctionCall(FunctionDecl *FDecl, unsigned BuiltinID,
     if (SemaBuiltinLongjmp(TheCall))
       return ExprError();
     break;
+  case Builtin::BI__builtin_setjmp:
+    if (SemaBuiltinSetjmp(TheCall))
+      return ExprError();
+    break;
 
   case Builtin::BI__builtin_classify_type:
     if (checkArgCount(*this, TheCall, 1)) return true;
@@ -498,6 +502,19 @@ Sema::CheckBuiltinFunctionCall(FunctionDecl *FDecl, unsigned BuiltinID,
       return ExprError();
     break;
   }
+
+  case Builtin::BI__GetExceptionInfo:
+    if (checkArgCount(*this, TheCall, 1))
+      return ExprError();
+
+    if (CheckCXXThrowOperand(
+            TheCall->getLocStart(),
+            Context.getExceptionObjectType(FDecl->getParamDecl(0)->getType()),
+            TheCall))
+      return ExprError();
+
+    TheCall->setType(Context.VoidPtrTy);
+    break;
 
   }
 
@@ -878,14 +895,6 @@ bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
   switch (BuiltinID) {
   default: return false;
   case X86::BI_mm_prefetch: i = 1; l = 0; u = 3; break;
-  case X86::BI__builtin_ia32_vextractf128_pd256:
-  case X86::BI__builtin_ia32_vextractf128_ps256:
-  case X86::BI__builtin_ia32_vextractf128_si256:
-  case X86::BI__builtin_ia32_extract128i256: i = 1, l = 0, u = 1; break;
-  case X86::BI__builtin_ia32_vinsertf128_pd256:
-  case X86::BI__builtin_ia32_vinsertf128_ps256:
-  case X86::BI__builtin_ia32_vinsertf128_si256:
-  case X86::BI__builtin_ia32_insert128i256: i = 2, l = 0; u = 1; break;
   case X86::BI__builtin_ia32_sha1rnds4: i = 2, l = 0; u = 3; break;
   case X86::BI__builtin_ia32_vpermil2pd:
   case X86::BI__builtin_ia32_vpermil2pd256:
@@ -2460,8 +2469,13 @@ bool Sema::SemaBuiltinConstantArgRange(CallExpr *TheCall, int ArgNum,
 }
 
 /// SemaBuiltinLongjmp - Handle __builtin_longjmp(void *env[5], int val).
-/// This checks that val is a constant 1.
+/// This checks that the target supports __builtin_longjmp and
+/// that val is a constant 1.
 bool Sema::SemaBuiltinLongjmp(CallExpr *TheCall) {
+  if (!Context.getTargetInfo().hasSjLjLowering())
+    return Diag(TheCall->getLocStart(), diag::err_builtin_longjmp_unsupported)
+             << SourceRange(TheCall->getLocStart(), TheCall->getLocEnd());
+
   Expr *Arg = TheCall->getArg(1);
   llvm::APSInt Result;
 
@@ -2473,6 +2487,16 @@ bool Sema::SemaBuiltinLongjmp(CallExpr *TheCall) {
     return Diag(TheCall->getLocStart(), diag::err_builtin_longjmp_invalid_val)
              << SourceRange(Arg->getLocStart(), Arg->getLocEnd());
 
+  return false;
+}
+
+
+/// SemaBuiltinSetjmp - Handle __builtin_setjmp(void *env[5]).
+/// This checks that the target supports __builtin_setjmp.
+bool Sema::SemaBuiltinSetjmp(CallExpr *TheCall) {
+  if (!Context.getTargetInfo().hasSjLjLowering())
+    return Diag(TheCall->getLocStart(), diag::err_builtin_setjmp_unsupported)
+             << SourceRange(TheCall->getLocStart(), TheCall->getLocEnd());
   return false;
 }
 

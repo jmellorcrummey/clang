@@ -3416,8 +3416,8 @@ Decl *Sema::ParsedFreeStandingDeclSpec(Scope *S, AccessSpecifier AS,
   return ParsedFreeStandingDeclSpec(S, AS, DS, MultiTemplateParamsArg());
 }
 
-static void HandleTagNumbering(Sema &S, const TagDecl *Tag, Scope *TagScope) {
-  if (!S.Context.getLangOpts().CPlusPlus)
+void Sema::handleTagNumbering(const TagDecl *Tag, Scope *TagScope) {
+  if (!Context.getLangOpts().CPlusPlus)
     return;
 
   if (isa<CXXRecordDecl>(Tag->getParent())) {
@@ -3426,21 +3426,61 @@ static void HandleTagNumbering(Sema &S, const TagDecl *Tag, Scope *TagScope) {
     if (!Tag->getName().empty() || Tag->getTypedefNameForAnonDecl())
       return;
     MangleNumberingContext &MCtx =
-        S.Context.getManglingNumberContext(Tag->getParent());
-    S.Context.setManglingNumber(
+        Context.getManglingNumberContext(Tag->getParent());
+    Context.setManglingNumber(
         Tag, MCtx.getManglingNumber(Tag, TagScope->getMSLocalManglingNumber()));
     return;
   }
 
   // If this tag isn't a direct child of a class, number it if it is local.
   Decl *ManglingContextDecl;
-  if (MangleNumberingContext *MCtx =
-          S.getCurrentMangleNumberContext(Tag->getDeclContext(),
-                                          ManglingContextDecl)) {
-    S.Context.setManglingNumber(
+  if (MangleNumberingContext *MCtx = getCurrentMangleNumberContext(
+          Tag->getDeclContext(), ManglingContextDecl)) {
+    Context.setManglingNumber(
         Tag,
         MCtx->getManglingNumber(Tag, TagScope->getMSLocalManglingNumber()));
   }
+}
+
+void Sema::setTagNameForLinkagePurposes(TagDecl *TagFromDeclSpec,
+                                        TypedefNameDecl *NewTD) {
+  // Do nothing if the tag is not anonymous or already has an
+  // associated typedef (from an earlier typedef in this decl group).
+  if (TagFromDeclSpec->getIdentifier())
+    return;
+  if (TagFromDeclSpec->getTypedefNameForAnonDecl())
+    return;
+
+  // A well-formed anonymous tag must always be a TUK_Definition.
+  assert(TagFromDeclSpec->isThisDeclarationADefinition());
+
+  // The type must match the tag exactly;  no qualifiers allowed.
+  if (!Context.hasSameType(NewTD->getUnderlyingType(),
+                           Context.getTagDeclType(TagFromDeclSpec)))
+    return;
+
+  // If we've already computed linkage for the anonymous tag, then
+  // adding a typedef name for the anonymous decl can change that
+  // linkage, which might be a serious problem.  Diagnose this as
+  // unsupported and ignore the typedef name.  TODO: we should
+  // pursue this as a language defect and establish a formal rule
+  // for how to handle it.
+  if (TagFromDeclSpec->hasLinkageBeenComputed()) {
+    Diag(NewTD->getLocation(), diag::err_typedef_changes_linkage);
+
+    SourceLocation tagLoc = TagFromDeclSpec->getInnerLocStart();
+    tagLoc = getLocForEndOfToken(tagLoc);
+
+    llvm::SmallString<40> textToInsert;
+    textToInsert += ' ';
+    textToInsert += NewTD->getIdentifier()->getName();
+    Diag(tagLoc, diag::note_typedef_changes_linkage)
+        << FixItHint::CreateInsertion(tagLoc, textToInsert);
+    return;
+  }
+
+  // Otherwise, set this is the anon-decl typedef for the tag.
+  TagFromDeclSpec->setTypedefNameForAnonDecl(NewTD);
 }
 
 /// ParsedFreeStandingDeclSpec - This method is invoked when a declspec with
@@ -3472,7 +3512,7 @@ Decl *Sema::ParsedFreeStandingDeclSpec(Scope *S, AccessSpecifier AS,
   }
 
   if (Tag) {
-    HandleTagNumbering(*this, Tag, S);
+    handleTagNumbering(Tag, S);
     Tag->setFreeStanding();
     if (Tag->isInvalidDecl())
       return Tag;
@@ -9720,7 +9760,7 @@ Sema::DeclGroupPtrTy Sema::FinalizeDeclaratorGroup(Scope *S, const DeclSpec &DS,
 
   if (DeclSpec::isDeclRep(DS.getTypeSpecType())) {
     if (TagDecl *Tag = dyn_cast_or_null<TagDecl>(DS.getRepAsDecl())) {
-      HandleTagNumbering(*this, Tag, S);
+      handleTagNumbering(Tag, S);
       if (!Tag->hasNameForLinkage() && !Tag->hasDeclaratorForAnonDecl())
         Tag->setDeclaratorForAnonDecl(FirstDeclaratorInGroup);
     }
@@ -10148,6 +10188,10 @@ static bool ShouldWarnAboutMissingPrototype(const FunctionDecl *FD,
   if (FD->hasAttr<OpenCLKernelAttr>())
     return false;
 
+  // Don't warn on explicitly deleted functions.
+  if (FD->isDeleted())
+    return false;
+
   bool MissingPrototype = true;
   for (const FunctionDecl *Prev = FD->getPreviousDecl();
        Prev; Prev = Prev->getPreviousDecl()) {
@@ -10289,30 +10333,6 @@ Decl *Sema::ActOnStartOfFunctionDef(Scope *FnBodyScope, Decl *D) {
       RequireCompleteType(FD->getLocation(), ResultType,
                           diag::err_func_def_incomplete_result))
     FD->setInvalidDecl();
-
-  // GNU warning -Wmissing-prototypes:
-  //   Warn if a global function is defined without a previous
-  //   prototype declaration. This warning is issued even if the
-  //   definition itself provides a prototype. The aim is to detect
-  //   global functions that fail to be declared in header files.
-  const FunctionDecl *PossibleZeroParamPrototype = nullptr;
-  if (ShouldWarnAboutMissingPrototype(FD, PossibleZeroParamPrototype)) {
-    Diag(FD->getLocation(), diag::warn_missing_prototype) << FD;
-
-    if (PossibleZeroParamPrototype) {
-      // We found a declaration that is not a prototype,
-      // but that could be a zero-parameter prototype
-      if (TypeSourceInfo *TI =
-              PossibleZeroParamPrototype->getTypeSourceInfo()) {
-        TypeLoc TL = TI->getTypeLoc();
-        if (FunctionNoProtoTypeLoc FTL = TL.getAs<FunctionNoProtoTypeLoc>())
-          Diag(PossibleZeroParamPrototype->getLocation(),
-               diag::note_declaration_not_a_prototype)
-            << PossibleZeroParamPrototype
-            << FixItHint::CreateInsertion(FTL.getRParenLoc(), "void");
-      }
-    }
-  }
 
   if (FnBodyScope)
     PushDeclContext(FnBodyScope, FD);
@@ -10515,7 +10535,7 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
 
     if (!FD->isInvalidDecl()) {
       // Don't diagnose unused parameters of defaulted or deleted functions.
-      if (Body)
+      if (!FD->isDeleted() && !FD->isDefaulted())
         DiagnoseUnusedParameters(FD->param_begin(), FD->param_end());
       DiagnoseSizeOfParametersAndReturnValue(FD->param_begin(), FD->param_end(),
                                              FD->getReturnType(), FD);
@@ -10532,6 +10552,30 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
       if (getLangOpts().CPlusPlus && FD->getReturnType()->isRecordType() &&
           !FD->isDependentContext())
         computeNRVO(Body, getCurFunction());
+    }
+
+    // GNU warning -Wmissing-prototypes:
+    //   Warn if a global function is defined without a previous
+    //   prototype declaration. This warning is issued even if the
+    //   definition itself provides a prototype. The aim is to detect
+    //   global functions that fail to be declared in header files.
+    const FunctionDecl *PossibleZeroParamPrototype = nullptr;
+    if (ShouldWarnAboutMissingPrototype(FD, PossibleZeroParamPrototype)) {
+      Diag(FD->getLocation(), diag::warn_missing_prototype) << FD;
+
+      if (PossibleZeroParamPrototype) {
+        // We found a declaration that is not a prototype,
+        // but that could be a zero-parameter prototype
+        if (TypeSourceInfo *TI =
+                PossibleZeroParamPrototype->getTypeSourceInfo()) {
+          TypeLoc TL = TI->getTypeLoc();
+          if (FunctionNoProtoTypeLoc FTL = TL.getAs<FunctionNoProtoTypeLoc>())
+            Diag(PossibleZeroParamPrototype->getLocation(),
+                 diag::note_declaration_not_a_prototype)
+                << PossibleZeroParamPrototype
+                << FixItHint::CreateInsertion(FTL.getRParenLoc(), "void");
+        }
+      }
     }
 
     if (auto *MD = dyn_cast<CXXMethodDecl>(FD)) {
@@ -10619,7 +10663,7 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
          "handled in the block above.");
 
   // Verify and clean out per-function state.
-  if (Body) {
+  if (Body && (!FD || !FD->isDefaulted())) {
     // C++ constructors that have function-try-blocks can't have return
     // statements in the handlers of that block. (C++ [except.handle]p14)
     // Verify this.
@@ -10935,44 +10979,10 @@ TypedefDecl *Sema::ParseTypedefDecl(Scope *S, Declarator &D, QualType T,
   case TST_union:
   case TST_class: {
     TagDecl *tagFromDeclSpec = cast<TagDecl>(D.getDeclSpec().getRepAsDecl());
-
-    // Do nothing if the tag is not anonymous or already has an
-    // associated typedef (from an earlier typedef in this decl group).
-    if (tagFromDeclSpec->getIdentifier()) break;
-    if (tagFromDeclSpec->getTypedefNameForAnonDecl()) break;
-
-    // A well-formed anonymous tag must always be a TUK_Definition.
-    assert(tagFromDeclSpec->isThisDeclarationADefinition());
-
-    // The type must match the tag exactly;  no qualifiers allowed.
-    if (!Context.hasSameType(T, Context.getTagDeclType(tagFromDeclSpec)))
-      break;
-
-    // If we've already computed linkage for the anonymous tag, then
-    // adding a typedef name for the anonymous decl can change that
-    // linkage, which might be a serious problem.  Diagnose this as
-    // unsupported and ignore the typedef name.  TODO: we should
-    // pursue this as a language defect and establish a formal rule
-    // for how to handle it.
-    if (tagFromDeclSpec->hasLinkageBeenComputed()) {
-      Diag(D.getIdentifierLoc(), diag::err_typedef_changes_linkage);
-
-      SourceLocation tagLoc = D.getDeclSpec().getTypeSpecTypeLoc();
-      tagLoc = getLocForEndOfToken(tagLoc);
-
-      llvm::SmallString<40> textToInsert;
-      textToInsert += ' ';
-      textToInsert += D.getIdentifier()->getName();
-      Diag(tagLoc, diag::note_typedef_changes_linkage)
-        << FixItHint::CreateInsertion(tagLoc, textToInsert);
-      break;
-    }
-
-    // Otherwise, set this is the anon-decl typedef for the tag.
-    tagFromDeclSpec->setTypedefNameForAnonDecl(NewTD);
+    setTagNameForLinkagePurposes(tagFromDeclSpec, NewTD);
     break;
   }
-    
+
   default:
     break;
   }
@@ -12054,6 +12064,24 @@ void Sema::ActOnStartCXXMemberDeclarations(Scope *S, Decl *TagD,
          "Broken injected-class-name");
 }
 
+static void getDefaultArgExprsForConstructors(Sema &S, CXXRecordDecl *Class) {
+  for (Decl *Member : Class->decls()) {
+    auto *CD = dyn_cast<CXXConstructorDecl>(Member);
+    if (!CD || !CD->isDefaultConstructor() || !CD->hasAttr<DLLExportAttr>())
+      continue;
+
+    for (unsigned I = 0, E = CD->getNumParams(); I != E; ++I) {
+      // Skip any default arguments that we've already instantiated.
+      if (S.Context.getDefaultArgExprForConstructor(CD, I))
+        continue;
+
+      Expr *DefaultArg = S.BuildCXXDefaultArgExpr(Class->getLocation(), CD,
+                                                  CD->getParamDecl(I)).get();
+      S.Context.addDefaultArgExprForConstructor(CD, I, DefaultArg);
+    }
+  }
+}
+
 void Sema::ActOnTagFinishDefinition(Scope *S, Decl *TagD,
                                     SourceLocation RBraceLoc) {
   AdjustDeclIfTemplate(TagD);
@@ -12067,8 +12095,16 @@ void Sema::ActOnTagFinishDefinition(Scope *S, Decl *TagD,
       RD->completeDefinition();
   }
 
-  if (isa<CXXRecordDecl>(Tag))
+  if (auto *Class = dyn_cast<CXXRecordDecl>(Tag)) {
     FieldCollector->FinishClass();
+
+    // Default constructors that are annotated with __declspec(dllexport) which
+    // have default arguments or don't use the standard calling convention are
+    // wrapped with a thunk called the default constructor closure.
+    if (!Class->getDescribedClassTemplate() &&
+        Context.getTargetInfo().getCXXABI().isMicrosoft())
+      getDefaultArgExprsForConstructors(*this, Class);
+  }
 
   // Exit this scope of this tag's definition.
   PopDeclContext();

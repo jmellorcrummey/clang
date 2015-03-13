@@ -1316,9 +1316,22 @@ void Clang::AddPPCTargetArgs(const ArgList &Args,
     ABIName = A->getValue();
   } else if (getToolChain().getTriple().isOSLinux())
     switch(getToolChain().getArch()) {
-    case llvm::Triple::ppc64:
+    case llvm::Triple::ppc64: {
+      // When targeting a processor that supports QPX, or if QPX is
+      // specifically enabled, default to using the ABI that supports QPX (so
+      // long as it is not specifically disabled).
+      bool HasQPX = false;
+      if (Arg *A = Args.getLastArg(options::OPT_mcpu_EQ))
+        HasQPX = A->getValue() == StringRef("a2q");
+      HasQPX = Args.hasFlag(options::OPT_mqpx, options::OPT_mno_qpx, HasQPX);
+      if (HasQPX) {
+        ABIName = "elfv1-qpx";
+        break;
+      }
+
       ABIName = "elfv1";
       break;
+    }
     case llvm::Triple::ppc64le:
       ABIName = "elfv2";
       break;
@@ -8065,8 +8078,8 @@ void visualstudio::Link::ConstructJob(Compilation &C, const JobAction &JA,
   if (!llvm::sys::Process::GetEnv("LIB")) {
     // If the VC environment hasn't been configured (perhaps because the user
     // did not run vcvarsall), try to build a consistent link environment.  If
-    // the environment variable is set however, assume the user knows what he's
-    // doing.
+    // the environment variable is set however, assume the user knows what
+    // they're doing.
     std::string VisualStudioDir;
     const auto &MSVC = static_cast<const toolchains::MSVCToolChain &>(TC);
     if (MSVC.getVisualStudioInstallDir(VisualStudioDir)) {
@@ -8226,7 +8239,7 @@ std::unique_ptr<Command> visualstudio::Compile::GetCommand(
     }
   }
 
-  // Flags for which clang-cl have an alias.
+  // Flags for which clang-cl has an alias.
   // FIXME: How can we ensure this stays in sync with relevant clang-cl options?
 
   if (Args.hasFlag(options::OPT__SLASH_GR_, options::OPT__SLASH_GR,
@@ -8246,7 +8259,8 @@ std::unique_ptr<Command> visualstudio::Compile::GetCommand(
   if (Args.hasArg(options::OPT_g_Flag, options::OPT_gline_tables_only))
     CmdArgs.push_back("/Z7");
 
-  std::vector<std::string> Includes = Args.getAllArgValues(options::OPT_include);
+  std::vector<std::string> Includes =
+      Args.getAllArgValues(options::OPT_include);
   for (const auto &Include : Includes)
     CmdArgs.push_back(Args.MakeArgString(std::string("/FI") + Include));
 

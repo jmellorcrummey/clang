@@ -826,7 +826,7 @@ IdentifierInfo *ASTIdentifierLookupTrait::ReadData(const internal_key_type& k,
         uint32_t LocalMacroID =
             endian::readNext<uint32_t, little, unaligned>(d);
         DataLen -= 4;
-        if (LocalMacroID == 0xdeadbeef) break;
+        if (LocalMacroID == (uint32_t)-1) break;
         LocalMacroIDs.push_back(LocalMacroID);
       }
     }
@@ -1807,7 +1807,7 @@ struct ASTReader::ModuleMacroInfo {
 };
 
 ASTReader::ModuleMacroInfo *
-ASTReader::getModuleMacro(const PendingMacroInfo &PMInfo) {
+ASTReader::getModuleMacro(IdentifierInfo *II, const PendingMacroInfo &PMInfo) {
   ModuleMacroInfo Info;
 
   uint32_t ID = PMInfo.ModuleMacroData.MacID;
@@ -1815,6 +1815,11 @@ ASTReader::getModuleMacro(const PendingMacroInfo &PMInfo) {
     // Macro undefinition.
     Info.SubModID = getGlobalSubmoduleID(*PMInfo.M, ID >> 1);
     Info.MI = nullptr;
+
+    // If we've already loaded the #undef of this macro from this module,
+    // don't do so again.
+    if (!LoadedUndefs.insert(std::make_pair(II, Info.SubModID)).second)
+      return nullptr;
   } else {
     // Macro definition.
     GlobalMacroID GMacID = getGlobalMacroID(*PMInfo.M, ID >> 1);
@@ -1848,7 +1853,7 @@ void ASTReader::resolvePendingMacro(IdentifierInfo *II,
 
   // Module Macro.
 
-  ModuleMacroInfo *MMI = getModuleMacro(PMInfo);
+  ModuleMacroInfo *MMI = getModuleMacro(II, PMInfo);
   if (!MMI)
     return;
 
@@ -1945,15 +1950,13 @@ static bool areDefinedInSystemModules(MacroInfo *PrevMI, MacroInfo *NewMI,
   Module *PrevOwner = nullptr;
   if (SubmoduleID PrevModID = PrevMI->getOwningModuleID())
     PrevOwner = Reader.getSubmodule(PrevModID);
-  SourceManager &SrcMgr = Reader.getSourceManager();
-  bool PrevInSystem
-    = PrevOwner? PrevOwner->IsSystem
-               : SrcMgr.isInSystemHeader(PrevMI->getDefinitionLoc());
-  bool NewInSystem
-    = NewOwner? NewOwner->IsSystem
-              : SrcMgr.isInSystemHeader(NewMI->getDefinitionLoc());
   if (PrevOwner && PrevOwner == NewOwner)
     return false;
+  SourceManager &SrcMgr = Reader.getSourceManager();
+  bool PrevInSystem = (PrevOwner && PrevOwner->IsSystem) ||
+                      SrcMgr.isInSystemHeader(PrevMI->getDefinitionLoc());
+  bool NewInSystem = (NewOwner && NewOwner->IsSystem) ||
+                     SrcMgr.isInSystemHeader(NewMI->getDefinitionLoc());
   return PrevInSystem && NewInSystem;
 }
 
@@ -8369,10 +8372,12 @@ void ASTReader::finishPendingActions() {
         // Make sure that the TagType points at the definition.
         const_cast<TagType*>(TagT)->decl = TD;
       }
-      
+
       if (auto RD = dyn_cast<CXXRecordDecl>(D)) {
-        for (auto R : RD->redecls()) {
-          assert((R == D) == R->isThisDeclarationADefinition() &&
+        for (auto *R = getMostRecentExistingDecl(RD); R;
+             R = R->getPreviousDecl()) {
+          assert((R == D) ==
+                     cast<CXXRecordDecl>(R)->isThisDeclarationADefinition() &&
                  "declaration thinks it's the definition but it isn't");
           cast<CXXRecordDecl>(R)->DefinitionData = RD->DefinitionData;
         }
@@ -8380,34 +8385,36 @@ void ASTReader::finishPendingActions() {
 
       continue;
     }
-    
+
     if (auto ID = dyn_cast<ObjCInterfaceDecl>(D)) {
       // Make sure that the ObjCInterfaceType points at the definition.
       const_cast<ObjCInterfaceType *>(cast<ObjCInterfaceType>(ID->TypeForDecl))
         ->Decl = ID;
-      
-      for (auto R : ID->redecls())
-        R->Data = ID->Data;
-      
+
+      for (auto *R = getMostRecentExistingDecl(ID); R; R = R->getPreviousDecl())
+        cast<ObjCInterfaceDecl>(R)->Data = ID->Data;
+
       continue;
     }
-    
+
     if (auto PD = dyn_cast<ObjCProtocolDecl>(D)) {
-      for (auto R : PD->redecls())
-        R->Data = PD->Data;
-      
+      for (auto *R = getMostRecentExistingDecl(PD); R; R = R->getPreviousDecl())
+        cast<ObjCProtocolDecl>(R)->Data = PD->Data;
+
       continue;
     }
-    
+
     auto RTD = cast<RedeclarableTemplateDecl>(D)->getCanonicalDecl();
-    for (auto R : RTD->redecls())
-      R->Common = RTD->Common;
+    for (auto *R = getMostRecentExistingDecl(RTD); R; R = R->getPreviousDecl())
+      cast<RedeclarableTemplateDecl>(R)->Common = RTD->Common;
   }
   PendingDefinitions.clear();
 
   // Load the bodies of any functions or methods we've encountered. We do
   // this now (delayed) so that we can be sure that the declaration chains
   // have been fully wired up.
+  // FIXME: There seems to be no point in delaying this, it does not depend
+  // on the redecl chains having been wired up.
   for (PendingBodiesMap::iterator PB = PendingBodies.begin(),
                                PBEnd = PendingBodies.end();
        PB != PBEnd; ++PB) {

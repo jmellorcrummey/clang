@@ -539,6 +539,14 @@ private:
   /// been loaded.
   std::vector<MacroInfo *> MacrosLoaded;
 
+  typedef std::pair<IdentifierInfo *, serialization::SubmoduleID>
+      LoadedMacroInfo;
+
+  /// \brief A set of #undef directives that we have loaded; used to
+  /// deduplicate the same #undef information coming from multiple module
+  /// files.
+  llvm::DenseSet<LoadedMacroInfo> LoadedUndefs;
+
   typedef ContinuousRangeMap<serialization::MacroID, ModuleFile *, 4>
     GlobalMacroMapType;
 
@@ -1159,6 +1167,12 @@ private:
   void LoadedDecl(unsigned Index, Decl *D);
   Decl *ReadDeclRecord(serialization::DeclID ID);
   void markIncompleteDeclChain(Decl *Canon);
+
+  /// \brief Returns the most recent declaration of a declaration (which must be
+  /// of a redeclarable kind) that is either local or has already been loaded
+  /// merged into its redecl chain.
+  Decl *getMostRecentExistingDecl(Decl *D);
+
   RecordLocation DeclCursorForID(serialization::DeclID ID,
                                  unsigned &RawLocation);
   void loadDeclUpdateRecords(serialization::DeclID ID, Decl *D);
@@ -1838,7 +1852,8 @@ public:
   serialization::IdentifierID getGlobalIdentifierID(ModuleFile &M,
                                                     unsigned LocalID);
 
-  ModuleMacroInfo *getModuleMacro(const PendingMacroInfo &PMInfo);
+  ModuleMacroInfo *getModuleMacro(IdentifierInfo *II,
+                                  const PendingMacroInfo &PMInfo);
 
   void resolvePendingMacro(IdentifierInfo *II, const PendingMacroInfo &PMInfo);
 
