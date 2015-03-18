@@ -2864,6 +2864,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   else
     CmdArgs.push_back(Args.MakeArgString(getToolChain().getThreadModel()));
 
+  Args.AddLastArg(CmdArgs, options::OPT_fveclib);
+
   if (!Args.hasFlag(options::OPT_fmerge_all_constants,
                     options::OPT_fno_merge_all_constants))
     CmdArgs.push_back("-fno-merge-all-constants");
@@ -6135,6 +6137,16 @@ void darwin::Link::ConstructJob(Compilation &C, const JobAction &JA,
          ie = Args.filtered_end(); it != ie; ++it)
     CmdArgs.push_back(Args.MakeArgString(std::string("-F") +
                                          (*it)->getValue()));
+
+  if (!Args.hasArg(options::OPT_nostdlib) &&
+      !Args.hasArg(options::OPT_nodefaultlibs)) {
+    if (Arg *A = Args.getLastArg(options::OPT_fveclib)) {
+      if (A->getValue() == StringRef("Accelerate")) {
+        CmdArgs.push_back("-framework");
+        CmdArgs.push_back("Accelerate");
+      }
+    }
+  }
 
   const char *Exec =
     Args.MakeArgString(getToolChain().GetLinkerPath());
