@@ -1865,6 +1865,8 @@ Value *CodeGenFunction::EmitTargetBuiltinExpr(unsigned BuiltinID,
   case llvm::Triple::r600:
   case llvm::Triple::amdgcn:
     return EmitR600BuiltinExpr(BuiltinID, E);
+  case llvm::Triple::systemz:
+    return EmitSystemZBuiltinExpr(BuiltinID, E);
   default:
     return nullptr;
   }
@@ -3105,7 +3107,7 @@ Value *CodeGenFunction::EmitCommonNeonBuiltinExpr(
         Indices.push_back(Builder.getInt32(i+vi));
         Indices.push_back(Builder.getInt32(i+e+vi));
       }
-      Value *Addr = Builder.CreateConstInBoundsGEP1_32(Ops[0], vi);
+      Value *Addr = Builder.CreateConstInBoundsGEP1_32(Ty, Ops[0], vi);
       SV = llvm::ConstantVector::get(Indices);
       SV = Builder.CreateShuffleVector(Ops[1], Ops[2], SV, "vtrn");
       SV = Builder.CreateStore(SV, Addr);
@@ -3133,7 +3135,7 @@ Value *CodeGenFunction::EmitCommonNeonBuiltinExpr(
       for (unsigned i = 0, e = VTy->getNumElements(); i != e; ++i)
         Indices.push_back(ConstantInt::get(Int32Ty, 2*i+vi));
 
-      Value *Addr = Builder.CreateConstInBoundsGEP1_32(Ops[0], vi);
+      Value *Addr = Builder.CreateConstInBoundsGEP1_32(Ty, Ops[0], vi);
       SV = llvm::ConstantVector::get(Indices);
       SV = Builder.CreateShuffleVector(Ops[1], Ops[2], SV, "vuzp");
       SV = Builder.CreateStore(SV, Addr);
@@ -3153,7 +3155,7 @@ Value *CodeGenFunction::EmitCommonNeonBuiltinExpr(
         Indices.push_back(ConstantInt::get(Int32Ty, (i + vi*e) >> 1));
         Indices.push_back(ConstantInt::get(Int32Ty, ((i + vi*e) >> 1)+e));
       }
-      Value *Addr = Builder.CreateConstInBoundsGEP1_32(Ops[0], vi);
+      Value *Addr = Builder.CreateConstInBoundsGEP1_32(Ty, Ops[0], vi);
       SV = llvm::ConstantVector::get(Indices);
       SV = Builder.CreateShuffleVector(Ops[1], Ops[2], SV, "vzip");
       SV = Builder.CreateStore(SV, Addr);
@@ -5768,7 +5770,7 @@ Value *CodeGenFunction::EmitAArch64BuiltinExpr(unsigned BuiltinID,
         Indices.push_back(ConstantInt::get(Int32Ty, i+vi));
         Indices.push_back(ConstantInt::get(Int32Ty, i+e+vi));
       }
-      Value *Addr = Builder.CreateConstInBoundsGEP1_32(Ops[0], vi);
+      Value *Addr = Builder.CreateConstInBoundsGEP1_32(Ty, Ops[0], vi);
       SV = llvm::ConstantVector::get(Indices);
       SV = Builder.CreateShuffleVector(Ops[1], Ops[2], SV, "vtrn");
       SV = Builder.CreateStore(SV, Addr);
@@ -5787,7 +5789,7 @@ Value *CodeGenFunction::EmitAArch64BuiltinExpr(unsigned BuiltinID,
       for (unsigned i = 0, e = VTy->getNumElements(); i != e; ++i)
         Indices.push_back(ConstantInt::get(Int32Ty, 2*i+vi));
 
-      Value *Addr = Builder.CreateConstInBoundsGEP1_32(Ops[0], vi);
+      Value *Addr = Builder.CreateConstInBoundsGEP1_32(Ty, Ops[0], vi);
       SV = llvm::ConstantVector::get(Indices);
       SV = Builder.CreateShuffleVector(Ops[1], Ops[2], SV, "vuzp");
       SV = Builder.CreateStore(SV, Addr);
@@ -5807,7 +5809,7 @@ Value *CodeGenFunction::EmitAArch64BuiltinExpr(unsigned BuiltinID,
         Indices.push_back(ConstantInt::get(Int32Ty, (i + vi*e) >> 1));
         Indices.push_back(ConstantInt::get(Int32Ty, ((i + vi*e) >> 1)+e));
       }
-      Value *Addr = Builder.CreateConstInBoundsGEP1_32(Ops[0], vi);
+      Value *Addr = Builder.CreateConstInBoundsGEP1_32(Ty, Ops[0], vi);
       SV = llvm::ConstantVector::get(Indices);
       SV = Builder.CreateShuffleVector(Ops[1], Ops[2], SV, "vzip");
       SV = Builder.CreateStore(SV, Addr);
@@ -6472,6 +6474,44 @@ Value *CodeGenFunction::EmitR600BuiltinExpr(unsigned BuiltinID,
   case R600::BI__builtin_amdgpu_classf:
     return emitFPIntBuiltin(*this, E, Intrinsic::AMDGPU_class);
    default:
+    return nullptr;
+  }
+}
+
+Value *CodeGenFunction::EmitSystemZBuiltinExpr(unsigned BuiltinID,
+                                               const CallExpr *E) {
+  switch (BuiltinID) {
+  case SystemZ::BI__builtin_tbegin: {
+    Value *TDB = EmitScalarExpr(E->getArg(0));
+    Value *Control = llvm::ConstantInt::get(Int32Ty, 0xff0c);
+    Value *F = CGM.getIntrinsic(Intrinsic::s390_tbegin);
+    return Builder.CreateCall2(F, TDB, Control);
+  }
+  case SystemZ::BI__builtin_tbegin_nofloat: {
+    Value *TDB = EmitScalarExpr(E->getArg(0));
+    Value *Control = llvm::ConstantInt::get(Int32Ty, 0xff0c);
+    Value *F = CGM.getIntrinsic(Intrinsic::s390_tbegin_nofloat);
+    return Builder.CreateCall2(F, TDB, Control);
+  }
+  case SystemZ::BI__builtin_tbeginc: {
+    Value *TDB = llvm::ConstantPointerNull::get(Int8PtrTy);
+    Value *Control = llvm::ConstantInt::get(Int32Ty, 0xff08);
+    Value *F = CGM.getIntrinsic(Intrinsic::s390_tbeginc);
+    return Builder.CreateCall2(F, TDB, Control);
+  }
+  case SystemZ::BI__builtin_tabort: {
+    Value *Data = EmitScalarExpr(E->getArg(0));
+    Value *F = CGM.getIntrinsic(Intrinsic::s390_tabort);
+    return Builder.CreateCall(F, Builder.CreateSExt(Data, Int64Ty, "tabort"));
+  }
+  case SystemZ::BI__builtin_non_tx_store: {
+    Value *Address = EmitScalarExpr(E->getArg(0));
+    Value *Data = EmitScalarExpr(E->getArg(1));
+    Value *F = CGM.getIntrinsic(Intrinsic::s390_ntstg);
+    return Builder.CreateCall2(F, Data, Address);
+  }
+
+  default:
     return nullptr;
   }
 }

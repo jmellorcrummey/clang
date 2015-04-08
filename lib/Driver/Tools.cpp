@@ -750,9 +750,8 @@ static void getARMTargetFeatures(const Driver &D, const llvm::Triple &Triple,
     Features.push_back("-crypto");
   }
 
-  // En/disable crc
-  if (Arg *A = Args.getLastArg(options::OPT_mcrc,
-                               options::OPT_mnocrc)) {
+  // En/disable crc code generation.
+  if (Arg *A = Args.getLastArg(options::OPT_mcrc, options::OPT_mnocrc)) {
     if (A->getOption().matches(options::OPT_mcrc))
       Features.push_back("+crc");
     else
@@ -1418,6 +1417,18 @@ static const char *getSystemZTargetCPU(const ArgList &Args) {
   return "z10";
 }
 
+static void getSystemZTargetFeatures(const ArgList &Args,
+                                     std::vector<const char *> &Features) {
+  // -m(no-)htm overrides use of the transactional-execution facility.
+  if (Arg *A = Args.getLastArg(options::OPT_mhtm,
+                               options::OPT_mno_htm)) {
+    if (A->getOption().matches(options::OPT_mhtm))
+      Features.push_back("+transactional-execution");
+    else
+      Features.push_back("-transactional-execution");
+  }
+}
+
 static const char *getX86TargetCPU(const ArgList &Args,
                                    const llvm::Triple &Triple) {
   if (const Arg *A = Args.getLastArg(options::OPT_march_EQ)) {
@@ -1566,6 +1577,17 @@ static void AddGoldPlugin(const ToolChain &ToolChain, const ArgList &Args,
 static void getX86TargetFeatures(const Driver &D, const llvm::Triple &Triple,
                                  const ArgList &Args,
                                  std::vector<const char *> &Features) {
+  // If -march=native, autodetect the feature list.
+  if (const Arg *A = Args.getLastArg(options::OPT_march_EQ)) {
+    if (StringRef(A->getValue()) == "native") {
+      llvm::StringMap<bool> HostFeatures;
+      if (llvm::sys::getHostCPUFeatures(HostFeatures))
+        for (auto &F : HostFeatures)
+          Features.push_back(Args.MakeArgString((F.second ? "+" : "-") +
+                                                F.first()));
+    }
+  }
+
   if (Triple.getArchName() == "x86_64h") {
     // x86_64h implies quite a few of the more modern subtarget features
     // for Haswell class CPUs, but not all of them. Opt-out of a few.
@@ -1884,6 +1906,9 @@ static void getTargetFeatures(const Driver &D, const llvm::Triple &Triple,
   case llvm::Triple::sparc:
   case llvm::Triple::sparcv9:
     getSparcTargetFeatures(Args, Features);
+    break;
+  case llvm::Triple::systemz:
+    getSystemZTargetFeatures(Args, Features);
     break;
   case llvm::Triple::aarch64:
   case llvm::Triple::aarch64_be:
@@ -2281,18 +2306,10 @@ collectSanitizerRuntimes(const ToolChain &TC, const ArgList &Args,
     StaticRuntimes.push_back("msan");
   if (SanArgs.needsTsanRt())
     StaticRuntimes.push_back("tsan");
-  // WARNING: UBSan should always go last.
   if (SanArgs.needsUbsanRt()) {
-    // Check if UBSan is combined with another sanitizers.
-    if (StaticRuntimes.empty()) {
-      StaticRuntimes.push_back("ubsan_standalone");
-      if (SanArgs.linkCXXRuntimes())
-        StaticRuntimes.push_back("ubsan_standalone_cxx");
-    } else {
-      StaticRuntimes.push_back("ubsan");
-      if (SanArgs.linkCXXRuntimes())
-        StaticRuntimes.push_back("ubsan_cxx");
-    }
+    StaticRuntimes.push_back("ubsan_standalone");
+    if (SanArgs.linkCXXRuntimes())
+      StaticRuntimes.push_back("ubsan_standalone_cxx");
   }
 }
 
@@ -3087,8 +3104,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       Args.hasArg(options::OPT_dA))
     CmdArgs.push_back("-masm-verbose");
 
-  if (!Args.hasFlag(options::OPT_fintegrated_as, options::OPT_fno_integrated_as,
-                    IsIntegratedAssemblerDefault))
+  bool UsingIntegratedAssembler =
+      Args.hasFlag(options::OPT_fintegrated_as, options::OPT_fno_integrated_as,
+                   IsIntegratedAssemblerDefault);
+  if (!UsingIntegratedAssembler)
     CmdArgs.push_back("-no-integrated-as");
 
   if (Args.hasArg(options::OPT_fdebug_pass_structure)) {
@@ -3332,7 +3351,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   if (!Args.hasFlag(options::OPT_funique_section_names,
-                    options::OPT_fno_unique_section_names, true))
+                    options::OPT_fno_unique_section_names,
+                    !UsingIntegratedAssembler))
     CmdArgs.push_back("-fno-unique-section-names");
 
   Args.AddAllArgs(CmdArgs, options::OPT_finstrument_functions);

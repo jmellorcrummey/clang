@@ -680,7 +680,7 @@ void CodeGenFunction::StartFunction(GlobalDecl GD,
     unsigned Idx = CurFnInfo->getReturnInfo().getInAllocaFieldIndex();
     llvm::Function::arg_iterator EI = CurFn->arg_end();
     --EI;
-    llvm::Value *Addr = Builder.CreateStructGEP(EI, Idx);
+    llvm::Value *Addr = Builder.CreateStructGEP(nullptr, EI, Idx);
     ReturnValue = Builder.CreateLoad(Addr, "agg.result");
   } else {
     ReturnValue = CreateIRTemp(RetTy, "retval");
@@ -1229,7 +1229,8 @@ static void emitNonZeroVLAInit(CodeGenFunction &CGF, QualType baseType,
                        /*volatile*/ false);
 
   // Go to the next element.
-  llvm::Value *next = Builder.CreateConstInBoundsGEP1_32(cur, 1, "vla.next");
+  llvm::Value *next = Builder.CreateConstInBoundsGEP1_32(Builder.getInt8Ty(),
+                                                         cur, 1, "vla.next");
 
   // Leave if that's the end of the VLA.
   llvm::Value *done = Builder.CreateICmpEQ(next, end, "vla-init.isdone");

@@ -546,6 +546,10 @@ Sema::CheckBuiltinFunctionCall(FunctionDecl *FDecl, unsigned BuiltinID,
         if (CheckMipsBuiltinFunctionCall(BuiltinID, TheCall))
           return ExprError();
         break;
+      case llvm::Triple::systemz:
+        if (CheckSystemZBuiltinFunctionCall(BuiltinID, TheCall))
+          return ExprError();
+        break;
       case llvm::Triple::x86:
       case llvm::Triple::x86_64:
         if (CheckX86BuiltinFunctionCall(BuiltinID, TheCall))
@@ -920,6 +924,20 @@ bool Sema::CheckPPCBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
            SemaBuiltinConstantArgRange(TheCall, 2, 0, 31);
   }
   return SemaBuiltinConstantArgRange(TheCall, i, l, u);
+}
+
+bool Sema::CheckSystemZBuiltinFunctionCall(unsigned BuiltinID,
+                                           CallExpr *TheCall) {
+  if (BuiltinID == SystemZ::BI__builtin_tabort) {
+    Expr *Arg = TheCall->getArg(0);
+    llvm::APSInt AbortCode(32);
+    if (Arg->isIntegerConstantExpr(AbortCode, Context) &&
+        AbortCode.getSExtValue() >= 0 && AbortCode.getSExtValue() < 256)
+      return Diag(Arg->getLocStart(), diag::err_systemz_invalid_tabort_code)
+             << Arg->getSourceRange();
+  }
+
+  return false;
 }
 
 bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
@@ -7687,6 +7705,31 @@ void Sema::CheckBitFieldInitialization(SourceLocation InitLoc,
   (void) AnalyzeBitFieldAssignment(*this, BitField, Init, InitLoc);
 }
 
+static void diagnoseArrayStarInParamType(Sema &S, QualType PType,
+                                         SourceLocation Loc) {
+  if (!PType->isVariablyModifiedType())
+    return;
+  if (const auto *PointerTy = dyn_cast<PointerType>(PType)) {
+    diagnoseArrayStarInParamType(S, PointerTy->getPointeeType(), Loc);
+    return;
+  }
+  if (const auto *ParenTy = dyn_cast<ParenType>(PType)) {
+    diagnoseArrayStarInParamType(S, ParenTy->getInnerType(), Loc);
+    return;
+  }
+
+  const ArrayType *AT = S.Context.getAsArrayType(PType);
+  if (!AT)
+    return;
+
+  if (AT->getSizeModifier() != ArrayType::Star) {
+    diagnoseArrayStarInParamType(S, AT->getElementType(), Loc);
+    return;
+  }
+
+  S.Diag(Loc, diag::err_array_star_in_function_definition);
+}
+
 /// CheckParmsForFunctionDef - Check that the parameters of the given
 /// function are appropriate for the definition of a function. This
 /// takes care of any checks that cannot be performed on the
@@ -7725,15 +7768,9 @@ bool Sema::CheckParmsForFunctionDef(ParmVarDecl *const *P,
     //   notation in their sequences of declarator specifiers to specify
     //   variable length array types.
     QualType PType = Param->getOriginalType();
-    while (const ArrayType *AT = Context.getAsArrayType(PType)) {
-      if (AT->getSizeModifier() == ArrayType::Star) {
-        // FIXME: This diagnostic should point the '[*]' if source-location
-        // information is added for it.
-        Diag(Param->getLocation(), diag::err_array_star_in_function_definition);
-        break;
-      }
-      PType= AT->getElementType();
-    }
+    // FIXME: This diagnostic should point the '[*]' if source-location
+    // information is added for it.
+    diagnoseArrayStarInParamType(*this, PType, Param->getLocation());
 
     // MSVC destroys objects passed by value in the callee.  Therefore a
     // function definition which takes such a parameter must be able to call the

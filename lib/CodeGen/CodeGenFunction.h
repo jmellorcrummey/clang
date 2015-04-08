@@ -851,7 +851,8 @@ public:
   
   /// getByrefValueFieldNumber - Given a declaration, returns the LLVM field
   /// number that holds the value.
-  unsigned getByRefValueLLVMField(const ValueDecl *VD) const;
+  std::pair<llvm::Type *, unsigned>
+  getByRefValueLLVMField(const ValueDecl *VD) const;
 
   /// BuildBlockByrefAddress - Computes address location of the
   /// variable which is declared as __block.
@@ -1729,7 +1730,8 @@ public:
                              llvm::Value *This);
 
   void EmitNewArrayInitializer(const CXXNewExpr *E, QualType elementType,
-                               llvm::Value *NewPtr, llvm::Value *NumElements,
+                               llvm::Type *ElementTy, llvm::Value *NewPtr,
+                               llvm::Value *NumElements,
                                llvm::Value *AllocSizeWithoutCookie);
 
   void EmitCXXTemporary(const CXXTemporary *Temporary, QualType TempType,
@@ -1895,8 +1897,8 @@ public:
     llvm::Value *getObjectAddress(CodeGenFunction &CGF) const {
       if (!IsByRef) return Address;
 
-      return CGF.Builder.CreateStructGEP(Address,
-                                         CGF.getByRefValueLLVMField(Variable),
+      auto F = CGF.getByRefValueLLVMField(Variable);
+      return CGF.Builder.CreateStructGEP(F.first, Address, F.second,
                                          Variable->getNameAsString());
     }
   };
@@ -2434,6 +2436,7 @@ public:
   llvm::Value *EmitX86BuiltinExpr(unsigned BuiltinID, const CallExpr *E);
   llvm::Value *EmitPPCBuiltinExpr(unsigned BuiltinID, const CallExpr *E);
   llvm::Value *EmitR600BuiltinExpr(unsigned BuiltinID, const CallExpr *E);
+  llvm::Value *EmitSystemZBuiltinExpr(unsigned BuiltinID, const CallExpr *E);
 
   llvm::Value *EmitObjCProtocolExpr(const ObjCProtocolExpr *E);
   llvm::Value *EmitObjCStringLiteral(const ObjCStringLiteral *E);
