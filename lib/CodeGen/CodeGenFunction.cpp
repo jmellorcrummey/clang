@@ -40,7 +40,7 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
       CurFn(nullptr), CapturedStmtInfo(nullptr),
       SanOpts(CGM.getLangOpts().Sanitize), IsSanitizerScope(false),
       CurFuncIsThunk(false), AutoreleaseResult(false), SawAsmBlock(false),
-      BlockInfo(nullptr), BlockPointer(nullptr),
+      IsOutlinedSEHHelper(false), BlockInfo(nullptr), BlockPointer(nullptr),
       LambdaThisCaptureField(nullptr), NormalCleanupDest(nullptr),
       NextCleanupDestIndex(1), FirstBlockInfo(nullptr), EHResumeBlock(nullptr),
       ExceptionSlot(nullptr), EHSelectorSlot(nullptr),
@@ -69,6 +69,9 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
   }
   if (CGM.getCodeGenOpts().NoSignedZeros) {
     FMF.setNoSignedZeros();
+  }
+  if (CGM.getCodeGenOpts().ReciprocalMath) {
+    FMF.setAllowReciprocal();
   }
   Builder.SetFastMathFlags(FMF);
 }
@@ -277,6 +280,20 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
   if (IndirectBranch) {
     EmitBlock(IndirectBranch->getParent());
     Builder.ClearInsertionPoint();
+  }
+
+  // If some of our locals escaped, insert a call to llvm.frameescape in the
+  // entry block.
+  if (!EscapedLocals.empty()) {
+    // Invert the map from local to index into a simple vector. There should be
+    // no holes.
+    SmallVector<llvm::Value *, 4> EscapeArgs;
+    EscapeArgs.resize(EscapedLocals.size());
+    for (auto &Pair : EscapedLocals)
+      EscapeArgs[Pair.second] = Pair.first;
+    llvm::Function *FrameEscapeFn = llvm::Intrinsic::getDeclaration(
+        &CGM.getModule(), llvm::Intrinsic::frameescape);
+    CGBuilderTy(AllocaInsertPt).CreateCall(FrameEscapeFn, EscapeArgs);
   }
 
   // Remove the AllocaInsertPt instruction, which is just a convenience for us.
