@@ -485,6 +485,8 @@ def warn_static_main : Warning<"'main' should not be declared static">,
     InGroup<Main>;
 def err_static_main : Error<"'main' is not allowed to be declared static">;
 def err_inline_main : Error<"'main' is not allowed to be declared inline">;
+def ext_variadic_main : ExtWarn<
+  "'main' is not allowed to be declared variadic">, InGroup<Main>;
 def ext_noreturn_main : ExtWarn<
   "'main' is not allowed to be declared _Noreturn">, InGroup<Main>;
 def note_main_remove_noreturn : Note<"remove '_Noreturn'">;
@@ -4775,6 +4777,17 @@ def warn_self_move : Warning<
   "explicitly moving variable of type %0 to itself">,
   InGroup<SelfMove>, DefaultIgnore;
 
+def warn_redundant_move_on_return : Warning<
+  "redundant move in return statement">,
+  InGroup<RedundantMove>, DefaultIgnore;
+def warn_pessimizing_move_on_return : Warning<
+  "moving a local object in a return statement prevents copy elision">,
+  InGroup<PessimizingMove>, DefaultIgnore;
+def warn_pessimizing_move_on_initialization : Warning<
+  "moving a temporary object prevents copy elision">,
+  InGroup<PessimizingMove>, DefaultIgnore;
+def note_remove_move : Note<"remove std::move call here">;
+
 def warn_string_plus_int : Warning<
   "adding %0 to a string does not append to the string">,
   InGroup<StringPlusInt>;
@@ -5533,6 +5546,8 @@ def err_seh_try_outside_functions : Error<
   "cannot use SEH '__try' in blocks, captured regions, or Obj-C method decls">;
 def err_mixing_cxx_try_seh_try : Error<
   "cannot use C++ 'try' in the same function as SEH '__try'">;
+def err_seh_try_unsupported : Error<
+  "SEH '__try' is not supported on this target">;
 def note_conflicting_try_here : Note<
   "conflicting %0 here">;
 def warn_jump_out_of_seh_finally : Warning<

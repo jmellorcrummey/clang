@@ -37,33 +37,34 @@ MacroDirective *
 Preprocessor::getMacroDirectiveHistory(const IdentifierInfo *II) const {
   assert(II->hadMacroDefinition() && "Identifier has not been not a macro!");
 
-  macro_iterator Pos = Macros.find(II);
+  auto Pos = Macros.find(II);
   assert(Pos != Macros.end() && "Identifier macro info is missing!");
-  return Pos->second;
+  return Pos->second.getLatest();
 }
 
 void Preprocessor::appendMacroDirective(IdentifierInfo *II, MacroDirective *MD){
   assert(MD && "MacroDirective should be non-zero!");
   assert(!MD->getPrevious() && "Already attached to a MacroDirective history.");
 
-  MacroDirective *&StoredMD = Macros[II];
-  MD->setPrevious(StoredMD);
-  StoredMD = MD;
-  // Setup the identifier as having associated macro history.
+  MacroState &StoredMD = Macros[II];
+  auto *OldMD = StoredMD.getLatest();
+  MD->setPrevious(OldMD);
+  StoredMD.setLatest(MD);
+  StoredMD.overrideActiveModuleMacros(*this, II);
+
+  // Set up the identifier as having associated macro history.
   II->setHasMacroDefinition(true);
   if (!MD->isDefined())
     II->setHasMacroDefinition(false);
-  bool isImportedMacro = isa<DefMacroDirective>(MD) &&
-                         cast<DefMacroDirective>(MD)->isImported();
-  if (II->isFromAST() && !isImportedMacro)
+  if (II->isFromAST() && !MD->isImported())
     II->setChangedSinceDeserialization();
 }
 
 void Preprocessor::setLoadedMacroDirective(IdentifierInfo *II,
                                            MacroDirective *MD) {
   assert(II && MD);
-  MacroDirective *&StoredMD = Macros[II];
-  assert(!StoredMD &&
+  MacroState &StoredMD = Macros[II];
+  assert(!StoredMD.getLatest() &&
          "the macro history was modified before initializing it from a pch");
   StoredMD = MD;
   // Setup the identifier as having associated macro history.
@@ -72,12 +73,12 @@ void Preprocessor::setLoadedMacroDirective(IdentifierInfo *II,
     II->setHasMacroDefinition(false);
 }
 
-ModuleMacro *Preprocessor::addModuleMacro(unsigned ModuleID, IdentifierInfo *II,
+ModuleMacro *Preprocessor::addModuleMacro(Module *Mod, IdentifierInfo *II,
                                           MacroInfo *Macro,
                                           ArrayRef<ModuleMacro *> Overrides,
                                           bool &New) {
   llvm::FoldingSetNodeID ID;
-  ModuleMacro::Profile(ID, ModuleID, II);
+  ModuleMacro::Profile(ID, Mod, II);
 
   void *InsertPos;
   if (auto *MM = ModuleMacros.FindNodeOrInsertPos(ID, InsertPos)) {
@@ -85,7 +86,7 @@ ModuleMacro *Preprocessor::addModuleMacro(unsigned ModuleID, IdentifierInfo *II,
     return MM;
   }
 
-  auto *MM = ModuleMacro::create(*this, ModuleID, II, Macro, Overrides);
+  auto *MM = ModuleMacro::create(*this, Mod, II, Macro, Overrides);
   ModuleMacros.InsertNode(MM, InsertPos);
 
   // Each overridden macro is now overridden by one more macro.
@@ -112,13 +113,77 @@ ModuleMacro *Preprocessor::addModuleMacro(unsigned ModuleID, IdentifierInfo *II,
   return MM;
 }
 
-ModuleMacro *Preprocessor::getModuleMacro(unsigned ModuleID,
-                                          IdentifierInfo *II) {
+ModuleMacro *Preprocessor::getModuleMacro(Module *Mod, IdentifierInfo *II) {
   llvm::FoldingSetNodeID ID;
-  ModuleMacro::Profile(ID, ModuleID, II);
+  ModuleMacro::Profile(ID, Mod, II);
 
   void *InsertPos;
   return ModuleMacros.FindNodeOrInsertPos(ID, InsertPos);
+}
+
+void Preprocessor::updateModuleMacroInfo(IdentifierInfo *II,
+                                         ModuleMacroInfo &Info) {
+  assert(Info.ActiveModuleMacrosGeneration != MacroVisibilityGeneration &&
+         "don't need to update this macro name info");
+  Info.ActiveModuleMacrosGeneration = MacroVisibilityGeneration;
+
+  auto Leaf = LeafModuleMacros.find(II);
+  if (Leaf == LeafModuleMacros.end()) {
+    // No imported macros at all: nothing to do.
+    return;
+  }
+
+  Info.ActiveModuleMacros.clear();
+
+  // Every macro that's locally overridden is overridden by a visible macro.
+  llvm::DenseMap<ModuleMacro *, int> NumHiddenOverrides;
+  for (auto *O : Info.OverriddenMacros)
+    NumHiddenOverrides[O] = -1;
+
+  // Collect all macros that are not overridden by a visible macro.
+  llvm::SmallVector<ModuleMacro *, 16> Worklist(Leaf->second.begin(),
+                                                Leaf->second.end());
+  while (!Worklist.empty()) {
+    auto *MM = Worklist.pop_back_val();
+    if (MM->getOwningModule()->NameVisibility >= Module::MacrosVisible) {
+      // We only care about collecting definitions; undefinitions only act
+      // to override other definitions.
+      if (MM->getMacroInfo())
+        Info.ActiveModuleMacros.push_back(MM);
+    } else {
+      for (auto *O : MM->overrides())
+        if ((unsigned)++NumHiddenOverrides[O] == O->getNumOverridingMacros())
+          Worklist.push_back(O);
+    }
+  }
+
+  // Determine whether the macro name is ambiguous.
+  Info.IsAmbiguous = false;
+  MacroInfo *MI = nullptr;
+  bool IsSystemMacro = false;
+  if (auto *DMD = dyn_cast<DefMacroDirective>(Info.MD)) {
+    MI = DMD->getInfo();
+    IsSystemMacro = SourceMgr.isInSystemHeader(DMD->getLocation());
+  }
+  for (auto *Active : Info.ActiveModuleMacros) {
+    auto *NewMI = Active->getMacroInfo();
+
+    // Before marking the macro as ambiguous, check if this is a case where
+    // both macros are in system headers. If so, we trust that the system
+    // did not get it wrong. This also handles cases where Clang's own
+    // headers have a different spelling of certain system macros:
+    //   #define LONG_MAX __LONG_MAX__ (clang's limits.h)
+    //   #define LONG_MAX 0x7fffffffffffffffL (system's limits.h)
+    //
+    // FIXME: Remove the defined-in-system-headers check. clang's limits.h
+    // overrides the system limits.h's macros, so there's no conflict here.
+    IsSystemMacro &= Active->getOwningModule()->IsSystem;
+    if (MI && NewMI != MI && !IsSystemMacro &&
+        !MI->isIdenticalTo(*NewMI, *this, /*Syntactically=*/true)) {
+      Info.IsAmbiguous = true;
+      break;
+    }
+  }
 }
 
 /// RegisterBuiltinMacro - Register the specified identifier in the identifier

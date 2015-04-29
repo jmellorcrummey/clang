@@ -317,6 +317,14 @@ struct ComputeRegionCounts : public ConstStmtVisitor<ComputeRegionCounts> {
     RecordNextStmtCount = true;
   }
 
+  void VisitCXXThrowExpr(const CXXThrowExpr *E) {
+    RecordStmtCount(E);
+    if (E->getSubExpr())
+      Visit(E->getSubExpr());
+    PGO.setCurrentRegionUnreachable();
+    RecordNextStmtCount = true;
+  }
+
   void VisitGotoStmt(const GotoStmt *S) {
     RecordStmtCount(S);
     PGO.setCurrentRegionUnreachable();
@@ -729,7 +737,7 @@ void CodeGenPGO::emitCounterRegionMapping(const Decl *D) {
 }
 
 void
-CodeGenPGO::emitEmptyCounterMapping(const Decl *D, StringRef FuncName,
+CodeGenPGO::emitEmptyCounterMapping(const Decl *D, StringRef Name,
                                     llvm::GlobalValue::LinkageTypes Linkage) {
   if (SkipCoverageMapping)
     return;
@@ -749,7 +757,7 @@ CodeGenPGO::emitEmptyCounterMapping(const Decl *D, StringRef FuncName,
   if (CoverageMapping.empty())
     return;
 
-  setFuncName(FuncName, Linkage);
+  setFuncName(Name, Linkage);
   CGM.getCoverageMapping()->addFunctionMappingRecord(
       FuncNameVar, FuncName, FunctionHash, CoverageMapping);
 }
@@ -785,11 +793,13 @@ CodeGenPGO::applyFunctionAttributes(llvm::IndexedInstrProfReader *PGOReader,
     Fn->addFnAttr(llvm::Attribute::Cold);
 }
 
-void CodeGenPGO::emitCounterIncrement(CGBuilderTy &Builder, unsigned Counter) {
+void CodeGenPGO::emitCounterIncrement(CGBuilderTy &Builder, const Stmt *S) {
   if (!CGM.getCodeGenOpts().ProfileInstrGenerate || !RegionCounterMap)
     return;
   if (!Builder.GetInsertPoint())
     return;
+
+  unsigned Counter = (*RegionCounterMap)[S];
   auto *I8PtrTy = llvm::Type::getInt8PtrTy(CGM.getLLVMContext());
   Builder.CreateCall4(CGM.getIntrinsic(llvm::Intrinsic::instrprof_increment),
                       llvm::ConstantExpr::getBitCast(FuncNameVar, I8PtrTy),
@@ -876,10 +886,9 @@ llvm::MDNode *CodeGenPGO::createBranchWeights(ArrayRef<uint64_t> Weights) {
 }
 
 llvm::MDNode *CodeGenPGO::createLoopWeights(const Stmt *Cond,
-                                            RegionCounter &Cnt) {
+                                            uint64_t LoopCount) {
   if (!haveRegionCounts())
     return nullptr;
-  uint64_t LoopCount = Cnt.getCount();
   Optional<uint64_t> CondCount = getStmtCount(Cond);
   assert(CondCount.hasValue() && "missing expected loop condition count");
   if (*CondCount == 0)
