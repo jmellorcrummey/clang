@@ -310,13 +310,7 @@ public:
   /// write the current selector value into this alloca.
   llvm::AllocaInst *EHSelectorSlot;
 
-  /// Entering and leaving an SEH __try / __finally scope causes stores to this
-  /// slot.
-  llvm::Value *ChildAbnormalTerminationSlot;
-
-  /// The SEH __abnormal_termination() intrinsic lowers down to loads from this
-  /// slot from a parent function.
-  llvm::Value *AbnormalTerminationSlot;
+  llvm::AllocaInst *AbnormalTerminationSlot;
 
   /// The implicit parameter to SEH filter functions of type
   /// 'EXCEPTION_POINTERS*'.
@@ -894,6 +888,12 @@ private:
   SmallVector<BreakContinue, 8> BreakContinueStack;
 
   CodeGenPGO PGO;
+
+  /// Calculate branch weights appropriate for PGO data
+  llvm::MDNode *createProfileWeights(uint64_t TrueCount, uint64_t FalseCount);
+  llvm::MDNode *createProfileWeights(ArrayRef<uint64_t> Weights);
+  llvm::MDNode *createProfileWeightsForLoop(const Stmt *Cond,
+                                            uint64_t LoopCount);
 
 public:
   /// Increment the profiler's counter for the given statement.
@@ -2039,16 +2039,8 @@ public:
   /// Scan the outlined statement for captures from the parent function. For
   /// each capture, mark the capture as escaped and emit a call to
   /// llvm.framerecover. Insert the framerecover result into the LocalDeclMap.
-  void EmitCapturedLocals(CodeGenFunction &ParentCGF, const Stmt *OutlinedStmt);
-
-  /// Recovers the address of a local in a parent function. ParentVar is the
-  /// address of the variable used in the immediate parent function. It can
-  /// either be an alloca or a call to llvm.framerecover if there are nested
-  /// outlined functions. ParentFP is the frame pointer of the outermost parent
-  /// frame.
-  llvm::Value *recoverAddrOfEscapedLocal(CodeGenFunction &ParentCGF,
-                                         llvm::Value *ParentVar,
-                                         llvm::Value *ParentFP);
+  void EmitCapturedLocals(CodeGenFunction &ParentCGF, const Stmt *OutlinedStmt,
+                          llvm::Value *ParentFP);
 
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S,
                            ArrayRef<const Attr *> Attrs = None);

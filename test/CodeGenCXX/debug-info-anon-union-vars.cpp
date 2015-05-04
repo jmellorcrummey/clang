@@ -21,8 +21,6 @@ int test_it() {
   return (c == 1);
 }
 
-// This is not necessary (and actually harmful because it breaks IR assumptions)
-// for local variables.
 void foo() {
   union {
     int i;
@@ -31,16 +29,18 @@ void foo() {
   i = 8;
 }
 
-// CHECK: [[FILE:.*]] = !MDFile(filename: "{{.*}}debug-info-anon-union-vars.cpp",
-// CHECK: !MDGlobalVariable(name: "c",{{.*}} file: [[FILE]], line: 6,{{.*}} isLocal: true, isDefinition: true
-// CHECK: !MDGlobalVariable(name: "d",{{.*}} file: [[FILE]], line: 6,{{.*}} isLocal: true, isDefinition: true
-// CHECK: !MDGlobalVariable(name: "a",{{.*}} file: [[FILE]], line: 6,{{.*}} isLocal: true, isDefinition: true
-// CHECK: !MDGlobalVariable(name: "b",{{.*}} file: [[FILE]], line: 6,{{.*}} isLocal: true, isDefinition: true
-// CHECK: !MDLocalVariable(
+// CHECK: [[FILE:.*]] = !DIFile(filename: "{{.*}}debug-info-anon-union-vars.cpp",
+// CHECK: !DIGlobalVariable(name: "c",{{.*}} file: [[FILE]], line: 6,{{.*}} isLocal: true, isDefinition: true
+// CHECK: !DIGlobalVariable(name: "d",{{.*}} file: [[FILE]], line: 6,{{.*}} isLocal: true, isDefinition: true
+// CHECK: !DIGlobalVariable(name: "a",{{.*}} file: [[FILE]], line: 6,{{.*}} isLocal: true, isDefinition: true
+// CHECK: !DIGlobalVariable(name: "b",{{.*}} file: [[FILE]], line: 6,{{.*}} isLocal: true, isDefinition: true
+// CHECK: !DILocalVariable(tag: DW_TAG_auto_variable, name: "i", {{.*}}, flags: DIFlagArtificial
+// CHECK: !DILocalVariable(tag: DW_TAG_auto_variable, name: "c", {{.*}}, flags: DIFlagArtificial
+// CHECK: !DILocalVariable(
 // CHECK-NOT: name:
 // CHECK: type: ![[UNION:[0-9]+]]
-// CHECK: ![[UNION]] = !MDCompositeType(tag: DW_TAG_union_type,
+// CHECK: ![[UNION]] = !DICompositeType(tag: DW_TAG_union_type,
 // CHECK-NOT: name:
 // CHECK: elements
-// CHECK: !MDDerivedType(tag: DW_TAG_member, name: "i", scope: ![[UNION]],
-// CHECK: !MDDerivedType(tag: DW_TAG_member, name: "c", scope: ![[UNION]],
+// CHECK: !DIDerivedType(tag: DW_TAG_member, name: "i", scope: ![[UNION]],
+// CHECK: !DIDerivedType(tag: DW_TAG_member, name: "c", scope: ![[UNION]],

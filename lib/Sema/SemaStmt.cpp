@@ -25,7 +25,6 @@
 #include "clang/AST/StmtObjC.h"
 #include "clang/AST/TypeLoc.h"
 #include "clang/AST/TypeOrdering.h"
-#include "clang/Basic/TargetInfo.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/Lookup.h"
@@ -3411,6 +3410,7 @@ Sema::ActOnObjCAutoreleasePoolStmt(SourceLocation AtLoc, Stmt *Body) {
   return new (Context) ObjCAutoreleasePoolStmt(AtLoc, Body);
 }
 
+namespace {
 class CatchHandlerType {
   QualType QT;
   unsigned IsPointer : 1;
@@ -3452,6 +3452,7 @@ public:
     return LHS.QT == RHS.QT;
   }
 };
+} // namespace
 
 namespace llvm {
 template <> struct DenseMapInfo<CatchHandlerType> {
@@ -3637,10 +3638,6 @@ StmtResult Sema::ActOnSEHTryBlock(bool IsCXXTry, SourceLocation TryLoc,
     FD->setUsesSEHTry(true);
   else
     Diag(TryLoc, diag::err_seh_try_outside_functions);
-
-  // Reject __try on unsupported targets.
-  if (!Context.getTargetInfo().isSEHTrySupported())
-    Diag(TryLoc, diag::err_seh_try_unsupported);
 
   return SEHTryStmt::Create(Context, IsCXXTry, TryLoc, TryBlock, Handler);
 }

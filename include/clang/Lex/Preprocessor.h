@@ -357,9 +357,9 @@ class Preprocessor : public RefCountedBase<Preprocessor> {
 
   struct MacroExpandsInfo {
     Token Tok;
-    MacroDirective *MD;
+    MacroDefinition MD;
     SourceRange Range;
-    MacroExpandsInfo(Token Tok, MacroDirective *MD, SourceRange Range)
+    MacroExpandsInfo(Token Tok, MacroDefinition MD, SourceRange Range)
       : Tok(Tok), MD(MD), Range(Range) { }
   };
   SmallVector<MacroExpandsInfo, 2> DelayedMacroExpandsCallbacks;
@@ -367,14 +367,14 @@ class Preprocessor : public RefCountedBase<Preprocessor> {
   /// Information about a name that has been used to define a module macro.
   struct ModuleMacroInfo {
     ModuleMacroInfo(MacroDirective *MD)
-        : MD(MD), ActiveModuleMacrosGeneration(0) {}
+        : MD(MD), ActiveModuleMacrosGeneration(0), IsAmbiguous(false) {}
 
     /// The most recent macro directive for this identifier.
     MacroDirective *MD;
     /// The active module macros for this identifier.
     llvm::TinyPtrVector<ModuleMacro*> ActiveModuleMacros;
     /// The generation number at which we last updated ActiveModuleMacros.
-    /// \see Preprocessor::MacroVisibilityGeneration.
+    /// \see Preprocessor::VisibleModules.
     unsigned ActiveModuleMacrosGeneration;
     /// Whether this macro name is ambiguous.
     bool IsAmbiguous;
@@ -386,11 +386,12 @@ class Preprocessor : public RefCountedBase<Preprocessor> {
   class MacroState {
     mutable llvm::PointerUnion<MacroDirective *, ModuleMacroInfo *> State;
 
-    ModuleMacroInfo *getModuleInfo(Preprocessor &PP, IdentifierInfo *II) const {
+    ModuleMacroInfo *getModuleInfo(Preprocessor &PP,
+                                   const IdentifierInfo *II) const {
       // FIXME: Find a spare bit on IdentifierInfo and store a
       //        HasModuleMacros flag.
       if (!II->hasMacroDefinition() || !PP.getLangOpts().Modules ||
-          !PP.MacroVisibilityGeneration)
+          !PP.VisibleModules.getGeneration())
         return nullptr;
 
       auto *Info = State.dyn_cast<ModuleMacroInfo*>();
@@ -400,7 +401,8 @@ class Preprocessor : public RefCountedBase<Preprocessor> {
         State = Info;
       }
 
-      if (PP.MacroVisibilityGeneration != Info->ActiveModuleMacrosGeneration)
+      if (PP.VisibleModules.getGeneration() !=
+          Info->ActiveModuleMacrosGeneration)
         PP.updateModuleMacroInfo(II, *Info);
       return Info;
     }
@@ -434,12 +436,12 @@ class Preprocessor : public RefCountedBase<Preprocessor> {
         State = MD;
     }
 
-    bool isAmbiguous(Preprocessor &PP, IdentifierInfo *II) const {
+    bool isAmbiguous(Preprocessor &PP, const IdentifierInfo *II) const {
       auto *Info = getModuleInfo(PP, II);
       return Info ? Info->IsAmbiguous : false;
     }
-    ArrayRef<ModuleMacro *> getActiveModuleMacros(Preprocessor &PP,
-                                                  IdentifierInfo *II) const {
+    ArrayRef<ModuleMacro *>
+    getActiveModuleMacros(Preprocessor &PP, const IdentifierInfo *II) const {
       if (auto *Info = getModuleInfo(PP, II))
         return Info->ActiveModuleMacros;
       return None;
@@ -464,12 +466,15 @@ class Preprocessor : public RefCountedBase<Preprocessor> {
         return Info->OverriddenMacros;
       return None;
     }
-    void setOverriddenMacros(ArrayRef<ModuleMacro*> Overrides) {
+    void setOverriddenMacros(Preprocessor &PP,
+                             ArrayRef<ModuleMacro *> Overrides) {
       auto *Info = State.dyn_cast<ModuleMacroInfo*>();
       if (!Info) {
-        assert(Overrides.empty() &&
-               "have overrides but never had module macro");
-        return;
+        if (Overrides.empty())
+          return;
+        Info = new (PP.getPreprocessorAllocator())
+            ModuleMacroInfo(State.get<MacroDirective *>());
+        State = Info;
       }
       Info->OverriddenMacros.clear();
       Info->OverriddenMacros.insert(Info->OverriddenMacros.end(),
@@ -496,16 +501,11 @@ class Preprocessor : public RefCountedBase<Preprocessor> {
     Module *M;
     /// The location at which the module was included.
     SourceLocation ImportLoc;
-
-    struct SavedMacroInfo {
-      SavedMacroInfo() : Latest(nullptr) {}
-      MacroDirective *Latest;
-      llvm::TinyPtrVector<ModuleMacro*> Overridden;
-    };
     /// The macros that were visible before we entered the module.
-    llvm::DenseMap<const IdentifierInfo*, SavedMacroInfo> Macros;
+    MacroMap Macros;
+    /// The set of modules that was visible in the surrounding submodule.
+    VisibleModuleSet VisibleModules;
 
-    // FIXME: VisibleModules?
     // FIXME: CounterValue?
     // FIXME: PragmaPushMacroInfo?
   };
@@ -519,9 +519,8 @@ class Preprocessor : public RefCountedBase<Preprocessor> {
   llvm::DenseMap<const IdentifierInfo *, llvm::TinyPtrVector<ModuleMacro*>>
       LeafModuleMacros;
 
-  /// The generation number for module macros. Incremented each time the set
-  /// of modules with visible macros changes.
-  unsigned MacroVisibilityGeneration;
+  /// The current set of visible modules.
+  VisibleModuleSet VisibleModules;
 
   /// \brief Macros that we want to warn because they are not used at the end
   /// of the translation unit.
@@ -661,6 +660,7 @@ public:
   HeaderSearch &getHeaderSearchInfo() const { return HeaderInfo; }
 
   IdentifierTable &getIdentifierTable() { return Identifiers; }
+  const IdentifierTable &getIdentifierTable() const { return Identifiers; }
   SelectorTable &getSelectorTable() { return Selectors; }
   Builtin::Context &getBuiltinInfo() { return BuiltinInfo; }
   llvm::BumpPtrAllocator &getPreprocessorAllocator() { return BP; }
@@ -755,33 +755,73 @@ public:
   }
   /// \}
 
-  /// \brief Given an identifier, return its latest MacroDirective if it is
-  /// \#defined or null if it isn't \#define'd.
-  MacroDirective *getMacroDirective(IdentifierInfo *II) const {
+  bool isMacroDefined(StringRef Id) {
+    return isMacroDefined(&Identifiers.get(Id));
+  }
+  bool isMacroDefined(const IdentifierInfo *II) {
+    return II->hasMacroDefinition() &&
+           (!getLangOpts().Modules || (bool)getMacroDefinition(II));
+  }
+
+  MacroDefinition getMacroDefinition(const IdentifierInfo *II) {
+    if (!II->hasMacroDefinition())
+      return MacroDefinition();
+
+    MacroState &S = Macros[II];
+    auto *MD = S.getLatest();
+    while (MD && isa<VisibilityMacroDirective>(MD))
+      MD = MD->getPrevious();
+    return MacroDefinition(dyn_cast_or_null<DefMacroDirective>(MD),
+                           S.getActiveModuleMacros(*this, II),
+                           S.isAmbiguous(*this, II));
+  }
+
+  MacroDefinition getMacroDefinitionAtLoc(const IdentifierInfo *II,
+                                          SourceLocation Loc) {
+    if (!II->hadMacroDefinition())
+      return MacroDefinition();
+
+    MacroState &S = Macros[II];
+    MacroDirective::DefInfo DI;
+    if (auto *MD = S.getLatest())
+      DI = MD->findDirectiveAtLoc(Loc, getSourceManager());
+    // FIXME: Compute the set of active module macros at the specified location.
+    return MacroDefinition(DI.getDirective(),
+                           S.getActiveModuleMacros(*this, II),
+                           S.isAmbiguous(*this, II));
+  }
+
+  /// \brief Given an identifier, return its latest non-imported MacroDirective
+  /// if it is \#define'd and not \#undef'd, or null if it isn't \#define'd.
+  MacroDirective *getLocalMacroDirective(const IdentifierInfo *II) const {
     if (!II->hasMacroDefinition())
       return nullptr;
 
-    MacroDirective *MD = getMacroDirectiveHistory(II);
-    assert(MD->isDefined() && "Macro is undefined!");
+    auto *MD = getLocalMacroDirectiveHistory(II);
+    if (!MD || MD->getDefinition().isUndefined())
+      return nullptr;
+
     return MD;
   }
 
-  const MacroInfo *getMacroInfo(IdentifierInfo *II) const {
+  const MacroInfo *getMacroInfo(const IdentifierInfo *II) const {
     return const_cast<Preprocessor*>(this)->getMacroInfo(II);
   }
 
-  MacroInfo *getMacroInfo(IdentifierInfo *II) {
-    if (MacroDirective *MD = getMacroDirective(II))
-      return MD->getMacroInfo();
+  MacroInfo *getMacroInfo(const IdentifierInfo *II) {
+    if (!II->hasMacroDefinition())
+      return nullptr;
+    if (auto MD = getMacroDefinition(II))
+      return MD.getMacroInfo();
     return nullptr;
   }
 
-  /// \brief Given an identifier, return the (probably #undef'd) MacroInfo
-  /// representing the most recent macro definition.
+  /// \brief Given an identifier, return the latest non-imported macro
+  /// directive for that identifier.
   ///
-  /// One can iterate over all previous macro definitions from the most recent
-  /// one. This should only be called for identifiers that hadMacroDefinition().
-  MacroDirective *getMacroDirectiveHistory(const IdentifierInfo *II) const;
+  /// One can iterate over all previous macro directives from the most recent
+  /// one.
+  MacroDirective *getLocalMacroDirectiveHistory(const IdentifierInfo *II) const;
 
   /// \brief Add a directive to the macro directive history for this identifier.
   void appendMacroDirective(IdentifierInfo *II, MacroDirective *MD);
@@ -975,6 +1015,12 @@ public:
 
   void LexAfterModuleImport(Token &Result);
 
+  void makeModuleVisible(Module *M, SourceLocation Loc);
+
+  SourceLocation getModuleImportLoc(Module *M) const {
+    return VisibleModules.getImportLoc(M);
+  }
+
   /// \brief Lex a string literal, which may be the concatenation of multiple
   /// string literals and may even come from macro expansion.
   /// \returns true on success, false if a error diagnostic has been generated.
@@ -1092,7 +1138,7 @@ public:
   /// location of an annotation token.
   SourceLocation getLastCachedTokenLocation() const {
     assert(CachedLexPos != 0);
-    return CachedTokens[CachedLexPos-1].getLocation();
+    return CachedTokens[CachedLexPos-1].getLastLoc();
   }
 
   /// \brief Replace the last token with an annotation token.
@@ -1357,6 +1403,7 @@ public:
   void DumpToken(const Token &Tok, bool DumpFlags = false) const;
   void DumpLocation(SourceLocation Loc) const;
   void DumpMacro(const MacroInfo &MI) const;
+  void dumpMacroInfo(const IdentifierInfo *II);
 
   /// \brief Given a location that specifies the start of a
   /// token, return a new location that specifies a character within the token.
@@ -1580,7 +1627,7 @@ private:
 
   /// Update the set of active module macros and ambiguity flag for a module
   /// macro name.
-  void updateModuleMacroInfo(IdentifierInfo *II, ModuleMacroInfo &Info);
+  void updateModuleMacroInfo(const IdentifierInfo *II, ModuleMacroInfo &Info);
 
   /// \brief Allocate a new MacroInfo object.
   MacroInfo *AllocateMacroInfo();
@@ -1590,9 +1637,6 @@ private:
   UndefMacroDirective *AllocateUndefMacroDirective(SourceLocation UndefLoc);
   VisibilityMacroDirective *AllocateVisibilityMacroDirective(SourceLocation Loc,
                                                              bool isPublic);
-
-  MacroDirective *AllocateImportedMacroDirective(ModuleMacro *MM,
-                                                 SourceLocation Loc);
 
   /// \brief Lex and validate a macro name, which occurs after a
   /// \#define or \#undef.
@@ -1644,7 +1688,7 @@ private:
   /// If an identifier token is read that is to be expanded as a macro, handle
   /// it and return the next token as 'Tok'.  If we lexed a token, return true;
   /// otherwise the caller should lex again.
-  bool HandleMacroExpandedIdentifier(Token &Tok, MacroDirective *MD);
+  bool HandleMacroExpandedIdentifier(Token &Tok, const MacroDefinition &MD);
 
   /// \brief Cache macro expanded tokens for TokenLexers.
   //

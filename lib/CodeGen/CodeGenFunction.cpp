@@ -45,13 +45,12 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
       LambdaThisCaptureField(nullptr), NormalCleanupDest(nullptr),
       NextCleanupDestIndex(1), FirstBlockInfo(nullptr), EHResumeBlock(nullptr),
       ExceptionSlot(nullptr), EHSelectorSlot(nullptr),
-      ChildAbnormalTerminationSlot(nullptr), AbnormalTerminationSlot(nullptr),
-      SEHPointersDecl(nullptr), DebugInfo(CGM.getModuleDebugInfo()),
-      DisableDebugInfo(false), DidCallStackSave(false), IndirectBranch(nullptr),
-      PGO(cgm), SwitchInsn(nullptr), SwitchWeights(nullptr),
-      CaseRangeBlock(nullptr), UnreachableBlock(nullptr), NumReturnExprs(0),
-      NumSimpleReturnExprs(0), CXXABIThisDecl(nullptr),
-      CXXABIThisValue(nullptr), CXXThisValue(nullptr),
+      AbnormalTerminationSlot(nullptr), SEHPointersDecl(nullptr),
+      DebugInfo(CGM.getModuleDebugInfo()), DisableDebugInfo(false),
+      DidCallStackSave(false), IndirectBranch(nullptr), PGO(cgm),
+      SwitchInsn(nullptr), SwitchWeights(nullptr), CaseRangeBlock(nullptr),
+      UnreachableBlock(nullptr), NumReturnExprs(0), NumSimpleReturnExprs(0),
+      CXXABIThisDecl(nullptr), CXXABIThisValue(nullptr), CXXThisValue(nullptr),
       CXXDefaultInitExprThis(nullptr), CXXStructorImplicitParamDecl(nullptr),
       CXXStructorImplicitParamValue(nullptr), OutermostConditional(nullptr),
       CurLexicalScope(nullptr), TerminateLandingPad(nullptr),
@@ -1194,8 +1193,8 @@ void CodeGenFunction::EmitBranchOnBoolExpr(const Expr *Cond,
   // Create branch weights based on the number of times we get here and the
   // number of times the condition should be true.
   uint64_t CurrentCount = std::max(getCurrentProfileCount(), TrueCount);
-  llvm::MDNode *Weights = PGO.createBranchWeights(TrueCount,
-                                                  CurrentCount - TrueCount);
+  llvm::MDNode *Weights =
+      createProfileWeights(TrueCount, CurrentCount - TrueCount);
 
   // Emit the code with the fully general case.
   llvm::Value *CondV;
