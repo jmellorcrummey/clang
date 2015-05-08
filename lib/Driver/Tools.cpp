@@ -743,6 +743,13 @@ static void getARMTargetFeatures(const Driver &D, const llvm::Triple &Triple,
   if (const Arg *A = Args.getLastArg(options::OPT_mhwdiv_EQ))
     getARMHWDivFeatures(D, A, Args, Features);
 
+  // -march is handled in getARMCPUForMarch by translating it into a CPU name,
+  // but it needs to return an empty string on invalid arguments. We therefore
+  // check and give an error here if the -march is invalid.
+  if (const Arg *A = Args.getLastArg(options::OPT_march_EQ))
+    if (!Triple.getARMCPUForArch(A->getValue()))
+      D.Diag(diag::err_drv_clang_unsupported) << A->getAsString(Args);
+
   // Setting -msoft-float effectively disables NEON because of the GCC
   // implementation, although the same isn't true of VFP or VFP3.
   if (FloatABI == "soft") {
@@ -895,7 +902,7 @@ static std::string getAArch64TargetCPU(const ArgList &Args) {
   if ((A = Args.getLastArg(options::OPT_mtune_EQ))) {
     CPU = A->getValue();
   } else if ((A = Args.getLastArg(options::OPT_mcpu_EQ))) {
-    StringRef Mcpu = A->getValue();
+    StringRef Mcpu = StringRef(A->getValue()).lower();
     CPU = Mcpu.split("+").first;
   }
 
@@ -1442,6 +1449,14 @@ static void getSystemZTargetFeatures(const ArgList &Args,
     else
       Features.push_back("-transactional-execution");
   }
+  // -m(no-)vx overrides use of the vector facility.
+  if (Arg *A = Args.getLastArg(options::OPT_mvx,
+                               options::OPT_mno_vx)) {
+    if (A->getOption().matches(options::OPT_mvx))
+      Features.push_back("+vector");
+    else
+      Features.push_back("-vector");
+  }
 }
 
 static const char *getX86TargetCPU(const ArgList &Args,
@@ -1780,6 +1795,7 @@ static bool DecodeAArch64Features(const Driver &D, StringRef text,
 // decode CPU and feature.
 static bool DecodeAArch64Mcpu(const Driver &D, StringRef Mcpu, StringRef &CPU,
                               std::vector<const char *> &Features) {
+  Mcpu = Mcpu.lower();
   std::pair<StringRef, StringRef> Split = Mcpu.split("+");
   CPU = Split.first;
   if (CPU == "cyclone" || CPU == "cortex-a53" || CPU == "cortex-a57" || CPU == "cortex-a72") {
@@ -2444,7 +2460,7 @@ static void addDebugCompDirArg(const ArgList &Args, ArgStringList &CmdArgs) {
 }
 
 static const char *SplitDebugName(const ArgList &Args,
-                                  const InputInfoList &Inputs) {
+                                  const InputInfo &Input) {
   Arg *FinalOutput = Args.getLastArg(options::OPT_o);
   if (FinalOutput && Args.hasArg(options::OPT_c)) {
     SmallString<128> T(FinalOutput->getValue());
@@ -2454,7 +2470,7 @@ static const char *SplitDebugName(const ArgList &Args,
     // Use the compilation dir.
     SmallString<128> T(
         Args.getLastArgValue(options::OPT_fdebug_compilation_dir));
-    SmallString<128> F(llvm::sys::path::stem(Inputs[0].getBaseInput()));
+    SmallString<128> F(llvm::sys::path::stem(Input.getBaseInput()));
     llvm::sys::path::replace_extension(F, "dwo");
     T += F;
     return Args.MakeArgString(F);
@@ -2604,6 +2620,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   bool IsWindowsMSVC = getToolChain().getTriple().isWindowsMSVCEnvironment();
 
   assert(Inputs.size() == 1 && "Unable to handle multiple inputs.");
+  const InputInfo &Input = Inputs[0];
 
   // Invoke ourselves in -cc1 mode.
   //
@@ -2718,7 +2735,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // Set the main file name, so that debug info works even with
   // -save-temps.
   CmdArgs.push_back("-main-file-name");
-  CmdArgs.push_back(getBaseInputName(Args, Inputs));
+  CmdArgs.push_back(getBaseInputName(Args, Input));
 
   // Some flags which affect the language (via preprocessor
   // defines).
@@ -2746,7 +2763,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       
       CmdArgs.push_back("-analyzer-checker=deadcode");
       
-      if (types::isCXX(Inputs[0].getType()))
+      if (types::isCXX(Input.getType()))
         CmdArgs.push_back("-analyzer-checker=cplusplus");
 
       // Enable the following experimental checkers for testing.
@@ -3279,7 +3296,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   // Explicitly error on some things we know we don't support and can't just
   // ignore.
-  types::ID InputType = Inputs[0].getType();
+  types::ID InputType = Input.getType();
   if (!Args.hasArg(options::OPT_fallow_unsupported)) {
     Arg *Unsupported;
     if (types::isCXX(InputType) &&
@@ -4698,7 +4715,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   const char *SplitDwarfOut;
   if (SplitDwarf) {
     CmdArgs.push_back("-split-dwarf-file");
-    SplitDwarfOut = SplitDebugName(Args, Inputs);
+    SplitDwarfOut = SplitDebugName(Args, Input);
     CmdArgs.push_back(SplitDwarfOut);
   }
 
@@ -5080,7 +5097,7 @@ void ClangAs::ConstructJob(Compilation &C, const JobAction &JA,
   // Set the main file name, so that debug info works even with
   // -save-temps or preprocessed assembly.
   CmdArgs.push_back("-main-file-name");
-  CmdArgs.push_back(Clang::getBaseInputName(Args, Inputs));
+  CmdArgs.push_back(Clang::getBaseInputName(Args, Input));
 
   // Add the target cpu
   const llvm::Triple &Triple = getToolChain().getTriple();
@@ -5195,7 +5212,7 @@ void ClangAs::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.hasArg(options::OPT_gsplit_dwarf) &&
       getToolChain().getTriple().isOSLinux())
     SplitDebugInfo(getToolChain(), C, *this, JA, Args, Output,
-                   SplitDebugName(Args, Inputs));
+                   SplitDebugName(Args, Input));
 }
 
 void GnuTool::anchor() {}
@@ -5610,7 +5627,13 @@ const char *arm::getARMCPUForMArch(const ArgList &Args,
     }
   }
 
-  return Triple.getARMCPUForArch(MArch);
+  // We need to return an empty string here on invalid MArch values as the
+  // various places that call this function can't cope with a null result.
+  const char *result = Triple.getARMCPUForArch(MArch);
+  if (result)
+    return result;
+  else
+    return "";
 }
 
 /// getARMTargetCPU - Get the (LLVM) name of the ARM cpu we are targeting.
@@ -5619,7 +5642,7 @@ StringRef arm::getARMTargetCPU(const ArgList &Args,
   // FIXME: Warn on inconsistent use of -mcpu and -march.
   // If we have -mcpu=, use that.
   if (Arg *A = Args.getLastArg(options::OPT_mcpu_EQ)) {
-    StringRef MCPU = A->getValue();
+    StringRef MCPU = StringRef(A->getValue()).lower();
     // Handle -mcpu=native.
     if (MCPU == "native")
       return llvm::sys::getHostCPUName();
@@ -5785,14 +5808,13 @@ void darwin::setTripleTypeForMachOArchName(llvm::Triple &T, StringRef Str) {
 }
 
 const char *Clang::getBaseInputName(const ArgList &Args,
-                                    const InputInfoList &Inputs) {
-  return Args.MakeArgString(
-    llvm::sys::path::filename(Inputs[0].getBaseInput()));
+                                    const InputInfo &Input) {
+  return Args.MakeArgString(llvm::sys::path::filename(Input.getBaseInput()));
 }
 
 const char *Clang::getBaseInputStem(const ArgList &Args,
                                     const InputInfoList &Inputs) {
-  const char *Str = getBaseInputName(Args, Inputs);
+  const char *Str = getBaseInputName(Args, Inputs[0]);
 
   if (const char *End = strrchr(Str, '.'))
     return Args.MakeArgString(std::string(Str, End));
@@ -7488,7 +7510,7 @@ void gnutools::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
     // march from being picked in the absence of a cpu flag.
     Arg *A;
     if ((A = Args.getLastArg(options::OPT_mcpu_EQ)) &&
-      StringRef(A->getValue()) == "krait")
+      StringRef(A->getValue()).lower() == "krait")
         CmdArgs.push_back("-march=armv7-a");
     else
       Args.AddLastArg(CmdArgs, options::OPT_mcpu_EQ);
@@ -7614,7 +7636,7 @@ void gnutools::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.hasArg(options::OPT_gsplit_dwarf) &&
       getToolChain().getTriple().isOSLinux())
     SplitDebugInfo(getToolChain(), C, *this, JA, Args, Output,
-                   SplitDebugName(Args, Inputs));
+                   SplitDebugName(Args, Inputs[0]));
 }
 
 static void AddLibgcc(const llvm::Triple &Triple, const Driver &D,
