@@ -736,7 +736,8 @@ private:
     // recovered from an error (e.g. failure to find the matching >).
     if (!CurrentToken->isOneOf(TT_LambdaLSquare, TT_ForEachMacro,
                                TT_FunctionLBrace, TT_ImplicitStringLiteral,
-                               TT_RegexLiteral, TT_TrailingReturnArrow))
+                               TT_InlineASMBrace, TT_RegexLiteral,
+                               TT_TrailingReturnArrow))
       CurrentToken->Type = TT_Unknown;
     CurrentToken->Role.reset();
     CurrentToken->MatchingParen = nullptr;
@@ -914,17 +915,21 @@ private:
       if (rParenEndsCast(Current))
         Current.Type = TT_CastRParen;
     } else if (Current.is(tok::at) && Current.Next) {
-      switch (Current.Next->Tok.getObjCKeywordID()) {
-      case tok::objc_interface:
-      case tok::objc_implementation:
-      case tok::objc_protocol:
-        Current.Type = TT_ObjCDecl;
-        break;
-      case tok::objc_property:
-        Current.Type = TT_ObjCProperty;
-        break;
-      default:
-        break;
+      if (Current.Next->isStringLiteral()) {
+        Current.Type = TT_ObjCStringLiteral;
+      } else {
+        switch (Current.Next->Tok.getObjCKeywordID()) {
+        case tok::objc_interface:
+        case tok::objc_implementation:
+        case tok::objc_protocol:
+          Current.Type = TT_ObjCDecl;
+          break;
+        case tok::objc_property:
+          Current.Type = TT_ObjCProperty;
+          break;
+        default:
+          break;
+        }
       }
     } else if (Current.is(tok::period)) {
       FormatToken *PreviousNoComment = Current.getPreviousNonComment();
@@ -1979,8 +1984,10 @@ bool TokenAnnotator::mustBreakBefore(const AnnotatedLine &Line,
     return Left.BlockKind != BK_BracedInit &&
            Left.isNot(TT_CtorInitializerColon) &&
            (Right.NewlinesBefore > 0 && Right.HasUnescapedNewline);
-  if (Right.Previous->isTrailingComment() ||
-      (Right.isStringLiteral() && Right.Previous->isStringLiteral()))
+  if (Left.isTrailingComment())
+   return true;
+  if (Left.isStringLiteral() &&
+      (Right.isStringLiteral() || Right.is(TT_ObjCStringLiteral)))
     return true;
   if (Right.Previous->IsUnterminatedLiteral)
     return true;
@@ -2006,6 +2013,8 @@ bool TokenAnnotator::mustBreakBefore(const AnnotatedLine &Line,
       Style.Language == FormatStyle::LK_Proto)
     // Don't put enums onto single lines in protocol buffers.
     return true;
+  if (Right.is(TT_InlineASMBrace))
+    return Right.HasUnescapedNewline;
   if (Style.Language == FormatStyle::LK_JavaScript && Right.is(tok::r_brace) &&
       Left.is(tok::l_brace) && !Left.Children.empty())
     // Support AllowShortFunctionsOnASingleLine for JavaScript.

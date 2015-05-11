@@ -108,6 +108,7 @@ bool Darwin::hasBlocksRuntime() const {
   }
 }
 
+// FIXME: Use ARMTargetParser.
 static const char *GetArmArchForMArch(StringRef Value) {
   return llvm::StringSwitch<const char*>(Value)
     .Case("armv6k", "armv6")
@@ -125,8 +126,9 @@ static const char *GetArmArchForMArch(StringRef Value) {
     .Default(nullptr);
 }
 
+// FIXME: Use ARMTargetParser.
 static const char *GetArmArchForMCpu(StringRef Value) {
-  return llvm::StringSwitch<const char *>(Value.lower())
+  return llvm::StringSwitch<const char *>(Value)
     .Cases("arm9e", "arm946e-s", "arm966e-s", "arm968e-s", "arm926ej-s","armv5")
     .Cases("arm10e", "arm10tdmi", "armv5")
     .Cases("arm1020t", "arm1020e", "arm1022e", "arm1026ej-s", "armv5")
@@ -2076,6 +2078,7 @@ bool Generic_GCC::IsIntegratedAssemblerDefault() const {
          getTriple().getArch() == llvm::Triple::ppc64 ||
          getTriple().getArch() == llvm::Triple::ppc64le ||
          getTriple().getArch() == llvm::Triple::sparc ||
+         getTriple().getArch() == llvm::Triple::sparcel ||
          getTriple().getArch() == llvm::Triple::sparcv9 ||
          getTriple().getArch() == llvm::Triple::systemz;
 }

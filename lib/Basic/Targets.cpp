@@ -657,7 +657,7 @@ protected:
       // FIXME We cannot encode the revision information into 32-bits
       Builder.defineMacro("_MSC_BUILD", Twine(1));
 
-      if (Opts.CPlusPlus11 && Opts.isCompatibleWithMSVC(19))
+      if (Opts.CPlusPlus11 && Opts.isCompatibleWithMSVC(LangOptions::MSVC2015))
         Builder.defineMacro("_HAS_CHAR16_T_LANGUAGE_SUPPORT", Twine(1));
     }
 
@@ -5477,6 +5477,15 @@ public:
   }
 };
 
+// SPARCV8el is the 32-bit little-endian mode selected by Triple::sparcel.
+class SparcV8elTargetInfo : public SparcV8TargetInfo {
+ public:
+  SparcV8elTargetInfo(const llvm::Triple &Triple) : SparcV8TargetInfo(Triple) {
+    DescriptionString = "e-m:e-p:32:32-i64:64-f128:64-n32-S64";
+    BigEndian = false;
+  }
+};
+
 // SPARC v9 is the 64-bit mode selected by Triple::sparcv9.
 class SparcV9TargetInfo : public SparcTargetInfo {
 public:
@@ -6996,6 +7005,21 @@ static TargetInfo *AllocateTarget(const llvm::Triple &Triple) {
       return new RTEMSTargetInfo<SparcV8TargetInfo>(Triple);
     default:
       return new SparcV8TargetInfo(Triple);
+    }
+
+  // The 'sparcel' architecture copies all the above cases except for Solaris.
+  case llvm::Triple::sparcel:
+    switch (os) {
+    case llvm::Triple::Linux:
+      return new LinuxTargetInfo<SparcV8elTargetInfo>(Triple);
+    case llvm::Triple::NetBSD:
+      return new NetBSDTargetInfo<SparcV8elTargetInfo>(Triple);
+    case llvm::Triple::OpenBSD:
+      return new OpenBSDTargetInfo<SparcV8elTargetInfo>(Triple);
+    case llvm::Triple::RTEMS:
+      return new RTEMSTargetInfo<SparcV8elTargetInfo>(Triple);
+    default:
+      return new SparcV8elTargetInfo(Triple);
     }
 
   case llvm::Triple::sparcv9:

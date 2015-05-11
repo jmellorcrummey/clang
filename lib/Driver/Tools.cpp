@@ -32,6 +32,7 @@
 #include "llvm/Option/Arg.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Option/Option.h"
+#include "llvm/Support/TargetParser.h"
 #include "llvm/Support/Compression.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
@@ -543,75 +544,77 @@ static void getARMFPUFeatures(const Driver &D, const Arg *A,
                               std::vector<const char *> &Features) {
   StringRef FPU = A->getValue();
 
-  // Set the target features based on the FPU.
-  if (FPU == "fpa" || FPU == "fpe2" || FPU == "fpe3" || FPU == "maverick") {
-    // Disable any default FPU support.
-    Features.push_back("-vfp2");
-    Features.push_back("-vfp3");
-    Features.push_back("-neon");
-  } else if (FPU == "vfp") {
-    Features.push_back("+vfp2");
-    Features.push_back("-neon");
-  } else if (FPU == "vfp3-d16" || FPU == "vfpv3-d16") {
-    Features.push_back("+vfp3");
-    Features.push_back("+d16");
-    Features.push_back("-neon");
-  } else if (FPU == "vfp3" || FPU == "vfpv3") {
-    Features.push_back("+vfp3");
-    Features.push_back("-neon");
-  } else if (FPU == "vfp4-d16" || FPU == "vfpv4-d16") {
-    Features.push_back("+vfp4");
-    Features.push_back("+d16");
-    Features.push_back("-neon");
-  } else if (FPU == "vfp4" || FPU == "vfpv4") {
-    Features.push_back("+vfp4");
-    Features.push_back("-neon");
-  } else if (FPU == "fp4-sp-d16" || FPU == "fpv4-sp-d16") {
-    Features.push_back("+vfp4");
-    Features.push_back("+d16");
-    Features.push_back("+fp-only-sp");
-    Features.push_back("-neon");
-  } else if (FPU == "fp5-sp-d16" || FPU == "fpv5-sp-d16") {
-    Features.push_back("+fp-armv8");
-    Features.push_back("+fp-only-sp");
-    Features.push_back("+d16");
-    Features.push_back("-neon");
-    Features.push_back("-crypto");
-  } else if (FPU == "fp5-dp-d16" || FPU == "fpv5-dp-d16" ||
-             FPU == "fp5-d16" || FPU == "fpv5-d16") {
-    Features.push_back("+fp-armv8");
-    Features.push_back("+d16");
-    Features.push_back("-neon");
-    Features.push_back("-crypto");
-  } else if (FPU == "fp-armv8") {
-    Features.push_back("+fp-armv8");
-    Features.push_back("-neon");
-    Features.push_back("-crypto");
-  } else if (FPU == "neon-fp-armv8") {
-    Features.push_back("+fp-armv8");
-    Features.push_back("+neon");
-    Features.push_back("-crypto");
-  } else if (FPU == "crypto-neon-fp-armv8") {
-    Features.push_back("+fp-armv8");
-    Features.push_back("+neon");
-    Features.push_back("+crypto");
-  } else if (FPU == "neon") {
-    Features.push_back("+neon");
-  } else if (FPU == "neon-vfpv3") {
-    Features.push_back("+vfp3");
-    Features.push_back("+neon");
-  } else if (FPU == "neon-vfpv4") {
-    Features.push_back("+neon");
-    Features.push_back("+vfp4");
-  } else if (FPU == "none") {
+  // FIXME: Why does "none" disable more than "invalid"?
+  if (FPU == "none") {
     Features.push_back("-vfp2");
     Features.push_back("-vfp3");
     Features.push_back("-vfp4");
     Features.push_back("-fp-armv8");
     Features.push_back("-crypto");
     Features.push_back("-neon");
-  } else
+    return;
+  }
+
+  // FIXME: Make sure we differentiate sp-only.
+  if (FPU.find("-sp-") != StringRef::npos) {
+    Features.push_back("+fp-only-sp");
+  }
+
+  // All other FPU types, valid or invalid.
+  switch(llvm::ARMTargetParser::parseFPU(FPU)) {
+  case llvm::ARM::INVALID_FPU:
+  case llvm::ARM::SOFTVFP:
+    Features.push_back("-vfp2");
+    Features.push_back("-vfp3");
+    Features.push_back("-neon");
+    break;
+  case llvm::ARM::VFP:
+  case llvm::ARM::VFPV2:
+    Features.push_back("+vfp2");
+    Features.push_back("-neon");
+    break;
+  case llvm::ARM::VFPV3_D16:
+    Features.push_back("+d16");
+    // fall-through
+  case llvm::ARM::VFPV3:
+    Features.push_back("+vfp3");
+    Features.push_back("-neon");
+    break;
+  case llvm::ARM::VFPV4_D16:
+    Features.push_back("+d16");
+    // fall-through
+  case llvm::ARM::VFPV4:
+    Features.push_back("+vfp4");
+    Features.push_back("-neon");
+    break;
+  case llvm::ARM::FPV5_D16:
+    Features.push_back("+d16");
+    // fall-through
+  case llvm::ARM::FP_ARMV8:
+    Features.push_back("+fp-armv8");
+    Features.push_back("-neon");
+    Features.push_back("-crypto");
+    break;
+  case llvm::ARM::NEON_FP_ARMV8:
+    Features.push_back("+fp-armv8");
+    Features.push_back("+neon");
+    Features.push_back("-crypto");
+    break;
+  case llvm::ARM::CRYPTO_NEON_FP_ARMV8:
+    Features.push_back("+fp-armv8");
+    Features.push_back("+neon");
+    Features.push_back("+crypto");
+    break;
+  case llvm::ARM::NEON:
+    Features.push_back("+neon");
+    break;
+  case llvm::ARM::NEON_VFPV4:
+    Features.push_back("+neon");
+    Features.push_back("+vfp4");
+    break;
+  default:
     D.Diag(diag::err_drv_clang_unsupported) << A->getAsString(Args);
+  }
 }
 
 // Select the float ABI as determined by -msoft-float, -mhard-float, and
@@ -902,7 +905,7 @@ static std::string getAArch64TargetCPU(const ArgList &Args) {
   if ((A = Args.getLastArg(options::OPT_mtune_EQ))) {
     CPU = A->getValue();
   } else if ((A = Args.getLastArg(options::OPT_mcpu_EQ))) {
-    StringRef Mcpu = StringRef(A->getValue()).lower();
+    StringRef Mcpu = A->getValue();
     CPU = Mcpu.split("+").first;
   }
 
@@ -1565,6 +1568,7 @@ static std::string getCPUName(const ArgList &Args, const llvm::Triple &T) {
   }
 
   case llvm::Triple::sparc:
+  case llvm::Triple::sparcel:
   case llvm::Triple::sparcv9:
     if (const Arg *A = Args.getLastArg(options::OPT_mcpu_EQ))
       return A->getValue();
@@ -1795,7 +1799,6 @@ static bool DecodeAArch64Features(const Driver &D, StringRef text,
 // decode CPU and feature.
 static bool DecodeAArch64Mcpu(const Driver &D, StringRef Mcpu, StringRef &CPU,
                               std::vector<const char *> &Features) {
-  Mcpu = Mcpu.lower();
   std::pair<StringRef, StringRef> Split = Mcpu.split("+");
   CPU = Split.first;
   if (CPU == "cyclone" || CPU == "cortex-a53" || CPU == "cortex-a57" || CPU == "cortex-a72") {
@@ -1944,6 +1947,7 @@ static void getTargetFeatures(const Driver &D, const llvm::Triple &Triple,
     getPPCTargetFeatures(Args, Features);
     break;
   case llvm::Triple::sparc:
+  case llvm::Triple::sparcel:
   case llvm::Triple::sparcv9:
     getSparcTargetFeatures(Args, Features);
     break;
@@ -2831,6 +2835,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     case llvm::Triple::mips64:
     case llvm::Triple::mips64el:
     case llvm::Triple::sparc:
+    case llvm::Triple::sparcel:
     case llvm::Triple::x86:
     case llvm::Triple::x86_64:
       IsPICLevelTwo = false; // "-fpie"
@@ -3267,6 +3272,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     break;
 
   case llvm::Triple::sparc:
+  case llvm::Triple::sparcel:
   case llvm::Triple::sparcv9:
     AddSparcTargetArgs(Args, CmdArgs);
     break;
@@ -5442,17 +5448,16 @@ void hexagon::Link::RenderExtraToolArgs(const JobAction &JA,
   // The types are (hopefully) good enough.
 }
 
-void hexagon::Link::ConstructJob(Compilation &C, const JobAction &JA,
-                               const InputInfo &Output,
-                               const InputInfoList &Inputs,
-                               const ArgList &Args,
-                               const char *LinkingOutput) const {
+static void constructHexagonLinkArgs(Compilation &C, const JobAction &JA,
+                              const toolchains::Hexagon_TC& ToolChain,
+                              const InputInfo &Output,
+                              const InputInfoList &Inputs,
+                              const ArgList &Args,
+                              ArgStringList &CmdArgs,
+                              const char *LinkingOutput) {
 
-  const toolchains::Hexagon_TC& ToolChain =
-    static_cast<const toolchains::Hexagon_TC&>(getToolChain());
   const Driver &D = ToolChain.getDriver();
 
-  ArgStringList CmdArgs;
 
   //----------------------------------------------------------------------------
   //
@@ -5598,6 +5603,20 @@ void hexagon::Link::ConstructJob(Compilation &C, const JobAction &JA,
     std::string finiObj = useShared ? "/finiS.o" : "/fini.o";
     CmdArgs.push_back(Args.MakeArgString(StartFilesDir + finiObj));
   }
+}
+
+void hexagon::Link::ConstructJob(Compilation &C, const JobAction &JA,
+                               const InputInfo &Output,
+                               const InputInfoList &Inputs,
+                               const ArgList &Args,
+                               const char *LinkingOutput) const {
+
+  const toolchains::Hexagon_TC& ToolChain =
+    static_cast<const toolchains::Hexagon_TC&>(getToolChain());
+
+  ArgStringList CmdArgs;
+  constructHexagonLinkArgs(C, JA, ToolChain, Output, Inputs, Args, CmdArgs,
+                           LinkingOutput);
 
   std::string Linker = ToolChain.GetProgramPath("hexagon-ld");
   C.addCommand(llvm::make_unique<Command>(JA, *this, Args.MakeArgString(Linker),
@@ -5642,7 +5661,7 @@ StringRef arm::getARMTargetCPU(const ArgList &Args,
   // FIXME: Warn on inconsistent use of -mcpu and -march.
   // If we have -mcpu=, use that.
   if (Arg *A = Args.getLastArg(options::OPT_mcpu_EQ)) {
-    StringRef MCPU = StringRef(A->getValue()).lower();
+    StringRef MCPU = A->getValue();
     // Handle -mcpu=native.
     if (MCPU == "native")
       return llvm::sys::getHostCPUName();
@@ -5658,6 +5677,7 @@ StringRef arm::getARMTargetCPU(const ArgList &Args,
 //
 // FIXME: This is redundant with -mcpu, why does LLVM use this.
 // FIXME: tblgen this, or kill it!
+// FIXME: Use ARMTargetParser.
 const char *arm::getLLVMArchSuffixForARM(StringRef CPU) {
   return llvm::StringSwitch<const char *>(CPU)
     .Case("strongarm", "v4")
@@ -6564,6 +6584,7 @@ void openbsd::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
     break;
 
   case llvm::Triple::sparc:
+  case llvm::Triple::sparcel:
     CmdArgs.push_back("-32");
     NeedsKPIC = true;
     break;
@@ -6942,6 +6963,7 @@ void freebsd::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-matpcs");
     }
   } else if (getToolChain().getArch() == llvm::Triple::sparc ||
+             getToolChain().getArch() == llvm::Triple::sparcel ||
              getToolChain().getArch() == llvm::Triple::sparcv9) {
     if (getToolChain().getArch() == llvm::Triple::sparc)
       CmdArgs.push_back("-Av8plusa");
@@ -7196,6 +7218,7 @@ void netbsd::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   case llvm::Triple::sparc:
+  case llvm::Triple::sparcel:
     CmdArgs.push_back("-32");
     addAssemblerKPIC(Args, CmdArgs);
     break;
@@ -7473,6 +7496,7 @@ void gnutools::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-mlittle-endian");
     break;
   case llvm::Triple::sparc:
+  case llvm::Triple::sparcel:
     CmdArgs.push_back("-32");
     CmdArgs.push_back("-Av8plusa");
     NeedsKPIC = true;
@@ -7510,7 +7534,7 @@ void gnutools::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
     // march from being picked in the absence of a cpu flag.
     Arg *A;
     if ((A = Args.getLastArg(options::OPT_mcpu_EQ)) &&
-      StringRef(A->getValue()).lower() == "krait")
+      StringRef(A->getValue()) == "krait")
         CmdArgs.push_back("-march=armv7-a");
     else
       Args.AddLastArg(CmdArgs, options::OPT_mcpu_EQ);
@@ -7680,7 +7704,8 @@ static std::string getLinuxDynamicLinker(const ArgList &Args,
     else
       return "/system/bin/linker";
   } else if (ToolChain.getArch() == llvm::Triple::x86 ||
-             ToolChain.getArch() == llvm::Triple::sparc)
+             ToolChain.getArch() == llvm::Triple::sparc ||
+             ToolChain.getArch() == llvm::Triple::sparcel)
     return "/lib/ld-linux.so.2";
   else if (ToolChain.getArch() == llvm::Triple::aarch64)
     return "/lib/ld-linux-aarch64.so.1";
@@ -7782,6 +7807,7 @@ static const char *getLDMOption(const llvm::Triple &T, const ArgList &Args) {
   case llvm::Triple::ppc64le:
     return "elf64lppc";
   case llvm::Triple::sparc:
+  case llvm::Triple::sparcel:
     return "elf32_sparc";
   case llvm::Triple::sparcv9:
     return "elf64_sparc";
