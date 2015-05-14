@@ -234,6 +234,10 @@ private:
         MightBeObjCForRangeLoop = false;
       if (MightBeObjCForRangeLoop && CurrentToken->is(Keywords.kw_in))
         CurrentToken->Type = TT_ObjCForIn;
+      // When we discover a 'new', we set CanBeExpression to 'false' in order to
+      // parse the type correctly. Reset that after a comma.
+      if (CurrentToken->is(tok::comma))
+        Contexts.back().CanBeExpression = true;
 
       FormatToken *Tok = CurrentToken;
       if (!consumeToken())
@@ -1593,6 +1597,9 @@ unsigned TokenAnnotator::splitPenalty(const AnnotatedLine &Line,
   if (Right.is(tok::l_square)) {
     if (Style.Language == FormatStyle::LK_Proto)
       return 1;
+    // Slightly prefer formatting local lambda definitions like functions.
+    if (Right.is(TT_LambdaLSquare) && Left.is(tok::equal))
+      return 50;
     if (!Right.isOneOf(TT_ObjCMethodExpr, TT_LambdaLSquare))
       return 500;
   }
@@ -2108,7 +2115,8 @@ bool TokenAnnotator::canBreakBefore(const AnnotatedLine &Line,
     return false;
   if (Left.is(tok::colon) && (Left.isOneOf(TT_DictLiteral, TT_ObjCMethodExpr)))
     return true;
-  if (Right.is(TT_SelectorName))
+  if (Right.is(TT_SelectorName) || (Right.is(tok::identifier) && Right.Next &&
+                                    Right.Next->is(TT_ObjCMethodExpr)))
     return true;
   if (Left.is(tok::r_paren) && Line.Type == LT_ObjCProperty)
     return true;

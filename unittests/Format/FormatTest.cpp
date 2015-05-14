@@ -2804,6 +2804,10 @@ TEST_F(FormatTest, MacrosWithoutTrailingSemicolon) {
                    "\n"
                    "  A() {\n}\n"
                    "}  ;"));
+  EXPECT_EQ("MACRO\n"
+            "/*static*/ int i;",
+            format("MACRO\n"
+                   " /*static*/ int   i;"));
   EXPECT_EQ("SOME_MACRO\n"
             "namespace {\n"
             "void f();\n"
@@ -5482,6 +5486,7 @@ TEST_F(FormatTest, UnderstandsUsesOfStarAndAmp) {
   verifyFormat("Constructor() : a(a), area(a, width * height) {}");
   verifyGoogleFormat("MACRO Constructor(const int& i) : a(a), b(b) {}");
   verifyFormat("void f() { f(a, c * d); }");
+  verifyFormat("void f() { f(new a(), c * d); }");
 
   verifyIndependentOfContext("InvalidRegions[*R] = 0;");
 
@@ -6368,6 +6373,12 @@ TEST_F(FormatTest, FormatsBracedListsInColumnLayout) {
                "                 /**/ /**/};",
                getLLVMStyleWithColumns(39));
 
+  // Trailing comment in the first line.
+  verifyFormat("vector<int> iiiiiiiiiiiiiii = {                      //\n"
+               "    1111111111, 2222222222, 33333333333, 4444444444, //\n"
+               "    111111111,  222222222,  3333333333,  444444444,  //\n"
+               "    11111111,   22222222,   333333333,   44444444};");
+
   // With nested lists, we should either format one item per line or all nested
   // lists one on line.
   // FIXME: For some nested lists, we can do better.
@@ -6857,6 +6868,21 @@ TEST_F(FormatTest, FormatForObjectiveCMethodDecls) {
                "                  outRange8:(NSRange)out_range8\n"
                "                  outRange9:(NSRange)out_range9;");
 
+  // When the function name has to be wrapped.
+  FormatStyle Style = getLLVMStyle();
+  Style.IndentWrappedFunctionNames = false;
+  verifyFormat("- (SomeLooooooooooooooooooooongType *)\n"
+               "veryLooooooooooongName:(NSString)aaaaaaaaaaaaaa\n"
+               "           anotherName:(NSString)bbbbbbbbbbbbbb {\n"
+               "}",
+               Style);
+  Style.IndentWrappedFunctionNames = true;
+  verifyFormat("- (SomeLooooooooooooooooooooongType *)\n"
+               "    veryLooooooooooongName:(NSString)aaaaaaaaaaaaaa\n"
+               "               anotherName:(NSString)bbbbbbbbbbbbbb {\n"
+               "}",
+               Style);
+
   verifyFormat("- (int)sum:(vector<int>)numbers;");
   verifyGoogleFormat("- (void)setDelegate:(id<Protocol>)delegate;");
   // FIXME: In LLVM style, there should be a space in front of a '<' for ObjC
@@ -7278,6 +7304,8 @@ TEST_F(FormatTest, FormatObjCMethodExpr) {
                "    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa];");
   verifyFormat("[aaaaaaaaaaaaaaaaaaaa(aaaaaaaaaaaaaaaaaaaaa)\n"
                "    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa];");
+  verifyFormat("[aaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaa[aaaaaaaaaaaaaaaaaaaaa]\n"
+               "    aaaaaaaaaaaaaaaaaaaaaa];");
 
   verifyFormat(
       "scoped_nsobject<NSTextField> message(\n"
@@ -9961,6 +9989,17 @@ TEST_F(FormatTest, FormatsLambdas) {
                "    : Field([] { // comment\n"
                "        int i;\n"
                "      }) {}");
+  verifyFormat("auto my_lambda = [](const string &some_parameter) {\n"
+               "  return some_parameter.size();\n"
+               "};");
+  verifyFormat("int i = aaaaaa ? 1 //\n"
+               "               : [] {\n"
+               "                   return 2; //\n"
+               "                 }();");
+  verifyFormat("llvm::errs() << \"number of twos is \"\n"
+               "             << std::count_if(v.begin(), v.end(), [](int x) {\n"
+               "                  return x == 2; // force break\n"
+               "                });");
 
   // Lambdas with return types.
   verifyFormat("int c = []() -> int { return 2; }();\n");
