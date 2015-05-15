@@ -1208,7 +1208,7 @@ void PPCTargetInfo::getTargetDefines(const LangOptions &Opts,
   if (HasHTM)
     Builder.defineMacro("__HTM__");
   if (getTriple().getArch() == llvm::Triple::ppc64le ||
-      (defs & ArchDefinePwr8)) {
+      (defs & ArchDefinePwr8) || (CPU == "pwr8")) {
     Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_1");
     Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_2");
     Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4");
@@ -4209,7 +4209,7 @@ public:
                // default.
                // FIXME: Use ARMTargetParser. This would require Triple::arm/thumb
                // to be recogniseable universally.
-               ArchName == "armv8a.1a"  || ArchName == "thumbv8a.1a" || //v8.1a
+               ArchName == "armv8.1a"  || ArchName == "thumbv8.1a" || //v8.1a
                ArchName == "armebv8.1a" || ArchName == "thumbebv8.1a" ||
                ArchName == "armv8a" || ArchName == "armv8" ||           //v8a
                ArchName == "armebv8a" || ArchName == "armebv8" ||
