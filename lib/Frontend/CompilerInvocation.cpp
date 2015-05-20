@@ -1597,6 +1597,12 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
         << Opts.CurrentModule << Opts.ImplementationOfModule;
   }
 
+  // For now, we only support local submodule visibility in C++ (because we
+  // heavily depend on the ODR for merging redefinitions).
+  if (Opts.ModulesLocalVisibility && !Opts.CPlusPlus)
+    Diags.Report(diag::err_drv_argument_not_allowed_with)
+        << "-fmodules-local-submodule-visibility" << "C";
+
   if (Arg *A = Args.getLastArg(OPT_faddress_space_map_mangling_EQ)) {
     switch (llvm::StringSwitch<unsigned>(A->getValue())
       .Case("target", LangOptions::ASMM_Target)
@@ -1637,12 +1643,8 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
     Opts.setMSPointerToMemberRepresentationMethod(InheritanceModel);
   }
 
-  // Check if -fopenmp= is specified.
-  if (const Arg *A = Args.getLastArg(options::OPT_fopenmp_EQ)) {
-    Opts.OpenMP = llvm::StringSwitch<bool>(A->getValue())
-        .Case("libiomp5", true)
-        .Default(false);
-  }
+  // Check if -fopenmp is specified.
+  Opts.OpenMP = Args.hasArg(options::OPT_fopenmp);
 
   // Record whether the __DEPRECATED define was requested.
   Opts.Deprecated = Args.hasFlag(OPT_fdeprecated_macro,

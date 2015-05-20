@@ -44,6 +44,12 @@ bool Decl::isOutOfLine() const {
   return !getLexicalDeclContext()->Equals(getDeclContext());
 }
 
+TranslationUnitDecl::TranslationUnitDecl(ASTContext &ctx)
+    : Decl(TranslationUnit, nullptr, SourceLocation()),
+      DeclContext(TranslationUnit), Ctx(ctx), AnonymousNamespace(nullptr) {
+  Hidden = Ctx.getLangOpts().ModulesLocalVisibility;
+}
+
 //===----------------------------------------------------------------------===//
 // NamedDecl Implementation
 //===----------------------------------------------------------------------===//
@@ -1769,6 +1775,8 @@ VarDecl::VarDecl(Kind DK, ASTContext &C, DeclContext *DC,
                 "VarDeclBitfields too large!");
   static_assert(sizeof(ParmVarDeclBitfields) <= sizeof(unsigned),
                 "ParmVarDeclBitfields too large!");
+  static_assert(sizeof(NonParmVarDeclBitfields) <= sizeof(unsigned),
+                "NonParmVarDeclBitfields too large!");
   AllBits = 0;
   VarDeclBits.SClass = SC;
   // Everything else is implicitly initialized to false.
@@ -3934,10 +3942,17 @@ TypedefDecl *TypedefDecl::Create(ASTContext &C, DeclContext *DC,
 
 void TypedefNameDecl::anchor() { }
 
-TagDecl *TypedefNameDecl::getAnonDeclWithTypedefName() const {
-  if (auto *TT = getTypeSourceInfo()->getType()->getAs<TagType>())
-    if (TT->getDecl()->getTypedefNameForAnonDecl() == this)
+TagDecl *TypedefNameDecl::getAnonDeclWithTypedefName(bool AnyRedecl) const {
+  if (auto *TT = getTypeSourceInfo()->getType()->getAs<TagType>()) {
+    auto *OwningTypedef = TT->getDecl()->getTypedefNameForAnonDecl();
+    auto *ThisTypedef = this;
+    if (AnyRedecl && OwningTypedef) {
+      OwningTypedef = OwningTypedef->getCanonicalDecl();
+      ThisTypedef = ThisTypedef->getCanonicalDecl();
+    }
+    if (OwningTypedef == ThisTypedef)
       return TT->getDecl();
+  }
 
   return nullptr;
 }

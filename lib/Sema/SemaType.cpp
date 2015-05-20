@@ -688,30 +688,28 @@ static void maybeSynthesizeBlockSignature(TypeProcessingState &state,
   state.setCurrentChunkIndex(declarator.getNumTypeObjects());
 }
 
-void diagnoseAndRemoveTypeQualifiers(Sema &S, const DeclSpec &DS,
-                                     unsigned &TypeQuals, QualType TypeSoFar,
-                                     unsigned RemoveTQs, unsigned DiagID) {
+static void diagnoseAndRemoveTypeQualifiers(Sema &S, const DeclSpec &DS,
+                                            unsigned &TypeQuals,
+                                            QualType TypeSoFar,
+                                            unsigned RemoveTQs,
+                                            unsigned DiagID) {
   // If this occurs outside a template instantiation, warn the user about
   // it; they probably didn't mean to specify a redundant qualifier.
   typedef std::pair<DeclSpec::TQ, SourceLocation> QualLoc;
-  QualLoc Quals[] = {
-    QualLoc(DeclSpec::TQ_const, DS.getConstSpecLoc()),
-    QualLoc(DeclSpec::TQ_volatile, DS.getVolatileSpecLoc()),
-    QualLoc(DeclSpec::TQ_atomic, DS.getAtomicSpecLoc())
-  };
-
-  for (unsigned I = 0, N = llvm::array_lengthof(Quals); I != N; ++I) {
-    if (!(RemoveTQs & Quals[I].first))
+  for (QualLoc Qual : {QualLoc(DeclSpec::TQ_const, DS.getConstSpecLoc()),
+                       QualLoc(DeclSpec::TQ_volatile, DS.getVolatileSpecLoc()),
+                       QualLoc(DeclSpec::TQ_atomic, DS.getAtomicSpecLoc())}) {
+    if (!(RemoveTQs & Qual.first))
       continue;
 
     if (S.ActiveTemplateInstantiations.empty()) {
-      if (TypeQuals & Quals[I].first)
-        S.Diag(Quals[I].second, DiagID)
-          << DeclSpec::getSpecifierName(Quals[I].first) << TypeSoFar
-          << FixItHint::CreateRemoval(Quals[I].second);
+      if (TypeQuals & Qual.first)
+        S.Diag(Qual.second, DiagID)
+          << DeclSpec::getSpecifierName(Qual.first) << TypeSoFar
+          << FixItHint::CreateRemoval(Qual.second);
     }
 
-    TypeQuals &= ~Quals[I].first;
+    TypeQuals &= ~Qual.first;
   }
 }
 
@@ -5148,7 +5146,11 @@ bool Sema::hasVisibleDefinition(NamedDecl *D, NamedDecl **Suggested) {
 
   // If this definition was instantiated from a template, map back to the
   // pattern from which it was instantiated.
-  if (auto *RD = dyn_cast<CXXRecordDecl>(D)) {
+  if (isa<TagDecl>(D) && cast<TagDecl>(D)->isBeingDefined()) {
+    // We're in the middle of defining it; this definition should be treated
+    // as visible.
+    return true;
+  } else if (auto *RD = dyn_cast<CXXRecordDecl>(D)) {
     if (auto *Pattern = RD->getTemplateInstantiationPattern())
       RD = Pattern;
     D = RD->getDefinition();
@@ -5231,7 +5233,7 @@ bool Sema::RequireCompleteTypeImpl(SourceLocation Loc, QualType T,
       // repeating the diagnostic.
       // FIXME: Add a Fix-It that imports the corresponding module or includes
       // the header.
-      Module *Owner = SuggestedDef->getOwningModule();
+      Module *Owner = getOwningModule(SuggestedDef);
       Diag(Loc, diag::err_module_private_definition)
         << T << Owner->getFullModuleName();
       Diag(SuggestedDef->getLocation(), diag::note_previous_definition);

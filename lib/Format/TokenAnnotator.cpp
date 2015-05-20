@@ -568,7 +568,8 @@ private:
     case tok::comma:
       if (Contexts.back().InCtorInitializer)
         Tok->Type = TT_CtorInitializerComma;
-      else if (Contexts.back().FirstStartOfName && Contexts.size() == 1) {
+      else if (Contexts.back().FirstStartOfName &&
+               (Contexts.size() == 1 || Line.First->is(tok::kw_for))) {
         Contexts.back().FirstStartOfName->PartOfMultiVariableDeclStmt = true;
         Line.IsMultiVariableDeclStmt = true;
       }
@@ -633,6 +634,7 @@ private:
       return Type;
     switch (CurrentToken->Tok.getIdentifierInfo()->getPPKeywordID()) {
     case tok::pp_include:
+    case tok::pp_include_next:
     case tok::pp_import:
       next();
       parseIncludeDirective();
@@ -823,6 +825,9 @@ private:
             Previous->Type = TT_PointerOrReference;
         }
       }
+    } else if (Current.is(tok::lessless) &&
+               (!Current.Previous || !Current.Previous->is(tok::kw_operator))) {
+      Contexts.back().IsExpression = true;
     } else if (Current.isOneOf(tok::kw_return, tok::kw_throw)) {
       Contexts.back().IsExpression = true;
     } else if (Current.is(TT_TrailingReturnArrow)) {
@@ -918,6 +923,15 @@ private:
     } else if (Current.is(tok::r_paren)) {
       if (rParenEndsCast(Current))
         Current.Type = TT_CastRParen;
+      if (Current.MatchingParen && Current.Next &&
+          !Current.Next->isBinaryOperator() &&
+          !Current.Next->isOneOf(tok::semi, tok::colon))
+        if (FormatToken *BeforeParen = Current.MatchingParen->Previous)
+          if (BeforeParen->is(tok::identifier) &&
+              BeforeParen->TokenText == BeforeParen->TokenText.upper() &&
+              (!BeforeParen->Previous ||
+               BeforeParen->Previous->ClosesTemplateDeclaration))
+            Current.Type = TT_FunctionAnnotationRParen;
     } else if (Current.is(tok::at) && Current.Next) {
       if (Current.Next->isStringLiteral()) {
         Current.Type = TT_ObjCStringLiteral;
@@ -1073,7 +1087,8 @@ private:
         }
 
         for (; Prev != Tok.MatchingParen; Prev = Prev->Previous) {
-          if (!Prev || !Prev->isOneOf(tok::kw_const, tok::identifier)) {
+          if (!Prev ||
+              !Prev->isOneOf(tok::kw_const, tok::identifier, tok::coloncolon)) {
             IsCast = false;
             break;
           }
@@ -1609,7 +1624,7 @@ unsigned TokenAnnotator::splitPenalty(const AnnotatedLine &Line,
     if (Line.First->is(tok::kw_for) && Right.PartOfMultiVariableDeclStmt)
       return 3;
     if (Left.is(TT_StartOfName))
-      return 20;
+      return 110;
     if (InFunctionDecl && Right.NestingLevel == 0)
       return Style.PenaltyReturnTypeOnItsOwnLine;
     return 200;
@@ -1685,7 +1700,8 @@ unsigned TokenAnnotator::splitPenalty(const AnnotatedLine &Line,
     return 50;
 
   if (Right.is(tok::lessless)) {
-    if (Left.is(tok::string_literal)) {
+    if (Left.is(tok::string_literal) &&
+        (!Right.LastOperator || Right.OperatorIndex != 1)) {
       StringRef Content = Left.TokenText;
       if (Content.startswith("\""))
         Content = Content.drop_front(1);
@@ -1811,7 +1827,7 @@ bool TokenAnnotator::spaceRequiredBetween(const AnnotatedLine &Line,
                            tok::kw_new, tok::kw_delete) &&
               (!Left.Previous || Left.Previous->isNot(tok::period))))) ||
            (Style.SpaceBeforeParens == FormatStyle::SBPO_Always &&
-            (Left.is(tok::identifier) || Left.isFunctionLikeKeyword()) &&
+            (Left.is(tok::identifier) || Left.isFunctionLikeKeyword() || Left.is(tok::r_paren)) &&
             Line.Type != LT_PreprocessorDirective);
   }
   if (Left.is(tok::at) && Right.Tok.getObjCKeywordID() != tok::objc_not_keyword)
@@ -1922,8 +1938,13 @@ bool TokenAnnotator::spaceRequiredBefore(const AnnotatedLine &Line,
   }
   if (Left.is(TT_UnaryOperator))
     return Right.is(TT_BinaryOperator);
+
+  // If the next token is a binary operator or a selector name, we have
+  // incorrectly classified the parenthesis as a cast. FIXME: Detect correctly.
   if (Left.is(TT_CastRParen))
-    return Style.SpaceAfterCStyleCast || Right.is(TT_BinaryOperator);
+    return Style.SpaceAfterCStyleCast ||
+           Right.isOneOf(TT_BinaryOperator, TT_SelectorName);
+
   if (Left.is(tok::greater) && Right.is(tok::greater)) {
     return Right.is(TT_TemplateCloser) && Left.is(TT_TemplateCloser) &&
            (Style.Standard != FormatStyle::LS_Cpp11 || Style.SpacesInAngles);
@@ -2117,7 +2138,7 @@ bool TokenAnnotator::canBreakBefore(const AnnotatedLine &Line,
     return true;
   if (Right.is(TT_SelectorName) || (Right.is(tok::identifier) && Right.Next &&
                                     Right.Next->is(TT_ObjCMethodExpr)))
-    return true;
+    return Left.isNot(tok::period); // FIXME: Properly parse ObjC calls.
   if (Left.is(tok::r_paren) && Line.Type == LT_ObjCProperty)
     return true;
   if (Left.ClosesTemplateDeclaration)

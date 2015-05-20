@@ -2198,9 +2198,9 @@ private:
   bool EmitOMPWorksharingLoop(const OMPLoopDirective &S);
   void EmitOMPForOuterLoop(OpenMPScheduleClauseKind ScheduleKind,
                            const OMPLoopDirective &S,
-                           OMPPrivateScope &LoopScope, llvm::Value *LB,
-                           llvm::Value *UB, llvm::Value *ST, llvm::Value *IL,
-                           llvm::Value *Chunk);
+                           OMPPrivateScope &LoopScope, bool Ordered,
+                           llvm::Value *LB, llvm::Value *UB, llvm::Value *ST,
+                           llvm::Value *IL, llvm::Value *Chunk);
 
 public:
 
@@ -2272,7 +2272,7 @@ public:
       bool IsWeak = false, AggValueSlot Slot = AggValueSlot::ignored());
 
   void EmitAtomicUpdate(LValue LVal, llvm::AtomicOrdering AO,
-                        const std::function<RValue(RValue)> &UpdateOp,
+                        const llvm::function_ref<RValue(RValue)> &UpdateOp,
                         bool IsVolatile);
 
   /// EmitToMemory - Change a scalar value from its value

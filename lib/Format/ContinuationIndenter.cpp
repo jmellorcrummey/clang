@@ -208,7 +208,12 @@ bool ContinuationIndenter::mustBreak(const LineState &State) {
     return true;
 
   if (Current.NestingLevel == 0 && !Current.isTrailingComment()) {
+    // Always break after "template <...>" and leading annotations. This is only
+    // for cases where the entire line does not fit on a single line as a
+    // different LineFormatter would be used otherwise.
     if (Previous.ClosesTemplateDeclaration)
+      return true;
+    if (Previous.is(TT_FunctionAnnotationRParen))
       return true;
     if (Previous.is(TT_LeadingJavaAnnotation) && Current.isNot(tok::l_paren) &&
         Current.isNot(TT_LeadingJavaAnnotation))
@@ -487,8 +492,9 @@ unsigned ContinuationIndenter::addTokenOnNewLine(LineState &State,
       !PreviousNonComment->isOneOf(tok::comma, tok::semi) &&
       (PreviousNonComment->isNot(TT_TemplateCloser) ||
        Current.NestingLevel != 0) &&
-      !PreviousNonComment->isOneOf(TT_BinaryOperator, TT_JavaAnnotation,
-                                   TT_LeadingJavaAnnotation) &&
+      !PreviousNonComment->isOneOf(
+          TT_BinaryOperator, TT_FunctionAnnotationRParen, TT_JavaAnnotation,
+          TT_LeadingJavaAnnotation) &&
       Current.isNot(TT_BinaryOperator) && !PreviousNonComment->opensScope())
     State.Stack.back().BreakBeforeParameter = true;
 
@@ -546,10 +552,11 @@ unsigned ContinuationIndenter::getNewLineColumn(const LineState &State) {
   if (Current.is(tok::identifier) && Current.Next &&
       Current.Next->is(TT_DictLiteral))
     return State.Stack.back().Indent;
-  if ((NextNonComment->isStringLiteral() ||
-       NextNonComment->is(TT_ObjCStringLiteral)) &&
-      State.StartOfStringLiteral != 0)
+  if (NextNonComment->isStringLiteral() && State.StartOfStringLiteral != 0)
     return State.StartOfStringLiteral;
+  if (NextNonComment->is(TT_ObjCStringLiteral) &&
+      State.StartOfStringLiteral != 0)
+    return State.StartOfStringLiteral - 1;
   if (NextNonComment->is(tok::lessless) &&
       State.Stack.back().FirstLessLess != 0)
     return State.Stack.back().FirstLessLess;
@@ -567,8 +574,9 @@ unsigned ContinuationIndenter::getNewLineColumn(const LineState &State) {
     return State.Stack.back().VariablePos;
   if ((PreviousNonComment &&
        (PreviousNonComment->ClosesTemplateDeclaration ||
-        PreviousNonComment->isOneOf(TT_AttributeParen, TT_JavaAnnotation,
-                                    TT_LeadingJavaAnnotation))) ||
+        PreviousNonComment->isOneOf(
+            TT_AttributeParen, TT_FunctionAnnotationRParen, TT_JavaAnnotation,
+            TT_LeadingJavaAnnotation))) ||
       (!Style.IndentWrappedFunctionNames &&
        NextNonComment->isOneOf(tok::kw_operator, TT_FunctionDeclarationName)))
     return std::max(State.Stack.back().LastSpace, State.Stack.back().Indent);
@@ -702,13 +710,13 @@ unsigned ContinuationIndenter::moveStateToNextToken(LineState &State,
   moveStatePastScopeCloser(State);
   moveStatePastFakeRParens(State);
 
-  if ((Current.isStringLiteral() || Current.is(TT_ObjCStringLiteral)) &&
-      State.StartOfStringLiteral == 0) {
+  if (Current.isStringLiteral() && State.StartOfStringLiteral == 0)
     State.StartOfStringLiteral = State.Column;
-  } else if (!Current.isOneOf(tok::comment, tok::identifier, tok::hash) &&
-             !Current.isStringLiteral()) {
+  if (Current.is(TT_ObjCStringLiteral) && State.StartOfStringLiteral == 0)
+    State.StartOfStringLiteral = State.Column + 1;
+  else if (!Current.isOneOf(tok::comment, tok::identifier, tok::hash) &&
+             !Current.isStringLiteral())
     State.StartOfStringLiteral = 0;
-  }
 
   State.Column += Current.ColumnWidth;
   State.NextToken = State.NextToken->Next;

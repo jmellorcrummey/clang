@@ -557,6 +557,11 @@ TEST_F(FormatTest, FormatsForLoop) {
                "         I = FD->getDeclsInPrototypeScope().begin(),\n"
                "         E = FD->getDeclsInPrototypeScope().end();\n"
                "     I != E; ++I) {\n}");
+  verifyFormat("for (SmallVectorImpl<TemplateIdAnnotationn *>::iterator\n"
+               "         I = Container.begin(),\n"
+               "         E = Container.end();\n"
+               "     I != E; ++I) {\n}",
+               getLLVMStyleWithColumns(76));
 
   verifyFormat(
       "for (aaaaaaaaaaaaaaaaa aaaaaaaaaaa = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;\n"
@@ -4035,6 +4040,21 @@ TEST_F(FormatTest, BreaksFunctionDeclarationsWithTrailingTokens) {
   verifyGoogleFormat(
       "bool aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa GUARDED_BY(aaaaaaaaaaaa) =\n"
       "    aaaaaaaa::aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;");
+  verifyGoogleFormat(
+      "bool aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa GUARDED_BY(aaaaaaaaaaaa) =\n"
+      "    aaaaaaaaaaaaaaaaaaaaaaaaa;");
+}
+
+TEST_F(FormatTest, FunctionAnnotations) {
+  verifyFormat("DEPRECATED(\"Use NewClass::NewFunction instead.\")\n"
+               "string OldFunction(const string &parameter) {}");
+  verifyFormat("template <typename T>\n"
+               "DEPRECATED(\"Use NewClass::NewFunction instead.\")\n"
+               "string OldFunction(const string &parameter) {}");
+
+  // Not function annotations.
+  verifyFormat("ASSERT(\"aaaaa\") << aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+               "                << bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
 }
 
 TEST_F(FormatTest, BreaksDesireably) {
@@ -4765,7 +4785,11 @@ TEST_F(FormatTest, AlignsStringLiterals) {
   verifyFormat("f(@\"a\"\n"
                "  @\"b\");");
   verifyFormat("NSString s = @\"a\"\n"
-               "             @\"b\";");
+               "             @\"b\"\n"
+               "             @\"c\";");
+  verifyFormat("NSString s = @\"a\"\n"
+               "              \"b\"\n"
+               "              \"c\";");
 }
 
 TEST_F(FormatTest, AlwaysBreakAfterDefinitionReturnType) {
@@ -4891,14 +4915,12 @@ TEST_F(FormatTest, AlignsPipes) {
       "aaaaaaaa << (aaaaaaaaaaaaaaaaaaa << aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
       "                                 << aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)\n"
       "         << aaaaaaaaaaaaaaaaaaaaaaaaaaaaa;");
-  verifyFormat(
-      "llvm::errs() << \"a: \" << aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa(\n"
-      "                             aaaaaaaaaaaaaaaaaaaaaaaaaaaa,\n"
-      "                             aaaaaaaaaaaaaaaaaaaaaaaaaaaa);");
   verifyFormat("llvm::errs() << aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa(\n"
                "                    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,\n"
                "                    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)\n"
                "             << bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb;");
+  verifyFormat("llvm::errs() << \"aaaaaaaaaaaaaaaaaaaaaaa: \"\n"
+               "             << aaaaaaaaaaaaaaaaa(aaaaaaaa, aaaaaaaaaaa);");
   verifyFormat(
       "llvm::errs() << aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa(\n"
       "    aaaaaaaaaaaaaaaaaaaaaaaaaaaa, aaaaaaaaaaaaaaaaaaaaaaaaaaaa);");
@@ -5244,6 +5266,7 @@ TEST_F(FormatTest, UnderstandsTemplateParameters) {
   verifyFormat("struct A<std::enable_if<sizeof(T2) < sizeof(int32)>::type>;");
   verifyFormat("struct A<std::enable_if<sizeof(T2) ? sizeof(int32) : "
                "sizeof(char)>::type>;");
+  verifyFormat("template <class T> struct S<std::is_arithmetic<T>{}> {};");
 
   // Not template parameters.
   verifyFormat("return a < b && c > d;");
@@ -5445,6 +5468,8 @@ TEST_F(FormatTest, UnderstandsUsesOfStarAndAmp) {
   verifyIndependentOfContext("int a = *b;");
   verifyIndependentOfContext("int a = *b * c;");
   verifyIndependentOfContext("int a = b * *c;");
+  verifyIndependentOfContext("int a = b * (10);");
+  verifyIndependentOfContext("S << b * (10);");
   verifyIndependentOfContext("return 10 * b;");
   verifyIndependentOfContext("return *b * *c;");
   verifyIndependentOfContext("return a & ~b;");
@@ -5747,6 +5772,7 @@ TEST_F(FormatTest, FormatsCasts) {
   verifyFormat("my_int a = (const my_int)-1;");
   verifyFormat("my_int a = (const my_int *)-1;");
   verifyFormat("my_int a = (my_int)(my_int)-1;");
+  verifyFormat("my_int a = (ns::my_int)-2;");
 
   // FIXME: single value wrapped with paren will be treated as cast.
   verifyFormat("void f(int i = (kValue)*kMask) {}");
@@ -5968,6 +5994,7 @@ TEST_F(FormatTest, HandlesIncludeDirectives) {
                "#include \"string.h\"\n"
                "#include <a-a>\n"
                "#include < path with space >\n"
+               "#include_next <test.h>"
                "#include \"abc.h\" // this is included for ABC\n"
                "#include \"some long include\" // with a comment\n"
                "#include \"some very long include paaaaaaaaaaaaaaaaaaaaaaath\"",
@@ -6174,6 +6201,14 @@ TEST_F(FormatTest, LayoutCxx11BraceInitializers) {
                "        aaaa,\n"
                "    },\n"
                "};");
+  verifyFormat("class C : public D {\n"
+               "  SomeClass SC{2};\n"
+               "};");
+  verifyFormat("class C : public A {\n"
+               "  class D : public B {\n"
+               "    void f() { int i{2}; }\n"
+               "  };\n"
+               "};");
 
   // In combination with BinPackParameters = false.
   FormatStyle NoBinPacking = getLLVMStyle();
@@ -6313,11 +6348,9 @@ TEST_F(FormatTest, FormatsBracedListsInColumnLayout) {
                "                 1, 22, 333, 4444, 55555, 666666, 7777777,\n"
                "                 1, 22, 333, 4444, 55555, 666666, 7777777,\n"
                "                 1, 22, 333, 4444, 55555, 666666, 7777777};");
-  verifyFormat("vector<int> x = {1, 22, 333, 4444, 55555, 666666, 7777777,\n"
-               "                 // line comment\n"
+  verifyFormat("vector<int> x = {1, 22, 333, 4444, 55555, 666666, 7777777, //\n"
                "                 1, 22, 333, 4444, 55555, 666666, 7777777,\n"
-               "                 1, 22, 333, 4444, 55555,\n"
-               "                 // line comment\n"
+               "                 1, 22, 333, 4444, 55555, //\n"
                "                 1, 22, 333, 4444, 55555, 666666, 7777777,\n"
                "                 1, 22, 333, 4444, 55555, 666666, 7777777};");
   verifyFormat(
@@ -6329,6 +6362,14 @@ TEST_F(FormatTest, FormatsBracedListsInColumnLayout) {
       "                 7777777, 1,  22,  333,  4444,  55555,  666666,\n"
       "                 7777777};");
   verifyFormat("static const uint16_t CallerSavedRegs64Bittttt[] = {\n"
+               "    X86::RAX, X86::RDX, X86::RCX, X86::RSI, X86::RDI,\n"
+               "    X86::R8,  X86::R9,  X86::R10, X86::R11, 0};");
+  verifyFormat("static const uint16_t CallerSavedRegs64Bittttt[] = {\n"
+               "    X86::RAX, X86::RDX, X86::RCX, X86::RSI, X86::RDI,\n"
+               "    // Separating comment.\n"
+               "    X86::R8, X86::R9, X86::R10, X86::R11, 0};");
+  verifyFormat("static const uint16_t CallerSavedRegs64Bittttt[] = {\n"
+               "    // Leading comment\n"
                "    X86::RAX, X86::RDX, X86::RCX, X86::RSI, X86::RDI,\n"
                "    X86::R8,  X86::R9,  X86::R10, X86::R11, 0};");
   verifyFormat("vector<int> x = {1, 1, 1, 1,\n"
@@ -7216,6 +7257,8 @@ TEST_F(FormatTest, FormatObjCMethodExpr) {
   verifyFormat("for (id foo in [self getStuffFor:bla]) {\n"
                "}");
   verifyFormat("[self aaaaa:MACRO(a, b:, c:)];");
+  verifyFormat("[self aaaaa:(1 + 2) bbbbb:3];");
+  verifyFormat("[self aaaaa:(Type)a bbbbb:3];");
 
   verifyFormat("[self stuffWithInt:(4 + 2) float:4.5];");
   verifyFormat("[self stuffWithInt:a ? b : c float:4.5];");
@@ -7306,6 +7349,9 @@ TEST_F(FormatTest, FormatObjCMethodExpr) {
                "    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa];");
   verifyFormat("[aaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaa[aaaaaaaaaaaaaaaaaaaaa]\n"
                "    aaaaaaaaaaaaaaaaaaaaaa];");
+  verifyFormat("[call aaaaaaaa.aaaaaa.aaaaaaaa.aaaaaaaa.aaaaaaaa.aaaaaaaa\n"
+               "        .aaaaaaaa];", // FIXME: Indentation seems off.
+               getLLVMStyleWithColumns(60));
 
   verifyFormat(
       "scoped_nsobject<NSTextField> message(\n"
@@ -8408,6 +8454,7 @@ TEST_F(FormatTest, ConfigurableSpaceBeforeParens) {
   verifyFormat("size_t x = alignof(MyType);", NoSpace);
   verifyFormat("static_assert(sizeof(char) == 1, \"Impossible!\");", NoSpace);
   verifyFormat("int f() throw(Deprecated);", NoSpace);
+  verifyFormat("typedef void (*cb)(int);", NoSpace);
 
   FormatStyle Space = getLLVMStyle();
   Space.SpaceBeforeParens = FormatStyle::SBPO_Always;
@@ -8452,6 +8499,7 @@ TEST_F(FormatTest, ConfigurableSpaceBeforeParens) {
   verifyFormat("size_t x = alignof (MyType);", Space);
   verifyFormat("static_assert (sizeof (char) == 1, \"Impossible!\");", Space);
   verifyFormat("int f () throw (Deprecated);", Space);
+  verifyFormat("typedef void (*cb) (int);", Space);
 }
 
 TEST_F(FormatTest, ConfigurableSpacesInParentheses) {
