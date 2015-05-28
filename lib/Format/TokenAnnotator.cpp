@@ -925,7 +925,7 @@ private:
         Current.Type = TT_CastRParen;
       if (Current.MatchingParen && Current.Next &&
           !Current.Next->isBinaryOperator() &&
-          !Current.Next->isOneOf(tok::semi, tok::colon))
+          !Current.Next->isOneOf(tok::semi, tok::colon, tok::l_brace))
         if (FormatToken *BeforeParen = Current.MatchingParen->Previous)
           if (BeforeParen->is(tok::identifier) &&
               BeforeParen->TokenText == BeforeParen->TokenText.upper() &&
@@ -1873,6 +1873,8 @@ bool TokenAnnotator::spaceRequiredBefore(const AnnotatedLine &Line,
       return false;
     if ((Left.is(tok::l_brace) || Right.is(tok::r_brace)) &&
         Line.First->isOneOf(Keywords.kw_import, tok::kw_export))
+      return false;
+    if (Left.is(tok::ellipsis))
       return false;
     if (Left.is(TT_TemplateCloser) &&
         !Right.isOneOf(tok::equal, tok::l_brace, tok::comma, tok::l_square,

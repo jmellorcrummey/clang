@@ -82,6 +82,10 @@ TEST_F(FormatTestJS, UnderstandsJavaScriptOperators) {
 
   verifyFormat("var b = a.map((x) => x + 1);");
   verifyFormat("return ('aaa') in bbbb;");
+
+  // ES6 spread operator.
+  verifyFormat("someFunction(...a);");
+  verifyFormat("var x = [1, ...a, 2];");
 }
 
 TEST_F(FormatTestJS, UnderstandsAmpAmp) {
@@ -749,6 +753,13 @@ TEST_F(FormatTestJS, OptionalTypes) {
                "  y?(): z;\n"
                "}");
   verifyFormat("x ? 1 : 2;");
+  verifyFormat("constructor({aa}: {\n"
+               "  aa?: string,\n"
+               "  aaaaaaaa?: string,\n"
+               "  aaaaaaaaaaaaaaa?: boolean,\n"
+               "  aaaaaa?: List<string>\n"
+               "}) {\n"
+               "}");
 }
 
 TEST_F(FormatTestJS, IndexSignature) {
