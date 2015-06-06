@@ -836,7 +836,7 @@ void CodeGenModule::setNonAliasAttributes(const Decl *D,
   if (const SectionAttr *SA = D->getAttr<SectionAttr>())
     GO->setSection(SA->getName());
 
-  getTargetCodeGenInfo().SetTargetAttributes(D, GO, *this);
+  getTargetCodeGenInfo().setTargetAttributes(D, GO, *this);
 }
 
 void CodeGenModule::SetInternalFunctionAttributes(const Decl *D,
@@ -921,13 +921,13 @@ void CodeGenModule::SetFunctionAttributes(GlobalDecl GD, llvm::Function *F,
 void CodeGenModule::addUsedGlobal(llvm::GlobalValue *GV) {
   assert(!GV->isDeclaration() &&
          "Only globals with definition can force usage.");
-  LLVMUsed.push_back(GV);
+  LLVMUsed.emplace_back(GV);
 }
 
 void CodeGenModule::addCompilerUsedGlobal(llvm::GlobalValue *GV) {
   assert(!GV->isDeclaration() &&
          "Only globals with definition can force usage.");
-  LLVMCompilerUsed.push_back(GV);
+  LLVMCompilerUsed.emplace_back(GV);
 }
 
 static void emitUsed(CodeGenModule &CGM, StringRef Name,
