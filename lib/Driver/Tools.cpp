@@ -342,10 +342,7 @@ void Clang::AddPreprocessingOptions(Compilation &C,
   Args.AddLastArg(CmdArgs, options::OPT_MV);
 
   // Convert all -MQ <target> args to -MT <quoted target>
-  for (arg_iterator it = Args.filtered_begin(options::OPT_MT,
-                                             options::OPT_MQ),
-         ie = Args.filtered_end(); it != ie; ++it) {
-    const Arg *A = *it;
+  for (const Arg *A : Args.filtered(options::OPT_MT, options::OPT_MQ)) {
     A->claim();
 
     if (A->getOption().matches(options::OPT_MQ)) {
@@ -366,10 +363,7 @@ void Clang::AddPreprocessingOptions(Compilation &C,
   // replacement into a build system already set up to be generating
   // .gch files.
   bool RenderedImplicitInclude = false;
-  for (arg_iterator it = Args.filtered_begin(options::OPT_clang_i_Group),
-         ie = Args.filtered_end(); it != ie; ++it) {
-    const Arg *A = it;
-
+  for (const Arg *A : Args.filtered(options::OPT_clang_i_Group)) {
     if (A->getOption().matches(options::OPT_include)) {
       bool IsFirstImplicitInclude = !RenderedImplicitInclude;
       RenderedImplicitInclude = true;
@@ -1254,11 +1248,9 @@ static std::string getPPCTargetCPU(const ArgList &Args) {
 
 static void getPPCTargetFeatures(const ArgList &Args,
                                  std::vector<const char *> &Features) {
-  for (arg_iterator it = Args.filtered_begin(options::OPT_m_ppc_Features_Group),
-                    ie = Args.filtered_end();
-       it != ie; ++it) {
-    StringRef Name = (*it)->getOption().getName();
-    (*it)->claim();
+  for (const Arg *A : Args.filtered(options::OPT_m_ppc_Features_Group)) {
+    StringRef Name = A->getOption().getName();
+    A->claim();
 
     // Skip over "-m".
     assert(Name.startswith("m") && "Invalid feature name.");
@@ -1619,11 +1611,9 @@ static void getX86TargetFeatures(const Driver &D, const llvm::Triple &Triple,
 
   // Now add any that the user explicitly requested on the command line,
   // which may override the defaults.
-  for (arg_iterator it = Args.filtered_begin(options::OPT_m_x86_Features_Group),
-                    ie = Args.filtered_end();
-       it != ie; ++it) {
-    StringRef Name = (*it)->getOption().getName();
-    (*it)->claim();
+  for (const Arg *A : Args.filtered(options::OPT_m_x86_Features_Group)) {
+    StringRef Name = A->getOption().getName();
+    A->claim();
 
     // Skip over "-m".
     assert(Name.startswith("m") && "Invalid feature name.");
@@ -2086,10 +2076,8 @@ static void CollectArgsForIntegratedAssembler(Compilation &C,
     // When using an integrated assembler, translate -Wa, and -Xassembler
     // options.
     bool CompressDebugSections = false;
-    for (arg_iterator it = Args.filtered_begin(options::OPT_Wa_COMMA,
-                                               options::OPT_Xassembler),
-           ie = Args.filtered_end(); it != ie; ++it) {
-      const Arg *A = *it;
+    for (const Arg *A :
+         Args.filtered(options::OPT_Wa_COMMA, options::OPT_Xassembler)) {
       A->claim();
 
       for (unsigned i = 0, e = A->getNumValues(); i != e; ++i) {
@@ -2584,6 +2572,53 @@ static void appendUserToPath(SmallVectorImpl<char> &Result) {
   Result.append(UID.begin(), UID.end());
 }
 
+VersionTuple visualstudio::getMSVCVersion(const Driver *D,
+                                          const llvm::Triple &Triple,
+                                          const llvm::opt::ArgList &Args,
+                                          bool IsWindowsMSVC) {
+  if (Args.hasFlag(options::OPT_fms_extensions, options::OPT_fno_ms_extensions,
+                   IsWindowsMSVC) ||
+      Args.hasArg(options::OPT_fmsc_version) ||
+      Args.hasArg(options::OPT_fms_compatibility_version)) {
+    const Arg *MSCVersion = Args.getLastArg(options::OPT_fmsc_version);
+    const Arg *MSCompatibilityVersion =
+      Args.getLastArg(options::OPT_fms_compatibility_version);
+
+    if (MSCVersion && MSCompatibilityVersion) {
+      if (D)
+        D->Diag(diag::err_drv_argument_not_allowed_with)
+            << MSCVersion->getAsString(Args)
+            << MSCompatibilityVersion->getAsString(Args);
+      return VersionTuple();
+    }
+
+    if (MSCompatibilityVersion) {
+      VersionTuple MSVT;
+      if (MSVT.tryParse(MSCompatibilityVersion->getValue()) && D)
+        D->Diag(diag::err_drv_invalid_value)
+            << MSCompatibilityVersion->getAsString(Args)
+            << MSCompatibilityVersion->getValue();
+      return MSVT;
+    }
+
+    if (MSCVersion) {
+      unsigned Version = 0;
+      if (StringRef(MSCVersion->getValue()).getAsInteger(10, Version) && D)
+        D->Diag(diag::err_drv_invalid_value) << MSCVersion->getAsString(Args)
+                                             << MSCVersion->getValue();
+      return getMSCompatibilityVersion(Version);
+    }
+
+    unsigned Major, Minor, Micro;
+    Triple.getEnvironmentVersion(Major, Minor, Micro);
+    if (Major || Minor || Micro)
+      return VersionTuple(Major, Minor, Micro);
+
+    return VersionTuple(18);
+  }
+  return VersionTuple();
+}
+
 void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                          const InputInfo &Output,
                          const InputInfoList &Inputs,
@@ -2923,14 +2958,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   if (Args.hasArg(options::OPT_frewrite_map_file) ||
       Args.hasArg(options::OPT_frewrite_map_file_EQ)) {
-    for (arg_iterator
-             MFI = Args.filtered_begin(options::OPT_frewrite_map_file,
-                                       options::OPT_frewrite_map_file_EQ),
-             MFE = Args.filtered_end();
-         MFI != MFE; ++MFI) {
+    for (const Arg *A : Args.filtered(options::OPT_frewrite_map_file,
+                                      options::OPT_frewrite_map_file_EQ)) {
       CmdArgs.push_back("-frewrite-map-file");
-      CmdArgs.push_back((*MFI)->getValue());
-      (*MFI)->claim();
+      CmdArgs.push_back(A->getValue());
+      A->claim();
     }
   }
 
@@ -3558,10 +3590,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   // Warn about ignored options to clang.
-  for (arg_iterator it = Args.filtered_begin(
-       options::OPT_clang_ignored_gcc_optimization_f_Group),
-       ie = Args.filtered_end(); it != ie; ++it) {
-    D.Diag(diag::warn_ignored_gcc_optimization) << (*it)->getAsString(Args);
+  for (const Arg *A :
+       Args.filtered(options::OPT_clang_ignored_gcc_optimization_f_Group)) {
+    D.Diag(diag::warn_ignored_gcc_optimization) << A->getAsString(Args);
   }
 
   claimNoWarnArgs(Args);
@@ -3882,16 +3913,15 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   // --param ssp-buffer-size=
-  for (arg_iterator it = Args.filtered_begin(options::OPT__param),
-       ie = Args.filtered_end(); it != ie; ++it) {
-    StringRef Str((*it)->getValue());
+  for (const Arg *A : Args.filtered(options::OPT__param)) {
+    StringRef Str(A->getValue());
     if (Str.startswith("ssp-buffer-size=")) {
       if (StackProtectorLevel) {
         CmdArgs.push_back("-stack-protector-buffer-size");
         // FIXME: Verify the argument is a valid integer.
         CmdArgs.push_back(Args.MakeArgString(Str.drop_front(16)));
       }
-      (*it)->claim();
+      A->claim();
     }
   }
 
@@ -4181,38 +4211,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-fms-compatibility");
 
   // -fms-compatibility-version=18.00 is default.
-  VersionTuple MSVT;
-  if (Args.hasFlag(options::OPT_fms_extensions, options::OPT_fno_ms_extensions,
-                   IsWindowsMSVC) ||
-      Args.hasArg(options::OPT_fmsc_version) ||
-      Args.hasArg(options::OPT_fms_compatibility_version)) {
-    const Arg *MSCVersion = Args.getLastArg(options::OPT_fmsc_version);
-    const Arg *MSCompatibilityVersion =
-      Args.getLastArg(options::OPT_fms_compatibility_version);
-
-    if (MSCVersion && MSCompatibilityVersion)
-      D.Diag(diag::err_drv_argument_not_allowed_with)
-          << MSCVersion->getAsString(Args)
-          << MSCompatibilityVersion->getAsString(Args);
-
-    if (MSCompatibilityVersion) {
-      if (MSVT.tryParse(MSCompatibilityVersion->getValue()))
-        D.Diag(diag::err_drv_invalid_value)
-            << MSCompatibilityVersion->getAsString(Args)
-            << MSCompatibilityVersion->getValue();
-    } else if (MSCVersion) {
-      unsigned Version = 0;
-      if (StringRef(MSCVersion->getValue()).getAsInteger(10, Version))
-        D.Diag(diag::err_drv_invalid_value) << MSCVersion->getAsString(Args)
-                                            << MSCVersion->getValue();
-      MSVT = getMSCompatibilityVersion(Version);
-    } else {
-      MSVT = VersionTuple(18);
-    }
-
+  VersionTuple MSVT = visualstudio::getMSVCVersion(
+      &D, getToolChain().getTriple(), Args, IsWindowsMSVC);
+  if (!MSVT.empty())
     CmdArgs.push_back(
         Args.MakeArgString("-fms-compatibility-version=" + MSVT.getAsString()));
-  }
 
   bool IsMSVC2015Compatible = MSVT.getMajor() >= 19;
   if (ImplyVCPPCXXVer) {
@@ -4658,17 +4661,16 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // parser.
   Args.AddAllArgValues(CmdArgs, options::OPT_Xclang);
   bool OptDisabled = false;
-  for (arg_iterator it = Args.filtered_begin(options::OPT_mllvm),
-         ie = Args.filtered_end(); it != ie; ++it) {
-    (*it)->claim();
+  for (const Arg *A : Args.filtered(options::OPT_mllvm)) {
+    A->claim();
 
     // We translate this by hand to the -cc1 argument, since nightly test uses
     // it and developers have been trained to spell it with -mllvm.
-    if (StringRef((*it)->getValue(0)) == "-disable-llvm-optzns") {
+    if (StringRef(A->getValue(0)) == "-disable-llvm-optzns") {
       CmdArgs.push_back("-disable-llvm-optzns");
       OptDisabled = true;
     } else
-      (*it)->render(Args, CmdArgs);
+      A->render(Args, CmdArgs);
   }
 
   // With -save-temps, we want to save the unoptimized bitcode output from the
@@ -5199,10 +5201,8 @@ void ClangAs::ConstructJob(Compilation &C, const JobAction &JA,
   // doesn't handle that so rather than warning about unused flags that are
   // actually used, we'll lie by omission instead.
   // FIXME: Stop lying and consume only the appropriate driver flags
-  for (arg_iterator it = Args.filtered_begin(options::OPT_W_Group),
-                    ie = Args.filtered_end();
-       it != ie; ++it)
-    (*it)->claim();
+  for (const Arg *A : Args.filtered(options::OPT_W_Group))
+    A->claim();
 
   CollectArgsForIntegratedAssembler(C, Args, CmdArgs,
                                     getToolChain().getDriver());
@@ -5533,10 +5533,9 @@ static void constructHexagonLinkArgs(Compilation &C, const JobAction &JA,
   std::vector<std::string> oslibs;
   bool hasStandalone= false;
 
-  for (arg_iterator it = Args.filtered_begin(options::OPT_moslib_EQ),
-         ie = Args.filtered_end(); it != ie; ++it) {
-    (*it)->claim();
-    oslibs.emplace_back((*it)->getValue());
+  for (const Arg *A : Args.filtered(options::OPT_moslib_EQ)) {
+    A->claim();
+    oslibs.emplace_back(A->getValue());
     hasStandalone = hasStandalone || (oslibs.back() == "standalone");
   }
   if (oslibs.empty()) {
@@ -6339,10 +6338,8 @@ void darwin::Link::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddAllArgs(CmdArgs, options::OPT_F);
 
   // -iframework should be forwarded as -F.
-  for (auto it = Args.filtered_begin(options::OPT_iframework),
-         ie = Args.filtered_end(); it != ie; ++it)
-    CmdArgs.push_back(Args.MakeArgString(std::string("-F") +
-                                         (*it)->getValue()));
+  for (const Arg *A : Args.filtered(options::OPT_iframework))
+    CmdArgs.push_back(Args.MakeArgString(std::string("-F") + A->getValue()));
 
   if (!Args.hasArg(options::OPT_nostdlib) &&
       !Args.hasArg(options::OPT_nodefaultlibs)) {
