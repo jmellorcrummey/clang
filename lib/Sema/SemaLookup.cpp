@@ -1228,6 +1228,8 @@ Module *Sema::getOwningModule(Decl *Entity) {
 }
 
 void Sema::makeMergedDefinitionVisible(NamedDecl *ND, SourceLocation Loc) {
+  // FIXME: If ND is a template declaration, make the template parameters
+  // visible too. They're not (necessarily) within its DeclContext.
   if (auto *M = PP.getModuleContainingLocation(Loc))
     Context.mergeDefinitionIntoModule(ND, M);
   else
@@ -1280,6 +1282,30 @@ bool Sema::hasVisibleMergedDefinition(NamedDecl *Def) {
     if (isModuleVisible(Merged))
       return true;
   return false;
+}
+
+template<typename ParmDecl>
+static bool hasVisibleDefaultArgument(Sema &S, const ParmDecl *D) {
+  if (!D->hasDefaultArgument())
+    return false;
+
+  while (D) {
+    auto &DefaultArg = D->getDefaultArgStorage();
+    if (!DefaultArg.isInherited() && S.isVisible(D))
+      return true;
+
+    // If there was a previous default argument, maybe its parameter is visible.
+    D = DefaultArg.getInheritedFrom();
+  }
+  return false;
+}
+
+bool Sema::hasVisibleDefaultArgument(const NamedDecl *D) {
+  if (auto *P = dyn_cast<TemplateTypeParmDecl>(D))
+    return ::hasVisibleDefaultArgument(*this, P);
+  if (auto *P = dyn_cast<NonTypeTemplateParmDecl>(D))
+    return ::hasVisibleDefaultArgument(*this, P);
+  return ::hasVisibleDefaultArgument(*this, cast<TemplateTemplateParmDecl>(D));
 }
 
 /// \brief Determine whether a declaration is visible to name lookup.
@@ -3004,6 +3030,9 @@ void Sema::ArgumentDependentLookup(DeclarationName Name, SourceLocation Loc,
         D = cast<UsingShadowDecl>(D)->getTargetDecl();
 
       if (!isa<FunctionDecl>(D) && !isa<FunctionTemplateDecl>(D))
+        continue;
+
+      if (!isVisible(D) && !(D = findAcceptableDecl(*this, D)))
         continue;
 
       Result.insert(D);

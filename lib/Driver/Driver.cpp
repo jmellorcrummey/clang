@@ -277,7 +277,8 @@ DerivedArgList *Driver::TranslateInputArgs(const InputArgList &Args) const {
   // Add a default value of -mlinker-version=, if one was given and the user
   // didn't specify one.
 #if defined(HOST_LINK_VERSION)
-  if (!Args.hasArg(options::OPT_mlinker_version_EQ)) {
+  if (!Args.hasArg(options::OPT_mlinker_version_EQ) &&
+      strlen(HOST_LINK_VERSION) > 0) {
     DAL->AddJoinedArg(0, Opts->getOption(options::OPT_mlinker_version_EQ),
                       HOST_LINK_VERSION);
     DAL->getLastArg(options::OPT_mlinker_version_EQ)->claim();
@@ -814,9 +815,12 @@ bool Driver::HandleImmediateArgs(const Compilation &C) {
   return true;
 }
 
+// Display an action graph human-readably.  Action A is the "sink" node
+// and latest-occuring action. Traversal is in pre-order, visiting the
+// inputs to each action before printing the action itself.
 static unsigned PrintActions1(const Compilation &C, Action *A,
                               std::map<Action*, unsigned> &Ids) {
-  if (Ids.count(A))
+  if (Ids.count(A)) // A was already visited.
     return Ids[A];
 
   std::string str;
@@ -847,6 +851,8 @@ static unsigned PrintActions1(const Compilation &C, Action *A,
   return Id;
 }
 
+// Print the action graphs in a compilation C.
+// For example "clang -c file1.c file2.c" is composed of two subgraphs.
 void Driver::PrintActions(const Compilation &C) const {
   std::map<Action*, unsigned> Ids;
   for (ActionList::const_iterator it = C.getActions().begin(),
@@ -1738,7 +1744,7 @@ const char *Driver::GetNamedOutputPath(Compilation &C,
   // Determine what the derived output name should be.
   const char *NamedOutput;
 
-  if ((JA.getType() == types::TY_Object || JA.getType() == types::TY_LTO_BC) &&
+  if (JA.getType() == types::TY_Object &&
       C.getArgs().hasArg(options::OPT__SLASH_Fo, options::OPT__SLASH_o)) {
     // The /Fo or /o flag decides the object filename.
     StringRef Val = C.getArgs().getLastArg(options::OPT__SLASH_Fo,
@@ -2112,13 +2118,12 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
 }
 
 bool Driver::ShouldUseClangCompiler(const JobAction &JA) const {
-  // Check if user requested no clang, or clang doesn't understand this type (we
-  // only handle single inputs for now).
+  // Say "no" if there is not exactly one input of a type clang understands.
   if (JA.size() != 1 ||
       !types::isAcceptedByClang((*JA.begin())->getType()))
     return false;
 
-  // Otherwise make sure this is an action clang understands.
+  // And say "no" if this is not a kind of action clang understands.
   if (!isa<PreprocessJobAction>(JA) && !isa<PrecompileJobAction>(JA) &&
       !isa<CompileJobAction>(JA) && !isa<BackendJobAction>(JA))
     return false;
