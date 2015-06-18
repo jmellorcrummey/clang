@@ -1007,7 +1007,7 @@ Corrected:
 
   // Check for a tag type hidden by a non-type decl in a few cases where it
   // seems likely a type is wanted instead of the non-type that was found.
-  bool NextIsOp = NextToken.is(tok::amp) || NextToken.is(tok::star);
+  bool NextIsOp = NextToken.isOneOf(tok::amp, tok::star);
   if ((NextToken.is(tok::identifier) ||
        (NextIsOp &&
         FirstDecl->getUnderlyingDecl()->isFunctionOrFunctionTemplate())) &&
@@ -13519,7 +13519,6 @@ Sema::SkipBodyInfo Sema::shouldSkipAnonEnumBody(Scope *S, IdentifierInfo *II,
       !hasVisibleDefinition(cast<NamedDecl>(PrevECD->getDeclContext()),
                             &Hidden)) {
     SkipBodyInfo Skip;
-    Skip.ShouldSkip = true;
     Skip.Previous = Hidden;
     return Skip;
   }
