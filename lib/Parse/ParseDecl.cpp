@@ -687,6 +687,28 @@ void Parser::ParseOpenCLQualifiers(ParsedAttributes &Attrs) {
                AttributeList::AS_Keyword);
 }
 
+void Parser::ParseNullabilityTypeSpecifiers(ParsedAttributes &attrs) {
+  // Treat these like attributes, even though they're type specifiers.
+  while (true) {
+    switch (Tok.getKind()) {
+    case tok::kw___nonnull:
+    case tok::kw___nullable:
+    case tok::kw___null_unspecified: {
+      IdentifierInfo *AttrName = Tok.getIdentifierInfo();
+      SourceLocation AttrNameLoc = ConsumeToken();
+      if (!getLangOpts().ObjC1)
+        Diag(AttrNameLoc, diag::ext_nullability)
+          << AttrName;
+      attrs.addNew(AttrName, AttrNameLoc, nullptr, AttrNameLoc, nullptr, 0, 
+                   AttributeList::AS_Keyword);
+      break;
+    }
+    default:
+      return;
+    }
+  }
+}
+
 static bool VersionNumberSeparator(const char Separator) {
   return (Separator == '.' || Separator == '_');
 }
@@ -2919,6 +2941,19 @@ void Parser::ParseDeclarationSpecifiers(DeclSpec &DS,
       if (DS.isTypeAltiVecVector())
         goto DoneWithDeclSpec;
 
+      if (DSContext == DSC_objc_method_result && isObjCInstancetype()) {
+        ParsedType TypeRep = Actions.ActOnObjCInstanceType(Loc);
+        assert(TypeRep);
+        isInvalid = DS.SetTypeSpecType(DeclSpec::TST_typename, Loc, PrevSpec,
+                                       DiagID, TypeRep, Policy);
+        if (isInvalid)
+          break;
+
+        DS.SetRangeEnd(Loc);
+        ConsumeToken();
+        continue;
+      }
+
       ParsedType TypeRep =
         Actions.getTypeName(*Tok.getIdentifierInfo(),
                             Tok.getLocation(), getCurScope());
@@ -3038,6 +3073,13 @@ void Parser::ParseDeclarationSpecifiers(DeclSpec &DS,
     // OpenCL single token adornments.
     case tok::kw___kernel:
       ParseOpenCLAttributes(DS.getAttributes());
+      continue;
+
+    // Nullability type specifiers.
+    case tok::kw___nonnull:
+    case tok::kw___nullable:
+    case tok::kw___null_unspecified:
+      ParseNullabilityTypeSpecifiers(DS.getAttributes());
       continue;
 
     // storage-class-specifier
@@ -4284,6 +4326,10 @@ bool Parser::isTypeSpecifierQualifier() {
   case tok::kw___pascal:
   case tok::kw___unaligned:
 
+  case tok::kw___nonnull:
+  case tok::kw___nullable:
+  case tok::kw___null_unspecified:
+
   case tok::kw___private:
   case tok::kw___local:
   case tok::kw___global:
@@ -4456,6 +4502,10 @@ bool Parser::isDeclarationSpecifier(bool DisambiguatingWithExpression) {
   case tok::kw___forceinline:
   case tok::kw___pascal:
   case tok::kw___unaligned:
+
+  case tok::kw___nonnull:
+  case tok::kw___nullable:
+  case tok::kw___null_unspecified:
 
   case tok::kw___private:
   case tok::kw___local:
@@ -4686,6 +4736,14 @@ void Parser::ParseTypeQualifierListOpt(DeclSpec &DS, unsigned AttrReqs,
         continue;
       }
       goto DoneWithTypeQuals;
+
+    // Nullability type specifiers.
+    case tok::kw___nonnull:
+    case tok::kw___nullable:
+    case tok::kw___null_unspecified:
+      ParseNullabilityTypeSpecifiers(DS.getAttributes());
+      continue;
+
     case tok::kw___attribute:
       if (AttrReqs & AR_GNUAttributesParsedAndRejected)
         // When GNU attributes are expressly forbidden, diagnose their usage.

@@ -1049,13 +1049,17 @@ static bool HasFeature(const Preprocessor &PP, const IdentifierInfo *II) {
     Feature = Feature.substr(2, Feature.size() - 4);
 
   return llvm::StringSwitch<bool>(Feature)
-      .Case("address_sanitizer", LangOpts.Sanitize.has(SanitizerKind::Address))
+      .Case("address_sanitizer",
+            LangOpts.Sanitize.hasOneOf(SanitizerKind::Address |
+                                       SanitizerKind::KernelAddress))
+      .Case("assume_nonnull", LangOpts.ObjC1 || LangOpts.GNUMode)
       .Case("attribute_analyzer_noreturn", true)
       .Case("attribute_availability", true)
       .Case("attribute_availability_with_message", true)
       .Case("attribute_availability_app_extension", true)
       .Case("attribute_cf_returns_not_retained", true)
       .Case("attribute_cf_returns_retained", true)
+      .Case("attribute_cf_returns_on_parameters", true)
       .Case("attribute_deprecated_with_message", true)
       .Case("attribute_ext_vector_type", true)
       .Case("attribute_ns_returns_not_retained", true)
@@ -1073,6 +1077,7 @@ static bool HasFeature(const Preprocessor &PP, const IdentifierInfo *II) {
       .Case("cxx_exceptions", LangOpts.CXXExceptions)
       .Case("cxx_rtti", LangOpts.RTTI)
       .Case("enumerator_attributes", true)
+      .Case("nullability", LangOpts.ObjC1 || LangOpts.GNUMode)
       .Case("memory_sanitizer", LangOpts.Sanitize.has(SanitizerKind::Memory))
       .Case("thread_sanitizer", LangOpts.Sanitize.has(SanitizerKind::Thread))
       .Case("dataflow_sanitizer", LangOpts.Sanitize.has(SanitizerKind::DataFlow))
@@ -1220,6 +1225,7 @@ static bool HasExtension(const Preprocessor &PP, const IdentifierInfo *II) {
   // Because we inherit the feature list from HasFeature, this string switch
   // must be less restrictive than HasFeature's.
   return llvm::StringSwitch<bool>(Extension)
+           .Case("nullability", true)
            // C11 features supported by other languages as extensions.
            .Case("c_alignas", true)
            .Case("c_alignof", true)

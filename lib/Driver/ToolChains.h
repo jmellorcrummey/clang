@@ -335,15 +335,6 @@ public:
   mutable VersionTuple TargetVersion;
 
 private:
-  /// The default macosx-version-min of this tool chain; empty until
-  /// initialized.
-  std::string MacosxVersionMin;
-
-  /// The default ios-version-min of this tool chain; empty until
-  /// initialized.
-  std::string iOSVersionMin;
-
-private:
   void AddDeploymentTarget(llvm::opt::DerivedArgList &Args) const;
 
 public:
@@ -472,6 +463,8 @@ public:
   void CheckObjCARC() const override;
 
   bool UseSjLjExceptions() const override;
+
+  SanitizerMask getSupportedSanitizers() const override;
 };
 
 /// DarwinClang - The Darwin toolchain used by Clang.
@@ -614,6 +607,7 @@ public:
 
   bool UseSjLjExceptions() const override;
   bool isPIEDefault() const override;
+  SanitizerMask getSupportedSanitizers() const override;
 protected:
   Tool *buildAssembler() const override;
   Tool *buildLinker() const override;
@@ -677,6 +671,7 @@ public:
   AddClangCXXStdlibIncludeArgs(const llvm::opt::ArgList &DriverArgs,
                                llvm::opt::ArgStringList &CC1Args) const override;
   bool isPIEDefault() const override;
+  SanitizerMask getSupportedSanitizers() const override;
 
   std::string Linker;
   std::vector<std::string> ExtraOpts;
@@ -807,6 +802,7 @@ public:
 
   std::string ComputeEffectiveClangTriple(const llvm::opt::ArgList &Args,
                                           types::ID InputType) const override;
+  SanitizerMask getSupportedSanitizers() const override;
 
 protected:
   void AddSystemIncludeWithSubfolder(const llvm::opt::ArgList &DriverArgs,
@@ -868,6 +864,27 @@ public:
                        llvm::opt::ArgStringList &CC1Args) const override;
   void AddCXXStdlibLibArgs(const llvm::opt::ArgList &Args,
                            llvm::opt::ArgStringList &CmdArgs) const override;
+};
+
+/// SHAVEToolChain - A tool chain using the compiler installed by the the
+// Movidius SDK into MV_TOOLS_DIR (which we assume will be copied to llvm's
+// installation dir) to perform all subcommands.
+class LLVM_LIBRARY_VISIBILITY SHAVEToolChain : public Generic_GCC {
+public:
+  SHAVEToolChain(const Driver &D, const llvm::Triple &Triple,
+            const llvm::opt::ArgList &Args);
+  ~SHAVEToolChain() override;
+
+  virtual Tool *SelectTool(const JobAction &JA) const override;
+
+protected:
+  Tool *getTool(Action::ActionClass AC) const override;
+  Tool *buildAssembler() const override;
+  Tool *buildLinker() const override;
+
+private:
+  mutable std::unique_ptr<Tool> Compiler;
+  mutable std::unique_ptr<Tool> Assembler;
 };
 
 } // end namespace toolchains
