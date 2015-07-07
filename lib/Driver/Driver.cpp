@@ -500,7 +500,7 @@ void Driver::generateCompilationDiagnostics(Compilation &C,
 
   // Generate preprocessed output.
   SmallVector<std::pair<int, const Command *>, 4> FailingCommands;
-  C.ExecuteJob(C.getJobs(), FailingCommands);
+  C.ExecuteJobs(C.getJobs(), FailingCommands);
 
   // If any of the preprocessing commands failed, clean up and exit.
   if (!FailingCommands.empty()) {
@@ -560,26 +560,16 @@ void Driver::generateCompilationDiagnostics(Compilation &C,
       << "\n\n********************";
 }
 
-void Driver::setUpResponseFiles(Compilation &C, Job &J) {
-  if (JobList *Jobs = dyn_cast<JobList>(&J)) {
-    for (auto &Job : *Jobs)
-      setUpResponseFiles(C, Job);
-    return;
-  }
-
-  Command *CurCommand = dyn_cast<Command>(&J);
-  if (!CurCommand)
-    return;
-
+void Driver::setUpResponseFiles(Compilation &C, Command &Cmd) {
   // Since argumentsFitWithinSystemLimits() may underestimate system's capacity
   // if the tool does not support response files, there is a chance/ that things
   // will just work without a response file, so we silently just skip it.
-  if (CurCommand->getCreator().getResponseFilesSupport() == Tool::RF_None ||
-      llvm::sys::argumentsFitWithinSystemLimits(CurCommand->getArguments()))
+  if (Cmd.getCreator().getResponseFilesSupport() == Tool::RF_None ||
+      llvm::sys::argumentsFitWithinSystemLimits(Cmd.getArguments()))
     return;
 
   std::string TmpName = GetTemporaryPath("response", "txt");
-  CurCommand->setResponseFile(
+  Cmd.setResponseFile(
       C.addTempFile(C.getArgs().MakeArgString(TmpName.c_str())));
 }
 
@@ -597,9 +587,10 @@ int Driver::ExecuteCompilation(
     return 1;
 
   // Set up response file names for each command, if necessary
-  setUpResponseFiles(C, C.getJobs());
+  for (auto &Job : C.getJobs())
+    setUpResponseFiles(C, Job);
 
-  C.ExecuteJob(C.getJobs(), FailingCommands);
+  C.ExecuteJobs(C.getJobs(), FailingCommands);
 
   // Remove temp files.
   C.CleanupFileList(C.getTempFiles());
@@ -1941,19 +1932,13 @@ static llvm::Triple computeTargetTriple(StringRef DefaultTargetTriple,
   if (Arg *A = Args.getLastArg(options::OPT_mlittle_endian,
                                options::OPT_mbig_endian)) {
     if (A->getOption().matches(options::OPT_mlittle_endian)) {
-      if (Target.getArch() == llvm::Triple::mips)
-        Target.setArch(llvm::Triple::mipsel);
-      else if (Target.getArch() == llvm::Triple::mips64)
-        Target.setArch(llvm::Triple::mips64el);
-      else if (Target.getArch() == llvm::Triple::aarch64_be)
-        Target.setArch(llvm::Triple::aarch64);
+      llvm::Triple LE = Target.getLittleEndianArchVariant();
+      if (LE.getArch() != llvm::Triple::UnknownArch)
+        Target = std::move(LE);
     } else {
-      if (Target.getArch() == llvm::Triple::mipsel)
-        Target.setArch(llvm::Triple::mips);
-      else if (Target.getArch() == llvm::Triple::mips64el)
-        Target.setArch(llvm::Triple::mips64);
-      else if (Target.getArch() == llvm::Triple::aarch64)
-        Target.setArch(llvm::Triple::aarch64_be);
+      llvm::Triple BE = Target.getBigEndianArchVariant();
+      if (BE.getArch() != llvm::Triple::UnknownArch)
+        Target = std::move(BE);
     }
   }
 
@@ -2048,12 +2033,7 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
           TC = new toolchains::Generic_GCC(*this, Target, Args);
         break;
       case llvm::Triple::GNU:
-        // FIXME: We need a MinGW toolchain.  Use the default Generic_GCC
-        // toolchain for now as the default case would below otherwise.
-        if (Target.isOSBinFormatELF())
-          TC = new toolchains::Generic_ELF(*this, Target, Args);
-        else
-          TC = new toolchains::Generic_GCC(*this, Target, Args);
+        TC = new toolchains::MinGW(*this, Target, Args);
         break;
       case llvm::Triple::Itanium:
         TC = new toolchains::CrossWindowsToolChain(*this, Target, Args);

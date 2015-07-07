@@ -759,6 +759,7 @@ public:
       HasP8Crypto(false), HasDirectMove(false), HasQPX(false), HasHTM(false),
       HasBPERMD(false), HasExtDiv(false) {
     BigEndian = (Triple.getArch() != llvm::Triple::ppc64le);
+    SimdDefaultAlign = 128;
     LongDoubleWidth = LongDoubleAlign = 128;
     LongDoubleFormat = &llvm::APFloat::PPCDoubleDouble;
   }
@@ -2988,6 +2989,9 @@ bool X86TargetInfo::handleTargetFeatures(std::vector<std::string> &Features,
     Features.erase(it);
   else if (SSELevel > NoSSE)
     MMX3DNowLevel = std::max(MMX3DNowLevel, MMX);
+
+  SimdDefaultAlign =
+      (getABI() == "avx512") ? 512 : (getABI() == "avx") ? 256 : 128;
   return true;
 }
 
@@ -4220,7 +4224,9 @@ public:
     // zero length bitfield.
     UseZeroLengthBitfieldAlignment = true;
   }
+
   StringRef getABI() const override { return ABI; }
+
   bool setABI(const std::string &Name) override {
     ABI = Name;
 

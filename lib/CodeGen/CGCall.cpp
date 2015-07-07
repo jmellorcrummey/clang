@@ -32,7 +32,6 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/Transforms/Utils/Local.h"
-#include <sstream>
 using namespace clang;
 using namespace CodeGen;
 
@@ -1453,6 +1452,8 @@ void CodeGenModule::ConstructAttributeList(const CGFunctionInfo &FI,
     // Attributes that should go on the call site only.
     if (!CodeGenOpts.SimplifyLibCalls)
       FuncAttrs.addAttribute(llvm::Attribute::NoBuiltin);
+    if (!CodeGenOpts.TrapFuncName.empty())
+      FuncAttrs.addAttribute("trap-func-name", CodeGenOpts.TrapFuncName);
   } else {
     // Attributes that should go on the function, but not the call site.
     if (!CodeGenOpts.DisableFPElim) {
@@ -1505,7 +1506,7 @@ void CodeGenModule::ConstructAttributeList(const CGFunctionInfo &FI,
 
     const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(TargetDecl);
     if (FD) {
-      if (const TargetAttr *TD = FD->getAttr<TargetAttr>()) {
+      if (const auto *TD = FD->getAttr<TargetAttr>()) {
         StringRef FeaturesStr = TD->getFeatures();
         SmallVector<StringRef, 1> AttrFeatures;
         FeaturesStr.split(AttrFeatures, ",");
@@ -1513,9 +1514,13 @@ void CodeGenModule::ConstructAttributeList(const CGFunctionInfo &FI,
         // Grab the various features and prepend a "+" to turn on the feature to
         // the backend and add them to our existing set of features.
         for (auto &Feature : AttrFeatures) {
+	  // Go ahead and trim whitespace rather than either erroring or
+	  // accepting it weirdly.
+	  Feature = Feature.trim();
+
           // While we're here iterating check for a different target cpu.
           if (Feature.startswith("arch="))
-            TargetCPU = Feature.split("=").second;
+            TargetCPU = Feature.split("=").second.trim();
 	  else if (Feature.startswith("tune="))
 	    // We don't support cpu tuning this way currently.
 	    ;
@@ -1544,14 +1549,9 @@ void CodeGenModule::ConstructAttributeList(const CGFunctionInfo &FI,
     if (TargetCPU != "")
       FuncAttrs.addAttribute("target-cpu", TargetCPU);
     if (!Features.empty()) {
-      std::stable_sort(Features.begin(), Features.end());
-      std::stringstream TargetFeatures;
-      std::copy(Features.begin(), Features.end(),
-                std::ostream_iterator<std::string>(TargetFeatures, ","));
-
-      // The drop_back gets rid of the trailing space.
+      std::sort(Features.begin(), Features.end());
       FuncAttrs.addAttribute("target-features",
-                             StringRef(TargetFeatures.str()).drop_back(1));
+                             llvm::join(Features.begin(), Features.end(), ","));
     }
   }
 
