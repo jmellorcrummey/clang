@@ -15,14 +15,9 @@
 
 // Check that -fprofile-generate=/path/to generates /path/to/default.profraw
 // RUN: %clang %s -c -S -o - -emit-llvm -fprofile-generate=/path/to | FileCheck -check-prefix=PROFILE-GEN-EQ %s
-// PROFILE-GEN-EQ: private constant [25 x i8] c"/path/to/default.profraw\00"
+// PROFILE-GEN-EQ: private constant [25 x i8] c"/path/to{{/|\\5C}}default.profraw\00"
 // PROFILE-GEN-EQ: call void @__llvm_profile_override_default_filename(i8* getelementptr inbounds ([25 x i8], [25 x i8]* @0, i32 0, i32 0))
 // PROFILE-GEN-EQ: declare void @__llvm_profile_override_default_filename(i8*)
-
-// Check that -fprofile-use reads default.profdata
-// RUN: llvm-profdata merge %S/Inputs/gcc-flag-compatibility.proftext -o default.profdata
-// RUN: %clang %s -o - -mllvm -disable-llvm-optzns -emit-llvm -S -fprofile-use | FileCheck -check-prefix=PROFILE-USE-1 %s
-// PROFILE-USE-1: = !{!"branch_weights", i32 101, i32 2}
 
 // Check that -fprofile-use=some/path reads some/path/default.profdata
 // RUN: rm -rf %t.dir
