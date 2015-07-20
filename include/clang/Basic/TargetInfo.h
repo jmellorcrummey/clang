@@ -22,6 +22,8 @@
 #include "clang/Basic/TargetOptions.h"
 #include "clang/Basic/VersionTuple.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
+#include "llvm/ADT/APInt.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
@@ -70,6 +72,7 @@ protected:
   unsigned char MinGlobalAlign;
   unsigned char MaxAtomicPromoteWidth, MaxAtomicInlineWidth;
   unsigned short MaxVectorAlign;
+  unsigned short MaxTLSAlign;
   unsigned short SimdDefaultAlign;
   const char *DescriptionString;
   const char *UserLabelPrefix;
@@ -555,6 +558,7 @@ public:
       int Min;
       int Max;
     } ImmRange;
+    llvm::SmallSet<int, 4> ImmSet;
 
     std::string ConstraintStr;  // constraint: "=rm"
     std::string Name;           // Operand name: [foo] with no []'s.
@@ -590,8 +594,10 @@ public:
     bool requiresImmediateConstant() const {
       return (Flags & CI_ImmediateConstant) != 0;
     }
-    int getImmConstantMin() const { return ImmRange.Min; }
-    int getImmConstantMax() const { return ImmRange.Max; }
+    bool isValidAsmImmediate(const llvm::APInt &Value) const {
+      return (Value.sge(ImmRange.Min) && Value.sle(ImmRange.Max)) ||
+             ImmSet.count(Value.getZExtValue()) != 0;
+    }
 
     void setIsReadWrite() { Flags |= CI_ReadWrite; }
     void setEarlyClobber() { Flags |= CI_EarlyClobber; }
@@ -602,6 +608,20 @@ public:
       Flags |= CI_ImmediateConstant;
       ImmRange.Min = Min;
       ImmRange.Max = Max;
+    }
+    void setRequiresImmediate(llvm::ArrayRef<int> Exacts) {
+      Flags |= CI_ImmediateConstant;
+      for (int Exact : Exacts)
+        ImmSet.insert(Exact);
+    }
+    void setRequiresImmediate(int Exact) {
+      Flags |= CI_ImmediateConstant;
+      ImmSet.insert(Exact);
+    }
+    void setRequiresImmediate() {
+      Flags |= CI_ImmediateConstant;
+      ImmRange.Min = INT_MIN;
+      ImmRange.Max = INT_MAX;
     }
 
     /// \brief Indicate that this is an input operand that is tied to
@@ -807,6 +827,14 @@ public:
   /// \brief Whether the target supports thread-local storage.
   bool isTLSSupported() const {
     return TLSSupported;
+  }
+
+  /// \brief Return the maximum alignment (in bits) of a TLS variable
+  ///
+  /// Gets the maximum alignment (in bits) of a TLS variable on this target.
+  /// Returns zero if there is no such constraint.
+  unsigned short getMaxTLSAlign() const {
+    return MaxTLSAlign;
   }
 
   /// \brief Whether the target supports SEH __try.
