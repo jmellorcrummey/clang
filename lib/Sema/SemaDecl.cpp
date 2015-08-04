@@ -4865,6 +4865,12 @@ NamedDecl *Sema::HandleDeclarator(Scope *S, Declarator &D,
     // C++ Concepts TS [dcl.spec.concept]p1: The concept specifier shall be
     // applied only to the definition of a function template or variable
     // template, declared in namespace scope
+    if (!TemplateParamLists.size()) {
+      Diag(D.getDeclSpec().getConceptSpecLoc(),
+           diag::err_concept_decl_non_template);
+      return nullptr;
+    }
+
     if (!DC->getRedeclContext()->isFileContext()) {
       Diag(D.getIdentifierLoc(),
            diag::err_concept_decls_may_only_appear_in_namespace_scope);
@@ -5849,6 +5855,9 @@ Sema::ActOnVariableDeclarator(Scope *S, Declarator &D, DeclContext *DC,
 
     if (D.getDeclSpec().isConstexprSpecified())
       NewVD->setConstexpr(true);
+
+    if (D.getDeclSpec().isConceptSpecified())
+      NewVD->setConcept(true);
   }
 
   // Set the lexical context. If the declarator has a C++ scope specifier, the
@@ -7434,7 +7443,7 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
 
     if (isConcept) {
       // C++ Concepts TS [dcl.spec.concept]p1: The concept specifier shall be
-      // applied only to the definition of a function template...
+      // applied only to the definition of a function template [...]
       if (!D.isFunctionDefinition()) {
         Diag(D.getDeclSpec().getConceptSpecLoc(),
              diag::err_function_concept_not_defined);
@@ -8570,9 +8579,8 @@ namespace {
 
       // Convert FieldDecls to their index number.
       llvm::SmallVector<unsigned, 4> UsedFieldIndex;
-      for (auto I = Fields.rbegin(), E = Fields.rend(); I != E; ++I) {
-        UsedFieldIndex.push_back((*I)->getFieldIndex());
-      }
+      for (const FieldDecl *I : llvm::reverse(Fields))
+        UsedFieldIndex.push_back(I->getFieldIndex());
 
       // See if a warning is needed by checking the first difference in index
       // numbers.  If field being used has index less than the field being
@@ -9398,6 +9406,15 @@ void Sema::ActOnUninitializedDecl(Decl *RealDecl,
           << Var->getDeclName();
       else
         Diag(Var->getLocation(), diag::err_invalid_constexpr_var_decl);
+      Var->setInvalidDecl();
+      return;
+    }
+
+    // C++ Concepts TS [dcl.spec.concept]p1: [...]  A variable template
+    // definition having the concept specifier is called a variable concept. A
+    // concept definition refers to [...] a variable concept and its initializer.
+    if (Var->isConcept()) {
+      Diag(Var->getLocation(), diag::err_var_concept_not_initialized);
       Var->setInvalidDecl();
       return;
     }
