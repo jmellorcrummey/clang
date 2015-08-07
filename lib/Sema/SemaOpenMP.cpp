@@ -657,7 +657,9 @@ void Sema::InitDataSharingAttributesStack() {
 bool Sema::IsOpenMPCapturedVar(VarDecl *VD) {
   assert(LangOpts.OpenMP && "OpenMP is not allowed");
   VD = VD->getCanonicalDecl();
-  if (DSAStack->getCurrentDirective() != OMPD_unknown) {
+  if (DSAStack->getCurrentDirective() != OMPD_unknown &&
+      (!DSAStack->isClauseParsingMode() ||
+       DSAStack->getParentDirective() != OMPD_unknown)) {
     if (DSAStack->isLoopControlVariable(VD) ||
         (VD->hasLocalStorage() &&
          isParallelOrTaskRegion(DSAStack->getCurrentDirective())) ||
@@ -2249,6 +2251,9 @@ public:
   Expr *BuildPreCond(Scope *S, Expr *Cond) const;
   /// \brief Build reference expression to the counter be used for codegen.
   Expr *BuildCounterVar() const;
+  /// \brief Build reference expression to the private counter be used for
+  /// codegen.
+  Expr *BuildPrivateCounterVar() const;
   /// \brief Build initization of the counter be used for codegen.
   Expr *BuildCounterInit() const;
   /// \brief Build step of the counter be used for codegen.
@@ -2412,7 +2417,7 @@ bool OpenMPIterationSpaceChecker::CheckInit(Stmt *S, bool EmitDiags) {
   } else if (auto DS = dyn_cast<DeclStmt>(S)) {
     if (DS->isSingleDecl()) {
       if (auto Var = dyn_cast_or_null<VarDecl>(DS->getSingleDecl())) {
-        if (Var->hasInit()) {
+        if (Var->hasInit() && !Var->getType()->isReferenceType()) {
           // Accept non-canonical init form here but emit ext. warning.
           if (Var->getInitStyle() != VarDecl::CInit && EmitDiags)
             SemaRef.Diag(S->getLocStart(),
@@ -2697,7 +2702,19 @@ Expr *OpenMPIterationSpaceChecker::BuildPreCond(Scope *S, Expr *Cond) const {
 
 /// \brief Build reference expression to the counter be used for codegen.
 Expr *OpenMPIterationSpaceChecker::BuildCounterVar() const {
-  return buildDeclRefExpr(SemaRef, Var, Var->getType(), DefaultLoc);
+  return buildDeclRefExpr(SemaRef, Var, Var->getType().getNonReferenceType(),
+                          DefaultLoc);
+}
+
+Expr *OpenMPIterationSpaceChecker::BuildPrivateCounterVar() const {
+  if (Var && !Var->isInvalidDecl()) {
+    auto Type = Var->getType().getNonReferenceType();
+    auto *PrivateVar = buildVarDecl(SemaRef, DefaultLoc, Type, Var->getName());
+    if (PrivateVar->isInvalidDecl())
+      return nullptr;
+    return buildDeclRefExpr(SemaRef, PrivateVar, Type, DefaultLoc);
+  }
+  return nullptr;
 }
 
 /// \brief Build initization of the counter be used for codegen.
@@ -2715,6 +2732,8 @@ struct LoopIterationSpace {
   Expr *NumIterations;
   /// \brief The loop counter variable.
   Expr *CounterVar;
+  /// \brief Private loop counter variable.
+  Expr *PrivateCounterVar;
   /// \brief This is initializer for the initial value of #CounterVar.
   Expr *CounterInit;
   /// \brief This is step for the #CounterVar used to generate its update:
@@ -2799,7 +2818,7 @@ static bool CheckOpenMPIterationSpace(
   //   A variable of signed or unsigned integer type.
   //   For C++, a variable of a random access iterator type.
   //   For C, a variable of a pointer type.
-  auto VarType = Var->getType();
+  auto VarType = Var->getType().getNonReferenceType();
   if (!VarType->isDependentType() && !VarType->isIntegerType() &&
       !VarType->isPointerType() &&
       !(SemaRef.getLangOpts().CPlusPlus && VarType->isOverloadableType())) {
@@ -2875,6 +2894,7 @@ static bool CheckOpenMPIterationSpace(
   ResultIterSpace.NumIterations = ISC.BuildNumIterations(
       DSA.getCurScope(), /* LimitedType */ isOpenMPWorksharingDirective(DKind));
   ResultIterSpace.CounterVar = ISC.BuildCounterVar();
+  ResultIterSpace.PrivateCounterVar = ISC.BuildPrivateCounterVar();
   ResultIterSpace.CounterInit = ISC.BuildCounterInit();
   ResultIterSpace.CounterStep = ISC.BuildCounterStep();
   ResultIterSpace.InitSrcRange = ISC.GetInitSrcRange();
@@ -2885,6 +2905,7 @@ static bool CheckOpenMPIterationSpace(
   HasErrors |= (ResultIterSpace.PreCond == nullptr ||
                 ResultIterSpace.NumIterations == nullptr ||
                 ResultIterSpace.CounterVar == nullptr ||
+                ResultIterSpace.PrivateCounterVar == nullptr ||
                 ResultIterSpace.CounterInit == nullptr ||
                 ResultIterSpace.CounterStep == nullptr);
 
@@ -3284,6 +3305,7 @@ CheckOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
       }
       // Save results
       Built.Counters[Cnt] = IS.CounterVar;
+      Built.PrivateCounters[Cnt] = IS.PrivateCounterVar;
       Built.Updates[Cnt] = Update.get();
       Built.Finals[Cnt] = Final.get();
     }
@@ -3381,6 +3403,16 @@ StmtResult Sema::ActOnOpenMPForDirective(
 
   assert((CurContext->isDependentContext() || B.builtAll()) &&
          "omp for loop exprs were not built");
+
+  if (!CurContext->isDependentContext()) {
+    // Finalize the clauses that need pre-built expressions for CodeGen.
+    for (auto C : Clauses) {
+      if (auto LC = dyn_cast<OMPLinearClause>(C))
+        if (FinishOpenMPLinearClause(*LC, cast<DeclRefExpr>(B.IterationVarRef),
+                                     B.NumIterations, *this, CurScope))
+          return StmtError();
+    }
+  }
 
   getCurFunction()->setHasBranchProtectedScope();
   return OMPForDirective::Create(Context, StartLoc, EndLoc, NestedLoopCount,
@@ -3537,6 +3569,16 @@ StmtResult Sema::ActOnOpenMPParallelForDirective(
 
   assert((CurContext->isDependentContext() || B.builtAll()) &&
          "omp parallel for loop exprs were not built");
+
+  if (!CurContext->isDependentContext()) {
+    // Finalize the clauses that need pre-built expressions for CodeGen.
+    for (auto C : Clauses) {
+      if (auto LC = dyn_cast<OMPLinearClause>(C))
+        if (FinishOpenMPLinearClause(*LC, cast<DeclRefExpr>(B.IterationVarRef),
+                                     B.NumIterations, *this, CurScope))
+          return StmtError();
+    }
+  }
 
   getCurFunction()->setHasBranchProtectedScope();
   return OMPParallelForDirective::Create(Context, StartLoc, EndLoc,
@@ -4469,6 +4511,9 @@ OMPClause *Sema::ActOnOpenMPSingleExprClause(OpenMPClauseKind Kind, Expr *Expr,
   case OMPC_ordered:
     Res = ActOnOpenMPOrderedClause(StartLoc, EndLoc, LParenLoc, Expr);
     break;
+  case OMPC_device:
+    Res = ActOnOpenMPDeviceClause(Expr, StartLoc, LParenLoc, EndLoc);
+    break;
   case OMPC_default:
   case OMPC_proc_bind:
   case OMPC_schedule:
@@ -4732,6 +4777,7 @@ OMPClause *Sema::ActOnOpenMPSimpleClause(
   case OMPC_capture:
   case OMPC_seq_cst:
   case OMPC_depend:
+  case OMPC_device:
   case OMPC_unknown:
     llvm_unreachable("Clause is not allowed.");
   }
@@ -4853,6 +4899,7 @@ OMPClause *Sema::ActOnOpenMPSingleExprWithArgClause(
   case OMPC_capture:
   case OMPC_seq_cst:
   case OMPC_depend:
+  case OMPC_device:
   case OMPC_unknown:
     llvm_unreachable("Clause is not allowed.");
   }
@@ -4976,6 +5023,7 @@ OMPClause *Sema::ActOnOpenMPClause(OpenMPClauseKind Kind,
   case OMPC_threadprivate:
   case OMPC_flush:
   case OMPC_depend:
+  case OMPC_device:
   case OMPC_unknown:
     llvm_unreachable("Clause is not allowed.");
   }
@@ -5086,6 +5134,7 @@ OMPClause *Sema::ActOnOpenMPVarListClause(
   case OMPC_update:
   case OMPC_capture:
   case OMPC_seq_cst:
+  case OMPC_device:
   case OMPC_unknown:
     llvm_unreachable("Clause is not allowed.");
   }
@@ -6679,4 +6728,29 @@ Sema::ActOnOpenMPDependClause(OpenMPDependClauseKind DepKind,
 
   return OMPDependClause::Create(Context, StartLoc, LParenLoc, EndLoc, DepKind,
                                  DepLoc, ColonLoc, Vars);
+}
+
+OMPClause *Sema::ActOnOpenMPDeviceClause(Expr *Device, SourceLocation StartLoc,
+                                         SourceLocation LParenLoc,
+                                         SourceLocation EndLoc) {
+  Expr *ValExpr = Device;
+  if (!ValExpr->isTypeDependent() && !ValExpr->isValueDependent() &&
+      !ValExpr->isInstantiationDependent()) {
+    SourceLocation Loc = ValExpr->getExprLoc();
+    ExprResult Value = PerformOpenMPImplicitIntegerConversion(Loc, ValExpr);
+    if (Value.isInvalid())
+      return nullptr;
+
+    // OpenMP [2.9.1, Restrictions]
+    // The device expression must evaluate to a non-negative integer value.
+    llvm::APSInt Result;
+    if (Value.get()->isIntegerConstantExpr(Result, Context) && 
+        Result.isSigned() && !Result.isStrictlyPositive()) {
+      Diag(Loc, diag::err_omp_negative_expression_in_clause)
+          << "device" << ValExpr->getSourceRange();
+      return nullptr;
+    }
+  }
+
+  return new (Context) OMPDeviceClause(ValExpr, StartLoc, LParenLoc, EndLoc);
 }
