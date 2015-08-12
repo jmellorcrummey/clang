@@ -975,11 +975,18 @@ bool ASTReader::ReadLexicalDeclContextStorage(ModuleFile &M,
 
   assert(!isa<TranslationUnitDecl>(DC) &&
          "expected a TU_UPDATE_LEXICAL record for TU");
-  // FIXME: Once we remove RewriteDecl, assert that we didn't already have
-  // lexical decls for this context.
-  LexicalDecls[DC] = llvm::makeArrayRef(
-      reinterpret_cast<const llvm::support::unaligned_uint32_t *>(Blob.data()),
-      Blob.size() / 4);
+  // If we are handling a C++ class template instantiation, we can see multiple
+  // lexical updates for the same record. It's important that we select only one
+  // of them, so that field numbering works properly. Just pick the first one we
+  // see.
+  auto &Lex = LexicalDecls[DC];
+  if (!Lex.first) {
+    Lex = std::make_pair(
+        &M, llvm::makeArrayRef(
+                reinterpret_cast<const llvm::support::unaligned_uint32_t *>(
+                    Blob.data()),
+                Blob.size() / 4));
+  }
   DC->setHasExternalLexicalStorage(true);
   return false;
 }
@@ -1878,10 +1885,6 @@ ASTReader::readInputFileInfo(ModuleFile &F, unsigned ID) {
   return R;
 }
 
-std::string ASTReader::getInputFileName(ModuleFile &F, unsigned int ID) {
-  return readInputFileInfo(F, ID).Filename;
-}
-
 InputFile ASTReader::getInputFile(ModuleFile &F, unsigned ID, bool Complain) {
   // If this ID is bogus, just return an empty input file.
   if (ID == 0 || ID > F.InputFilesLoaded.size())
@@ -2029,6 +2032,21 @@ void ASTReader::ResolveImportedPath(std::string &Filename, StringRef Prefix) {
   Filename.assign(Buffer.begin(), Buffer.end());
 }
 
+static bool isDiagnosedResult(ASTReader::ASTReadResult ARR, unsigned Caps) {
+  switch (ARR) {
+  case ASTReader::Failure: return true;
+  case ASTReader::Missing: return !(Caps & ASTReader::ARR_Missing);
+  case ASTReader::OutOfDate: return !(Caps & ASTReader::ARR_OutOfDate);
+  case ASTReader::VersionMismatch: return !(Caps & ASTReader::ARR_VersionMismatch);
+  case ASTReader::ConfigurationMismatch:
+    return !(Caps & ASTReader::ARR_ConfigurationMismatch);
+  case ASTReader::HadErrors: return true;
+  case ASTReader::Success: return false;
+  }
+
+  llvm_unreachable("unknown ASTReadResult");
+}
+
 ASTReader::ASTReadResult
 ASTReader::ReadControlBlock(ModuleFile &F,
                             SmallVectorImpl<ImportedModule> &Loaded,
@@ -2064,8 +2082,9 @@ ASTReader::ReadControlBlock(ModuleFile &F,
           PP.getHeaderSearchInfo().getHeaderSearchOpts();
 
       // All user input files reside at the index range [0, NumUserInputs), and
-      // system input files reside at [NumUserInputs, NumInputs).
-      if (!DisableValidation) {
+      // system input files reside at [NumUserInputs, NumInputs). For explicitly
+      // loaded module files, ignore missing inputs.
+      if (!DisableValidation && F.Kind != MK_ExplicitModule) {
         bool Complain = (ClientLoadCapabilities & ARR_OutOfDate) == 0;
 
         // If we are reading a module, we will create a verification timestamp,
@@ -2181,10 +2200,23 @@ ASTReader::ReadControlBlock(ModuleFile &F,
         ASTFileSignature StoredSignature = Record[Idx++];
         auto ImportedFile = ReadPath(F, Record, Idx);
 
+        // If our client can't cope with us being out of date, we can't cope with
+        // our dependency being missing.
+        unsigned Capabilities = ClientLoadCapabilities;
+        if ((ClientLoadCapabilities & ARR_OutOfDate) == 0)
+          Capabilities &= ~ARR_Missing;
+
         // Load the AST file.
-        switch(ReadASTCore(ImportedFile, ImportedKind, ImportLoc, &F, Loaded,
-                           StoredSize, StoredModTime, StoredSignature,
-                           ClientLoadCapabilities)) {
+        auto Result = ReadASTCore(ImportedFile, ImportedKind, ImportLoc, &F,
+                                  Loaded, StoredSize, StoredModTime,
+                                  StoredSignature, Capabilities);
+
+        // If we diagnosed a problem, produce a backtrace.
+        if (isDiagnosedResult(Result, Capabilities))
+          Diag(diag::note_module_file_imported_by)
+              << F.FileName << !F.ModuleName.empty() << F.ModuleName;
+
+        switch (Result) {
         case Failure: return Failure;
           // If we have to ignore the dependency, we'll have to ignore this too.
         case Missing:
@@ -2197,9 +2229,6 @@ ASTReader::ReadControlBlock(ModuleFile &F,
       }
       break;
     }
-
-    case KNOWN_MODULE_FILES:
-      break;
 
     case LANGUAGE_OPTIONS: {
       bool Complain = (ClientLoadCapabilities & ARR_ConfigurationMismatch) == 0;
@@ -3152,11 +3181,18 @@ ASTReader::ReadModuleMapFileBlock(RecordData &Record, ModuleFile &F,
     const FileEntry *ModMap = M ? Map.getModuleMapFileForUniquing(M) : nullptr;
     if (!ModMap) {
       assert(ImportedBy && "top-level import should be verified");
-      if ((ClientLoadCapabilities & ARR_Missing) == 0)
-        Diag(diag::err_imported_module_not_found) << F.ModuleName << F.FileName
-                                                  << ImportedBy->FileName
-                                                  << F.ModuleMapPath;
-      return Missing;
+      if ((ClientLoadCapabilities & ARR_OutOfDate) == 0) {
+        if (auto *ASTFE = M ? M->getASTFile() : nullptr)
+          // This module was defined by an imported (explicit) module.
+          Diag(diag::err_module_file_conflict) << F.ModuleName << F.FileName
+                                               << ASTFE->getName();
+        else
+          // This module was built with a different module map.
+          Diag(diag::err_imported_module_not_found)
+              << F.ModuleName << F.FileName << ImportedBy->FileName
+              << F.ModuleMapPath;
+      }
+      return OutOfDate;
     }
 
     assert(M->Name == F.ModuleName && "found module with different name");
@@ -3557,6 +3593,20 @@ static bool startsWithASTFileMagic(BitstreamCursor &Stream) {
          Stream.Read(8) == 'H';
 }
 
+static unsigned moduleKindForDiagnostic(ModuleKind Kind) {
+  switch (Kind) {
+  case MK_PCH:
+    return 0; // PCH
+  case MK_ImplicitModule:
+  case MK_ExplicitModule:
+    return 1; // module
+  case MK_MainFile:
+  case MK_Preamble:
+    return 2; // main source file
+  }
+  llvm_unreachable("unknown module kind");
+}
+
 ASTReader::ASTReadResult
 ASTReader::ReadASTCore(StringRef FileName,
                        ModuleKind Type,
@@ -3589,11 +3639,9 @@ ASTReader::ReadASTCore(StringRef FileName,
       return Missing;
 
     // Otherwise, return an error.
-    {
-      std::string Msg = "Unable to load module \"" + FileName.str() + "\": "
-                      + ErrorStr;
-      Error(Msg);
-    }
+    Diag(diag::err_module_file_not_found) << moduleKindForDiagnostic(Type)
+                                          << FileName << ErrorStr.empty()
+                                          << ErrorStr;
     return Failure;
 
   case ModuleManager::OutOfDate:
@@ -3603,11 +3651,9 @@ ASTReader::ReadASTCore(StringRef FileName,
       return OutOfDate;
 
     // Otherwise, return an error.
-    {
-      std::string Msg = "Unable to load module \"" + FileName.str() + "\": "
-                      + ErrorStr;
-      Error(Msg);
-    }
+    Diag(diag::err_module_file_out_of_date) << moduleKindForDiagnostic(Type)
+                                            << FileName << ErrorStr.empty()
+                                            << ErrorStr;
     return Failure;
   }
 
@@ -3628,7 +3674,8 @@ ASTReader::ReadASTCore(StringRef FileName,
   
   // Sniff for the signature.
   if (!startsWithASTFileMagic(Stream)) {
-    Diag(diag::err_not_a_pch_file) << FileName;
+    Diag(diag::err_module_file_invalid) << moduleKindForDiagnostic(Type)
+                                        << FileName;
     return Failure;
   }
 
@@ -3661,6 +3708,18 @@ ASTReader::ReadASTCore(StringRef FileName,
       HaveReadControlBlock = true;
       switch (ReadControlBlock(F, Loaded, ImportedBy, ClientLoadCapabilities)) {
       case Success:
+        // Check that we didn't try to load a non-module AST file as a module.
+        //
+        // FIXME: Should we also perform the converse check? Loading a module as
+        // a PCH file sort of works, but it's a bit wonky.
+        if ((Type == MK_ImplicitModule || Type == MK_ExplicitModule) &&
+            F.ModuleName.empty()) {
+          auto Result = (Type == MK_ImplicitModule) ? OutOfDate : Failure;
+          if (Result != OutOfDate ||
+              (ClientLoadCapabilities & ARR_OutOfDate) == 0)
+            Diag(diag::err_module_file_not_module) << FileName;
+          return Result;
+        }
         break;
 
       case Failure: return Failure;
@@ -3690,8 +3749,6 @@ ASTReader::ReadASTCore(StringRef FileName,
       break;
     }
   }
-  
-  return Success;
 }
 
 void ASTReader::InitializeContext() {
@@ -4151,20 +4208,6 @@ bool ASTReader::readASTFileControlBlock(
       while (Idx < N) {
         // Read information about the AST file.
         Idx += 5; // ImportLoc, Size, ModTime, Signature
-        std::string Filename = ReadString(Record, Idx);
-        ResolveImportedPath(Filename, ModuleDir);
-        Listener.visitImport(Filename);
-      }
-      break;
-    }
-
-    case KNOWN_MODULE_FILES: {
-      // Known-but-not-technically-used module files are treated as imports.
-      if (!NeedsImports)
-        break;
-
-      unsigned Idx = 0, N = Record.size();
-      while (Idx < N) {
         std::string Filename = ReadString(Record, Idx);
         ResolveImportedPath(Filename, ModuleDir);
         Listener.visitImport(Filename);
@@ -6204,6 +6247,7 @@ void ASTReader::FindExternalLexicalDecls(
       }
 
       if (Decl *D = GetLocalDecl(*M, ID)) {
+        assert(D->getKind() == K && "wrong kind for lexical decl");
         if (!DC->isDeclInLexicalTraversal(D))
           Decls.push_back(D);
       }
@@ -6216,7 +6260,7 @@ void ASTReader::FindExternalLexicalDecls(
   } else {
     auto I = LexicalDecls.find(DC);
     if (I != LexicalDecls.end())
-      Visit(getOwningModuleFile(cast<Decl>(DC)), I->second);
+      Visit(I->second.first, I->second.second);
   }
 
   ++NumLexicalDeclContextsRead;
@@ -7568,9 +7612,19 @@ ASTReader::ReadTemplateName(ModuleFile &F, const RecordData &Record,
   llvm_unreachable("Unhandled template name kind!");
 }
 
-TemplateArgument
-ASTReader::ReadTemplateArgument(ModuleFile &F,
-                                const RecordData &Record, unsigned &Idx) {
+TemplateArgument ASTReader::ReadTemplateArgument(ModuleFile &F,
+                                                 const RecordData &Record,
+                                                 unsigned &Idx,
+                                                 bool Canonicalize) {
+  if (Canonicalize) {
+    // The caller wants a canonical template argument. Sometimes the AST only
+    // wants template arguments in canonical form (particularly as the template
+    // argument lists of template specializations) so ensure we preserve that
+    // canonical form across serialization.
+    TemplateArgument Arg = ReadTemplateArgument(F, Record, Idx, false);
+    return Context.getCanonicalTemplateArgument(Arg);
+  }
+
   TemplateArgument::ArgKind Kind = (TemplateArgument::ArgKind)Record[Idx++];
   switch (Kind) {
   case TemplateArgument::Null:
@@ -7634,11 +7688,11 @@ void
 ASTReader::
 ReadTemplateArgumentList(SmallVectorImpl<TemplateArgument> &TemplArgs,
                          ModuleFile &F, const RecordData &Record,
-                         unsigned &Idx) {
+                         unsigned &Idx, bool Canonicalize) {
   unsigned NumTemplateArgs = Record[Idx++];
   TemplArgs.reserve(NumTemplateArgs);
   while (NumTemplateArgs--)
-    TemplArgs.push_back(ReadTemplateArgument(F, Record, Idx));
+    TemplArgs.push_back(ReadTemplateArgument(F, Record, Idx, Canonicalize));
 }
 
 /// \brief Read a UnresolvedSet structure.
@@ -8016,14 +8070,6 @@ void ASTReader::ReadComments() {
     }
   NextCursor:
     Context.Comments.addDeserializedComments(Comments);
-  }
-}
-
-void ASTReader::getInputFiles(ModuleFile &F,
-                             SmallVectorImpl<serialization::InputFile> &Files) {
-  for (unsigned I = 0, E = F.InputFilesLoaded.size(); I != E; ++I) {
-    unsigned ID = I+1;
-    Files.push_back(getInputFile(F, ID));
   }
 }
 

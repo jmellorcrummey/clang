@@ -499,7 +499,8 @@ private:
   typedef ArrayRef<llvm::support::unaligned_uint32_t> LexicalContents;
 
   /// \brief Map from a DeclContext to its lexical contents.
-  llvm::DenseMap<const DeclContext*, LexicalContents> LexicalDecls;
+  llvm::DenseMap<const DeclContext*, std::pair<ModuleFile*, LexicalContents>>
+      LexicalDecls;
 
   /// \brief Map from the TU to its lexical contents from each module file.
   std::vector<std::pair<ModuleFile*, LexicalContents>> TULexicalDecls;
@@ -1056,8 +1057,6 @@ private:
 
   /// \brief Reads the stored information about an input file.
   InputFileInfo readInputFileInfo(ModuleFile &F, unsigned ID);
-  /// \brief A convenience method to read the filename from an input file.
-  std::string getInputFileName(ModuleFile &F, unsigned ID);
 
   /// \brief Retrieve the file entry and 'overridden' bit for an input
   /// file in the given module file.
@@ -1927,8 +1926,9 @@ public:
                                 unsigned &Idx);
 
   /// \brief Read a template argument.
-  TemplateArgument ReadTemplateArgument(ModuleFile &F,
-                                        const RecordData &Record,unsigned &Idx);
+  TemplateArgument ReadTemplateArgument(ModuleFile &F, const RecordData &Record,
+                                        unsigned &Idx,
+                                        bool Canonicalize = false);
 
   /// \brief Read a template parameter list.
   TemplateParameterList *ReadTemplateParameterList(ModuleFile &F,
@@ -1936,10 +1936,9 @@ public:
                                                    unsigned &Idx);
 
   /// \brief Read a template argument array.
-  void
-  ReadTemplateArgumentList(SmallVectorImpl<TemplateArgument> &TemplArgs,
-                           ModuleFile &F, const RecordData &Record,
-                           unsigned &Idx);
+  void ReadTemplateArgumentList(SmallVectorImpl<TemplateArgument> &TemplArgs,
+                                ModuleFile &F, const RecordData &Record,
+                                unsigned &Idx, bool Canonicalize = false);
 
   /// \brief Read a UnresolvedSet structure.
   void ReadUnresolvedSet(ModuleFile &F, LazyASTUnresolvedSet &Set,
@@ -2088,12 +2087,8 @@ public:
   SmallVector<std::pair<llvm::BitstreamCursor,
                         serialization::ModuleFile *>, 8> CommentsCursors;
 
-  //RIDErief Loads comments ranges.
+  /// \brief Loads comments ranges.
   void ReadComments() override;
-
-  /// Return all input files for the given module file.
-  void getInputFiles(ModuleFile &F,
-                     SmallVectorImpl<serialization::InputFile> &Files);
 };
 
 /// \brief Helper class that saves the current stream position and
