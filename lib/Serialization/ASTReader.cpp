@@ -138,20 +138,24 @@ bool ChainedASTReaderListener::needsSystemInputFileVisitation() {
   return First->needsSystemInputFileVisitation() ||
   Second->needsSystemInputFileVisitation();
 }
-void ChainedASTReaderListener::visitModuleFile(StringRef Filename) {
-  First->visitModuleFile(Filename);
-  Second->visitModuleFile(Filename);
+void ChainedASTReaderListener::visitModuleFile(StringRef Filename,
+                                               ModuleKind Kind) {
+  First->visitModuleFile(Filename, Kind);
+  Second->visitModuleFile(Filename, Kind);
 }
 bool ChainedASTReaderListener::visitInputFile(StringRef Filename,
                                               bool isSystem,
-                                              bool isOverridden) {
+                                              bool isOverridden,
+                                              bool isExplicitModule) {
   bool Continue = false;
   if (First->needsInputFileVisitation() &&
       (!isSystem || First->needsSystemInputFileVisitation()))
-    Continue |= First->visitInputFile(Filename, isSystem, isOverridden);
+    Continue |= First->visitInputFile(Filename, isSystem, isOverridden,
+                                      isExplicitModule);
   if (Second->needsInputFileVisitation() &&
       (!isSystem || Second->needsSystemInputFileVisitation()))
-    Continue |= Second->visitInputFile(Filename, isSystem, isOverridden);
+    Continue |= Second->visitInputFile(Filename, isSystem, isOverridden,
+                                       isExplicitModule);
   return Continue;
 }
 
@@ -1019,7 +1023,8 @@ bool ASTReader::ReadVisibleDeclContextStorage(ModuleFile &M,
 
 void ASTReader::Error(StringRef Msg) {
   Error(diag::err_fe_pch_malformed, Msg);
-  if (Context.getLangOpts().Modules && !Diags.isDiagnosticInFlight()) {
+  if (Context.getLangOpts().Modules && !Diags.isDiagnosticInFlight() &&
+      !PP.getHeaderSearchInfo().getModuleCachePath().empty()) {
     Diag(diag::note_module_cache_path)
       << PP.getHeaderSearchInfo().getModuleCachePath();
   }
@@ -1495,13 +1500,14 @@ unsigned HeaderFileInfoTrait::ComputeHash(internal_key_ref ikey) {
 
 HeaderFileInfoTrait::internal_key_type 
 HeaderFileInfoTrait::GetInternalKey(const FileEntry *FE) {
-  internal_key_type ikey = { FE->getSize(), FE->getModificationTime(),
-                             FE->getName(), /*Imported*/false };
+  internal_key_type ikey = {FE->getSize(),
+                            M.HasTimestamps ? FE->getModificationTime() : 0,
+                            FE->getName(), /*Imported*/ false};
   return ikey;
 }
     
 bool HeaderFileInfoTrait::EqualKey(internal_key_ref a, internal_key_ref b) {
-  if (a.Size != b.Size || a.ModTime != b.ModTime)
+  if (a.Size != b.Size || (a.ModTime && b.ModTime && a.ModTime != b.ModTime))
     return false;
 
   if (llvm::sys::path::is_absolute(a.Filename) &&
@@ -1971,14 +1977,9 @@ InputFile ASTReader::getInputFile(ModuleFile &F, unsigned ID, bool Complain) {
        // have inconsistent modification times that sometimes
        // erroneously trigger this error-handling path.
        //
-       // This also happens in networked file systems, so disable this
-       // check if validation is disabled or if we have an explicitly
-       // built PCM file.
-       //
-       // FIXME: Should we also do this for PCH files? They could also
-       // reasonably get shared across a network during a distributed build.
-       (StoredTime != File->getModificationTime() && !DisableValidation &&
-        F.Kind != MK_ExplicitModule)
+       // FIXME: This probably also breaks HeaderFileInfo lookups on Windows.
+       (StoredTime && StoredTime != File->getModificationTime() &&
+        !DisableValidation)
 #endif
        )) {
     if (Complain) {
@@ -2106,7 +2107,7 @@ ASTReader::ReadControlBlock(ModuleFile &F,
       }
 
       if (Listener)
-        Listener->visitModuleFile(F.FileName);
+        Listener->visitModuleFile(F.FileName, F.Kind);
 
       if (Listener && Listener->needsInputFileVisitation()) {
         unsigned N = Listener->needsSystemInputFileVisitation() ? NumInputs
@@ -2114,7 +2115,8 @@ ASTReader::ReadControlBlock(ModuleFile &F,
         for (unsigned I = 0; I < N; ++I) {
           bool IsSystem = I >= NumUserInputs;
           InputFileInfo FI = readInputFileInfo(F, I+1);
-          Listener->visitInputFile(FI.Filename, IsSystem, FI.Overridden);
+          Listener->visitInputFile(FI.Filename, IsSystem, FI.Overridden,
+                                   F.Kind == MK_ExplicitModule);
         }
       }
 
@@ -2158,7 +2160,7 @@ ASTReader::ReadControlBlock(ModuleFile &F,
         return VersionMismatch;
       }
 
-      bool hasErrors = Record[5];
+      bool hasErrors = Record[6];
       if (hasErrors && !DisableValidation && !AllowASTWithCompilerErrors) {
         Diag(diag::err_pch_with_compiler_errors);
         return HadErrors;
@@ -2168,6 +2170,8 @@ ASTReader::ReadControlBlock(ModuleFile &F,
       // Relative paths in a relocatable PCH are relative to our sysroot.
       if (F.RelocatablePCH)
         F.BaseDirectory = isysroot.empty() ? "/" : isysroot;
+
+      F.HasTimestamps = Record[5];
 
       const std::string &CurBranch = getClangFullRepositoryVersion();
       StringRef ASTBranch = Blob;
@@ -2727,6 +2731,10 @@ ASTReader::ReadASTBlock(ModuleFile &F, unsigned ClientLoadCapabilities) {
       std::tie(F.SLocEntryBaseID, F.SLocEntryBaseOffset) =
           SourceMgr.AllocateLoadedSLocEntries(F.LocalNumSLocEntries,
                                               SLocSpaceSize);
+      if (!F.SLocEntryBaseID) {
+        Error("ran out of source locations");
+        break;
+      }
       // Make our entry in the range map. BaseID is negative and growing, so
       // we invert it. Because we invert it, though, we need the other end of
       // the range.
@@ -4190,8 +4198,8 @@ bool ASTReader::readASTFileControlBlock(
           bool Overridden = static_cast<bool>(Record[3]);
           std::string Filename = Blob;
           ResolveImportedPath(Filename, ModuleDir);
-          shouldContinue =
-              Listener.visitInputFile(Filename, isSystemFile, Overridden);
+          shouldContinue = Listener.visitInputFile(
+              Filename, isSystemFile, Overridden, /*IsExplicitModule*/false);
           break;
         }
         if (!shouldContinue)

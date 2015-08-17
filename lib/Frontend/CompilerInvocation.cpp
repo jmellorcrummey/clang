@@ -705,6 +705,13 @@ static void ParseDependencyOutputArgs(DependencyOutputOptions &Opts,
       Args.getLastArgValue(OPT_module_dependency_dir);
   if (Args.hasArg(OPT_MV))
     Opts.OutputFormat = DependencyOutputFormat::NMake;
+  // Add sanitizer blacklists as extra dependencies.
+  // They won't be discovered by the regular preprocessor, so
+  // we let make / ninja to know about this implicit dependency.
+  Opts.ExtraDeps = Args.getAllArgValues(OPT_fsanitize_blacklist);
+  auto ModuleFiles = Args.getAllArgValues(OPT_fmodule_file);
+  Opts.ExtraDeps.insert(Opts.ExtraDeps.end(), ModuleFiles.begin(),
+                        ModuleFiles.end());
 }
 
 bool clang::ParseDiagnosticArgs(DiagnosticOptions &Opts, ArgList &Args,
@@ -953,6 +960,7 @@ static InputKind ParseFrontendArgs(FrontendOptions &Opts, ArgList &Args,
   Opts.GenerateGlobalModuleIndex = Opts.UseGlobalModuleIndex;
   Opts.ModuleMapFiles = Args.getAllArgValues(OPT_fmodule_map_file);
   Opts.ModuleFiles = Args.getAllArgValues(OPT_fmodule_file);
+  Opts.ModulesEmbedFiles = Args.getAllArgValues(OPT_fmodules_embed_file_EQ);
 
   Opts.CodeCompleteOpts.IncludeMacros
     = Args.hasArg(OPT_code_completion_macros);
