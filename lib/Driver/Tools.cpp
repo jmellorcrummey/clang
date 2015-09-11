@@ -4205,10 +4205,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       // given, decide a default based on the target. Otherwise rely on the
       // options and pass the right information to the frontend.
       if (!Args.hasFlag(options::OPT_fopenmp_use_tls,
-                        options::OPT_fnoopenmp_use_tls,
-                        getToolChain().getArch() == llvm::Triple::ppc ||
-                            getToolChain().getArch() == llvm::Triple::ppc64 ||
-                            getToolChain().getArch() == llvm::Triple::ppc64le))
+                        options::OPT_fnoopenmp_use_tls, /*Default=*/true))
         CmdArgs.push_back("-fnoopenmp-use-tls");
       break;
     default:
@@ -4464,7 +4461,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddAllArgs(CmdArgs, options::OPT_fmodule_map_file);
 
   // -fmodule-file can be used to specify files containing precompiled modules.
-  Args.AddAllArgs(CmdArgs, options::OPT_fmodule_file);
+  if (HaveModules)
+    Args.AddAllArgs(CmdArgs, options::OPT_fmodule_file);
+  else
+    Args.ClaimAllArgs(options::OPT_fmodule_file);
 
   // -fmodule-cache-path specifies where our implicitly-built module files
   // should be written.
@@ -8951,6 +8951,13 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       }
       CmdArgs.push_back(
           Args.MakeArgString(std::string("-libpath:") + LibDir.c_str()));
+
+      if (MSVC.useUniversalCRT(VisualStudioDir)) {
+        std::string UniversalCRTLibPath;
+        if (MSVC.getUniversalCRTLibraryPath(UniversalCRTLibPath))
+          CmdArgs.push_back(Args.MakeArgString(std::string("-libpath:") +
+                                               UniversalCRTLibPath.c_str()));
+      }
     }
 
     std::string WindowsSdkLibPath;
@@ -9669,15 +9676,27 @@ void tools::SHAVE::Compiler::ConstructJob(Compilation &C, const JobAction &JA,
   // Append all -I, -iquote, -isystem paths, defines/undefines,
   // 'f' flags, optimize flags, and warning options.
   // These are spelled the same way in clang and moviCompile.
-  Args.AddAllArgs(CmdArgs,
-                  {options::OPT_I_Group, options::OPT_clang_i_Group,
-                   options::OPT_D, options::OPT_U,
-                   options::OPT_f_Group,
-                   options::OPT_f_clang_Group,
-                   options::OPT_g_Group,
-                   options::OPT_M_Group,
-                   options::OPT_O_Group,
-                   options::OPT_W_Group});
+  Args.AddAllArgs(CmdArgs, {options::OPT_I_Group, options::OPT_clang_i_Group,
+                            options::OPT_D, options::OPT_U,
+                            options::OPT_f_Group, options::OPT_f_clang_Group,
+                            options::OPT_g_Group, options::OPT_M_Group,
+                            options::OPT_O_Group, options::OPT_W_Group});
+
+  // If we're producing a dependency file, and assembly is the final action,
+  // then the name of the target in the dependency file should be the '.o'
+  // file, not the '.s' file produced by this step. For example, instead of
+  //  /tmp/mumble.s: mumble.c .../someheader.h
+  // the filename on the lefthand side should be "mumble.o"
+  if (Args.getLastArg(options::OPT_MF) && !Args.getLastArg(options::OPT_MT) &&
+      C.getActions().size() == 1 &&
+      C.getActions()[0]->getKind() == Action::AssembleJobClass) {
+    Arg *A = Args.getLastArg(options::OPT_o);
+    if (A) {
+      CmdArgs.push_back("-MT");
+      CmdArgs.push_back(Args.MakeArgString(A->getValue()));
+    }
+  }
+
   CmdArgs.push_back("-fno-exceptions"); // Always do this even if unspecified.
 
   CmdArgs.push_back(II.getFilename());
