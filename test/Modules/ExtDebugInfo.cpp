@@ -3,8 +3,8 @@
 
 // Modules:
 // RUN: %clang_cc1 -x objective-c++ -std=c++11 -g -dwarf-ext-refs -fmodules \
-// RUN:     -triple %itanium_abi_triple \
 // RUN:     -fmodule-format=obj -fimplicit-module-maps -DMODULES \
+// RUN:     -triple %itanium_abi_triple \
 // RUN:     -fmodules-cache-path=%t %s -I %S/Inputs -I %t -emit-llvm -o %t-mod.ll
 // RUN: cat %t-mod.ll |  FileCheck %s
 
@@ -35,15 +35,8 @@ enum {
 auto anon_enum = DebugCXX::e2;
 char _anchor = anon_enum + conflicting_uid;
 
-// CHECK: ![[ANON_ENUM:[0-9]+]] = !DICompositeType(tag: DW_TAG_enumeration_type
-// CHECK-SAME:             scope: ![[MOD:[0-9]+]],
-// CHECK-SAME: {{.*}}line: 16, {{.*}}, elements: ![[EE:[0-9]+]])
-
 // CHECK: ![[NS:.*]] = !DINamespace(name: "DebugCXX", scope: ![[MOD:[0-9]+]],
 // CHECK: ![[MOD]] = !DIModule(scope: null, name: {{.*}}DebugCXX
-
-// CHECK: ![[EE]] = !{![[E2:[0-9]+]]}
-// CHECK: ![[E2]] = !DIEnumerator(name: "e2", value: 50)
 
 // CHECK: !DICompositeType(tag: DW_TAG_structure_type, name: "Struct",
 // CHECK-SAME:             scope: ![[NS]],
@@ -72,6 +65,8 @@ char _anchor = anon_enum + conflicting_uid;
 // CHECK: !DIDerivedType(tag: DW_TAG_member, name: "static_member",
 // CHECK-SAME:           scope: !"_ZTSN8DebugCXX6StructE"
 
-// CHECK: !DIGlobalVariable(name: "anon_enum", {{.*}}, type: ![[ANON_ENUM]]
+// CHECK: !DIGlobalVariable(name: "anon_enum", {{.*}}, type: ![[ANON_ENUM:[0-9]+]]
+// CHECK: !DICompositeType(tag: DW_TAG_enumeration_type, scope: ![[NS]],
+// CHECK-SAME:             line: 16
 
-// CHECK: !DIImportedEntity(tag: DW_TAG_imported_declaration, scope: !0, entity: !"_ZTSN8DebugCXX6StructE", line: [[@LINE-53]])
+// CHECK: !DIImportedEntity(tag: DW_TAG_imported_declaration, scope: !0, entity: !"_ZTSN8DebugCXX6StructE", line: 24)
