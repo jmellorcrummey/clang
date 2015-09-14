@@ -82,8 +82,8 @@ void call() {
 // CHECK-NOT: attributes #[[NOAI]] = {{.*alwaysinline.*}}
 
 // CHECK-USE-LABEL: define void @g()
-// CHECK-USE-NEXT:   entry:
-// CHECK-USE-NEXT:     call void @f1.alwaysinline()
+// CHECK-USE-NOT:      ret void
+// CHECK-USE:          call void @f1.alwaysinline()
 // CHECK-USE-NEXT:     call void @f2.alwaysinline()
 // CHECK-USE-NEXT:     call void @f3.alwaysinline()
 // CHECK-USE-NEXT:     call void @f4.alwaysinline()
@@ -93,8 +93,8 @@ void call() {
 // CHECK-USE-NEXT:     ret void
 
 // CHECK-USE-LABEL: define void @h()
-// CHECK-USE-NEXT:   entry:
-// CHECK-USE-NEXT:     store void ()* @f1,
+// CHECK-USE-NOT:      ret void
+// CHECK-USE:          store void ()* @f1,
 // CHECK-USE-NEXT:     store void ()* @f2,
 // CHECK-USE-NEXT:     store void ()* @f3,
 // CHECK-USE-NEXT:     store void ()* @f4,

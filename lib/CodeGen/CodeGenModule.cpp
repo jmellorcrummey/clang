@@ -494,8 +494,12 @@ void CodeGenModule::RewriteAlwaysInlineFunction(llvm::Function *Fn) {
   FindNonDirectCallUses(Fn, &NonDirectCallUses);
   // Do not create the wrapper if there are no non-direct call uses, and we are
   // not required to emit an external definition.
-  if (NonDirectCallUses.empty() && Fn->isDiscardableIfUnused())
+  if (NonDirectCallUses.empty() && Fn->isDiscardableIfUnused()) {
+    // An always inline function with no wrapper cannot legitimately use the
+    // function's COMDAT symbol.
+    Fn->setComdat(nullptr);
     return;
+  }
 
   llvm::FunctionType *FT = Fn->getFunctionType();
   llvm::LLVMContext &Ctx = getModule().getContext();
@@ -535,6 +539,12 @@ void CodeGenModule::RewriteAlwaysInlineFunction(llvm::Function *Fn) {
     StubFn->setComdat(Fn->getComdat());
 
   ReplaceUsesWith(NonDirectCallUses, Fn, StubFn);
+
+  // Replace all metadata uses with the stub. This is primarily to reattach
+  // DISubprogram metadata to the stub, because that's what will be emitted in
+  // the object file.
+  if (Fn->isUsedByMetadata())
+    llvm::ValueAsMetadata::handleRAUW(Fn, StubFn);
 }
 
 void CodeGenModule::RewriteAlwaysInlineFunctions() {

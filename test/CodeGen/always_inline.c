@@ -23,6 +23,6 @@ int f3(void) { return f2(); }
 // CHECK: ret i32 7
 
 // CHECK-NO-OPTZNS: define i32 @f3()
-// CHECK-NO-OPTZNS-NEXT: entry:
-// CHECK-NO-OPTZNS-NEXT:   call i32 @f2.alwaysinline()
+// CHECK-NO-OPTZNS-NOT: ret i32
+// CHECK-NO-OPTZNS:   call i32 @f2.alwaysinline()
 // CHECK-NO-OPTZNS-NEXT:   ret i32
