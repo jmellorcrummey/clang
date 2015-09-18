@@ -3,3 +3,4 @@
 // AS_LINK: "-cc1as"
 // AS_LINK-LABEL: lld
 // AS_LINK: "-flavor" "gnu" "-target" "amdgcn--amdhsa"
+// REQUIRES: clang-driver
