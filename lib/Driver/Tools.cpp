@@ -574,8 +574,9 @@ static bool useAAPCSForMachO(const llvm::Triple &T) {
 
 // Select the float ABI as determined by -msoft-float, -mhard-float, and
 // -mfloat-abi=.
-arm::FloatABI arm::getARMFloatABI(const Driver &D, const ArgList &Args,
-                                  const llvm::Triple &Triple) {
+arm::FloatABI arm::getARMFloatABI(const ToolChain &TC, const ArgList &Args) {
+  const Driver &D = TC.getDriver();
+  const llvm::Triple Triple(TC.ComputeEffectiveClangTriple(Args));
   auto SubArch = getARMSubArchVersionNumber(Triple);
   arm::FloatABI ABI = FloatABI::Invalid;
   if (Arg *A =
@@ -663,13 +664,16 @@ arm::FloatABI arm::getARMFloatABI(const Driver &D, const ArgList &Args,
   return ABI;
 }
 
-static void getARMTargetFeatures(const Driver &D, const llvm::Triple &Triple,
+static void getARMTargetFeatures(const ToolChain &TC,
+                                 const llvm::Triple &Triple,
                                  const ArgList &Args,
                                  std::vector<const char *> &Features,
                                  bool ForAS) {
+  const Driver &D = TC.getDriver();
+
   bool KernelOrKext =
       Args.hasArg(options::OPT_mkernel, options::OPT_fapple_kext);
-  arm::FloatABI ABI = arm::getARMFloatABI(D, Args, Triple);
+  arm::FloatABI ABI = arm::getARMFloatABI(TC, Args);
   const Arg *WaCPU = nullptr, *WaFPU = nullptr;
   const Arg *WaHDiv = nullptr, *WaArch = nullptr;
 
@@ -851,15 +855,9 @@ static void getARMTargetFeatures(const Driver &D, const llvm::Triple &Triple,
     Features.push_back("+no-movt");
 }
 
-void Clang::AddARMTargetArgs(const ArgList &Args, ArgStringList &CmdArgs,
-                             bool KernelOrKext) const {
-  const Driver &D = getToolChain().getDriver();
-  // Get the effective triple, which takes into account the deployment target.
-  std::string TripleStr = getToolChain().ComputeEffectiveClangTriple(Args);
-  llvm::Triple Triple(TripleStr);
-
+void Clang::AddARMTargetArgs(const llvm::Triple &Triple, const ArgList &Args,
+                             ArgStringList &CmdArgs, bool KernelOrKext) const {
   // Select the ABI to use.
-  //
   // FIXME: Support -meabi.
   // FIXME: Parts of this are duplicated in the backend, unify this somehow.
   const char *ABIName = nullptr;
@@ -898,7 +896,7 @@ void Clang::AddARMTargetArgs(const ArgList &Args, ArgStringList &CmdArgs,
   CmdArgs.push_back(ABIName);
 
   // Determine floating point ABI from the options & target defaults.
-  arm::FloatABI ABI = arm::getARMFloatABI(D, Args, Triple);
+  arm::FloatABI ABI = arm::getARMFloatABI(getToolChain(), Args);
   if (ABI == arm::FloatABI::Soft) {
     // Floating point operations and argument passing are soft.
     // FIXME: This changes CPP defines, we need -target-soft-float.
@@ -1090,33 +1088,37 @@ static StringRef getGnuCompatibleMipsABIName(StringRef ABI) {
 
 // Select the MIPS float ABI as determined by -msoft-float, -mhard-float,
 // and -mfloat-abi=.
-static StringRef getMipsFloatABI(const Driver &D, const ArgList &Args) {
-  StringRef FloatABI;
+static mips::FloatABI getMipsFloatABI(const Driver &D, const ArgList &Args) {
+  mips::FloatABI ABI = mips::FloatABI::Invalid;
   if (Arg *A =
           Args.getLastArg(options::OPT_msoft_float, options::OPT_mhard_float,
                           options::OPT_mfloat_abi_EQ)) {
     if (A->getOption().matches(options::OPT_msoft_float))
-      FloatABI = "soft";
+      ABI = mips::FloatABI::Soft;
     else if (A->getOption().matches(options::OPT_mhard_float))
-      FloatABI = "hard";
+      ABI = mips::FloatABI::Hard;
     else {
-      FloatABI = A->getValue();
-      if (FloatABI != "soft" && FloatABI != "hard") {
+      ABI = llvm::StringSwitch<mips::FloatABI>(A->getValue())
+                .Case("soft", mips::FloatABI::Soft)
+                .Case("hard", mips::FloatABI::Hard)
+                .Default(mips::FloatABI::Invalid);
+      if (ABI == mips::FloatABI::Invalid && !StringRef(A->getValue()).empty()) {
         D.Diag(diag::err_drv_invalid_mfloat_abi) << A->getAsString(Args);
-        FloatABI = "hard";
+        ABI = mips::FloatABI::Hard;
       }
     }
   }
 
   // If unspecified, choose the default based on the platform.
-  if (FloatABI.empty()) {
+  if (ABI == mips::FloatABI::Invalid) {
     // Assume "hard", because it's a default value used by gcc.
     // When we start to recognize specific target MIPS processors,
     // we will be able to select the default more correctly.
-    FloatABI = "hard";
+    ABI = mips::FloatABI::Hard;
   }
 
-  return FloatABI;
+  assert(ABI != mips::FloatABI::Invalid && "must select an ABI");
+  return ABI;
 }
 
 static void AddTargetFeature(const ArgList &Args,
@@ -1142,8 +1144,8 @@ static void getMIPSTargetFeatures(const Driver &D, const llvm::Triple &Triple,
   AddTargetFeature(Args, Features, options::OPT_mno_abicalls,
                    options::OPT_mabicalls, "noabicalls");
 
-  StringRef FloatABI = getMipsFloatABI(D, Args);
-  if (FloatABI == "soft") {
+  mips::FloatABI FloatABI = getMipsFloatABI(D, Args);
+  if (FloatABI == mips::FloatABI::Soft) {
     // FIXME: Note, this is a hack. We need to pass the selected float
     // mode to the MipsTargetInfoBase to define appropriate macros there.
     // Now it is the only method.
@@ -1215,16 +1217,15 @@ void Clang::AddMIPSTargetArgs(const ArgList &Args,
   CmdArgs.push_back("-target-abi");
   CmdArgs.push_back(ABIName.data());
 
-  StringRef FloatABI = getMipsFloatABI(D, Args);
-
-  if (FloatABI == "soft") {
+  mips::FloatABI ABI = getMipsFloatABI(D, Args);
+  if (ABI == mips::FloatABI::Soft) {
     // Floating point operations and argument passing are soft.
     CmdArgs.push_back("-msoft-float");
     CmdArgs.push_back("-mfloat-abi");
     CmdArgs.push_back("soft");
   } else {
     // Floating point operations and argument passing are hard.
-    assert(FloatABI == "hard" && "Invalid float abi!");
+    assert(ABI == mips::FloatABI::Hard && "Invalid float abi!");
     CmdArgs.push_back("-mfloat-abi");
     CmdArgs.push_back("hard");
   }
@@ -1669,7 +1670,7 @@ static void AddGoldPlugin(const ToolChain &ToolChain, const ArgList &Args,
 /// parameter in reciprocal argument strings. Return false if there is an error
 /// parsing the refinement step. Otherwise, return true and set the Position
 /// of the refinement step in the input string.
-static bool getRefinementStep(const StringRef &In, const Driver &D,
+static bool getRefinementStep(StringRef In, const Driver &D,
                               const Arg &A, size_t &Position) {
   const char RefinementStepToken = ':';
   Position = In.find(RefinementStepToken);
@@ -2110,9 +2111,10 @@ static void getWebAssemblyTargetFeatures(const ArgList &Args,
   }
 }
 
-static void getTargetFeatures(const Driver &D, const llvm::Triple &Triple,
+static void getTargetFeatures(const ToolChain &TC, const llvm::Triple &Triple,
                               const ArgList &Args, ArgStringList &CmdArgs,
                               bool ForAS) {
+  const Driver &D = TC.getDriver();
   std::vector<const char *> Features;
   switch (Triple.getArch()) {
   default:
@@ -2128,7 +2130,7 @@ static void getTargetFeatures(const Driver &D, const llvm::Triple &Triple,
   case llvm::Triple::armeb:
   case llvm::Triple::thumb:
   case llvm::Triple::thumbeb:
-    getARMTargetFeatures(D, Triple, Args, Features, ForAS);
+    getARMTargetFeatures(TC, Triple, Args, Features, ForAS);
     break;
 
   case llvm::Triple::ppc:
@@ -3662,7 +3664,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   // Add the target features
-  getTargetFeatures(D, Triple, Args, CmdArgs, false);
+  getTargetFeatures(getToolChain(), Triple, Args, CmdArgs, false);
 
   // Add target specific flags.
   switch (getToolChain().getArch()) {
@@ -3673,7 +3675,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   case llvm::Triple::armeb:
   case llvm::Triple::thumb:
   case llvm::Triple::thumbeb:
-    AddARMTargetArgs(Args, CmdArgs, KernelOrKext);
+    // Use the effective triple, which takes into account the deployment target.
+    AddARMTargetArgs(Triple, Args, CmdArgs, KernelOrKext);
     break;
 
   case llvm::Triple::aarch64:
@@ -5526,8 +5529,7 @@ void ClangAs::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   // Add the target features
-  const Driver &D = getToolChain().getDriver();
-  getTargetFeatures(D, Triple, Args, CmdArgs, true);
+  getTargetFeatures(getToolChain(), Triple, Args, CmdArgs, true);
 
   // Ignore explicit -force_cpusubtype_ALL option.
   (void)Args.hasArg(options::OPT_force__cpusubtype__ALL);
@@ -6193,7 +6195,7 @@ bool mips::isNaN2008(const ArgList &Args, const llvm::Triple &Triple) {
 }
 
 bool mips::isFPXXDefault(const llvm::Triple &Triple, StringRef CPUName,
-                         StringRef ABIName, StringRef FloatABI) {
+                         StringRef ABIName, mips::FloatABI FloatABI) {
   if (Triple.getVendor() != llvm::Triple::ImaginationTechnologies &&
       Triple.getVendor() != llvm::Triple::MipsTechnologies)
     return false;
@@ -6203,7 +6205,7 @@ bool mips::isFPXXDefault(const llvm::Triple &Triple, StringRef CPUName,
 
   // FPXX shouldn't be used if either -msoft-float or -mfloat-abi=soft is
   // present.
-  if (FloatABI == "soft")
+  if (FloatABI == mips::FloatABI::Soft)
     return false;
 
   return llvm::StringSwitch<bool>(CPUName)
@@ -6215,7 +6217,7 @@ bool mips::isFPXXDefault(const llvm::Triple &Triple, StringRef CPUName,
 
 bool mips::shouldUseFPXX(const ArgList &Args, const llvm::Triple &Triple,
                          StringRef CPUName, StringRef ABIName,
-                         StringRef FloatABI) {
+                         mips::FloatABI FloatABI) {
   bool UseFPXX = isFPXXDefault(Triple, CPUName, ABIName, FloatABI);
 
   // FPXX shouldn't be used if -msingle-float is present.
@@ -7344,9 +7346,7 @@ void freebsd::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
              getToolChain().getArch() == llvm::Triple::armeb ||
              getToolChain().getArch() == llvm::Triple::thumb ||
              getToolChain().getArch() == llvm::Triple::thumbeb) {
-    const Driver &D = getToolChain().getDriver();
-    const llvm::Triple &Triple = getToolChain().getTriple();
-    arm::FloatABI ABI = arm::getARMFloatABI(D, Args, Triple);
+    arm::FloatABI ABI = arm::getARMFloatABI(getToolChain(), Args);
 
     if (ABI == arm::FloatABI::Hard)
       CmdArgs.push_back("-mfpu=vfp");
@@ -7933,7 +7933,7 @@ void gnutools::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
       break;
     }
 
-    switch (arm::getARMFloatABI(getToolChain().getDriver(), Args, Triple)) {
+    switch (arm::getARMFloatABI(getToolChain(), Args)) {
     case arm::FloatABI::Invalid: llvm_unreachable("must have an ABI!");
     case arm::FloatABI::Soft:
       CmdArgs.push_back(Args.MakeArgString("-mfloat-abi=soft"));
@@ -7996,13 +7996,13 @@ void gnutools::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
     }
 
     // Add the last -mfp32/-mfpxx/-mfp64 or -mfpxx if it is enabled by default.
-    StringRef MIPSFloatABI = getMipsFloatABI(getToolChain().getDriver(), Args);
     if (Arg *A = Args.getLastArg(options::OPT_mfp32, options::OPT_mfpxx,
                                  options::OPT_mfp64)) {
       A->claim();
       A->render(Args, CmdArgs);
-    } else if (mips::shouldUseFPXX(Args, getToolChain().getTriple(), CPUName,
-                                   ABIName, MIPSFloatABI))
+    } else if (mips::shouldUseFPXX(
+                   Args, getToolChain().getTriple(), CPUName, ABIName,
+                   getMipsFloatABI(getToolChain().getDriver(), Args)))
       CmdArgs.push_back("-mfpxx");
 
     // Pass on -mmips16 or -mno-mips16. However, the assembler equivalent of
@@ -8129,16 +8129,14 @@ static std::string getLinuxDynamicLinker(const ArgList &Args,
     return "/lib/ld-linux-aarch64_be.so.1";
   else if (Arch == llvm::Triple::arm || Arch == llvm::Triple::thumb) {
     if (ToolChain.getTriple().getEnvironment() == llvm::Triple::GNUEABIHF ||
-        arm::getARMFloatABI(ToolChain.getDriver(), Args,
-                            ToolChain.getTriple()) == arm::FloatABI::Hard)
+        arm::getARMFloatABI(ToolChain, Args) == arm::FloatABI::Hard)
       return "/lib/ld-linux-armhf.so.3";
     else
       return "/lib/ld-linux.so.3";
   } else if (Arch == llvm::Triple::armeb || Arch == llvm::Triple::thumbeb) {
     // TODO: check which dynamic linker name.
     if (ToolChain.getTriple().getEnvironment() == llvm::Triple::GNUEABIHF ||
-        arm::getARMFloatABI(ToolChain.getDriver(), Args,
-                            ToolChain.getTriple()) == arm::FloatABI::Hard)
+        arm::getARMFloatABI(ToolChain, Args) == arm::FloatABI::Hard)
       return "/lib/ld-linux-armhf.so.3";
     else
       return "/lib/ld-linux.so.3";
