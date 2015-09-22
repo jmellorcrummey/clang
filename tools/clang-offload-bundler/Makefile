@@ -15,10 +15,7 @@ TOOLNAME = clang-offload-bundler
 TOOL_NO_EXPORTS = 1
 
 include $(CLANG_LEVEL)/../../Makefile.config
-LINK_COMPONENTS := $(TARGETS_TO_BUILD) asmparser bitreader support option
+LINK_COMPONENTS := $(TARGETS_TO_BUILD) support option
 USEDLIBS = clangBasic.a
-
-#clangFormat.a clangToolingCore.a clangDriver.a clangRewrite.a \
-           clangLex.a clangBasic.a 
 
 include $(CLANG_LEVEL)/Makefile

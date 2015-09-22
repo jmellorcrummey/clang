@@ -6,9 +6,6 @@ add_clang_executable(clang-offload-bundler
 
 set(CLANG_OFFLOAD_BUNDLER_LIB_DEPS
   clangBasic
-#  clangFormat
-#  clangRewrite
-#  clangToolingCore
   )
 
 target_link_libraries(clang-offload-bundler
