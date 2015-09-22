@@ -30,7 +30,7 @@ static cl::opt<bool> Help("h", cl::desc("Alias for -help"), cl::Hidden);
 // Mark all our options with this category, everything else (except for -version
 // and -help) will be hidden.
 static cl::OptionCategory
-    ClangOffloadBundlerCategory("Clang-offload-bundler options");
+    ClangOffloadBundlerCategory("clang-offload-bundler options");
 
 static cl::list<std::string>
     InputFileNames("inputs", cl::CommaSeparated, cl::OneOrMore,
