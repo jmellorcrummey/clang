@@ -183,6 +183,21 @@ private:
   /// stored in it, and will clean them up when torn down.
   mutable llvm::StringMap<ToolChain *> ToolChains;
 
+  /// \brief Cache of all the ToolChains in use by the driver.
+  ///
+  /// This maps from the string representation of a triple that refers to an
+  /// offloading target to a ToolChain created targeting that triple. The driver
+  /// owns all the ToolChain objects stored in it, and will clean them up when
+  /// torn down. We use a different cache for offloading as it is possible to
+  /// have offloading toolchains with the same triple the host has, and the
+  /// implementation has to differentiate the two in order to adjust the
+  /// commands for offloading.
+  mutable llvm::StringMap<ToolChain *> OffloadToolChains;
+
+  /// \brief Array of the toolchains of offloading targets in the order they
+  /// were requested by the user.
+  SmallVector<const ToolChain *, 4> OrderedOffloadingToolchains;
+
 private:
   /// TranslateInputArgs - Create a new derived argument list from the input
   /// arguments, after applying the standard argument translations.
@@ -408,9 +423,11 @@ private:
   /// \brief Retrieves a ToolChain for a particular \p Target triple.
   ///
   /// Will cache ToolChains for the life of the driver object, and create them
-  /// on-demand.
+  /// on-demand. If \a isOffloadToolChain is true the offloading toolchains
+  /// cache is used instead.
   const ToolChain &getToolChain(const llvm::opt::ArgList &Args,
-                                const llvm::Triple &Target) const;
+                                const llvm::Triple &Target,
+                                bool IsOffloadToolChain = false) const;
 
   /// @}
 

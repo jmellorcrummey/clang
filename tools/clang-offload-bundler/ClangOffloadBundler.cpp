@@ -48,13 +48,13 @@ static cl::opt<std::string>
     FilesType("type", cl::Required,
               cl::desc("Type of the files to be bundled/unbundled.\n"
                        "Current supported types are:\n"
-                       "  cpp-output\n"
-                       "  c++-cpp-output\n"
-                       "  llvm\n"
-                       "  llvm-bc\n"
-                       "  assembler\n"
-                       "  object\n"
-                       "  precompiled-header"),
+                       "  i   - cpp-output\n"
+                       "  ii  - c++-cpp-output\n"
+                       "  ll  - llvm\n"
+                       "  bc  - llvm-bc\n"
+                       "  s   - assembler\n"
+                       "  o   - object\n"
+                       "  gch - precompiled-header"),
               cl::cat(ClangOffloadBundlerCategory));
 static cl::opt<bool>
     Unbundle("unbundle",

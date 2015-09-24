@@ -77,6 +77,7 @@ Driver::~Driver() {
   delete Opts;
 
   llvm::DeleteContainerSeconds(ToolChains);
+  llvm::DeleteContainerSeconds(OffloadToolChains);
 }
 
 void Driver::ParseDriverMode(ArrayRef<const char *> Args) {
@@ -132,7 +133,9 @@ InputArgList Driver::ParseArgStrings(ArrayRef<const char *> ArgStrings) {
     }
 
     // Warn about -mcpu= without an argument.
-    if (A->getOption().matches(options::OPT_mcpu_EQ) && A->containsValue("")) {
+    if ((A->getOption().matches(options::OPT_mcpu_EQ) && A->containsValue("")) ||
+        (A->getOption().matches(options::OPT_omptargets_EQ) &&
+         !A->getNumValues())) {
       Diag(clang::diag::warn_drv_empty_joined_argument) << A->getAsString(Args);
     }
   }
@@ -451,6 +454,38 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   // Owned by the host.
   const ToolChain &TC =
       getToolChain(*UArgs, computeTargetTriple(DefaultTargetTriple, *UArgs));
+
+  // Get the toolchains for the offloading targets if any. We need to read the offloading toolchains only if we have a compatible runtime library, ant that would be either libomp or libiomp.
+  OrderedOffloadingToolchains.clear();
+
+  if (UArgs->hasFlag(options::OPT_fopenmp, options::OPT_fopenmp_EQ,
+      options::OPT_fno_openmp, false)){
+    StringRef OpenMPRuntimeName(CLANG_DEFAULT_OPENMP_RUNTIME);
+    if (const Arg *A = Args.getLastArg(options::OPT_fopenmp_EQ))
+      OpenMPRuntimeName = A->getValue();
+
+    if (OpenMPRuntimeName == "libomp" || OpenMPRuntimeName == "libiomp5"){
+      Arg *Tgts = UArgs->getLastArg(options::OPT_omptargets_EQ);
+
+      // If omptargets was specified use only the required targets
+      if (Tgts && Tgts->getNumValues()) {
+        for (unsigned v = 0; v < Tgts->getNumValues(); ++v) {
+          std::string error;
+          const char *Val = Tgts->getValue(v);
+
+          llvm::Triple TT(Val);
+
+          // If the specified target is invalid, emit error
+          if (TT.getArch() == llvm::Triple::UnknownArch)
+            Diag(clang::diag::err_drv_invalid_omp_target) << Val;
+          else {
+            const ToolChain &OffloadTC = getToolChain(*UArgs, TT, /*IsOffloadToolChain=*/true);
+            OrderedOffloadingToolchains.push_back(&OffloadTC);
+          }
+        }
+      }
+    }
+  }
 
   // The compilation takes ownership of Args.
   Compilation *C = new Compilation(*this, TC, UArgs.release(), TranslatedArgs);
@@ -1753,6 +1788,165 @@ static const Tool *selectToolForJob(Compilation &C, bool SaveTemps,
   return ToolForJob;
 }
 
+/// \brief Construct the job for a given action.
+static void DumpJobBindings(ArrayRef<const ToolChain*> TCs, StringRef ToolName,
+    ArrayRef<const InputInfo> Inputs, ArrayRef<const InputInfo> Outputs){
+
+  llvm::errs() << "# \"";
+  for (unsigned i = 0, e = TCs.size(); i != e; ++i) {
+    llvm::errs() << TCs[i]->getTripleString();
+    if (i + 1 != e)
+      llvm::errs() << ", ";
+  }
+
+  llvm::errs() << "\" - \"" << ToolName << "\", ";
+  llvm::errs() << (Inputs.size() > 1) ? "inputs" : "input" << ": [";
+  for (unsigned i = 0, e = Inputs.size(); i != e; ++i) {
+    llvm::errs() << Inputs[i].getAsString();
+    if (i + 1 != e)
+      llvm::errs() << ", ";
+  }
+  llvm::errs() << "], ";
+  llvm::errs() << (Outputs.size() > 1) ? "outputs" : "output" << ": [";
+  for (unsigned i = 0, e = Outputs.size(); i != e; ++i) {
+    llvm::errs() << Outputs[i].getAsString();
+    if (i + 1 != e)
+      llvm::errs() << ", ";
+  }
+  llvm::errs() << "]\n";
+  return;
+}
+
+/// \brief Dumps the detail of the job about to be created.
+static void ConstructJob(Compilation &C,
+    const Tool *T,
+    const JobAction &JA,
+    const InputInfo &Result,
+    const InputInfoList &InputInfos,
+    const ToolChain *HostTC,
+    ArrayRef<const ToolChain *> OffloadingTCs,
+    const char *BoundArch,
+    const char *LinkingOutput,
+    bool DumpOnly){
+
+  auto Args = C.getArgsForToolChain(HostTC, BoundArch);
+
+  // If we don't have any offloading, just create the jobs.
+  if (OffloadingTCs.empty()){
+    if (DumpOnly)
+      DumpJobBindings(HostTC, T->getName(), InputInfos, Result);
+    else
+      T->ConstructJob(C, *JA, Result, InputInfos, Args, LinkingOutput);
+    return;
+  }
+
+  // An array with all the tool chains that matter for this job.
+  SmallVector<const ToolChain*, 4> AllTCs;
+  AllTCs.push_back(HostTC);
+  AllTCs.insert(OffloadingTCs.begin(),OffloadingTCs.end());
+
+  // Create a helper to create the temporary files for the bundles.
+  typedef SmallVector<std::string, 4> BundleFileNames;
+  auto CreateBundleTemporaryFile = [&C, &AllTCs] (BundleFileNames &Names, InputInfo BaseFileInfo, bool IsUnbundle) {
+    bool IsHost = true;
+    for (auto *TC : AllTCs){
+      SmallString<128> Prefix;
+      Prefix = (IsUnbundle) ? "clang-offload-input-bundle-" : "clang-offload-output-bundle-";
+      Prefix += (IsHost) ? "host-" : "target-";
+      Prefix += TC->getTripleString();
+      Names.push_back(C.getDriver().GetTemporaryPath(Prefix, types::getTypeTempSuffix(BaseFileInfo.getType())));
+      // Host is only the first toolchain
+      IsHost = false;
+    }
+  };
+
+  // Create the inputs for each tool chain tool. That may require unbundling an
+  // input.
+  SmallVector<InputInfoList, 8> InputsPerToolChain(AllTCs.size());
+  for (auto II : InputInfos) {
+    // If this is a preprocess job, we don't need to unbundle because the inputs
+    // are source files. Also we only unbundle files.
+    if (isa<PreprocessJobAction>(JA) || !II.isFilename()){
+      for (auto &I : InputsPerToolChain)
+        I.push_back(II);
+      continue;
+    }
+
+    // Unbundling command looks like this:
+    // clang-offload-bundler -type=object
+    //   -omptargets=host-triple,tgt1-triple,tgt2-triple
+    //   -inputs=input_file
+    //   -outputs=unbundle_file_host,unbundle_file_tgt1,unbundle_file_tgt2"
+    //   -unbundle
+
+    // Get the executable.
+    const char *BundlerExec =
+          Args.MakeArgString(C.getDriver().Dir + "/clang-offload-bundler");
+
+    ArgStringList CmdArgs;
+
+    // Get the type.
+    CmdArgs.push_back(Args.MakeArgString("-type=" + types::getTypeTempSuffix(II.getType())));
+
+    // Get the triples.
+    {
+      SmallString<128> Triples("-omptargets=");
+      for (unsigned i=0; i<AllTCs.size(); ++i){
+        if (!i)
+          Triples += ',';
+        Triples += AllTCs[i]->getTripleString();
+      }
+      CmdArgs.push_back(Args.MakeArgString(Triples));
+    }
+
+    // Get input.
+    CmdArgs.push_back(Args.MakeArgString("-inputs=" + II.getFilename()));
+
+    // Get the outputs.
+    BundleFileNames OutputFileNames;
+    CreateBundleTemporaryFile(OutputFileNames, II, /*IsUnbundle=*/true);
+    {
+      SmallString<128> Outputs("-outputs=");
+      for (unsigned i=0; i<AllTCs.size(); ++i){
+        if (!i)
+          Outputs += ',';
+        Outputs += OutputFileNames[i];
+        C.addTempFile(OutputFileNames[i]);
+      }
+      CmdArgs.push_back(Args.MakeArgString(Outputs));
+    }
+
+    CmdArgs.push_back("-unbundle");
+
+    // Create the command to unbundle the files. All the inputs and outputs are
+    // already encoded in the command arguments.
+    C.addCommand(
+            llvm::make_unique<Command>(JA, *this, BundlerExec, CmdArgs, None));
+
+    // Register the new inputs for each tolchain.
+    for (unsigned i=0; i<AllTCs.size(); ++i){
+      InputInfo NewII(OutputFileNames[i], II.getType(), OutputFileNames[i]);
+      InputsPerToolChain[i].push_back(NewII);
+    }
+  }
+
+  // If we are generating
+
+  if (CCCPrintBindings && !CCGenDiagnostics) {
+    llvm::errs() << "# \"" << T->getToolChain().getTripleString() << '"'
+                 << " - \"" << T->getName() << "\", inputs: [";
+    for (unsigned i = 0, e = InputInfos.size(); i != e; ++i) {
+      llvm::errs() << InputInfos[i].getAsString();
+      if (i + 1 != e)
+        llvm::errs() << ", ";
+    }
+    llvm::errs() << "], output: " << Result.getAsString() << "\n";
+  } else {
+    T->ConstructJob(C, *JA, Result, InputInfos,
+                    C.getArgsForToolChain(TC, BoundArch), LinkingOutput);
+  }
+}
+
 void Driver::BuildJobsForAction(Compilation &C, const Action *A,
                                 const ToolChain *TC, const char *BoundArch,
                                 bool AtTopLevel, bool MultipleArchs,
@@ -1869,19 +2063,9 @@ void Driver::BuildJobsForAction(Compilation &C, const Action *A,
                                           AtTopLevel, MultipleArchs),
                        A->getType(), BaseInput);
 
-  if (CCCPrintBindings && !CCGenDiagnostics) {
-    llvm::errs() << "# \"" << T->getToolChain().getTripleString() << '"'
-                 << " - \"" << T->getName() << "\", inputs: [";
-    for (unsigned i = 0, e = InputInfos.size(); i != e; ++i) {
-      llvm::errs() << InputInfos[i].getAsString();
-      if (i + 1 != e)
-        llvm::errs() << ", ";
-    }
-    llvm::errs() << "], output: " << Result.getAsString() << "\n";
-  } else {
-    T->ConstructJob(C, *JA, Result, InputInfos,
-                    C.getArgsForToolChain(TC, BoundArch), LinkingOutput);
-  }
+  ConstructJob(C, T, JA, Result, InputInfos, TC, OffloadingToolchains,
+      BoundArch, LinkingOutput,
+      /*DumpOnly=*/CCCPrintBindings && !CCGenDiagnostics);
 }
 
 const char *Driver::getDefaultImageName() const {
@@ -2177,9 +2361,17 @@ std::string Driver::GetTemporaryPath(StringRef Prefix,
 }
 
 const ToolChain &Driver::getToolChain(const ArgList &Args,
-                                      const llvm::Triple &Target) const {
+                                      const llvm::Triple &Target,
+                                      bool IsOffloadToolChain) const {
+  // If this is an offload toolchain we need to try to get it from the right
+  // cache.
+  ToolChain **TCPtr;
+  if (IsOffloadToolChain)
+    TCPtr = &OffloadToolChains[Target.str()];
+  else
+    TCPtr = &ToolChains[Target.str()];
 
-  ToolChain *&TC = ToolChains[Target.str()];
+  ToolChain *&TC = *TCPtr;
   if (!TC) {
     switch (Target.getOS()) {
     case llvm::Triple::CloudABI:

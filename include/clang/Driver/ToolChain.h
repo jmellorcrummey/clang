@@ -61,6 +61,10 @@ public:
     RM_DisabledImplicitly
   };
 
+  enum OffloadingType {
+    OT_None,
+    OT_OpenMP
+  };
 private:
   const Driver &D;
   const llvm::Triple Triple;
@@ -68,6 +72,7 @@ private:
   // We need to initialize CachedRTTIArg before CachedRTTIMode
   const llvm::opt::Arg *const CachedRTTIArg;
   const RTTIMode CachedRTTIMode;
+  OffloadingType CachedOffloadingType;
 
   /// The list of toolchain specific path prefixes to search for
   /// files.
@@ -121,6 +126,9 @@ public:
 
   const Driver &getDriver() const;
   const llvm::Triple &getTriple() const { return Triple; }
+
+  OffloadingType getffloadingType() const {return CachedOffloadingType;}
+  void setOffloadingType(OffloadingType OT);
 
   llvm::Triple::ArchType getArch() const { return Triple.getArch(); }
   StringRef getArchName() const { return Triple.getArchName(); }
