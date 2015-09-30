@@ -522,13 +522,13 @@ int main(int argc, const char **argv) {
 
   std::unique_ptr<FileHandler> FH;
   FH.reset(StringSwitch<FileHandler *>(FilesType)
-               .Case("cpp-output", new TextFileHandler(/*Comment=*/"//"))
-               .Case("c++-cpp-output", new TextFileHandler(/*Comment=*/"//"))
-               .Case("llvm", new TextFileHandler(/*Comment=*/";"))
-               .Case("llvm-bc", new BinaryFileHandler())
-               .Case("assembler", new TextFileHandler(/*Comment=*/"#"))
-               .Case("object", new BinaryFileHandler())
-               .Case("precompiled-header", new BinaryFileHandler())
+               .Case("i", new TextFileHandler(/*Comment=*/"//"))
+               .Case("ii", new TextFileHandler(/*Comment=*/"//"))
+               .Case("ll", new TextFileHandler(/*Comment=*/";"))
+               .Case("bc", new BinaryFileHandler())
+               .Case("s", new TextFileHandler(/*Comment=*/"#"))
+               .Case("o", new BinaryFileHandler())
+               .Case("gch", new BinaryFileHandler())
                .Default(nullptr));
 
   if (!FH.get()) {

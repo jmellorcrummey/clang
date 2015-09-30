@@ -61,9 +61,10 @@ public:
     RM_DisabledImplicitly
   };
 
-  enum OffloadingType {
-    OT_None,
-    OT_OpenMP
+  enum OffloadingKind {
+    OK_None,
+    OK_OpenMP_Host,
+    OK_OpenMP_Device,
   };
 private:
   const Driver &D;
@@ -72,7 +73,7 @@ private:
   // We need to initialize CachedRTTIArg before CachedRTTIMode
   const llvm::opt::Arg *const CachedRTTIArg;
   const RTTIMode CachedRTTIMode;
-  OffloadingType CachedOffloadingType;
+  OffloadingKind CachedOffloadingKind;
 
   /// The list of toolchain specific path prefixes to search for
   /// files.
@@ -85,10 +86,12 @@ private:
   mutable std::unique_ptr<Tool> Clang;
   mutable std::unique_ptr<Tool> Assemble;
   mutable std::unique_ptr<Tool> Link;
+  mutable std::unique_ptr<Tool> OffloadBundler;
   Tool *getClang() const;
   Tool *getAssemble() const;
   Tool *getLink() const;
   Tool *getClangAs() const;
+  Tool *getOffloadBundler() const;
 
   mutable std::unique_ptr<SanitizerArgs> SanitizerArguments;
 
@@ -127,8 +130,8 @@ public:
   const Driver &getDriver() const;
   const llvm::Triple &getTriple() const { return Triple; }
 
-  OffloadingType getffloadingType() const {return CachedOffloadingType;}
-  void setOffloadingType(OffloadingType OT);
+  OffloadingKind getOffloadingKind() const {return CachedOffloadingKind;}
+  void setOffloadingKind(OffloadingKind OT);
 
   llvm::Triple::ArchType getArch() const { return Triple.getArch(); }
   StringRef getArchName() const { return Triple.getArchName(); }
@@ -168,6 +171,18 @@ public:
   /// \param BoundArch - The bound architecture name, or 0.
   virtual llvm::opt::DerivedArgList *
   TranslateArgs(const llvm::opt::DerivedArgList &Args,
+                const char *BoundArch) const {
+    return nullptr;
+  }
+
+  /// TranslateOffloadArgs - Create a new derived argument list for any argument
+  /// translations this ToolChain may wish to perform if supporting offloading,
+  // or 0 if no tool chain specific translations are needed. If this tool chain
+  // does not refer to an offloading tool chain 0 is returned too.
+  ///
+  /// \param BoundArch - The bound architecture name, or 0.
+  virtual llvm::opt::DerivedArgList *
+  TranslateOffloadArgs(const llvm::opt::DerivedArgList &Args,
                 const char *BoundArch) const {
     return nullptr;
   }

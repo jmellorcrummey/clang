@@ -59,9 +59,16 @@ const DerivedArgList &Compilation::getArgsForToolChain(const ToolChain *TC,
 
   DerivedArgList *&Entry = TCArgs[std::make_pair(TC, BoundArch)];
   if (!Entry) {
-    Entry = TC->TranslateArgs(*TranslatedArgs, BoundArch);
-    if (!Entry)
-      Entry = TranslatedArgs;
+    DerivedArgList *DefaultArgs = TC->TranslateArgs(*TranslatedArgs, BoundArch);
+    Entry = (DefaultArgs) ? DefaultArgs : TranslatedArgs;
+
+    // Check if there is any offloading specific translation to do.
+    DerivedArgList *OffloadArgs = TC->TranslateOffloadArgs(*Entry, BoundArch);
+    if (OffloadArgs) {
+      // There are offloading translated args, so we have to use them instead.
+      delete DefaultArgs;
+      Entry = OffloadArgs;
+    }
   }
 
   return *Entry;

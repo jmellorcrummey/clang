@@ -55,9 +55,11 @@ public:
     DsymutilJobClass,
     VerifyDebugInfoJobClass,
     VerifyPCHJobClass,
+    OffloadBundlingJobClass,
+    OffloadUnbundlingJobClass,
 
     JobClassFirst=PreprocessJobClass,
-    JobClassLast=VerifyPCHJobClass
+    JobClassLast=OffloadUnbundlingJobClass
   };
 
   static const char *getClassName(ActionClass AC);
@@ -175,6 +177,7 @@ public:
 class JobAction : public Action {
   virtual void anchor();
 protected:
+  JobAction(ActionClass Kind, std::unique_ptr<Action> Input);
   JobAction(ActionClass Kind, std::unique_ptr<Action> Input, types::ID Type);
   JobAction(ActionClass Kind, const ActionList &Inputs, types::ID Type);
 
@@ -182,6 +185,28 @@ public:
   static bool classof(const Action *A) {
     return (A->getKind() >= JobClassFirst &&
             A->getKind() <= JobClassLast);
+  }
+};
+
+class OffloadBundlingJobAction : public JobAction {
+  void anchor() override;
+public:
+  // Offloading bundling doesn't change the type of output.
+  OffloadBundlingJobAction(std::unique_ptr<Action> Input);
+
+  static bool classof(const Action *A) {
+    return A->getKind() == OffloadBundlingJobClass;
+  }
+};
+
+class OffloadUnbundlingJobAction : public JobAction {
+  void anchor() override;
+public:
+  // Offloading unbundling doesn't change the type of output.
+  OffloadUnbundlingJobAction(std::unique_ptr<Action> Input);
+
+  static bool classof(const Action *A) {
+    return A->getKind() == OffloadUnbundlingJobClass;
   }
 };
 

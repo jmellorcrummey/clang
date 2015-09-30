@@ -179,12 +179,23 @@ static void addDirectoryList(const ArgList &Args, ArgStringList &CmdArgs,
 static void AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
                             const ArgList &Args, ArgStringList &CmdArgs) {
   const Driver &D = TC.getDriver();
+  unsigned NumberOfInputs = Inputs.size();
+
+  // If the current toolchain is an OpenMP host toolchain, we need to ignore
+  // the last inputs - one for each offloading device - as they are going to be
+  // embedded in the fat binary by a custom linker script.
+  if (TC.getOffloadingKind() == ToolChain::OK_OpenMP_Host) {
+    Arg *Tgts = Args.getLastArg(options::OPT_omptargets_EQ);
+    assert( Tgts && Tgts->getNumValues() && "OpenMP offloading has to have targets specified.");
+    NumberOfInputs -= Tgts->getNumValues();
+  }
 
   // Add extra linker input arguments which are not treated as inputs
   // (constructed via -Xarch_).
   Args.AddAllArgValues(CmdArgs, options::OPT_Zlinker_input);
 
-  for (const auto &II : Inputs) {
+  for (unsigned i=0; i<NumberOfInputs; ++i) {
+    const auto &II = Inputs[i];
     if (!TC.HasNativeLLVMSupport()) {
       // Don't try to pass LLVM inputs unless we have native support.
       if (II.getType() == types::TY_LLVM_IR ||
@@ -220,6 +231,93 @@ static void AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
   //                and only supported on native toolchains.
   if (!TC.isCrossCompiling())
     addDirectoryList(Args, CmdArgs, "-L", "LIBRARY_PATH");
+}
+
+/// \brief Add OpenMP linker script arguments at the end of the argument list
+/// so that the fat binary is built by embedding each of the device images into
+/// the host. The device images are the last inputs, one for each device and
+/// come in the same order the triples are passed through the omptargets option.
+/// The linker script also defines a few symbols required by the code generation
+/// so that the images can be easily retrieved at runtime by the offloading
+/// library. This should be used in tool chains that support linker scripts.
+static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
+                                  const InputInfo &Output,
+                                  const InputInfoList &Inputs,
+                                  const ArgList &Args, ArgStringList &CmdArgs) {
+
+  // If this is not an OpenMP host toolchain, we don't need to do anything.
+  if (TC.getOffloadingKind() != ToolChain::OK_OpenMP_Host)
+    return;
+
+  // Gather the pairs (target triple)-(file name). The files names are at the end of the input list. So we do a reverse scanning.
+  SmallVector<std::pair<const char *, const char *>, 4> Targets;
+
+  Arg *Tgts = Args.getLastArg(options::OPT_omptargets_EQ);
+  assert( Tgts && Tgts->getNumValues() && "OpenMP offloading has to have targets specified.");
+
+  auto TriplesIt = Tgts->getValues().end();
+  auto FileNamesIt = Inputs.end();
+  for (unsigned i=0; i<Tgts->getNumValues(); ++i){
+    --TriplesIt;
+    --FileNamesIt;
+    Targets.push_back(std::make_pair(*TriplesIt,FileNamesIt->getFilename()));
+  }
+
+  // Create temporary linker script
+  StringRef Name = llvm::sys::path::filename(Output.getFilename());
+  std::pair<StringRef, StringRef> Split = Name.rsplit('.');
+  std::string TmpName = C.getDriver().GetTemporaryPath(Split.first, "lk");
+  const char *LKS = C.addTempFile(C.getArgs().MakeArgString(TmpName.c_str()));
+
+  // Open script file in order to write contents
+  std::error_code EC;
+  llvm::raw_fd_ostream lksf(LKS, EC, llvm::sys::fs::F_None);
+
+  if (EC) {
+    C.getDriver().Diag(clang::diag::err_unable_to_make_temp) << EC.message();
+    return;
+  }
+
+  // Add commands to embed target binaries. We ensure that each section and
+  // image s 16-byte aligned. This is not mandatory, but increases the
+  // likelihood of data to be aligned with a cache block in several main host
+  // machines.
+  lksf << "TARGET(binary)\n";
+  for (unsigned i = 0; i < Targets.size(); ++i)
+    lksf << "INPUT(" << Targets[i].second << ")\n";
+
+  lksf << "SECTIONS\n";
+  lksf << "{\n";
+  lksf << "  .openmptgt :\n";
+  lksf << "  ALIGN(0x10)\n";
+  lksf << "  {\n";
+
+  for (unsigned i = 0; i < Targets.size(); ++i) {
+    std::string tgt_name(Targets[i].first);
+    std::replace(tgt_name.begin(), tgt_name.end(), '-', '_');
+    lksf << "    . = ALIGN(0x10);\n";
+    lksf << "    PROVIDE_HIDDEN(__omptgt__img_start_" << tgt_name << " = .);\n";
+    lksf << "    " << Targets[i].second << "\n";
+    lksf << "    PROVIDE_HIDDEN(__omptgt__img_end_" << tgt_name << " = .);\n";
+  }
+
+  lksf << "  }\n";
+  // Add commands to define host entries begin and end
+  lksf << "  .openmptgt_host_entries :\n";
+  lksf << "  ALIGN(0x10)\n";
+  lksf << "  SUBALIGN(0x01)\n";
+  lksf << "  {\n";
+  lksf << "    PROVIDE_HIDDEN(__omptgt__host_entries_begin = .);\n";
+  lksf << "    *(.openmptgt_host_entries)\n";
+  lksf << "    PROVIDE_HIDDEN(__omptgt__host_entries_end = .);\n";
+  lksf << "  }\n";
+  lksf << "}\n";
+  lksf << "INSERT BEFORE .data\n";
+
+  lksf.close();
+
+  CmdArgs.push_back("-T");
+  CmdArgs.push_back(LKS);
 }
 
 /// \brief Determine whether Objective-C automated reference counting is
@@ -3160,10 +3258,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   assert(Inputs.size() >= 1 && "Must have at least one input.");
   const InputInfo &Input = Inputs[0];
   // CUDA compilation may have multiple inputs (source file + results of
-  // device-side compilations). All other jobs are expected to have exactly one
-  // input.
+  // device-side compilations). OpenMP offloading device compile jobs also take
+  // the host IR as an extra input. All other jobs are expected to have exactly
+  // one input.
   bool IsCuda = types::isCuda(Input.getType());
-  assert((IsCuda || Inputs.size() == 1) && "Unable to handle multiple inputs.");
+  bool IsOpenMPDeviceCompileJob = isa<CompileJobAction>(JA) && getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Device;
+  assert((IsCuda || (IsOpenMPDeviceCompileJob && Inputs.size() == 2) || Inputs.size() == 1) && "Unable to handle multiple inputs.");
 
   // Invoke ourselves in -cc1 mode.
   //
@@ -5111,6 +5211,31 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back(I->getFilename());
     }
 
+  // OpenMP offloading device jobs take the argument -omp-host-ir-file-path
+  // to specify the result of the compile phase on the host, so the meaningful
+  // device declarations can be identified. Also, -fopenmp-is-device is passed
+  // along to tell the frontend that it is generating code for a device, so that
+  // only the relevant declarations are emitted.
+  if (IsOpenMPDeviceCompileJob){
+    CmdArgs.push_back("-fopenmp-is-device");
+    CmdArgs.push_back("-omp-host-ir-file-path");
+    CmdArgs.push_back(Args.MakeArgString(Inputs.back().getFilename()));
+  }
+
+  // For all the OpenMP offloading compile jobs we need to pass the targets
+  // information using -omptargets= option.
+  if (isa<CompileJobAction>(JA) && (getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Device || getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Host)){
+    SmallString<128> TargetInfo("-omptargets=");
+
+    Arg *Tgts = Args.getLastArg(options::OPT_omptargets_EQ);
+    assert( Tgts && Tgts->getNumValues() && "OpenMP offloading has to have targets specified.");
+    for (unsigned i=0; i<Tgts->getNumValues(); ++i){
+      if (i)
+        TargetInfo += ',';
+      TargetInfo += Tgts->getValue(i);
+    }
+  }
+
   // Finally add the compile command to the compilation.
   if (Args.hasArg(options::OPT__SLASH_fallback) &&
       Output.getType() == types::TY_Object &&
@@ -5650,6 +5775,62 @@ void ClangAs::ConstructJob(Compilation &C, const JobAction &JA,
                    SplitDebugName(Args, Input));
 }
 
+void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
+                  const InputInfo &Output, const InputInfoList &Inputs,
+                  const llvm::opt::ArgList &TCArgs,
+                  const char *LinkingOutput) const {
+
+  // The (un)bundling command looks like this:
+  // clang-offload-bundler -type=bc
+  //   -omptargets=host-triple,tgt1-triple,tgt2-triple
+  //   -inputs=input_file
+  //   -outputs=unbundle_file_host,unbundle_file_tgt1,unbundle_file_tgt2"
+  //   (-unbundle)
+
+  auto BundledFile = Output;
+  auto UnbundledFiles = Inputs;
+
+  bool IsUnbundle = isa<OffloadUnbundlingJobAction>(JA);
+
+  ArgStringList CmdArgs;
+
+  // Get the type.
+  CmdArgs.push_back(TCArgs.MakeArgString(Twine("-type=") + types::getTypeTempSuffix(BundledFile.getType())));
+
+  // Get the triples. The order is the same that comes in omptargets option.
+  {
+    Arg *TargetsArg = TCArgs.getLastArg(options::OPT_omptargets_EQ);
+    SmallString<128> Triples("-omptargets=");
+    Triples += getToolChain().getTripleString();
+    for (auto *A : TargetsArg->getValues()){
+      Triples += ',';
+      Triples += A;
+    }
+    CmdArgs.push_back(TCArgs.MakeArgString(Triples));
+  }
+
+  // Get bundled file command.
+  CmdArgs.push_back(TCArgs.MakeArgString(Twine(IsUnbundle ? "-inputs=" : "-outputs=") + BundledFile.getFilename()));
+
+  // Get unbundled files command.
+  {
+    SmallString<128> UB(IsUnbundle ? "-outputs=" : "-inputs=");
+    for (unsigned i=0; i<UnbundledFiles.size(); ++i){
+      if (i)
+        UB += ',';
+      UB += UnbundledFiles[i].getFilename();
+    }
+    CmdArgs.push_back(TCArgs.MakeArgString(UB));
+  }
+
+  if (IsUnbundle)
+    CmdArgs.push_back("-unbundle");
+
+  // All the inputs are encoded as commands.
+  C.addCommand(llvm::make_unique<Command>(JA, *this, TCArgs.MakeArgString(getToolChain().GetProgramPath(getShortName())),
+                                          CmdArgs, None));
+}
+
 void GnuTool::anchor() {}
 
 void gcc::Common::ConstructJob(Compilation &C, const JobAction &JA,
@@ -5658,6 +5839,16 @@ void gcc::Common::ConstructJob(Compilation &C, const JobAction &JA,
                                const char *LinkingOutput) const {
   const Driver &D = getToolChain().getDriver();
   ArgStringList CmdArgs;
+  unsigned NumberOfInputs = Inputs.size();
+
+  // If this is a link job that requires OpenMP offloading support, we should
+  // ignore the last inputs - one for each device target - they will be embedded
+  // in the resulting fat binary by a linker script.
+  if (isa<LinkJobAction>(JA) && getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Host) {
+    Arg *Tgts = Args.getLastArg(options::OPT_omptargets_EQ);
+    assert( Tgts && Tgts->getNumValues() && "OpenMP offloading has to have targets specified.");
+    NumberOfInputs -= Tgts->getNumValues();
+  }
 
   for (const auto &A : Args) {
     if (forwardToGCC(A->getOption())) {
@@ -5729,7 +5920,8 @@ void gcc::Common::ConstructJob(Compilation &C, const JobAction &JA,
   //
   // FIXME: For the linker case specifically, can we safely convert
   // inputs into '-Wl,' options?
-  for (const auto &II : Inputs) {
+  for (unsigned i=0; i<NumberOfInputs; ++i) {
+    const auto &II = Inputs[i];
     // Don't try to pass LLVM or AST inputs to a generic gcc.
     if (II.getType() == types::TY_LLVM_IR || II.getType() == types::TY_LTO_IR ||
         II.getType() == types::TY_LLVM_BC || II.getType() == types::TY_LTO_BC)
@@ -5761,6 +5953,11 @@ void gcc::Common::ConstructJob(Compilation &C, const JobAction &JA,
       A.render(Args, CmdArgs);
     }
   }
+
+  // If this is a link job, make sure we add the OpenMP offloading linker script
+  // arguments.
+  if (isa<LinkJobAction>(JA))
+    AddOpenMPLinkerScript(getToolChain(), C, Output, Inputs, Args, CmdArgs);
 
   const std::string customGCCName = D.getCCCGenericGCCName();
   const char *GCCName;
@@ -8457,6 +8654,9 @@ void gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
         CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("crtn.o")));
     }
   }
+
+  // Add OpenMP offloading linker script args if required.
+  AddOpenMPLinkerScript(getToolChain(), C, Output, Inputs, Args, CmdArgs);
 
   C.addCommand(llvm::make_unique<Command>(JA, *this, ToolChain.Linker.c_str(),
                                           CmdArgs, Inputs));

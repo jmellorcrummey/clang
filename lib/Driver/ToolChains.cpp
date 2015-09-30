@@ -2126,6 +2126,44 @@ bool Generic_GCC::IsIntegratedAssemblerDefault() const {
   }
 }
 
+llvm::opt::DerivedArgList *Generic_GCC::TranslateOffloadArgs(const llvm::opt::DerivedArgList &Args, const char *BoundArch) const {
+  // Make sure we always generate a shared library for an OpenMP offloading
+  // target regardless the commands the user passed to the host.
+
+  if (getOffloadingKind() != OK_OpenMP_Device)
+    return nullptr;
+
+  DerivedArgList *DAL = new DerivedArgList(Args.getBaseArgs());
+  const OptTable &Opts = getDriver().getOpts();
+
+  // Request the shared library.
+  DAL->AddFlagArg(0, Opts.getOption(options::OPT_shared));
+  DAL->AddFlagArg(0, Opts.getOption(options::OPT_fPIC));
+
+  // Filter all the arguments we don't care passing to the offloading toolchain
+  // as they can mess up with the creation of a shared library.
+  for (auto *A : Args) {
+    switch ((options::ID)A->getOption().getID()) {
+    default:
+      DAL->append(A);
+      break;
+    case options::OPT_shared:
+    case options::OPT_static:
+    case options::OPT_fPIC:
+    case options::OPT_fno_PIC:
+    case options::OPT_fpic:
+    case options::OPT_fno_pic:
+    case options::OPT_fPIE:
+    case options::OPT_fno_PIE:
+    case options::OPT_fpie:
+    case options::OPT_fno_pie:
+      break;
+    }
+  }
+
+  return DAL;
+}
+
 void Generic_ELF::addClangTargetOptions(const ArgList &DriverArgs,
                                         ArgStringList &CC1Args) const {
   const Generic_GCC::GCCVersion &V = GCCInstallation.getVersion();

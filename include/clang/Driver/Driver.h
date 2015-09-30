@@ -14,6 +14,8 @@
 #include "clang/Basic/LLVM.h"
 #include "clang/Driver/Phases.h"
 #include "clang/Driver/Types.h"
+#include "clang/Driver/Tool.h"
+#include "clang/Driver/ToolChain.h"
 #include "clang/Driver/Util.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
@@ -41,11 +43,10 @@ namespace driver {
   class Action;
   class Command;
   class Compilation;
-  class InputInfo;
+  class InputAction;
   class JobList;
   class JobAction;
   class SanitizerArgs;
-  class ToolChain;
 
 /// Driver - Encapsulate logic for constructing compilation processes
 /// from a set of gcc-driver-like command line arguments.
@@ -198,7 +199,24 @@ private:
   /// were requested by the user.
   SmallVector<const ToolChain *, 4> OrderedOffloadingToolchains;
 
+  /// \brief Type for the cache of the results for the offloading host emitted
+  /// so far. The host results can be required by the device tools.
+  typedef llvm::DenseMap<const Action*, InputInfoList> OffloadingHostResultsTy;
+
 private:
+  /// CreateUnbundledOffloadingResult - Create a command to unbundle the input
+  /// and use the resulting input info. If there re inputs already cached in
+  /// OffloadingHostResults for that action use them instead. If no offloading
+  /// is being support just return the provided input info.
+  InputInfo CreateUnbundledOffloadingResult(Compilation &C, const OffloadUnbundlingJobAction* CurAction, const ToolChain *TC, InputInfo Result, OffloadingHostResultsTy &OffloadingHostResults) const;
+
+  /// CreateBundledOffloadingResult - Create a bundle of all provided results
+  /// and return the InputInfo of the bundled file.
+  InputInfo CreateBundledOffloadingResult(Compilation &C, const OffloadBundlingJobAction* CurAction, const ToolChain *TC, InputInfoList Results) const;
+
+  /// PostProcessOffloadingInputsAndResults - Update the input and output information to suit the needs of the offloading implementation. This used to, e.g., to pass extra results from host to device side and vice-versa.
+  void PostProcessOffloadingInputsAndResults(Compilation &C, const JobAction *JA, const ToolChain *TC, InputInfoList &Inputs, InputInfo &Result, OffloadingHostResultsTy &OffloadingHostResults) const;
+
   /// TranslateInputArgs - Create a new derived argument list from the input
   /// arguments, after applying the standard argument translations.
   llvm::opt::DerivedArgList *
@@ -384,7 +402,8 @@ public:
                           bool AtTopLevel,
                           bool MultipleArchs,
                           const char *LinkingOutput,
-                          InputInfo &Result) const;
+                          InputInfo &Result,
+                          OffloadingHostResultsTy &OffloadingHostResults) const;
 
   /// Returns the default name for linked images (e.g., "a.out").
   const char *getDefaultImageName() const;
@@ -423,11 +442,11 @@ private:
   /// \brief Retrieves a ToolChain for a particular \p Target triple.
   ///
   /// Will cache ToolChains for the life of the driver object, and create them
-  /// on-demand. If \a isOffloadToolChain is true the offloading toolchains
-  /// cache is used instead.
+  /// on-demand. \a OffloadingKind specifies if the toolchain being created
+  /// refers to any kind of offloading (e.g. OpenMP).
   const ToolChain &getToolChain(const llvm::opt::ArgList &Args,
                                 const llvm::Triple &Target,
-                                bool IsOffloadToolChain = false) const;
+                                ToolChain::OffloadingKind OffloadingKind = ToolChain::OK_None) const;
 
   /// @}
 
