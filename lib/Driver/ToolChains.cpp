@@ -2126,7 +2126,9 @@ bool Generic_GCC::IsIntegratedAssemblerDefault() const {
   }
 }
 
-llvm::opt::DerivedArgList *Generic_GCC::TranslateOffloadArgs(const llvm::opt::DerivedArgList &Args, const char *BoundArch) const {
+llvm::opt::DerivedArgList *
+Generic_GCC::TranslateOffloadArgs(const llvm::opt::DerivedArgList &Args,
+                                  const char *BoundArch) const {
   // Make sure we always generate a shared library for an OpenMP offloading
   // target regardless the commands the user passed to the host.
 

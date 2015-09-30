@@ -66,6 +66,7 @@ public:
     OK_OpenMP_Host,
     OK_OpenMP_Device,
   };
+
 private:
   const Driver &D;
   const llvm::Triple Triple;
@@ -130,7 +131,7 @@ public:
   const Driver &getDriver() const;
   const llvm::Triple &getTriple() const { return Triple; }
 
-  OffloadingKind getOffloadingKind() const {return CachedOffloadingKind;}
+  OffloadingKind getOffloadingKind() const { return CachedOffloadingKind; }
   void setOffloadingKind(OffloadingKind OT);
 
   llvm::Triple::ArchType getArch() const { return Triple.getArch(); }
@@ -183,7 +184,7 @@ public:
   /// \param BoundArch - The bound architecture name, or 0.
   virtual llvm::opt::DerivedArgList *
   TranslateOffloadArgs(const llvm::opt::DerivedArgList &Args,
-                const char *BoundArch) const {
+                       const char *BoundArch) const {
     return nullptr;
   }
 

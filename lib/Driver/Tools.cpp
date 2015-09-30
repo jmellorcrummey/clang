@@ -186,7 +186,8 @@ static void AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
   // embedded in the fat binary by a custom linker script.
   if (TC.getOffloadingKind() == ToolChain::OK_OpenMP_Host) {
     Arg *Tgts = Args.getLastArg(options::OPT_omptargets_EQ);
-    assert( Tgts && Tgts->getNumValues() && "OpenMP offloading has to have targets specified.");
+    assert(Tgts && Tgts->getNumValues() &&
+           "OpenMP offloading has to have targets specified.");
     NumberOfInputs -= Tgts->getNumValues();
   }
 
@@ -194,7 +195,7 @@ static void AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
   // (constructed via -Xarch_).
   Args.AddAllArgValues(CmdArgs, options::OPT_Zlinker_input);
 
-  for (unsigned i=0; i<NumberOfInputs; ++i) {
+  for (unsigned i = 0; i < NumberOfInputs; ++i) {
     const auto &II = Inputs[i];
     if (!TC.HasNativeLLVMSupport()) {
       // Don't try to pass LLVM inputs unless we have native support.
@@ -249,18 +250,20 @@ static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
   if (TC.getOffloadingKind() != ToolChain::OK_OpenMP_Host)
     return;
 
-  // Gather the pairs (target triple)-(file name). The files names are at the end of the input list. So we do a reverse scanning.
+  // Gather the pairs (target triple)-(file name). The files names are at the
+  // end of the input list. So we do a reverse scanning.
   SmallVector<std::pair<const char *, const char *>, 4> Targets;
 
   Arg *Tgts = Args.getLastArg(options::OPT_omptargets_EQ);
-  assert( Tgts && Tgts->getNumValues() && "OpenMP offloading has to have targets specified.");
+  assert(Tgts && Tgts->getNumValues() &&
+         "OpenMP offloading has to have targets specified.");
 
   auto TriplesIt = Tgts->getValues().end();
   auto FileNamesIt = Inputs.end();
-  for (unsigned i=0; i<Tgts->getNumValues(); ++i){
+  for (unsigned i = 0; i < Tgts->getNumValues(); ++i) {
     --TriplesIt;
     --FileNamesIt;
-    Targets.push_back(std::make_pair(*TriplesIt,FileNamesIt->getFilename()));
+    Targets.push_back(std::make_pair(*TriplesIt, FileNamesIt->getFilename()));
   }
 
   // Create temporary linker script
@@ -3262,8 +3265,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // the host IR as an extra input. All other jobs are expected to have exactly
   // one input.
   bool IsCuda = types::isCuda(Input.getType());
-  bool IsOpenMPDeviceCompileJob = isa<CompileJobAction>(JA) && getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Device;
-  assert((IsCuda || (IsOpenMPDeviceCompileJob && Inputs.size() == 2) || Inputs.size() == 1) && "Unable to handle multiple inputs.");
+  bool IsOpenMPDeviceCompileJob =
+      isa<CompileJobAction>(JA) &&
+      getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Device;
+  assert((IsCuda || (IsOpenMPDeviceCompileJob && Inputs.size() == 2) ||
+          Inputs.size() == 1) &&
+         "Unable to handle multiple inputs.");
 
   // Invoke ourselves in -cc1 mode.
   //
@@ -5216,7 +5223,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // device declarations can be identified. Also, -fopenmp-is-device is passed
   // along to tell the frontend that it is generating code for a device, so that
   // only the relevant declarations are emitted.
-  if (IsOpenMPDeviceCompileJob){
+  if (IsOpenMPDeviceCompileJob) {
     CmdArgs.push_back("-fopenmp-is-device");
     CmdArgs.push_back("-omp-host-ir-file-path");
     CmdArgs.push_back(Args.MakeArgString(Inputs.back().getFilename()));
@@ -5224,12 +5231,15 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   // For all the OpenMP offloading compile jobs we need to pass the targets
   // information using -omptargets= option.
-  if (isa<CompileJobAction>(JA) && (getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Device || getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Host)){
+  if (isa<CompileJobAction>(JA) &&
+      (getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Device ||
+       getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Host)) {
     SmallString<128> TargetInfo("-omptargets=");
 
     Arg *Tgts = Args.getLastArg(options::OPT_omptargets_EQ);
-    assert( Tgts && Tgts->getNumValues() && "OpenMP offloading has to have targets specified.");
-    for (unsigned i=0; i<Tgts->getNumValues(); ++i){
+    assert(Tgts && Tgts->getNumValues() &&
+           "OpenMP offloading has to have targets specified.");
+    for (unsigned i = 0; i < Tgts->getNumValues(); ++i) {
       if (i)
         TargetInfo += ',';
       TargetInfo += Tgts->getValue(i);
@@ -5776,9 +5786,10 @@ void ClangAs::ConstructJob(Compilation &C, const JobAction &JA,
 }
 
 void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
-                  const InputInfo &Output, const InputInfoList &Inputs,
-                  const llvm::opt::ArgList &TCArgs,
-                  const char *LinkingOutput) const {
+                                  const InputInfo &Output,
+                                  const InputInfoList &Inputs,
+                                  const llvm::opt::ArgList &TCArgs,
+                                  const char *LinkingOutput) const {
 
   // The (un)bundling command looks like this:
   // clang-offload-bundler -type=bc
@@ -5795,14 +5806,15 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
   ArgStringList CmdArgs;
 
   // Get the type.
-  CmdArgs.push_back(TCArgs.MakeArgString(Twine("-type=") + types::getTypeTempSuffix(BundledFile.getType())));
+  CmdArgs.push_back(TCArgs.MakeArgString(
+      Twine("-type=") + types::getTypeTempSuffix(BundledFile.getType())));
 
   // Get the triples. The order is the same that comes in omptargets option.
   {
     Arg *TargetsArg = TCArgs.getLastArg(options::OPT_omptargets_EQ);
     SmallString<128> Triples("-omptargets=");
     Triples += getToolChain().getTripleString();
-    for (auto *A : TargetsArg->getValues()){
+    for (auto *A : TargetsArg->getValues()) {
       Triples += ',';
       Triples += A;
     }
@@ -5810,12 +5822,14 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   // Get bundled file command.
-  CmdArgs.push_back(TCArgs.MakeArgString(Twine(IsUnbundle ? "-inputs=" : "-outputs=") + BundledFile.getFilename()));
+  CmdArgs.push_back(
+      TCArgs.MakeArgString(Twine(IsUnbundle ? "-inputs=" : "-outputs=") +
+                           BundledFile.getFilename()));
 
   // Get unbundled files command.
   {
     SmallString<128> UB(IsUnbundle ? "-outputs=" : "-inputs=");
-    for (unsigned i=0; i<UnbundledFiles.size(); ++i){
+    for (unsigned i = 0; i < UnbundledFiles.size(); ++i) {
       if (i)
         UB += ',';
       UB += UnbundledFiles[i].getFilename();
@@ -5827,8 +5841,10 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-unbundle");
 
   // All the inputs are encoded as commands.
-  C.addCommand(llvm::make_unique<Command>(JA, *this, TCArgs.MakeArgString(getToolChain().GetProgramPath(getShortName())),
-                                          CmdArgs, None));
+  C.addCommand(llvm::make_unique<Command>(
+      JA, *this,
+      TCArgs.MakeArgString(getToolChain().GetProgramPath(getShortName())),
+      CmdArgs, None));
 }
 
 void GnuTool::anchor() {}
@@ -5844,9 +5860,11 @@ void gcc::Common::ConstructJob(Compilation &C, const JobAction &JA,
   // If this is a link job that requires OpenMP offloading support, we should
   // ignore the last inputs - one for each device target - they will be embedded
   // in the resulting fat binary by a linker script.
-  if (isa<LinkJobAction>(JA) && getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Host) {
+  if (isa<LinkJobAction>(JA) &&
+      getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Host) {
     Arg *Tgts = Args.getLastArg(options::OPT_omptargets_EQ);
-    assert( Tgts && Tgts->getNumValues() && "OpenMP offloading has to have targets specified.");
+    assert(Tgts && Tgts->getNumValues() &&
+           "OpenMP offloading has to have targets specified.");
     NumberOfInputs -= Tgts->getNumValues();
   }
 
@@ -5920,7 +5938,7 @@ void gcc::Common::ConstructJob(Compilation &C, const JobAction &JA,
   //
   // FIXME: For the linker case specifically, can we safely convert
   // inputs into '-Wl,' options?
-  for (unsigned i=0; i<NumberOfInputs; ++i) {
+  for (unsigned i = 0; i < NumberOfInputs; ++i) {
     const auto &II = Inputs[i];
     // Don't try to pass LLVM or AST inputs to a generic gcc.
     if (II.getType() == types::TY_LLVM_IR || II.getType() == types::TY_LTO_IR ||

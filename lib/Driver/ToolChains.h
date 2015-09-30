@@ -169,7 +169,9 @@ public:
   bool isPIEDefault() const override;
   bool isPICDefaultForced() const override;
   bool IsIntegratedAssemblerDefault() const override;
-  llvm::opt::DerivedArgList *TranslateOffloadArgs(const llvm::opt::DerivedArgList &Args, const char *BoundArch) const override;
+  llvm::opt::DerivedArgList *
+  TranslateOffloadArgs(const llvm::opt::DerivedArgList &Args,
+                       const char *BoundArch) const override;
 
 protected:
   Tool *getTool(Action::ActionClass AC) const override;

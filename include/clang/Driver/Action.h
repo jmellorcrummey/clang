@@ -58,8 +58,8 @@ public:
     OffloadBundlingJobClass,
     OffloadUnbundlingJobClass,
 
-    JobClassFirst=PreprocessJobClass,
-    JobClassLast=OffloadUnbundlingJobClass
+    JobClassFirst = PreprocessJobClass,
+    JobClassLast = OffloadUnbundlingJobClass
   };
 
   static const char *getClassName(ActionClass AC);
@@ -190,6 +190,7 @@ public:
 
 class OffloadBundlingJobAction : public JobAction {
   void anchor() override;
+
 public:
   // Offloading bundling doesn't change the type of output.
   OffloadBundlingJobAction(std::unique_ptr<Action> Input);
@@ -201,6 +202,7 @@ public:
 
 class OffloadUnbundlingJobAction : public JobAction {
   void anchor() override;
+
 public:
   // Offloading unbundling doesn't change the type of output.
   OffloadUnbundlingJobAction(std::unique_ptr<Action> Input);

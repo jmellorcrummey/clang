@@ -130,7 +130,8 @@ public:
 /// \brief Offload bundler tool.
 class LLVM_LIBRARY_VISIBILITY OffloadBundler : public Tool {
 public:
-  OffloadBundler(const ToolChain &TC) : Tool("Offload bundler", "clang-offload-bundler", TC) {}
+  OffloadBundler(const ToolChain &TC)
+      : Tool("Offload bundler", "clang-offload-bundler", TC) {}
 
   bool hasIntegratedCPP() const override { return false; }
   void ConstructJob(Compilation &C, const JobAction &JA,

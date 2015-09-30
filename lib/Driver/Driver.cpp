@@ -133,9 +133,8 @@ InputArgList Driver::ParseArgStrings(ArrayRef<const char *> ArgStrings) {
     }
 
     // Warn about -mcpu= without an argument.
-    if ((A->getOption().matches(options::OPT_mcpu_EQ) && A->containsValue(""))
-        || (A->getOption().matches(options::OPT_omptargets_EQ)
-            && !A->getNumValues())) {
+    if ((A->getOption().matches(options::OPT_mcpu_EQ) || A->getOption().matches(options::OPT_omptargets_EQ)) &&
+         A->containsValue("")) {
       Diag(clang::diag::warn_drv_empty_joined_argument) << A->getAsString(Args);
     }
   }
@@ -194,7 +193,7 @@ phases::ID Driver::getFinalPhase(const DerivedArgList &DAL,
 /// \brief Return true if the provided arguments require OpenMP offloading.
 static bool RequiresOpenMPOffloading(ArgList &Args) {
   if (Args.hasFlag(options::OPT_fopenmp, options::OPT_fopenmp_EQ,
-      options::OPT_fno_openmp, false)) {
+                   options::OPT_fno_openmp, false)) {
     StringRef OpenMPRuntimeName(CLANG_DEFAULT_OPENMP_RUNTIME);
     if (const Arg *A = Args.getLastArg(options::OPT_fopenmp_EQ))
       OpenMPRuntimeName = A->getValue();
@@ -206,13 +205,14 @@ static bool RequiresOpenMPOffloading(ArgList &Args) {
 }
 /// \brief Return true if the provided tool chain require OpenMP offloading.
 static bool RequiresOpenMPOffloading(const ToolChain *TC) {
-  return TC->getOffloadingKind() == ToolChain::OK_OpenMP_Host
-      || TC->getOffloadingKind() == ToolChain::OK_OpenMP_Device;
+  return TC->getOffloadingKind() == ToolChain::OK_OpenMP_Host ||
+         TC->getOffloadingKind() == ToolChain::OK_OpenMP_Device;
 }
 
 /// \brief Dump the job bindings for a given action.
-static void DumpJobBindings(ArrayRef<const ToolChain*> TCs, StringRef ToolName,
-    ArrayRef<InputInfo> Inputs, ArrayRef<InputInfo> Outputs) {
+static void DumpJobBindings(ArrayRef<const ToolChain *> TCs, StringRef ToolName,
+                            ArrayRef<InputInfo> Inputs,
+                            ArrayRef<InputInfo> Outputs) {
 
   llvm::errs() << "# \"";
   for (unsigned i = 0, e = TCs.size(); i != e; ++i) {
@@ -221,56 +221,56 @@ static void DumpJobBindings(ArrayRef<const ToolChain*> TCs, StringRef ToolName,
       llvm::errs() << ", ";
   }
 
-  llvm::errs() << "\" - \"" << ToolName << "\", ";
-  llvm::errs() << ((Inputs.size() > 1) ? "inputs" : "input") << ": [";
+  llvm::errs() << "\" - \"" << ToolName << "\", inputs: [";
   for (unsigned i = 0, e = Inputs.size(); i != e; ++i) {
     llvm::errs() << Inputs[i].getAsString();
     if (i + 1 != e)
       llvm::errs() << ", ";
   }
   llvm::errs() << "], ";
-  llvm::errs() << ((Outputs.size() > 1) ? "outputs" : "output") << ": [";
+  llvm::errs() << ((Outputs.size() > 1) ? "outputs: [" : "output: ");
   for (unsigned i = 0, e = Outputs.size(); i != e; ++i) {
     llvm::errs() << Outputs[i].getAsString();
     if (i + 1 != e)
       llvm::errs() << ", ";
   }
-  llvm::errs() << "]\n";
+  llvm::errs() << ((Outputs.size() > 1) ? "]\n" : "\n");
   return;
 }
 
 /// \brief Create output for a given action, if any.
 static InputInfo CreateActionResult(Compilation &C, const Action *A,
-    const char *BaseInput, const char *BoundArch, bool AtTopLevel,
-    bool MultipleArchs) {
+                                    const char *BaseInput,
+                                    const char *BoundArch, bool AtTopLevel,
+                                    bool MultipleArchs) {
   InputInfo Result;
   const JobAction *JA = cast<JobAction>(A);
   if (JA->getType() == types::TY_Nothing)
     Result = InputInfo(A->getType(), BaseInput);
   else
-    Result = InputInfo(
-        C.getDriver().GetNamedOutputPath(C, *JA, BaseInput, BoundArch,
-            AtTopLevel, MultipleArchs), A->getType(), BaseInput);
+    Result =
+        InputInfo(C.getDriver().GetNamedOutputPath(C, *JA, BaseInput, BoundArch,
+                                                   AtTopLevel, MultipleArchs),
+                  A->getType(), BaseInput);
   return Result;
 }
 
-static const char* CreateOffloadingPseudoArchName(Compilation &C,
-    const ToolChain *TC) {
+static const char *CreateOffloadingPseudoArchName(Compilation &C,
+                                                  const ToolChain *TC) {
   SmallString<128> Name;
-  Name =
-      (TC->getOffloadingKind() == ToolChain::OK_None) ?
-          "offload-host-" : "offload-device-";
+  Name = (TC->getOffloadingKind() == ToolChain::OK_None) ? "offload-host-"
+                                                         : "offload-device-";
   Name += TC->getTripleString();
   return C.getArgs().MakeArgString(Name.str());
 }
 
-InputInfo Driver::CreateUnbundledOffloadingResult(Compilation &C,
-    const OffloadUnbundlingJobAction* CurAction, const ToolChain *TC,
-    InputInfo Result, OffloadingHostResultsTy &OffloadingHostResults) const {
-  assert(
-      !OrderedOffloadingToolchains.empty()
-          && !types::isSrcFile(Result.getType())
-          && "Not expecting to create a bundling action!");
+InputInfo Driver::CreateUnbundledOffloadingResult(
+    Compilation &C, const OffloadUnbundlingJobAction *CurAction,
+    const ToolChain *TC, InputInfo Result,
+    OffloadingHostResultsTy &OffloadingHostResults) const {
+  assert(!OrderedOffloadingToolchains.empty() &&
+         !types::isSrcFile(Result.getType()) &&
+         "Not expecting to create a bundling action!");
 
   // If this is an offloading toolchain, we need to use the results cached when
   // the host input was processed, except if the input is a source file.
@@ -279,13 +279,11 @@ InputInfo Driver::CreateUnbundledOffloadingResult(Compilation &C,
     // to checkout the results created by the host when this input was processed
     // for the host toolchain.
     auto ILIt = OffloadingHostResults.find(CurAction);
-    assert(
-        ILIt != OffloadingHostResults.end()
-            && "Offloading inputs do not exist??");
+    assert(ILIt != OffloadingHostResults.end() &&
+           "Offloading inputs do not exist??");
     InputInfoList &IL = ILIt->getSecond();
-    assert(
-        IL.size() == OrderedOffloadingToolchains.size() + 1
-            && "Not all offloading inputs exist??");
+    assert(IL.size() == OrderedOffloadingToolchains.size() + 1 &&
+           "Not all offloading inputs exist??");
 
     // Get the order of the toolchain and retrieve the input;
     unsigned Order = 1;
@@ -306,14 +304,16 @@ InputInfo Driver::CreateUnbundledOffloadingResult(Compilation &C,
   // Create the input info for the unbundled files.
   InputInfoList &UnbundledFiles = OffloadingHostResults[CurAction];
   {
-    InputInfo HostResult = CreateActionResult(C, CurAction,
-        Result.getBaseInput(), CreateOffloadingPseudoArchName(C, TC), /*AtTopLevel=*/
-        false,/*MultipleArchs=*/false);
+    InputInfo HostResult = CreateActionResult(
+        C, CurAction, Result.getBaseInput(),
+        CreateOffloadingPseudoArchName(C, TC), /*AtTopLevel=*/
+        false, /*MultipleArchs=*/false);
     UnbundledFiles.push_back(HostResult);
     for (auto *OffloadTC : OrderedOffloadingToolchains) {
-      InputInfo TargetResult = CreateActionResult(C, CurAction,
-          Result.getBaseInput(), CreateOffloadingPseudoArchName(C, OffloadTC), /*AtTopLevel=*/
-          false,/*MultipleArchs=*/false);
+      InputInfo TargetResult = CreateActionResult(
+          C, CurAction, Result.getBaseInput(),
+          CreateOffloadingPseudoArchName(C, OffloadTC), /*AtTopLevel=*/
+          false, /*MultipleArchs=*/false);
       UnbundledFiles.push_back(TargetResult);
     }
   }
@@ -325,29 +325,29 @@ InputInfo Driver::CreateUnbundledOffloadingResult(Compilation &C,
     SmallVector<const ToolChain *, 4> AllToolChains;
     AllToolChains.push_back(TC);
     AllToolChains.append(OrderedOffloadingToolchains.begin(),
-        OrderedOffloadingToolchains.end());
+                         OrderedOffloadingToolchains.end());
     DumpJobBindings(AllToolChains, OffloadBundlerTool->getName(), BundledFile,
-        UnbundledFiles);
+                    UnbundledFiles);
   } else {
     OffloadBundlerTool->ConstructJob(C, *CurAction, BundledFile, UnbundledFiles,
-        C.getArgs(), nullptr);
+                                     C.getArgs(), nullptr);
   }
 
   // The host result is the first of the unbundled files.
   return UnbundledFiles.front();
 }
 
-InputInfo Driver::CreateBundledOffloadingResult(Compilation &C,
-    const OffloadBundlingJobAction* CurAction, const ToolChain *TC,
-    InputInfoList Results) const {
-  assert(
-      !OrderedOffloadingToolchains.empty()
-          && "Not expecting to create a bundling action!");
+InputInfo Driver::CreateBundledOffloadingResult(
+    Compilation &C, const OffloadBundlingJobAction *CurAction,
+    const ToolChain *TC, InputInfoList Results) const {
+  assert(!OrderedOffloadingToolchains.empty() &&
+         "Not expecting to create a bundling action!");
 
   // Get the result file based on BaseInput file name and the previous host
   // action.
-  InputInfo BundledFile = CreateActionResult(C, *CurAction->begin(),
-      Results[0].getBaseInput(), /*BoundArch=*/nullptr, /*AtTopLevel=*/false,/*MultipleArchs=*/
+  InputInfo BundledFile = CreateActionResult(
+      C, *CurAction->begin(), Results[0].getBaseInput(), /*BoundArch=*/nullptr,
+      /*AtTopLevel=*/false, /*MultipleArchs=*/
       false);
 
   // The unbundled files are the previous action result for each target.
@@ -361,55 +361,57 @@ InputInfo Driver::CreateBundledOffloadingResult(Compilation &C,
     SmallVector<const ToolChain *, 4> AllToolChains;
     AllToolChains.push_back(TC);
     AllToolChains.append(OrderedOffloadingToolchains.begin(),
-        OrderedOffloadingToolchains.end());
+                         OrderedOffloadingToolchains.end());
     DumpJobBindings(AllToolChains, OffloadBundlerTool->getName(),
-        UnbundledFiles, BundledFile);
+                    UnbundledFiles, BundledFile);
   } else {
     OffloadBundlerTool->ConstructJob(C, *CurAction, BundledFile, UnbundledFiles,
-        C.getArgs(), nullptr);
+                                     C.getArgs(), nullptr);
   }
 
   return BundledFile;
 }
 
-void Driver::PostProcessOffloadingInputsAndResults(Compilation &C,
-    const JobAction *JA, const ToolChain *TC, InputInfoList &Inputs,
-    InputInfo &Result, OffloadingHostResultsTy &OffloadingHostResults) const {
+void Driver::PostProcessOffloadingInputsAndResults(
+    Compilation &C, const JobAction *JA, const ToolChain *TC,
+    InputInfoList &Inputs, InputInfo &Result,
+    OffloadingHostResultsTy &OffloadingHostResults) const {
 
   // If this driver run requires OpenMP offloading we need to make sure
   // everything gets combined at link time. Also, all the compile phase results
   // obtained for the host are used as inputs in the device side.
   if (RequiresOpenMPOffloading(TC)) {
 
-    if (isa<LinkJobAction>(JA)
-        && TC->getOffloadingKind() == ToolChain::OK_OpenMP_Host) {
+    if (isa<LinkJobAction>(JA) &&
+        TC->getOffloadingKind() == ToolChain::OK_OpenMP_Host) {
       // Get link results for all targets.
       InputInfoList TgtLinkResults(OrderedOffloadingToolchains.size());
       for (unsigned i = 0; i < OrderedOffloadingToolchains.size(); ++i) {
         const ToolChain *TgtTC = OrderedOffloadingToolchains[i];
         BuildJobsForAction(C, JA, TgtTC,
-            CreateOffloadingPseudoArchName(C, TgtTC), /*AtTopLevel=*/false,
-            /*MultipleArchs=*/true, /*LinkingOutput=*/nullptr,
-            TgtLinkResults[i], OffloadingHostResults);
+                           CreateOffloadingPseudoArchName(C, TgtTC),
+                           /*AtTopLevel=*/false,
+                           /*MultipleArchs=*/true, /*LinkingOutput=*/nullptr,
+                           TgtLinkResults[i], OffloadingHostResults);
       }
       Inputs.append(TgtLinkResults.begin(), TgtLinkResults.end());
       return;
     }
 
-    if (isa<CompileJobAction>(JA)
-        && TC->getOffloadingKind() == ToolChain::OK_OpenMP_Device) {
+    if (isa<CompileJobAction>(JA) &&
+        TC->getOffloadingKind() == ToolChain::OK_OpenMP_Device) {
       // Find the host compile result.
       auto ILIt = OffloadingHostResults.find(JA);
-      assert(
-          ILIt != OffloadingHostResults.end()
-              && "The OpenMP host side action is expected to be processed before!");
+      assert(ILIt != OffloadingHostResults.end() &&
+             "The OpenMP host side action is expected to be processed before!");
       InputInfoList &IL = ILIt->getSecond();
       assert(IL.size() == 1 && "Host compile results should only be one!");
       Inputs.push_back(IL.front());
       return;
     }
 
-    // If this is a host action, make sure it is recorded in the offloading results cache.
+    // If this is a host action, make sure it is recorded in the offloading
+    // results cache.
     if (TC->getOffloadingKind() == ToolChain::OK_OpenMP_Host)
       OffloadingHostResults[JA].push_back(Result);
 
@@ -691,17 +693,19 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   }
 
   // Owned by the host.
-  const ToolChain &TC = getToolChain(*UArgs,
-      computeTargetTriple(DefaultTargetTriple, *UArgs), HostOffloadingKind);
+  const ToolChain &TC =
+      getToolChain(*UArgs, computeTargetTriple(DefaultTargetTriple, *UArgs),
+                   HostOffloadingKind);
 
-  // Get the toolchains for the offloading targets if any. We need to read the offloading toolchains only if we have a compatible runtime library, ant that would be either libomp or libiomp.
+  // Get the toolchains for the offloading targets if any. We need to read the
+  // offloading toolchains only if we have a compatible runtime library, ant
+  // that would be either libomp or libiomp.
   OrderedOffloadingToolchains.clear();
 
   if (DeviceOffloadingKind == ToolChain::OK_OpenMP_Device) {
     Arg *Tgts = UArgs->getLastArg(options::OPT_omptargets_EQ);
-    assert(
-        Tgts && Tgts->getNumValues()
-            && "OpenMP offloading has to have targets specified.");
+    assert(Tgts && Tgts->getNumValues() &&
+           "OpenMP offloading has to have targets specified.");
 
     for (unsigned v = 0; v < Tgts->getNumValues(); ++v) {
       const char *Val = Tgts->getValue(v);
@@ -711,8 +715,8 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
       if (TT.getArch() == llvm::Triple::UnknownArch)
         Diag(clang::diag::err_drv_invalid_omp_target) << Val;
       else {
-        const ToolChain &OffloadTC = getToolChain(*UArgs, TT,
-            DeviceOffloadingKind);
+        const ToolChain &OffloadTC =
+            getToolChain(*UArgs, TT, DeviceOffloadingKind);
         OrderedOffloadingToolchains.push_back(&OffloadTC);
       }
     }
@@ -1906,10 +1910,11 @@ void Driver::BuildJobs(Compilation &C) const {
 
     InputInfo II;
     BuildJobsForAction(C, A, &C.getDefaultToolChain(),
-    /*BoundArch*/nullptr,
-    /*AtTopLevel*/true,
-    /*MultipleArchs*/ArchNames.size() > 1,
-    /*LinkingOutput*/LinkingOutput, II, OffloadingHostResults);
+                       /*BoundArch*/ nullptr,
+                       /*AtTopLevel*/ true,
+                       /*MultipleArchs*/ ArchNames.size() > 1,
+                       /*LinkingOutput*/ LinkingOutput, II,
+                       OffloadingHostResults);
   }
 
   // If the user passed -Qunused-arguments or there were errors, don't warn
@@ -1990,8 +1995,8 @@ static const Tool *selectToolForJob(Compilation &C, bool SaveTemps,
       // Compile job may be wrapped in CudaHostAction, extract it if
       // that's the case and update CollapsedCHA if we combine phases.
       CHA = dyn_cast<CudaHostAction>(*CurJA->begin());
-      JobAction *CurJA = cast<CompileJobAction>(
-          CHA ? *CHA->begin() : *BackendInputs->begin());
+      CurJA =
+          cast<CompileJobAction>(CHA ? *CHA->begin() : *BackendInputs->begin());
       assert(CurJA && "Backend job is not preceeded by compile job.");
     }
     const Tool *CurTool = TC->SelectTool(*CurJA);
@@ -2044,8 +2049,8 @@ static const Tool *selectToolForJob(Compilation &C, bool SaveTemps,
   return ToolForJob;
 }
 
-void Driver::BuildJobsForAction(Compilation &C, const Action *A,
-    const ToolChain *TC, const char *BoundArch,
+void Driver::BuildJobsForAction(
+    Compilation &C, const Action *A, const ToolChain *TC, const char *BoundArch,
     bool AtTopLevel, bool MultipleArchs, const char *LinkingOutput,
     InputInfo &Result, OffloadingHostResultsTy &OffloadingHostResults) const {
   llvm::PrettyStackTraceString CrashInfo("Building compilation jobs");
@@ -2056,7 +2061,8 @@ void Driver::BuildJobsForAction(Compilation &C, const Action *A,
     // Append outputs of device jobs to the input list.
     for (const Action *DA : CHA->getDeviceActions()) {
       BuildJobsForAction(C, DA, TC, "", AtTopLevel,
-      /*MultipleArchs*/false, LinkingOutput, II, OffloadingHostResults);
+                         /*MultipleArchs*/ false, LinkingOutput, II,
+                         OffloadingHostResults);
       CudaDeviceInputInfos.push_back(II);
     }
     // Override current action with a real host compile action and continue
@@ -2064,20 +2070,21 @@ void Driver::BuildJobsForAction(Compilation &C, const Action *A,
     A = *CHA->begin();
   }
 
-  if (const OffloadUnbundlingJobAction *OUA = dyn_cast<
-      OffloadUnbundlingJobAction>(A)) {
+  if (const OffloadUnbundlingJobAction *OUA =
+          dyn_cast<OffloadUnbundlingJobAction>(A)) {
     // The input of the unbundling job has to a single input non-source file,
     // so we do not consider it having multiple architectures. We just use the
     // naming that a regular host input file would have.
     BuildJobsForAction(C, *OUA->begin(), TC, BoundArch, AtTopLevel,
-    /*MultipleArchs=*/false, LinkingOutput, Result, OffloadingHostResults);
+                       /*MultipleArchs=*/false, LinkingOutput, Result,
+                       OffloadingHostResults);
     Result = CreateUnbundledOffloadingResult(C, OUA, TC, Result,
-        OffloadingHostResults);
+                                             OffloadingHostResults);
     return;
   }
 
-  if (const OffloadBundlingJobAction *OBA = dyn_cast<OffloadBundlingJobAction>(
-      A)) {
+  if (const OffloadBundlingJobAction *OBA =
+          dyn_cast<OffloadBundlingJobAction>(A)) {
     // Compute the input action for all devices and emit a bundling command.
     InputInfoList Results(OrderedOffloadingToolchains.size() + 1);
     for (unsigned i = 0; i < Results.size(); ++i) {
@@ -2086,9 +2093,10 @@ void Driver::BuildJobsForAction(Compilation &C, const Action *A,
       // is not a top level job - the bundling job is the top level for the
       // current output.
       BuildJobsForAction(C, *OBA->begin(), CurTC,
-          CreateOffloadingPseudoArchName(C, CurTC), /*AtTopLevel=*/false,
-          /*MultipleArchs=*/true, LinkingOutput, Results[i],
-          OffloadingHostResults);
+                         CreateOffloadingPseudoArchName(C, CurTC),
+                         /*AtTopLevel=*/false,
+                         /*MultipleArchs=*/true, LinkingOutput, Results[i],
+                         OffloadingHostResults);
     }
     Result = CreateBundledOffloadingResult(C, OBA, TC, Results);
     return;
@@ -2120,7 +2128,8 @@ void Driver::BuildJobsForAction(Compilation &C, const Action *A,
       TC = &C.getDefaultToolChain();
 
     BuildJobsForAction(C, *BAA->begin(), TC, ArchName, AtTopLevel,
-        MultipleArchs, LinkingOutput, Result, OffloadingHostResults);
+                       MultipleArchs, LinkingOutput, Result,
+                       OffloadingHostResults);
     return;
   }
 
@@ -2129,7 +2138,7 @@ void Driver::BuildJobsForAction(Compilation &C, const Action *A,
         C, *CDA->begin(),
         &getToolChain(C.getArgs(), llvm::Triple(CDA->getDeviceTriple())),
         CDA->getGpuArchName(), CDA->isAtTopLevel(),
-        /*MultipleArchs*/true, LinkingOutput, Result, OffloadingHostResults);
+        /*MultipleArchs*/ true, LinkingOutput, Result, OffloadingHostResults);
     return;
   }
 
@@ -2148,7 +2157,8 @@ void Driver::BuildJobsForAction(Compilation &C, const Action *A,
     InputInfo II;
     for (const Action *DA : CollapsedCHA->getDeviceActions()) {
       BuildJobsForAction(C, DA, TC, "", AtTopLevel,
-      /*MultipleArchs*/false, LinkingOutput, II, OffloadingHostResults);
+                         /*MultipleArchs*/ false, LinkingOutput, II,
+                         OffloadingHostResults);
       CudaDeviceInputInfos.push_back(II);
     }
   }
@@ -2165,7 +2175,7 @@ void Driver::BuildJobsForAction(Compilation &C, const Action *A,
 
     InputInfo II;
     BuildJobsForAction(C, Input, TC, BoundArch, SubJobAtTopLevel, MultipleArchs,
-        LinkingOutput, II, OffloadingHostResults);
+                       LinkingOutput, II, OffloadingHostResults);
     InputInfos.push_back(II);
   }
 
@@ -2182,13 +2192,13 @@ void Driver::BuildJobsForAction(Compilation &C, const Action *A,
     InputInfos.append(CudaDeviceInputInfos.begin(), CudaDeviceInputInfos.end());
 
   // Determine the place to write output to, if any.
-  Result = CreateActionResult(C, A, BaseInput, BoundArch, AtTopLevel,
-      MultipleArchs);
+  Result =
+      CreateActionResult(C, A, BaseInput, BoundArch, AtTopLevel, MultipleArchs);
 
   // Post-process inputs and results to suit the needs of the offloading
   // implementations.
   PostProcessOffloadingInputsAndResults(C, JA, TC, InputInfos, Result,
-      OffloadingHostResults);
+                                        OffloadingHostResults);
 
   if (CCCPrintBindings && !CCGenDiagnostics)
     DumpJobBindings(&T->getToolChain(), T->getName(), InputInfos, Result);
@@ -2489,14 +2499,14 @@ std::string Driver::GetTemporaryPath(StringRef Prefix,
   return Path.str();
 }
 
-const ToolChain &Driver::getToolChain(const ArgList &Args,
-    const llvm::Triple &Target,
-    ToolChain::OffloadingKind OffloadingKind) const {
+const ToolChain &
+Driver::getToolChain(const ArgList &Args, const llvm::Triple &Target,
+                     ToolChain::OffloadingKind OffloadingKind) const {
   // If this is an offload toolchain we need to try to get it from the right
   // cache.
-  ToolChain *&TC = *(
-      (OffloadingKind == ToolChain::OK_None) ?
-          &ToolChains[Target.str()] : &OffloadToolChains[Target.str()]);
+  ToolChain *&TC = *((OffloadingKind == ToolChain::OK_None)
+                         ? &ToolChains[Target.str()]
+                         : &OffloadToolChains[Target.str()]);
   if (!TC) {
     switch (Target.getOS()) {
     case llvm::Triple::CloudABI:
