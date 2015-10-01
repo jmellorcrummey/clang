@@ -263,7 +263,8 @@ static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
   for (unsigned i = 0; i < Tgts->getNumValues(); ++i) {
     --TriplesIt;
     --FileNamesIt;
-    Targets.push_back(std::make_pair(llvm::Triple(*TriplesIt), FileNamesIt->getFilename()));
+    Targets.push_back(
+        std::make_pair(llvm::Triple(*TriplesIt), FileNamesIt->getFilename()));
   }
 
   // Create temporary linker script
@@ -8633,7 +8634,6 @@ void gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
         if (getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Host)
           CmdArgs.push_back("-lomptarget");
       }
-
 
       AddRunTimeLibs(ToolChain, D, CmdArgs, Args);
 

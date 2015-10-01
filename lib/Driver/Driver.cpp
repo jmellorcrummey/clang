@@ -1712,7 +1712,9 @@ void Driver::BuildActions(const ToolChain &TC, DerivedArgList &Args,
     // If we need to support offloading, run an unbundling job before each input
     // to make sure that bundled files get unbundled. If the input is a source
     // file that is not required.
-    if (!OrderedOffloadingToolchains.empty() && InputArg->getOption().getKind() == llvm::opt::Option::InputClass && !types::isSrcFile(InputType))
+    if (!OrderedOffloadingToolchains.empty() &&
+        InputArg->getOption().getKind() == llvm::opt::Option::InputClass &&
+        !types::isSrcFile(InputType))
       Current.reset(new OffloadUnbundlingJobAction(std::move(Current)));
 
     for (SmallVectorImpl<phases::ID>::iterator i = PL.begin(), e = PL.end();
@@ -2054,10 +2056,12 @@ static const Tool *selectToolForJob(Compilation &C, bool SaveTemps,
   return ToolForJob;
 }
 
-void Driver::BuildJobsForAction(
-    Compilation &C, const Action *A, const ToolChain *TC, const char *BoundArch,
-    bool AtTopLevel, bool MultipleArchs, const char *LinkingOutput,
-    InputInfo &Result, OffloadingHostResultsTy &OffloadingHostResults) const {
+void Driver::BuildJobsForAction(Compilation &C, const Action *A,
+                                const ToolChain *TC, const char *BoundArch,
+                                bool AtTopLevel, bool MultipleArchs,
+                                const char *LinkingOutput,
+                                InputInfo &Result, 
+																OffloadingHostResultsTy &OffloadingHostResults) const {
   llvm::PrettyStackTraceString CrashInfo("Building compilation jobs");
 
   InputInfoList CudaDeviceInputInfos;
@@ -2510,9 +2514,8 @@ Driver::getToolChain(const ArgList &Args, const llvm::Triple &Target,
   // If this is an offload toolchain we need to try to get it from the right
   // cache.
   bool IsOffloadingDevice = (OffloadingKind == ToolChain::OK_OpenMP_Device);
-  ToolChain *&TC = *((IsOffloadingDevice)
-                         ? &OffloadToolChains[Target.str()]
-                         : &ToolChains[Target.str()]);
+  ToolChain *&TC = *((IsOffloadingDevice) ? &OffloadToolChains[Target.str()]
+                                          : &ToolChains[Target.str()]);
   if (!TC) {
     switch (Target.getOS()) {
     case llvm::Triple::CloudABI:

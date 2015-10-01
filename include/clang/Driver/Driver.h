@@ -413,8 +413,7 @@ public:
                           bool MultipleArchs,
                           const char *LinkingOutput,
                           InputInfo &Result,
-                          OffloadingHostResultsTy 
-															&OffloadingHostResults) const;
+                          OffloadingHostResultsTy &OffloadingHostResults) const;
 
   /// Returns the default name for linked images (e.g., "a.out").
   const char *getDefaultImageName() const;
