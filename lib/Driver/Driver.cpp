@@ -455,7 +455,7 @@ DerivedArgList *Driver::TranslateInputArgs(const InputArgList &Args) const {
       DAL->AddFlagArg(A, Opts->getOption(options::OPT_Z_Xlinker__no_demangle));
 
       // Add the remaining values as Xlinker arguments.
-      for (const StringRef Val : A->getValues())
+      for (StringRef Val : A->getValues())
         if (Val != "--no-demangle")
           DAL->AddSeparateArg(A, Opts->getOption(options::OPT_Xlinker), Val);
 
@@ -499,7 +499,7 @@ DerivedArgList *Driver::TranslateInputArgs(const InputArgList &Args) const {
     // Pick up inputs via the -- option.
     if (A->getOption().matches(options::OPT__DASH_DASH)) {
       A->claim();
-      for (const StringRef Val : A->getValues())
+      for (StringRef Val : A->getValues())
         DAL->append(MakeInputArg(*DAL, Opts, Val));
       continue;
     }
@@ -1195,12 +1195,15 @@ static unsigned PrintActions1(const Compilation &C, Action *A,
     } else
       AL = &A->getInputs();
 
-    const char *Prefix = "{";
-    for (Action *PreRequisite : *AL) {
-      os << Prefix << PrintActions1(C, PreRequisite, Ids);
-      Prefix = ", ";
-    }
-    os << "}";
+    if (AL->size()) {
+      const char *Prefix = "{";
+      for (Action *PreRequisite : *AL) {
+        os << Prefix << PrintActions1(C, PreRequisite, Ids);
+        Prefix = ", ";
+      }
+      os << "}";
+    } else
+      os << "{}";
   }
 
   unsigned Id = Ids.size();
@@ -1518,6 +1521,18 @@ static std::unique_ptr<Action>
 buildCudaActions(const Driver &D, const ToolChain &TC, DerivedArgList &Args,
                  const Arg *InputArg, std::unique_ptr<Action> HostAction,
                  ActionList &Actions) {
+  // Figure out which NVPTX triple to use for device-side compilation based on
+  // whether host is 64-bit.
+  const char *DeviceTriple = TC.getTriple().isArch64Bit()
+                                 ? "nvptx64-nvidia-cuda"
+                                 : "nvptx-nvidia-cuda";
+  Arg *PartialCompilationArg = Args.getLastArg(options::OPT_cuda_host_only,
+                                               options::OPT_cuda_device_only);
+  // Host-only compilation case.
+  if (PartialCompilationArg &&
+      PartialCompilationArg->getOption().matches(options::OPT_cuda_host_only))
+    return std::unique_ptr<Action>(
+        new CudaHostAction(std::move(HostAction), {}, DeviceTriple));
 
   // Collect all cuda_gpu_arch parameters, removing duplicates.
   SmallVector<const char *, 4> GpuArchList;
@@ -1555,15 +1570,9 @@ buildCudaActions(const Driver &D, const ToolChain &TC, DerivedArgList &Args,
     }
   }
 
-  // Figure out which NVPTX triple to use for device-side compilation based on
-  // whether host is 64-bit.
-  const char *DeviceTriple = TC.getTriple().isArch64Bit()
-                                 ? "nvptx64-nvidia-cuda"
-                                 : "nvptx-nvidia-cuda";
-
   // Figure out what to do with device actions -- pass them as inputs to the
   // host action or run each of them independently.
-  bool DeviceOnlyCompilation = Args.hasArg(options::OPT_cuda_device_only);
+  bool DeviceOnlyCompilation = PartialCompilationArg != nullptr;
   if (PartialCompilation || DeviceOnlyCompilation) {
     // In case of partial or device-only compilation results of device actions
     // are not consumed by the host action device actions have to be added to
@@ -1596,7 +1605,7 @@ buildCudaActions(const Driver &D, const ToolChain &TC, DerivedArgList &Args,
   // Return a new host action that incorporates original host action and all
   // device actions.
   return std::unique_ptr<Action>(
-      new CudaHostAction(std::move(HostAction), DeviceActions));
+      new CudaHostAction(std::move(HostAction), DeviceActions, DeviceTriple));
 }
 
 void Driver::BuildActions(const ToolChain &TC, DerivedArgList &Args,
@@ -1696,11 +1705,8 @@ void Driver::BuildActions(const ToolChain &TC, DerivedArgList &Args,
       continue;
     }
 
-    phases::ID CudaInjectionPhase;
-    bool InjectCuda = (InputType == types::TY_CUDA &&
-                       !Args.hasArg(options::OPT_cuda_host_only));
-    CudaInjectionPhase = FinalPhase;
-    for (auto &Phase : PL)
+    phases::ID CudaInjectionPhase = FinalPhase;
+    for (const auto &Phase : PL)
       if (Phase <= FinalPhase && Phase == phases::Compile) {
         CudaInjectionPhase = Phase;
         break;
@@ -1741,7 +1747,7 @@ void Driver::BuildActions(const ToolChain &TC, DerivedArgList &Args,
       // Otherwise construct the appropriate action.
       Current = ConstructPhaseAction(TC, Args, Phase, std::move(Current));
 
-      if (InjectCuda && Phase == CudaInjectionPhase) {
+      if (InputType == types::TY_CUDA && Phase == CudaInjectionPhase) {
         Current = buildCudaActions(*this, TC, Args, InputArg,
                                    std::move(Current), Actions);
         if (!Current)
