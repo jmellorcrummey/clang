@@ -133,8 +133,10 @@ InputArgList Driver::ParseArgStrings(ArrayRef<const char *> ArgStrings) {
     }
 
     // Warn about -mcpu= without an argument.
-    if ((A->getOption().matches(options::OPT_mcpu_EQ) || A->getOption().matches(options::OPT_omptargets_EQ)) &&
-         A->containsValue("")) {
+    if ((A->getOption().matches(options::OPT_mcpu_EQ) &&
+         A->containsValue("")) ||
+        (A->getOption().matches(options::OPT_omptargets_EQ) &&
+         !A->getNumValues())) {
       Diag(clang::diag::warn_drv_empty_joined_argument) << A->getAsString(Args);
     }
   }
@@ -198,8 +200,10 @@ static bool RequiresOpenMPOffloading(ArgList &Args) {
     if (const Arg *A = Args.getLastArg(options::OPT_fopenmp_EQ))
       OpenMPRuntimeName = A->getValue();
 
-    if (OpenMPRuntimeName == "libomp" || OpenMPRuntimeName == "libiomp5")
-      return Args.getLastArg(options::OPT_omptargets_EQ) != nullptr;
+    if (OpenMPRuntimeName == "libomp" || OpenMPRuntimeName == "libiomp5") {
+      auto *A = Args.getLastArg(options::OPT_omptargets_EQ);
+      return A != nullptr && A->getNumValues();
+    }
   }
   return false;
 }
@@ -272,9 +276,10 @@ InputInfo Driver::CreateUnbundledOffloadingResult(
          !types::isSrcFile(Result.getType()) &&
          "Not expecting to create a bundling action!");
 
-  // If this is an offloading toolchain, we need to use the results cached when
-  // the host input was processed, except if the input is a source file.
-  if (TC->getOffloadingKind() != ToolChain::OK_None) {
+  // If this is an offloading device toolchain, we need to use the results
+  // cached when the host input was processed, except if the input is a source
+  // file.
+  if (TC->getOffloadingKind() == ToolChain::OK_OpenMP_Device) {
     // If this is not a source file, it had to be part of a bundle. So we need
     // to checkout the results created by the host when this input was processed
     // for the host toolchain.
@@ -1707,7 +1712,7 @@ void Driver::BuildActions(const ToolChain &TC, DerivedArgList &Args,
     // If we need to support offloading, run an unbundling job before each input
     // to make sure that bundled files get unbundled. If the input is a source
     // file that is not required.
-    if (!OrderedOffloadingToolchains.empty() && !types::isSrcFile(InputType))
+    if (!OrderedOffloadingToolchains.empty() && InputArg->getOption().getKind() == llvm::opt::Option::InputClass && !types::isSrcFile(InputType))
       Current.reset(new OffloadUnbundlingJobAction(std::move(Current)));
 
     for (SmallVectorImpl<phases::ID>::iterator i = PL.begin(), e = PL.end();
@@ -2504,9 +2509,10 @@ Driver::getToolChain(const ArgList &Args, const llvm::Triple &Target,
                      ToolChain::OffloadingKind OffloadingKind) const {
   // If this is an offload toolchain we need to try to get it from the right
   // cache.
-  ToolChain *&TC = *((OffloadingKind == ToolChain::OK_None)
-                         ? &ToolChains[Target.str()]
-                         : &OffloadToolChains[Target.str()]);
+  bool IsOffloadingDevice = (OffloadingKind == ToolChain::OK_OpenMP_Device);
+  ToolChain *&TC = *((IsOffloadingDevice)
+                         ? &OffloadToolChains[Target.str()]
+                         : &ToolChains[Target.str()]);
   if (!TC) {
     switch (Target.getOS()) {
     case llvm::Triple::CloudABI:
