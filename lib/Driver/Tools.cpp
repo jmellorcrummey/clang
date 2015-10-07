@@ -834,7 +834,8 @@ static void getARMTargetFeatures(const ToolChain &TC,
     // The above behavior is consistent with GCC.
     int VersionNum = getARMSubArchVersionNumber(Triple);
     if (Triple.isOSDarwin() || Triple.isOSNetBSD()) {
-      if (VersionNum < 6)
+      if (VersionNum < 6 ||
+          Triple.getSubArch() == llvm::Triple::SubArchType::ARMSubArch_v6m)
         Features.push_back("+strict-align");
     } else if (Triple.isOSLinux() || Triple.isOSNaCl()) {
       if (VersionNum < 7)
@@ -2655,6 +2656,10 @@ static bool shouldUseFramePointerForTarget(const ArgList &Args,
     switch (Triple.getArch()) {
     case llvm::Triple::x86:
       return !areOptimizationsEnabled(Args);
+    case llvm::Triple::arm:
+    case llvm::Triple::thumb:
+      // Windows on ARM builds with FPO disabled to aid fast stack walking
+      return true;
     default:
       // All other supported Windows ISAs use xdata unwind information, so frame
       // pointers are not generally useful.
@@ -4605,6 +4610,13 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.hasFlag(options::OPT_fborland_extensions,
                    options::OPT_fno_borland_extensions, false))
     CmdArgs.push_back("-fborland-extensions");
+
+  // -fno-declspec is default, except for PS4.
+  if (Args.hasFlag(options::OPT_fdeclspec, options::OPT_fno_declspec,
+                   getToolChain().getTriple().isPS4()))
+    CmdArgs.push_back("-fdeclspec");
+  else if (Args.hasArg(options::OPT_fno_declspec))
+    CmdArgs.push_back("-fno-declspec"); // Explicitly disabling __declspec.
 
   // -fthreadsafe-static is default, except for MSVC compatibility versions less
   // than 19.
@@ -9760,6 +9772,8 @@ void tools::Myriad::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   const llvm::Triple &T = TC.getTriple();
   ArgStringList CmdArgs;
   bool UseStartfiles = !Args.hasArg(options::OPT_nostartfiles);
+  bool UseDefaultLibs = !Args.hasArg(options::OPT_nostdlib) &&
+                        !Args.hasArg(options::OPT_nodefaultlibs);
 
   std::string StartFilesDir, BuiltinLibDir;
   TC.getCompilerSupportDir(StartFilesDir);
@@ -9796,27 +9810,31 @@ void tools::Myriad::Linker::ConstructJob(Compilation &C, const JobAction &JA,
                             options::OPT_e, options::OPT_s, options::OPT_t,
                             options::OPT_Z_Flag, options::OPT_r});
 
-  // The linker doesn't use these builtin paths unless directed to,
-  // because it was not compiled for support with sysroots, nor does
-  // it have a default of little-endian with FPU.
-  CmdArgs.push_back(Args.MakeArgString("-L" + BuiltinLibDir));
-  CmdArgs.push_back(Args.MakeArgString("-L" + StartFilesDir));
+  if (UseDefaultLibs) {
+    // The linker doesn't use these builtin paths unless directed to,
+    // because it was not compiled for support with sysroots, nor does
+    // it have a default of little-endian with FPU.
+    CmdArgs.push_back(Args.MakeArgString("-L" + BuiltinLibDir));
+    CmdArgs.push_back(Args.MakeArgString("-L" + StartFilesDir));
+  }
 
   AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
 
-  if (T.getOS() == llvm::Triple::RTEMS) {
-    CmdArgs.push_back("--start-group");
-    CmdArgs.push_back("-lc");
-    // You must provide your own "-L" option to enable finding these.
-    CmdArgs.push_back("-lrtemscpu");
-    CmdArgs.push_back("-lrtemsbsp");
-    CmdArgs.push_back("--end-group");
-  } else {
-    CmdArgs.push_back("-lc");
+  if (UseDefaultLibs) {
+    if (T.getOS() == llvm::Triple::RTEMS) {
+      CmdArgs.push_back("--start-group");
+      CmdArgs.push_back("-lc");
+      // You must provide your own "-L" option to enable finding these.
+      CmdArgs.push_back("-lrtemscpu");
+      CmdArgs.push_back("-lrtemsbsp");
+      CmdArgs.push_back("--end-group");
+    } else {
+      CmdArgs.push_back("-lc");
+    }
+    if (C.getDriver().CCCIsCXX())
+      CmdArgs.push_back("-lstdc++");
+    CmdArgs.push_back("-lgcc");
   }
-  if (C.getDriver().CCCIsCXX())
-    CmdArgs.push_back("-lstdc++");
-  CmdArgs.push_back("-lgcc");
   if (UseStartfiles) {
     CmdArgs.push_back(Args.MakeArgString(StartFilesDir + "/crtend.o"));
     CmdArgs.push_back(Args.MakeArgString(StartFilesDir + "/crtn.o"));
