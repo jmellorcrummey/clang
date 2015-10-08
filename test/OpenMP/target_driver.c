@@ -149,22 +149,22 @@
 //
 
 // Unbundle the input files.
-// CHK-COMMANDS-SEP-DAG:    clang-offload-bundler{{.*}}" "-type=s" "-omptargets=powerpc64le--linux,powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu" "-inputs=[[AAASM:.+]].s" "-outputs=[[AAHASM:.+]].s,[[AAT1ASM:.+]].s,[[AAT2ASM:.+]].s" "-unbundle"
-// CHK-COMMANDS-SEP-DAG:    clang-offload-bundler{{.*}}" "-type=i" "-omptargets=powerpc64le--linux,powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu" "-inputs=[[BBPP:.+]].c" "-outputs=[[BBHPP:.+]].i,[[BBT1PP:.+]].i,[[BBT2PP:.+]].i" "-unbundle"
+// CHK-COMMANDS-SEP-DAG:    clang-offload-bundler{{.*}}" "-type=s" "-targets=offload-host-powerpc64le--linux,offload-device-powerpc64le-ibm-linux-gnu,offload-device-x86_64-pc-linux-gnu" "-inputs=[[AAASM:.+]].s" "-outputs=[[AAHASM:.+]].s,[[AAT1ASM:.+]].s,[[AAT2ASM:.+]].s" "-unbundle"
+// CHK-COMMANDS-SEP-DAG:    clang-offload-bundler{{.*}}" "-type=i" "-targets=offload-host-powerpc64le--linux,offload-device-powerpc64le-ibm-linux-gnu,offload-device-x86_64-pc-linux-gnu" "-inputs=[[BBPP:.+]].c" "-outputs=[[BBHPP:.+]].i,[[BBT1PP:.+]].i,[[BBT2PP:.+]].i" "-unbundle"
 
-// CHK-COMMANDS-SEP-ST-DAG:    clang-offload-bundler{{.*}}" "-type=s" "-omptargets=powerpc64le--linux,powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu" "-inputs=[[AAASM:.+]].s" "-outputs=[[AAHASM:.+]].s,[[AAT1ASM:.+]].s,[[AAT2ASM:.+]].s" "-unbundle"
-// CHK-COMMANDS-SEP-ST-DAG:    clang-offload-bundler{{.*}}" "-type=i" "-omptargets=powerpc64le--linux,powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu" "-inputs=[[BBPP:.+]].c" "-outputs=[[BBHPP:.+]].i,[[BBT1PP:.+]].i,[[BBT2PP:.+]].i" "-unbundle"
+// CHK-COMMANDS-SEP-ST-DAG:    clang-offload-bundler{{.*}}" "-type=s" "-targets=offload-host-powerpc64le--linux,offload-device-powerpc64le-ibm-linux-gnu,offload-device-x86_64-pc-linux-gnu" "-inputs=[[AAASM:.+]].s" "-outputs=[[AAHASM:.+]].s,[[AAT1ASM:.+]].s,[[AAT2ASM:.+]].s" "-unbundle"
+// CHK-COMMANDS-SEP-ST-DAG:    clang-offload-bundler{{.*}}" "-type=i" "-targets=offload-host-powerpc64le--linux,offload-device-powerpc64le-ibm-linux-gnu,offload-device-x86_64-pc-linux-gnu" "-inputs=[[BBPP:.+]].c" "-outputs=[[BBHPP:.+]].i,[[BBT1PP:.+]].i,[[BBT2PP:.+]].i" "-unbundle"
 
 // Create 1st bundle.
 // CHK-COMMANDS-SEP-DAG:    clang{{.*}}" "-cc1as" "-triple" "powerpc64le--linux" "-filetype" "obj" {{.*}}"-o" "[[AAHOBJ:.+]].o" "[[AAHASM]].s"
 // CHK-COMMANDS-SEP-DAG:    clang{{.*}}" "-cc1as" "-triple" "powerpc64le-ibm-linux-gnu" "-filetype" "obj" {{.*}}"-o" "[[AAT1OBJ:.+]].o" "[[AAT1ASM]].s"
 // CHK-COMMANDS-SEP-DAG:    clang{{.*}}" "-cc1as" "-triple" "x86_64-pc-linux-gnu" "-filetype" "obj" {{.*}}"-o" "[[AAT2OBJ:.+]].o" "[[AAT2ASM]].s"
-// CHK-COMMANDS-SEP-DAG:    clang-offload-bundler{{.*}}" "-type=o" "-omptargets=powerpc64le--linux,powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu" "-outputs=[[AAOBJ:.+]].o" "-inputs=[[AAHOBJ]].o,[[AAT1OBJ]].o,[[AAT2OBJ]].o"
+// CHK-COMMANDS-SEP-DAG:    clang-offload-bundler{{.*}}" "-type=o" "-targets=offload-host-powerpc64le--linux,offload-device-powerpc64le-ibm-linux-gnu,offload-device-x86_64-pc-linux-gnu" "-outputs=[[AAOBJ:.+]].o" "-inputs=[[AAHOBJ]].o,[[AAT1OBJ]].o,[[AAT2OBJ]].o"
 
 // CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1as" "-triple" "powerpc64le--linux" "-filetype" "obj" {{.*}}"-o" "[[AAHOBJ:.+]].o" "[[AAHASM]].s"
 // CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1as" "-triple" "powerpc64le-ibm-linux-gnu" "-filetype" "obj" {{.*}}"-o" "[[AAT1OBJ:.+]].o" "[[AAT1ASM]].s"
 // CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1as" "-triple" "x86_64-pc-linux-gnu" "-filetype" "obj" {{.*}}"-o" "[[AAT2OBJ:.+]].o" "[[AAT2ASM]].s"
-// CHK-COMMANDS-SEP-ST-DAG:    clang-offload-bundler{{.*}}" "-type=o" "-omptargets=powerpc64le--linux,powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu" "-outputs=[[AAOBJ:.+]].o" "-inputs=[[AAHOBJ]].o,[[AAT1OBJ]].o,[[AAT2OBJ]].o"
+// CHK-COMMANDS-SEP-ST-DAG:    clang-offload-bundler{{.*}}" "-type=o" "-targets=offload-host-powerpc64le--linux,offload-device-powerpc64le-ibm-linux-gnu,offload-device-x86_64-pc-linux-gnu" "-outputs=[[AAOBJ:.+]].o" "-inputs=[[AAHOBJ]].o,[[AAT1OBJ]].o,[[AAT2OBJ]].o"
 
 // Create 2nd bundle.
 // CHK-COMMANDS-SEP-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" "-emit-llvm-bc"{{.*}}"-fopenmp" {{.*}}"-o" "[[BBHBC:.+]].bc" "-x" "cpp-output" "[[BBHPP]].i" "-omptargets=powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu"
@@ -188,8 +188,8 @@
 // CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBT2ASM:.+]].s" "-x" "ir" "[[BBT2BC]].bc"
 // CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1as" "-triple" "x86_64-pc-linux-gnu" "-filetype" "obj" {{.*}}"-o" "[[BBT2OBJ:.+]].o" "[[BBT2ASM]].s"
 
-// CHK-COMMANDS-SEP-DAG:     clang-offload-bundler{{.*}}" "-type=o" "-omptargets=powerpc64le--linux,powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu" "-outputs=[[BBOBJ:.+]].o" "-inputs=[[BBHOBJ]].o,[[BBT1OBJ]].o,[[BBT2OBJ]].o"
-// CHK-COMMANDS-SEP-ST-DAG:  clang-offload-bundler{{.*}}" "-type=o" "-omptargets=powerpc64le--linux,powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu" "-outputs=[[BBOBJ:.+]].o" "-inputs=[[BBHOBJ]].o,[[BBT1OBJ]].o,[[BBT2OBJ]].o"
+// CHK-COMMANDS-SEP-DAG:     clang-offload-bundler{{.*}}" "-type=o" "-targets=offload-host-powerpc64le--linux,offload-device-powerpc64le-ibm-linux-gnu,offload-device-x86_64-pc-linux-gnu" "-outputs=[[BBOBJ:.+]].o" "-inputs=[[BBHOBJ]].o,[[BBT1OBJ]].o,[[BBT2OBJ]].o"
+// CHK-COMMANDS-SEP-ST-DAG:  clang-offload-bundler{{.*}}" "-type=o" "-targets=offload-host-powerpc64le--linux,offload-device-powerpc64le-ibm-linux-gnu,offload-device-x86_64-pc-linux-gnu" "-outputs=[[BBOBJ:.+]].o" "-inputs=[[BBHOBJ]].o,[[BBT1OBJ]].o,[[BBT2OBJ]].o"
 
 
 

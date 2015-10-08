@@ -212,9 +212,9 @@ private:
 
 private:
   /// CreateUnbundledOffloadingResult - Create a command to unbundle the input
-  /// and use the resulting input info. If there re inputs already cached in
-  /// OffloadingHostResults for that action use them instead. If no offloading
-  /// is being support just return the provided input info.
+  /// and use the resulting input info. If there are inputs already cached in
+  /// OffloadingHostResults for that action use them instead. If offloading
+  /// is not supported, just return the provided input info.
   InputInfo CreateUnbundledOffloadingResult(
       Compilation &C, const OffloadUnbundlingJobAction *CurAction,
       const ToolChain *TC, InputInfo Result,

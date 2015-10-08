@@ -268,8 +268,18 @@ static InputInfo CreateActionResult(Compilation &C, const Action *A,
 static const char *CreateOffloadingPseudoArchName(Compilation &C,
                                                   const ToolChain *TC) {
   SmallString<128> Name;
-  Name = (TC->getOffloadingKind() == ToolChain::OK_None) ? "offload-host-"
-                                                         : "offload-device-";
+  switch (TC->getOffloadingKind()) {
+  default:
+    llvm_unreachable("Offload information was not specified.");
+    break;
+  case ToolChain::OK_OpenMP_Host:
+    Name = "offload-host-";
+    break;
+  case ToolChain::OK_OpenMP_Device:
+    Name = "offload-device-";
+    break;
+  }
+
   Name += TC->getTripleString();
   return C.getArgs().MakeArgString(Name.str());
 }
@@ -358,8 +368,7 @@ InputInfo Driver::CreateBundledOffloadingResult(
   // action.
   InputInfo BundledFile = CreateActionResult(
       C, *CurAction->begin(), Results[0].getBaseInput(), /*BoundArch=*/nullptr,
-      /*AtTopLevel=*/false, /*MultipleArchs=*/
-      false);
+      /*AtTopLevel=*/true, /*MultipleArchs=*/false);
 
   // The unbundled files are the previous action result for each target.
   InputInfoList &UnbundledFiles = Results;
@@ -2093,7 +2102,7 @@ void Driver::BuildJobsForAction(Compilation &C, const Action *A,
 
   if (const OffloadUnbundlingJobAction *OUA =
           dyn_cast<OffloadUnbundlingJobAction>(A)) {
-    // The input of the unbundling job has to a single input non-source file,
+    // The input of the unbundling job has to be a single input non-source file,
     // so we do not consider it having multiple architectures. We just use the
     // naming that a regular host input file would have.
     BuildJobsForAction(C, *OUA->begin(), TC, BoundArch, AtTopLevel,

@@ -40,7 +40,7 @@ static cl::list<std::string>
     OutputFileNames("outputs", cl::CommaSeparated, cl::OneOrMore,
                     cl::desc("[<output file>,...]"),
                     cl::cat(ClangOffloadBundlerCategory));
-static cl::list<std::string> TargetNames("omptargets", cl::CommaSeparated,
+static cl::list<std::string> TargetNames("targets", cl::CommaSeparated,
                                          cl::OneOrMore,
                                          cl::desc("[<target triple>,...]"),
                                          cl::cat(ClangOffloadBundlerCategory));

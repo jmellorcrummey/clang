@@ -275,7 +275,7 @@ static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
 
   // Open script file in order to write contents
   std::error_code EC;
-  llvm::raw_fd_ostream lksf(LKS, EC, llvm::sys::fs::F_None);
+  llvm::raw_fd_ostream Lksf(LKS, EC, llvm::sys::fs::F_None);
 
   if (EC) {
     C.getDriver().Diag(clang::diag::err_unable_to_make_temp) << EC.message();
@@ -286,39 +286,41 @@ static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
   // image s 16-byte aligned. This is not mandatory, but increases the
   // likelihood of data to be aligned with a cache block in several main host
   // machines.
-  lksf << "TARGET(binary)\n";
+  Lksf << "TARGET(binary)\n";
   for (unsigned i = 0; i < Targets.size(); ++i)
-    lksf << "INPUT(" << Targets[i].second << ")\n";
+    Lksf << "INPUT(" << Targets[i].second << ")\n";
 
-  lksf << "SECTIONS\n";
-  lksf << "{\n";
-  lksf << "  .openmptgt :\n";
-  lksf << "  ALIGN(0x10)\n";
-  lksf << "  {\n";
+  Lksf << "SECTIONS\n";
+  Lksf << "{\n";
+  Lksf << "  .omp_offloading :\n";
+  Lksf << "  ALIGN(0x10)\n";
+  Lksf << "  {\n";
 
   for (unsigned i = 0; i < Targets.size(); ++i) {
-    std::string tgt_name(Targets[i].first.getTriple());
-    std::replace(tgt_name.begin(), tgt_name.end(), '-', '_');
-    lksf << "    . = ALIGN(0x10);\n";
-    lksf << "    PROVIDE_HIDDEN(__omptgt__img_start_" << tgt_name << " = .);\n";
-    lksf << "    " << Targets[i].second << "\n";
-    lksf << "    PROVIDE_HIDDEN(__omptgt__img_end_" << tgt_name << " = .);\n";
+    std::string TgtName(Targets[i].first.getTriple());
+    // std::replace(TgtName.begin(), TgtName.end(), '-', '_');
+    Lksf << "    . = ALIGN(0x10);\n";
+    Lksf << "    PROVIDE_HIDDEN(.omp_offloading.img_start." << TgtName
+         << " = .);\n";
+    Lksf << "    " << Targets[i].second << "\n";
+    Lksf << "    PROVIDE_HIDDEN(.omp_offloading.img_end." << TgtName
+         << " = .);\n";
   }
 
-  lksf << "  }\n";
+  Lksf << "  }\n";
   // Add commands to define host entries begin and end
-  lksf << "  .openmptgt_host_entries :\n";
-  lksf << "  ALIGN(0x10)\n";
-  lksf << "  SUBALIGN(0x01)\n";
-  lksf << "  {\n";
-  lksf << "    PROVIDE_HIDDEN(__omptgt__host_entries_begin = .);\n";
-  lksf << "    *(.openmptgt_host_entries)\n";
-  lksf << "    PROVIDE_HIDDEN(__omptgt__host_entries_end = .);\n";
-  lksf << "  }\n";
-  lksf << "}\n";
-  lksf << "INSERT BEFORE .data\n";
+  Lksf << "  .omp_offloading.entries :\n";
+  Lksf << "  ALIGN(0x10)\n";
+  Lksf << "  SUBALIGN(0x01)\n";
+  Lksf << "  {\n";
+  Lksf << "    PROVIDE_HIDDEN(.omp_offloading.entries_begin = .);\n";
+  Lksf << "    *(.omp_offloading.entries)\n";
+  Lksf << "    PROVIDE_HIDDEN(.omp_offloading.entries_end = .);\n";
+  Lksf << "  }\n";
+  Lksf << "}\n";
+  Lksf << "INSERT BEFORE .data\n";
 
-  lksf.close();
+  Lksf.close();
 
   CmdArgs.push_back("-T");
   CmdArgs.push_back(LKS);
@@ -5806,7 +5808,7 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
 
   // The (un)bundling command looks like this:
   // clang-offload-bundler -type=bc
-  //   -omptargets=host-triple,tgt1-triple,tgt2-triple
+  //   -omptargets=host-triple,device-triple1,device-triple2
   //   -inputs=input_file
   //   -outputs=unbundle_file_host,unbundle_file_tgt1,unbundle_file_tgt2"
   //   (-unbundle)
@@ -5824,13 +5826,15 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
 
   // Get the triples. The order is the same that comes in omptargets option.
   {
-    Arg *TargetsArg = TCArgs.getLastArg(options::OPT_omptargets_EQ);
-    SmallString<128> Triples("-omptargets=");
+    SmallString<128> Triples;
+    Triples += "-targets=offload-host-";
     Triples += getToolChain().getTripleString();
+
+    Arg *TargetsArg = TCArgs.getLastArg(options::OPT_omptargets_EQ);
     for (auto *A : TargetsArg->getValues()) {
-      Triples += ',';
-      // Get the string that exactly matches the triple.
+      // We have to use the string that exactly matches the triple here.
       llvm::Triple T(A);
+      Triples += ",offload-device-";
       Triples += T.getTriple();
     }
     CmdArgs.push_back(TCArgs.MakeArgString(Triples));
