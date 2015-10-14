@@ -7756,8 +7756,6 @@ def err_omp_ordered_directive_with_param : Error<
   "'ordered' directive %select{without any clauses|with 'threads' clause}0 cannot be closely nested inside ordered region with specified parameter">;
 def note_omp_ordered_param : Note<
   "'ordered' clause with specified parameter">;
-def err_omp_expected_array_sect_reduction_lb_not_zero : Error<
-  "lower bound expected to be evaluated to zero">;
 def err_omp_expected_base_var_name : Error<
   "expected variable name as a base of the array %select{subscript|section}0">;
 } // end of OpenMP category
@@ -7803,9 +7801,10 @@ def err_module_unimported_use : Error<
 def err_module_unimported_use_multiple : Error<
   "%select{declaration|definition|default argument}0 of %1 must be imported "
   "from one of the following modules before it is required:%2">;
-def err_module_import_in_extern_c : Error<
+def ext_module_import_in_extern_c : ExtWarn<
   "import of C++ module '%0' appears within extern \"C\" language linkage "
-  "specification">;
+  "specification">, DefaultError,
+  InGroup<DiagGroup<"module-import-in-extern-c">>;
 def note_module_import_in_extern_c : Note<
   "extern \"C\" language linkage specification begins here">;
 def err_module_import_not_at_top_level_fatal : Error<
