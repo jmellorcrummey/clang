@@ -283,7 +283,7 @@ SanitizerArgs::SanitizerArgs(const ToolChain &TC,
   }
 
   // Check that LTO is enabled if we need it.
-  if ((Kinds & NeedsLTO) && !D.IsUsingLTO(Args)) {
+  if ((Kinds & NeedsLTO) && !D.isUsingLTO()) {
     D.Diag(diag::err_drv_argument_only_allowed_with)
         << lastArgumentForMask(D, Args, Kinds & NeedsLTO) << "-flto";
   }
@@ -495,10 +495,8 @@ SanitizerArgs::SanitizerArgs(const ToolChain &TC,
 
   if (AllAddedKinds & Address) {
     AsanSharedRuntime =
-        Args.hasArg(options::OPT_shared_libasan) ||
-        (TC.getTriple().getEnvironment() == llvm::Triple::Android);
-    AsanZeroBaseShadow =
-        (TC.getTriple().getEnvironment() == llvm::Triple::Android);
+        Args.hasArg(options::OPT_shared_libasan) || TC.getTriple().isAndroid();
+    AsanZeroBaseShadow = TC.getTriple().isAndroid();
     if (Arg *A =
             Args.getLastArg(options::OPT_fsanitize_address_field_padding)) {
         StringRef S = A->getValue();

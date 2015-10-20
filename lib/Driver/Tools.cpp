@@ -1093,7 +1093,7 @@ void Clang::AddAArch64TargetArgs(const ArgList &Args,
       CmdArgs.push_back("-aarch64-fix-cortex-a53-835769=1");
     else
       CmdArgs.push_back("-aarch64-fix-cortex-a53-835769=0");
-  } else if (Triple.getEnvironment() == llvm::Triple::Android) {
+  } else if (Triple.isAndroid()) {
     // Enabled A53 errata (835769) workaround by default on android
     CmdArgs.push_back("-backend-option");
     CmdArgs.push_back("-aarch64-fix-cortex-a53-835769=1");
@@ -1126,7 +1126,7 @@ void mips::getMipsCPUAndABI(const ArgList &Args, const llvm::Triple &Triple,
   }
 
   // MIPS64r6 is the default for Android MIPS64 (mips64el-linux-android).
-  if (Triple.getEnvironment() == llvm::Triple::Android)
+  if (Triple.isAndroid())
     DefMips64CPU = "mips64r6";
 
   // MIPS3 is the default for mips64*-unknown-openbsd.
@@ -1631,7 +1631,7 @@ static const char *getX86TargetCPU(const ArgList &Args,
     return "btver2";
 
   // On Android use targets compatible with gcc
-  if (Triple.getEnvironment() == llvm::Triple::Android)
+  if (Triple.isAndroid())
     return Is64Bit ? "x86-64" : "i686";
 
   // Everything else goes to x86-64 in 64-bit mode.
@@ -1752,7 +1752,7 @@ static std::string getCPUName(const ArgList &Args, const llvm::Triple &T,
 }
 
 static void AddGoldPlugin(const ToolChain &ToolChain, const ArgList &Args,
-                          ArgStringList &CmdArgs) {
+                          ArgStringList &CmdArgs, bool IsThinLTO) {
   // Tell the linker to load the plugin. This has to come before AddLinkerInputs
   // as gold requires -plugin to come before any -plugin-opt that -Wl might
   // forward.
@@ -1768,6 +1768,8 @@ static void AddGoldPlugin(const ToolChain &ToolChain, const ArgList &Args,
   std::string CPU = getCPUName(Args, ToolChain.getTriple());
   if (!CPU.empty())
     CmdArgs.push_back(Args.MakeArgString(Twine("-plugin-opt=mcpu=") + CPU));
+
+  if (IsThinLTO) CmdArgs.push_back("-plugin-opt=thinlto");
 }
 
 /// This is a helper function for validating the optional refinement step
@@ -1928,7 +1930,7 @@ static void getX86TargetFeatures(const Driver &D, const llvm::Triple &Triple,
 
   const llvm::Triple::ArchType ArchType = Triple.getArch();
   // Add features to be compatible with gcc for Android.
-  if (Triple.getEnvironment() == llvm::Triple::Android) {
+  if (Triple.isAndroid()) {
     if (ArchType == llvm::Triple::x86_64) {
       Features.push_back("+sse4.2");
       Features.push_back("+popcnt");
@@ -2428,6 +2430,38 @@ static bool UseRelaxAll(Compilation &C, const ArgList &Args) {
                       RelaxDefault);
 }
 
+// Extract the integer N from a string spelled "-dwarf-N", returning 0
+// on mismatch. The StringRef input (rather than an Arg) allows
+// for use by the "-Xassembler" option parser.
+static unsigned DwarfVersionNum(StringRef ArgValue) {
+  return llvm::StringSwitch<unsigned>(ArgValue)
+      .Case("-gdwarf-2", 2)
+      .Case("-gdwarf-3", 3)
+      .Case("-gdwarf-4", 4)
+      .Default(0);
+}
+
+static void RenderDebugEnablingArgs(const ArgList &Args, ArgStringList &CmdArgs,
+                                    CodeGenOptions::DebugInfoKind DebugInfoKind,
+                                    unsigned DwarfVersion) {
+  switch (DebugInfoKind) {
+  case CodeGenOptions::DebugLineTablesOnly:
+    CmdArgs.push_back("-debug-info-kind=line-tables-only");
+    break;
+  case CodeGenOptions::LimitedDebugInfo:
+    CmdArgs.push_back("-debug-info-kind=limited");
+    break;
+  case CodeGenOptions::FullDebugInfo:
+    CmdArgs.push_back("-debug-info-kind=standalone");
+    break;
+  default:
+    break;
+  }
+  if (DwarfVersion > 0)
+    CmdArgs.push_back(
+        Args.MakeArgString("-dwarf-version=" + Twine(DwarfVersion)));
+}
+
 static void CollectArgsForIntegratedAssembler(Compilation &C,
                                               const ArgList &Args,
                                               ArgStringList &CmdArgs,
@@ -2477,7 +2511,14 @@ static void CollectArgsForIntegratedAssembler(Compilation &C,
         if (Value == "-I")
           TakeNextArg = true;
       } else if (Value.startswith("-gdwarf-")) {
-        CmdArgs.push_back(Value.data());
+        // "-gdwarf-N" options are not cc1as options.
+        unsigned DwarfVersion = DwarfVersionNum(Value);
+        if (DwarfVersion == 0) { // Send it onward, and let cc1as complain.
+          CmdArgs.push_back(Value.data());
+        } else {
+          RenderDebugEnablingArgs(
+              Args, CmdArgs, CodeGenOptions::LimitedDebugInfo, DwarfVersion);
+        }
       } else if (Value.startswith("-mcpu") || Value.startswith("-mfpu") ||
                  Value.startswith("-mhwdiv") || Value.startswith("-march")) {
         // Do nothing, we'll validate it later.
@@ -2658,8 +2699,7 @@ collectSanitizerRuntimes(const ToolChain &TC, const ArgList &Args,
   }
 
   // Collect static runtimes.
-  if (Args.hasArg(options::OPT_shared) ||
-      (TC.getTriple().getEnvironment() == llvm::Triple::Android)) {
+  if (Args.hasArg(options::OPT_shared) || TC.getTriple().isAndroid()) {
     // Don't link static runtimes into DSOs or if compiling for Android.
     return;
   }
@@ -2911,6 +2951,7 @@ static VersionTuple getMSCompatibilityVersion(unsigned Version) {
 static void claimNoWarnArgs(const ArgList &Args) {
   // Don't warn about unused -f(no-)?lto.  This can happen when we're
   // preprocessing, precompiling or assembling.
+  Args.ClaimAllArgs(options::OPT_flto_EQ);
   Args.ClaimAllArgs(options::OPT_flto);
   Args.ClaimAllArgs(options::OPT_fno_lto);
 }
@@ -3107,7 +3148,7 @@ ParsePICArgs(const ToolChain &ToolChain, const llvm::Triple &Triple,
       Args.hasArg(options::OPT_mkernel, options::OPT_fapple_kext);
 
   // Android-specific defaults for PIC/PIE
-  if (ToolChain.getTriple().getEnvironment() == llvm::Triple::Android) {
+  if (ToolChain.getTriple().isAndroid()) {
     switch (ToolChain.getArch()) {
     case llvm::Triple::arm:
     case llvm::Triple::armeb:
@@ -3176,15 +3217,23 @@ ParsePICArgs(const ToolChain &ToolChain, const llvm::Triple &Triple,
             O.matches(options::OPT_fPIE) || O.matches(options::OPT_fPIC);
       } else {
         PIE = PIC = false;
+        if (Triple.isPS4CPU()) {
+          Arg *ModelArg = Args.getLastArg(options::OPT_mcmodel_EQ);
+          StringRef Model = ModelArg ? ModelArg->getValue() : "";
+          if (Model != "kernel") {
+            PIC = true;
+            ToolChain.getDriver().Diag(diag::warn_drv_ps4_force_pic)
+                << LastPICArg->getSpelling();
+          }
+        }
       }
     }
   }
 
-  // Introduce a Darwin-specific hack. If the default is PIC, but the
-  // PIC level would've been set to level 1, force it back to level 2
-  // PIC instead. This matches the behavior of Darwin GCC (based on
-  // chandlerc's informal testing in 2012).
-  if (PIC && ToolChain.getTriple().isOSDarwin())
+  // Introduce a Darwin and PS4-specific hack. If the default is PIC, but the
+  // PIC level would've been set to level 1, force it back to level 2 PIC
+  // instead.
+  if (PIC && (ToolChain.getTriple().isOSDarwin() || Triple.isPS4CPU()))
     IsPICLevelTwo |= ToolChain.isPICDefault();
 
   // This kernel flags are a trump-card: they will disable PIC/PIE
@@ -3256,6 +3305,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   bool IsWindowsCygnus =
       getToolChain().getTriple().isWindowsCygwinEnvironment();
   bool IsWindowsMSVC = getToolChain().getTriple().isWindowsMSVCEnvironment();
+  bool IsPS4CPU = getToolChain().getTriple().isPS4CPU();
 
   // Check number of inputs for sanity. We need at least one input.
   assert(Inputs.size() >= 1 && "Must have at least one input.");
@@ -3335,10 +3385,6 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   } else {
     assert((isa<CompileJobAction>(JA) || isa<BackendJobAction>(JA)) &&
            "Invalid action for clang tool.");
-
-    if (JA.getType() == types::TY_LTO_IR || JA.getType() == types::TY_LTO_BC) {
-      CmdArgs.push_back("-flto");
-    }
     if (JA.getType() == types::TY_Nothing) {
       CmdArgs.push_back("-fsyntax-only");
     } else if (JA.getType() == types::TY_LLVM_IR ||
@@ -3369,6 +3415,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     // the use-list order, since serialization to bitcode is part of the flow.
     if (JA.getType() == types::TY_LLVM_BC)
       CmdArgs.push_back("-emit-llvm-uselists");
+
+    if (D.isUsingLTO())
+      Args.AddLastArg(CmdArgs, options::OPT_flto, options::OPT_flto_EQ);
   }
 
   // We normally speed up the clang process a bit by skipping destructors at
@@ -3820,9 +3869,23 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     break;
   }
 
+  // The 'g' groups options involve a somewhat intricate sequence of decisions
+  // about what to pass from the driver to the frontend, but by the time they
+  // reach cc1 they've been factored into two well-defined orthogonal choices:
+  //  * what level of debug info to generate
+  //  * what dwarf version to write
+  // This avoids having to monkey around further in cc1 other than to disable
+  // codeview if not running in a Windows environment. Perhaps even that
+  // decision should be made in the driver as well though.
+  enum CodeGenOptions::DebugInfoKind DebugInfoKind =
+      CodeGenOptions::NoDebugInfo;
+  // These two are potentially updated by AddClangCLArgs.
+  unsigned DwarfVersion = 0;
+  bool EmitCodeView = false;
+
   // Add clang-cl arguments.
   if (getToolChain().getDriver().IsCLMode())
-    AddClangCLArgs(Args, CmdArgs);
+    AddClangCLArgs(Args, CmdArgs, &DebugInfoKind, &EmitCodeView);
 
   // Pass the linker version in use.
   if (Arg *A = Args.getLastArg(options::OPT_mlinker_version_EQ)) {
@@ -3863,51 +3926,53 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                                                  : "-");
   }
 
-  // Use the last option from "-g" group. "-gline-tables-only" and "-gdwarf-x"
-  // are preserved, all other debug options are substituted with "-g".
   Args.ClaimAllArgs(options::OPT_g_Group);
   Arg *SplitDwarfArg = Args.getLastArg(options::OPT_gsplit_dwarf);
   if (Arg *A = Args.getLastArg(options::OPT_g_Group)) {
+    // If you say "-gline-tables-only -gsplit-dwarf", split-dwarf wins,
+    // which mandates turning on "-g". But -split-dwarf is not a g_group option,
+    // hence it takes a nontrivial test to decide about line-tables-only.
     if (A->getOption().matches(options::OPT_gline_tables_only) &&
         (!SplitDwarfArg || A->getIndex() > SplitDwarfArg->getIndex())) {
-      // FIXME: we should support specifying dwarf version with
-      // -gline-tables-only.
-      CmdArgs.push_back("-gline-tables-only");
-      // Default is dwarf-2 for Darwin, OpenBSD, FreeBSD and Solaris.
-      const llvm::Triple &Triple = getToolChain().getTriple();
-      if (Triple.isOSDarwin() || Triple.getOS() == llvm::Triple::OpenBSD ||
-          Triple.getOS() == llvm::Triple::FreeBSD ||
-          Triple.getOS() == llvm::Triple::Solaris)
-        CmdArgs.push_back("-gdwarf-2");
+      DebugInfoKind = CodeGenOptions::DebugLineTablesOnly;
       SplitDwarfArg = nullptr;
-    } else if (A->getOption().matches(options::OPT_gdwarf_2) ||
-               A->getOption().matches(options::OPT_gdwarf_3) ||
-               A->getOption().matches(options::OPT_gdwarf_4)) {
-      A->render(Args, CmdArgs);
     } else if (!A->getOption().matches(options::OPT_g0)) {
-      // Default is dwarf-2 for Darwin, OpenBSD, FreeBSD and Solaris.
-      const llvm::Triple &Triple = getToolChain().getTriple();
-      if (Triple.isOSDarwin() || Triple.getOS() == llvm::Triple::OpenBSD ||
-          Triple.getOS() == llvm::Triple::FreeBSD ||
-          Triple.getOS() == llvm::Triple::Solaris)
-        CmdArgs.push_back("-gdwarf-2");
-      else
-        CmdArgs.push_back("-g");
+      // Some 'g' group option other than one expressly disabling debug info
+      // must have been the final (winning) one. They're all equivalent.
+      DebugInfoKind = CodeGenOptions::LimitedDebugInfo;
     }
   }
 
+  // If a -gdwarf argument appeared, use it, unless DebugInfoKind is None
+  // (because that would mean that "-g0" was the rightmost 'g' group option).
+  // FIXME: specifying "-gdwarf-<N>" "-g1" in that order works,
+  // but "-g1" "-gdwarf-<N>" does not. A deceptively simple (but wrong) "fix"
+  // exists of removing the gdwarf options from the g_group.
+  if (Arg *A = Args.getLastArg(options::OPT_gdwarf_2, options::OPT_gdwarf_3,
+                               options::OPT_gdwarf_4))
+    DwarfVersion = DwarfVersionNum(A->getSpelling());
+
   // Forward -gcodeview.
-  Args.AddLastArg(CmdArgs, options::OPT_gcodeview);
+  // 'EmitCodeView might have been set by CL-compatibility argument parsing.
+  if (Args.hasArg(options::OPT_gcodeview) || EmitCodeView) {
+    // DwarfVersion remains at 0 if no explicit choice was made.
+    CmdArgs.push_back("-gcodeview");
+  } else if (DwarfVersion == 0 &&
+             DebugInfoKind != CodeGenOptions::NoDebugInfo) {
+    DwarfVersion = getToolChain().GetDefaultDwarfVersion();
+  }
 
   // We ignore flags -gstrict-dwarf and -grecord-gcc-switches for now.
   Args.ClaimAllArgs(options::OPT_g_flags_Group);
+
+  // PS4 defaults to no column info
   if (Args.hasFlag(options::OPT_gcolumn_info, options::OPT_gno_column_info,
-                   /*Default*/ true))
+                   /*Default=*/ !IsPS4CPU))
     CmdArgs.push_back("-dwarf-column-info");
 
   // FIXME: Move backend command line options to the module.
   if (Args.hasArg(options::OPT_gmodules)) {
-    CmdArgs.push_back("-g");
+    DebugInfoKind = CodeGenOptions::LimitedDebugInfo;
     CmdArgs.push_back("-dwarf-ext-refs");
     CmdArgs.push_back("-fmodule-format=obj");
   }
@@ -3916,10 +3981,22 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // splitting and extraction.
   // FIXME: Currently only works on Linux.
   if (getToolChain().getTriple().isOSLinux() && SplitDwarfArg) {
-    CmdArgs.push_back("-g");
+    DebugInfoKind = CodeGenOptions::LimitedDebugInfo;
     CmdArgs.push_back("-backend-option");
     CmdArgs.push_back("-split-dwarf=Enable");
   }
+
+  // After we've dealt with all combinations of things that could
+  // make DebugInfoKind be other than None or DebugLineTablesOnly,
+  // figure out if we need to "upgrade" it to standalone debug info.
+  // We parse these two '-f' options whether or not they will be used,
+  // to claim them even if you wrote "-fstandalone-debug -gline-tables-only"
+  bool NeedFullDebug = Args.hasFlag(options::OPT_fstandalone_debug,
+                                    options::OPT_fno_standalone_debug,
+                                    getToolChain().GetDefaultStandaloneDebug());
+  if (DebugInfoKind == CodeGenOptions::LimitedDebugInfo && NeedFullDebug)
+    DebugInfoKind = CodeGenOptions::FullDebugInfo;
+  RenderDebugEnablingArgs(Args, CmdArgs, DebugInfoKind, DwarfVersion);
 
   // -ggnu-pubnames turns on gnu style pubnames in the backend.
   if (Args.hasArg(options::OPT_ggnu_pubnames)) {
@@ -3929,7 +4006,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   // -gdwarf-aranges turns on the emission of the aranges section in the
   // backend.
-  if (Args.hasArg(options::OPT_gdwarf_aranges)) {
+  // Always enabled on the PS4.
+  if (Args.hasArg(options::OPT_gdwarf_aranges) || IsPS4CPU) {
     CmdArgs.push_back("-backend-option");
     CmdArgs.push_back("-generate-arange-section");
   }
@@ -4171,6 +4249,15 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // Add in -fdebug-compilation-dir if necessary.
   addDebugCompDirArg(Args, CmdArgs);
 
+  for (const Arg *A : Args.filtered(options::OPT_fdebug_prefix_map_EQ)) {
+    StringRef Map = A->getValue();
+    if (Map.find('=') == StringRef::npos)
+      D.Diag(diag::err_drv_invalid_argument_to_fdebug_prefix_map) << Map;
+    else
+      CmdArgs.push_back(Args.MakeArgString("-fdebug-prefix-map=" + Map));
+    A->claim();
+  }
+
   if (Arg *A = Args.getLastArg(options::OPT_ftemplate_depth_,
                                options::OPT_ftemplate_depth_EQ)) {
     CmdArgs.push_back("-ftemplate-depth");
@@ -4283,12 +4370,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // Forward -f (flag) options which we can pass directly.
   Args.AddLastArg(CmdArgs, options::OPT_femit_all_decls);
   Args.AddLastArg(CmdArgs, options::OPT_fheinous_gnu_extensions);
-  Args.AddLastArg(CmdArgs, options::OPT_fstandalone_debug);
-  Args.AddLastArg(CmdArgs, options::OPT_fno_standalone_debug);
   Args.AddLastArg(CmdArgs, options::OPT_fno_operator_names);
   // Emulated TLS is enabled by default on Android, and can be enabled manually
   // with -femulated-tls.
-  bool EmulatedTLSDefault = Triple.getEnvironment() == llvm::Triple::Android;
+  bool EmulatedTLSDefault = Triple.isAndroid();
   if (Args.hasFlag(options::OPT_femulated_tls, options::OPT_fno_emulated_tls,
                    EmulatedTLSDefault))
     CmdArgs.push_back("-femulated-tls");
@@ -5470,14 +5555,12 @@ static EHFlags parseClangCLEHFlags(const Driver &D, const ArgList &Args) {
     }
   }
 
-  // FIXME: Disable C++ EH completely, until it becomes more reliable. Users
-  // can use -Xclang to manually enable C++ EH until then.
-  EH = EHFlags();
-
   return EH;
 }
 
-void Clang::AddClangCLArgs(const ArgList &Args, ArgStringList &CmdArgs) const {
+void Clang::AddClangCLArgs(const ArgList &Args, ArgStringList &CmdArgs,
+                           enum CodeGenOptions::DebugInfoKind *DebugInfoKind,
+                           bool *EmitCodeView) const {
   unsigned RTOptionID = options::OPT__SLASH_MT;
 
   if (Args.hasArg(options::OPT__SLASH_LDd))
@@ -5541,13 +5624,13 @@ void Clang::AddClangCLArgs(const ArgList &Args, ArgStringList &CmdArgs) const {
     CmdArgs.push_back("-fno-rtti-data");
 
   // Emit CodeView if -Z7 is present.
-  bool EmitCodeView = Args.hasArg(options::OPT__SLASH_Z7);
+  *EmitCodeView = Args.hasArg(options::OPT__SLASH_Z7);
   bool EmitDwarf = Args.hasArg(options::OPT_gdwarf);
   // If we are emitting CV but not DWARF, don't build information that LLVM
   // can't yet process.
-  if (EmitCodeView && !EmitDwarf)
-    CmdArgs.push_back("-gline-tables-only");
-  if (EmitCodeView)
+  if (*EmitCodeView && !EmitDwarf)
+    *DebugInfoKind = CodeGenOptions::DebugLineTablesOnly;
+  if (*EmitCodeView)
     CmdArgs.push_back("-gcodeview");
 
   const Driver &D = getToolChain().getDriver();
@@ -5698,14 +5781,20 @@ void ClangAs::ConstructJob(Compilation &C, const JobAction &JA,
   // with an actual assembly file.
   if (SourceAction->getType() == types::TY_Asm ||
       SourceAction->getType() == types::TY_PP_Asm) {
+    bool WantDebug = false;
+    unsigned DwarfVersion = 0;
     Args.ClaimAllArgs(options::OPT_g_Group);
-    if (Arg *A = Args.getLastArg(options::OPT_g_Group))
-      if (!A->getOption().matches(options::OPT_g0))
-        CmdArgs.push_back("-g");
-
-    if (Arg *A = Args.getLastArg(options::OPT_gdwarf_2, options::OPT_gdwarf_3,
-                                 options::OPT_gdwarf_4))
-      A->render(Args, CmdArgs);
+    if (Arg *A = Args.getLastArg(options::OPT_g_Group)) {
+      WantDebug = !A->getOption().matches(options::OPT_g0);
+      if (WantDebug)
+        DwarfVersion = DwarfVersionNum(A->getSpelling());
+    }
+    if (DwarfVersion == 0)
+      DwarfVersion = getToolChain().GetDefaultDwarfVersion();
+    RenderDebugEnablingArgs(Args, CmdArgs,
+                            (WantDebug ? CodeGenOptions::LimitedDebugInfo
+                                       : CodeGenOptions::NoDebugInfo),
+                            DwarfVersion);
 
     // Add the -fdebug-compilation-dir flag if needed.
     addDebugCompDirArg(Args, CmdArgs);
@@ -6576,8 +6665,8 @@ void cloudabi::Linker::ConstructJob(Compilation &C, const JobAction &JA,
                   {options::OPT_T_Group, options::OPT_e, options::OPT_s,
                    options::OPT_t, options::OPT_Z_Flag, options::OPT_r});
 
-  if (D.IsUsingLTO(Args))
-    AddGoldPlugin(ToolChain, Args, CmdArgs);
+  if (D.isUsingLTO())
+    AddGoldPlugin(ToolChain, Args, CmdArgs, D.getLTOMode() == LTOK_Thin);
 
   AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
 
@@ -6720,7 +6809,7 @@ void darwin::Linker::AddLinkArgs(Compilation &C, const ArgList &Args,
                    options::OPT_fno_application_extension, false))
     CmdArgs.push_back("-application_extension");
 
-  if (D.IsUsingLTO(Args)) {
+  if (D.isUsingLTO()) {
     // If we are using LTO, then automatically create a temporary file path for
     // the linker to use, so that it's lifetime will extend past a possible
     // dsymutil step.
@@ -7722,14 +7811,15 @@ void freebsd::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddAllArgs(CmdArgs, options::OPT_Z_Flag);
   Args.AddAllArgs(CmdArgs, options::OPT_r);
 
-  if (D.IsUsingLTO(Args))
-    AddGoldPlugin(ToolChain, Args, CmdArgs);
+  if (D.isUsingLTO())
+    AddGoldPlugin(ToolChain, Args, CmdArgs, D.getLTOMode() == LTOK_Thin);
 
   bool NeedsSanitizerDeps = addSanitizerRuntimes(ToolChain, Args, CmdArgs);
   AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
 
   if (!Args.hasArg(options::OPT_nostdlib) &&
       !Args.hasArg(options::OPT_nodefaultlibs)) {
+    addOpenMPRuntime(CmdArgs, ToolChain, Args);
     if (D.CCCIsCXX()) {
       ToolChain.AddCXXStdlibLibArgs(Args, CmdArgs);
       if (Args.hasArg(options::OPT_pg))
@@ -8310,7 +8400,7 @@ void gnutools::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
 
 static void AddLibgcc(const llvm::Triple &Triple, const Driver &D,
                       ArgStringList &CmdArgs, const ArgList &Args) {
-  bool isAndroid = Triple.getEnvironment() == llvm::Triple::Android;
+  bool isAndroid = Triple.isAndroid();
   bool isCygMing = Triple.isOSCygMing();
   bool StaticLibgcc = Args.hasArg(options::OPT_static_libgcc) ||
                       Args.hasArg(options::OPT_static);
@@ -8346,7 +8436,7 @@ static std::string getLinuxDynamicLinker(const ArgList &Args,
                                          const toolchains::Linux &ToolChain) {
   const llvm::Triple::ArchType Arch = ToolChain.getArch();
 
-  if (ToolChain.getTriple().getEnvironment() == llvm::Triple::Android) {
+  if (ToolChain.getTriple().isAndroid()) {
     if (ToolChain.getTriple().isArch64Bit())
       return "/system/bin/linker64";
     else
@@ -8494,8 +8584,7 @@ void gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   llvm::Triple Triple = llvm::Triple(TripleStr);
 
   const llvm::Triple::ArchType Arch = ToolChain.getArch();
-  const bool isAndroid =
-      ToolChain.getTriple().getEnvironment() == llvm::Triple::Android;
+  const bool isAndroid = ToolChain.getTriple().isAndroid();
   const bool IsPIE =
       !Args.hasArg(options::OPT_shared) && !Args.hasArg(options::OPT_static) &&
       (Args.hasArg(options::OPT_pie) || ToolChain.isPIEDefault());
@@ -8598,8 +8687,8 @@ void gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   for (const auto &Path : Paths)
     CmdArgs.push_back(Args.MakeArgString(StringRef("-L") + Path));
 
-  if (D.IsUsingLTO(Args))
-    AddGoldPlugin(ToolChain, Args, CmdArgs);
+  if (D.isUsingLTO())
+    AddGoldPlugin(ToolChain, Args, CmdArgs, D.getLTOMode() == LTOK_Thin);
 
   if (Args.hasArg(options::OPT_Z_Xlinker__no_demangle))
     CmdArgs.push_back("--no-demangle");
@@ -9217,7 +9306,7 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(Args.MakeArgString("-debug"));
     CmdArgs.push_back(Args.MakeArgString("-incremental:no"));
     if (Args.hasArg(options::OPT__SLASH_MD, options::OPT__SLASH_MDd)) {
-      static const char *CompilerRTComponents[] = {
+      static const char *const CompilerRTComponents[] = {
           "asan_dynamic", "asan_dynamic_runtime_thunk",
       };
       for (const auto &Component : CompilerRTComponents)
@@ -9228,7 +9317,7 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     } else if (DLL) {
       CmdArgs.push_back(getCompilerRTArgString(TC, Args, "asan_dll_thunk"));
     } else {
-      static const char *CompilerRTComponents[] = {
+      static const char *const CompilerRTComponents[] = {
           "asan", "asan_cxx",
       };
       for (const auto &Component : CompilerRTComponents)
@@ -10032,6 +10121,8 @@ void tools::Myriad::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
 
   if (UseDefaultLibs) {
+    if (C.getDriver().CCCIsCXX())
+      CmdArgs.push_back("-lstdc++");
     if (T.getOS() == llvm::Triple::RTEMS) {
       CmdArgs.push_back("--start-group");
       CmdArgs.push_back("-lc");
@@ -10042,8 +10133,6 @@ void tools::Myriad::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     } else {
       CmdArgs.push_back("-lc");
     }
-    if (C.getDriver().CCCIsCXX())
-      CmdArgs.push_back("-lstdc++");
     CmdArgs.push_back("-lgcc");
   }
   if (UseStartfiles) {
@@ -10055,4 +10144,328 @@ void tools::Myriad::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       Args.MakeArgString(TC.GetProgramPath("sparc-myriad-elf-ld"));
   C.addCommand(llvm::make_unique<Command>(JA, *this, Args.MakeArgString(Exec),
                                           CmdArgs, Inputs));
+}
+
+void PS4cpu::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
+                                    const InputInfo &Output,
+                                    const InputInfoList &Inputs,
+                                    const ArgList &Args,
+                                    const char *LinkingOutput) const {
+  claimNoWarnArgs(Args);
+  ArgStringList CmdArgs;
+
+  Args.AddAllArgValues(CmdArgs, options::OPT_Wa_COMMA, options::OPT_Xassembler);
+
+  CmdArgs.push_back("-o");
+  CmdArgs.push_back(Output.getFilename());
+
+  assert(Inputs.size() == 1 && "Unexpected number of inputs.");
+  const InputInfo &Input = Inputs[0];
+  assert(Input.isFilename() && "Invalid input.");
+  CmdArgs.push_back(Input.getFilename());
+
+  const char *Exec =
+      Args.MakeArgString(getToolChain().GetProgramPath("ps4-as"));
+  C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, Inputs));
+}
+
+static void AddPS4ProfileRT(const ToolChain &TC, const ArgList &Args,
+                            ArgStringList &CmdArgs) {
+  if (!(Args.hasFlag(options::OPT_fprofile_arcs, options::OPT_fno_profile_arcs,
+                     false) ||
+        Args.hasArg(options::OPT_fprofile_generate) ||
+        Args.hasArg(options::OPT_fprofile_instr_generate) ||
+        Args.hasArg(options::OPT_fcreate_profile) ||
+        Args.hasArg(options::OPT_coverage)))
+    return;
+
+  assert(TC.getTriple().isPS4CPU() &&
+         "Profiling libraries are only implemented for the PS4 CPU");
+  CmdArgs.push_back("-lclang_rt.profile-x86_64");
+}
+
+static void AddPS4SanitizerArgs(const ToolChain &TC, ArgStringList &CmdArgs) {
+  const SanitizerArgs &SanArgs = TC.getSanitizerArgs();
+  if (SanArgs.needsUbsanRt()) {
+    CmdArgs.push_back("-lSceDbgUBSanitizer_stub_weak");
+  }
+  if (SanArgs.needsAsanRt()) {
+    CmdArgs.push_back("-lSceDbgAddressSanitizer_stub_weak");
+  }
+}
+
+static void ConstructPS4LinkJob(const Tool &T, Compilation &C,
+                                const JobAction &JA, const InputInfo &Output,
+                                const InputInfoList &Inputs,
+                                const ArgList &Args,
+                                const char *LinkingOutput) {
+  const toolchains::FreeBSD &ToolChain =
+      static_cast<const toolchains::FreeBSD &>(T.getToolChain());
+  const Driver &D = ToolChain.getDriver();
+  ArgStringList CmdArgs;
+
+  // Silence warning for "clang -g foo.o -o foo"
+  Args.ClaimAllArgs(options::OPT_g_Group);
+  // and "clang -emit-llvm foo.o -o foo"
+  Args.ClaimAllArgs(options::OPT_emit_llvm);
+  // and for "clang -w foo.o -o foo". Other warning options are already
+  // handled somewhere else.
+  Args.ClaimAllArgs(options::OPT_w);
+
+  if (!D.SysRoot.empty())
+    CmdArgs.push_back(Args.MakeArgString("--sysroot=" + D.SysRoot));
+
+  if (Args.hasArg(options::OPT_pie))
+    CmdArgs.push_back("-pie");
+
+  if (Args.hasArg(options::OPT_rdynamic))
+    CmdArgs.push_back("-export-dynamic");
+  if (Args.hasArg(options::OPT_shared))
+    CmdArgs.push_back("--oformat=so");
+
+  if (Output.isFilename()) {
+    CmdArgs.push_back("-o");
+    CmdArgs.push_back(Output.getFilename());
+  } else {
+    assert(Output.isNothing() && "Invalid output.");
+  }
+
+  AddPS4SanitizerArgs(ToolChain, CmdArgs);
+
+  Args.AddAllArgs(CmdArgs, options::OPT_L);
+  Args.AddAllArgs(CmdArgs, options::OPT_T_Group);
+  Args.AddAllArgs(CmdArgs, options::OPT_e);
+  Args.AddAllArgs(CmdArgs, options::OPT_s);
+  Args.AddAllArgs(CmdArgs, options::OPT_t);
+  Args.AddAllArgs(CmdArgs, options::OPT_r);
+
+  if (Args.hasArg(options::OPT_Z_Xlinker__no_demangle))
+    CmdArgs.push_back("--no-demangle");
+
+  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
+
+  if (Args.hasArg(options::OPT_pthread)) {
+    CmdArgs.push_back("-lpthread");
+  }
+
+  AddPS4ProfileRT(ToolChain, Args, CmdArgs);
+
+  const char *Exec = Args.MakeArgString(ToolChain.GetProgramPath("ps4-ld"));
+
+  C.addCommand(llvm::make_unique<Command>(JA, T, Exec, CmdArgs, Inputs));
+}
+
+static void ConstructGoldLinkJob(const Tool &T, Compilation &C,
+                                 const JobAction &JA, const InputInfo &Output,
+                                 const InputInfoList &Inputs,
+                                 const ArgList &Args,
+                                 const char *LinkingOutput) {
+  const toolchains::FreeBSD &ToolChain =
+      static_cast<const toolchains::FreeBSD &>(T.getToolChain());
+  const Driver &D = ToolChain.getDriver();
+  ArgStringList CmdArgs;
+
+  // Silence warning for "clang -g foo.o -o foo"
+  Args.ClaimAllArgs(options::OPT_g_Group);
+  // and "clang -emit-llvm foo.o -o foo"
+  Args.ClaimAllArgs(options::OPT_emit_llvm);
+  // and for "clang -w foo.o -o foo". Other warning options are already
+  // handled somewhere else.
+  Args.ClaimAllArgs(options::OPT_w);
+
+  if (!D.SysRoot.empty())
+    CmdArgs.push_back(Args.MakeArgString("--sysroot=" + D.SysRoot));
+
+  if (Args.hasArg(options::OPT_pie))
+    CmdArgs.push_back("-pie");
+
+  if (Args.hasArg(options::OPT_static)) {
+    CmdArgs.push_back("-Bstatic");
+  } else {
+    if (Args.hasArg(options::OPT_rdynamic))
+      CmdArgs.push_back("-export-dynamic");
+    CmdArgs.push_back("--eh-frame-hdr");
+    if (Args.hasArg(options::OPT_shared)) {
+      CmdArgs.push_back("-Bshareable");
+    } else {
+      CmdArgs.push_back("-dynamic-linker");
+      CmdArgs.push_back("/libexec/ld-elf.so.1");
+    }
+    CmdArgs.push_back("--enable-new-dtags");
+  }
+
+  if (Output.isFilename()) {
+    CmdArgs.push_back("-o");
+    CmdArgs.push_back(Output.getFilename());
+  } else {
+    assert(Output.isNothing() && "Invalid output.");
+  }
+
+  AddPS4SanitizerArgs(ToolChain, CmdArgs);
+
+  if (!Args.hasArg(options::OPT_nostdlib) &&
+      !Args.hasArg(options::OPT_nostartfiles)) {
+    const char *crt1 = NULL;
+    if (!Args.hasArg(options::OPT_shared)) {
+      if (Args.hasArg(options::OPT_pg))
+        crt1 = "gcrt1.o";
+      else if (Args.hasArg(options::OPT_pie))
+        crt1 = "Scrt1.o";
+      else
+        crt1 = "crt1.o";
+    }
+    if (crt1)
+      CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath(crt1)));
+
+    CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("crti.o")));
+
+    const char *crtbegin = NULL;
+    if (Args.hasArg(options::OPT_static))
+      crtbegin = "crtbeginT.o";
+    else if (Args.hasArg(options::OPT_shared) || Args.hasArg(options::OPT_pie))
+      crtbegin = "crtbeginS.o";
+    else
+      crtbegin = "crtbegin.o";
+
+    CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath(crtbegin)));
+  }
+
+  Args.AddAllArgs(CmdArgs, options::OPT_L);
+
+  const ToolChain::path_list Paths = ToolChain.getFilePaths();
+  for (ToolChain::path_list::const_iterator i = Paths.begin(), e = Paths.end();
+       i != e; ++i)
+    CmdArgs.push_back(Args.MakeArgString(StringRef("-L") + *i));
+
+  Args.AddAllArgs(CmdArgs, options::OPT_T_Group);
+  Args.AddAllArgs(CmdArgs, options::OPT_e);
+  Args.AddAllArgs(CmdArgs, options::OPT_s);
+  Args.AddAllArgs(CmdArgs, options::OPT_t);
+  Args.AddAllArgs(CmdArgs, options::OPT_r);
+
+  if (Args.hasArg(options::OPT_Z_Xlinker__no_demangle))
+    CmdArgs.push_back("--no-demangle");
+
+  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
+
+  if (!Args.hasArg(options::OPT_nostdlib) &&
+      !Args.hasArg(options::OPT_nodefaultlibs)) {
+    // For PS4, we always want to pass libm, libstdc++ and libkernel
+    // libraries for both C and C++ compilations.
+    CmdArgs.push_back("-lkernel");
+    if (D.CCCIsCXX()) {
+      ToolChain.AddCXXStdlibLibArgs(Args, CmdArgs);
+      if (Args.hasArg(options::OPT_pg))
+        CmdArgs.push_back("-lm_p");
+      else
+        CmdArgs.push_back("-lm");
+    }
+    // FIXME: For some reason GCC passes -lgcc and -lgcc_s before adding
+    // the default system libraries. Just mimic this for now.
+    if (Args.hasArg(options::OPT_pg))
+      CmdArgs.push_back("-lgcc_p");
+    else
+      CmdArgs.push_back("-lcompiler_rt");
+    if (Args.hasArg(options::OPT_static)) {
+      CmdArgs.push_back("-lstdc++");
+    } else if (Args.hasArg(options::OPT_pg)) {
+      CmdArgs.push_back("-lgcc_eh_p");
+    } else {
+      CmdArgs.push_back("--as-needed");
+      CmdArgs.push_back("-lstdc++");
+      CmdArgs.push_back("--no-as-needed");
+    }
+
+    if (Args.hasArg(options::OPT_pthread)) {
+      if (Args.hasArg(options::OPT_pg))
+        CmdArgs.push_back("-lpthread_p");
+      else
+        CmdArgs.push_back("-lpthread");
+    }
+
+    if (Args.hasArg(options::OPT_pg)) {
+      if (Args.hasArg(options::OPT_shared))
+        CmdArgs.push_back("-lc");
+      else {
+        if (Args.hasArg(options::OPT_static)) {
+          CmdArgs.push_back("--start-group");
+          CmdArgs.push_back("-lc_p");
+          CmdArgs.push_back("-lpthread_p");
+          CmdArgs.push_back("--end-group");
+        } else {
+          CmdArgs.push_back("-lc_p");
+        }
+      }
+      CmdArgs.push_back("-lgcc_p");
+    } else {
+      if (Args.hasArg(options::OPT_static)) {
+        CmdArgs.push_back("--start-group");
+        CmdArgs.push_back("-lc");
+        CmdArgs.push_back("-lpthread");
+        CmdArgs.push_back("--end-group");
+      } else {
+        CmdArgs.push_back("-lc");
+      }
+      CmdArgs.push_back("-lcompiler_rt");
+    }
+
+    if (Args.hasArg(options::OPT_static)) {
+      CmdArgs.push_back("-lstdc++");
+    } else if (Args.hasArg(options::OPT_pg)) {
+      CmdArgs.push_back("-lgcc_eh_p");
+    } else {
+      CmdArgs.push_back("--as-needed");
+      CmdArgs.push_back("-lstdc++");
+      CmdArgs.push_back("--no-as-needed");
+    }
+  }
+
+  if (!Args.hasArg(options::OPT_nostdlib) &&
+      !Args.hasArg(options::OPT_nostartfiles)) {
+    if (Args.hasArg(options::OPT_shared) || Args.hasArg(options::OPT_pie))
+      CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("crtendS.o")));
+    else
+      CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("crtend.o")));
+    CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("crtn.o")));
+  }
+
+  AddPS4ProfileRT(ToolChain, Args, CmdArgs);
+
+  const char *Exec =
+#ifdef LLVM_ON_WIN32
+      Args.MakeArgString(ToolChain.GetProgramPath("ps4-ld.gold.exe"));
+#else
+      Args.MakeArgString(ToolChain.GetProgramPath("ps4-ld"));
+#endif
+
+  C.addCommand(llvm::make_unique<Command>(JA, T, Exec, CmdArgs, Inputs));
+}
+
+void PS4cpu::Link::ConstructJob(Compilation &C, const JobAction &JA,
+                                const InputInfo &Output,
+                                const InputInfoList &Inputs,
+                                const ArgList &Args,
+                                const char *LinkingOutput) const {
+  const toolchains::FreeBSD &ToolChain =
+      static_cast<const toolchains::FreeBSD &>(getToolChain());
+  const Driver &D = ToolChain.getDriver();
+  bool PS4Linker;
+  StringRef LinkerOptName;
+  if (const Arg *A = Args.getLastArg(options::OPT_fuse_ld_EQ)) {
+    LinkerOptName = A->getValue();
+    if (LinkerOptName != "ps4" && LinkerOptName != "gold")
+      D.Diag(diag::err_drv_unsupported_linker) << LinkerOptName;
+  }
+
+  if (LinkerOptName == "gold")
+    PS4Linker = false;
+  else if (LinkerOptName == "ps4")
+    PS4Linker = true;
+  else
+    PS4Linker = !Args.hasArg(options::OPT_shared);
+
+  if (PS4Linker)
+    ConstructPS4LinkJob(*this, C, JA, Output, Inputs, Args, LinkingOutput);
+  else
+    ConstructGoldLinkJob(*this, C, JA, Output, Inputs, Args, LinkingOutput);
 }

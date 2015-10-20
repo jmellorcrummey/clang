@@ -199,9 +199,11 @@ static bool fillRanges(MemoryBuffer *Code,
 }
 
 static void outputReplacementXML(StringRef Text) {
+  // FIXME: When we sort includes, we need to make sure the stream is correct
+  // utf-8.
   size_t From = 0;
   size_t Index;
-  while ((Index = Text.find_first_of("\n\r", From)) != StringRef::npos) {
+  while ((Index = Text.find_first_of("\n\r<&", From)) != StringRef::npos) {
     llvm::outs() << Text.substr(From, Index - From);
     switch (Text[Index]) {
     case '\n':
@@ -209,6 +211,12 @@ static void outputReplacementXML(StringRef Text) {
       break;
     case '\r':
       llvm::outs() << "&#13;";
+      break;
+    case '<':
+      llvm::outs() << "&lt;";
+      break;
+    case '&':
+      llvm::outs() << "&amp;";
       break;
     default:
       llvm_unreachable("Unexpected character encountered!");
@@ -316,7 +324,7 @@ int main(int argc, const char **argv) {
   cl::SetVersionPrinter(PrintVersion);
   cl::ParseCommandLineOptions(
       argc, argv,
-      "A tool to format C/C++/Obj-C code.\n\n"
+      "A tool to format C/C++/Java/JavaScript/Objective-C/Protobuf code.\n\n"
       "If no arguments are specified, it formats the code from standard input\n"
       "and writes the result to the standard output.\n"
       "If <file>s are given, it reformats the files. If -i is specified\n"

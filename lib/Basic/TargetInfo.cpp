@@ -287,9 +287,9 @@ void TargetInfo::adjust(const LangOptions &Opts) {
     LongLongWidth = LongLongAlign = 128;
     HalfWidth = HalfAlign = 16;
     FloatWidth = FloatAlign = 32;
-    
-    // Embedded 32-bit targets (OpenCL EP) might have double C type 
-    // defined as float. Let's not override this as it might lead 
+
+    // Embedded 32-bit targets (OpenCL EP) might have double C type
+    // defined as float. Let's not override this as it might lead
     // to generating illegal code that uses 64bit doubles.
     if (DoubleWidth != FloatWidth) {
       DoubleWidth = DoubleAlign = 64;
@@ -312,9 +312,9 @@ void TargetInfo::adjust(const LangOptions &Opts) {
   }
 }
 
-bool TargetInfo::initFeatureMap(llvm::StringMap<bool> &Features,
-                                DiagnosticsEngine &Diags, StringRef CPU,
-                                std::vector<std::string> &FeatureVec) const {
+bool TargetInfo::initFeatureMap(
+    llvm::StringMap<bool> &Features, DiagnosticsEngine &Diags, StringRef CPU,
+    const std::vector<std::string> &FeatureVec) const {
   for (const auto &F : FeatureVec) {
     const char *Name = F.c_str();
     // Apply the feature via the target.
@@ -339,7 +339,7 @@ static StringRef removeGCCRegisterPrefix(StringRef Name) {
 /// Sema.
 bool TargetInfo::isValidClobber(StringRef Name) const {
   return (isValidGCCRegisterName(Name) ||
-	  Name == "memory" || Name == "cc");
+          Name == "memory" || Name == "cc");
 }
 
 /// isValidGCCRegisterName - Returns whether the passed in string
@@ -349,49 +349,41 @@ bool TargetInfo::isValidGCCRegisterName(StringRef Name) const {
   if (Name.empty())
     return false;
 
-  const char * const *Names;
-  unsigned NumNames;
-
   // Get rid of any register prefix.
   Name = removeGCCRegisterPrefix(Name);
   if (Name.empty())
       return false;
 
-  getGCCRegNames(Names, NumNames);
+  ArrayRef<const char *> Names = getGCCRegNames();
 
   // If we have a number it maps to an entry in the register name array.
   if (isDigit(Name[0])) {
     int n;
     if (!Name.getAsInteger(0, n))
-      return n >= 0 && (unsigned)n < NumNames;
+      return n >= 0 && (unsigned)n < Names.size();
   }
 
   // Check register names.
-  for (unsigned i = 0; i < NumNames; i++) {
+  for (unsigned i = 0; i < Names.size(); i++) {
     if (Name == Names[i])
       return true;
   }
 
   // Check any additional names that we have.
-  const AddlRegName *AddlNames;
-  unsigned NumAddlNames;
-  getGCCAddlRegNames(AddlNames, NumAddlNames);
-  for (unsigned i = 0; i < NumAddlNames; i++)
+  ArrayRef<AddlRegName> AddlNames = getGCCAddlRegNames();
+  for (unsigned i = 0; i < AddlNames.size(); i++)
     for (unsigned j = 0; j < llvm::array_lengthof(AddlNames[i].Names); j++) {
       if (!AddlNames[i].Names[j])
-	break;
+        break;
       // Make sure the register that the additional name is for is within
       // the bounds of the register names from above.
-      if (AddlNames[i].Names[j] == Name && AddlNames[i].RegNum < NumNames)
-	return true;
+      if (AddlNames[i].Names[j] == Name && AddlNames[i].RegNum < Names.size())
+        return true;
   }
 
   // Now check aliases.
-  const GCCRegAlias *Aliases;
-  unsigned NumAliases;
-
-  getGCCRegAliases(Aliases, NumAliases);
-  for (unsigned i = 0; i < NumAliases; i++) {
+  ArrayRef<GCCRegAlias> Aliases = getGCCRegAliases();
+  for (unsigned i = 0; i < Aliases.size(); i++) {
     for (unsigned j = 0 ; j < llvm::array_lengthof(Aliases[i].Aliases); j++) {
       if (!Aliases[i].Aliases[j])
         break;
@@ -410,41 +402,33 @@ TargetInfo::getNormalizedGCCRegisterName(StringRef Name) const {
   // Get rid of any register prefix.
   Name = removeGCCRegisterPrefix(Name);
 
-  const char * const *Names;
-  unsigned NumNames;
-
-  getGCCRegNames(Names, NumNames);
+  ArrayRef<const char *> Names = getGCCRegNames();
 
   // First, check if we have a number.
   if (isDigit(Name[0])) {
     int n;
     if (!Name.getAsInteger(0, n)) {
-      assert(n >= 0 && (unsigned)n < NumNames &&
+      assert(n >= 0 && (unsigned)n < Names.size() &&
              "Out of bounds register number!");
       return Names[n];
     }
   }
 
   // Check any additional names that we have.
-  const AddlRegName *AddlNames;
-  unsigned NumAddlNames;
-  getGCCAddlRegNames(AddlNames, NumAddlNames);
-  for (unsigned i = 0; i < NumAddlNames; i++)
+  ArrayRef<AddlRegName> AddlNames = getGCCAddlRegNames();
+  for (unsigned i = 0; i < AddlNames.size(); i++)
     for (unsigned j = 0; j < llvm::array_lengthof(AddlNames[i].Names); j++) {
       if (!AddlNames[i].Names[j])
-	break;
+        break;
       // Make sure the register that the additional name is for is within
       // the bounds of the register names from above.
-      if (AddlNames[i].Names[j] == Name && AddlNames[i].RegNum < NumNames)
-	return Name;
+      if (AddlNames[i].Names[j] == Name && AddlNames[i].RegNum < Names.size())
+        return Name;
     }
 
   // Now check aliases.
-  const GCCRegAlias *Aliases;
-  unsigned NumAliases;
-
-  getGCCRegAliases(Aliases, NumAliases);
-  for (unsigned i = 0; i < NumAliases; i++) {
+  ArrayRef<GCCRegAlias> Aliases = getGCCRegAliases();
+  for (unsigned i = 0; i < Aliases.size(); i++) {
     for (unsigned j = 0 ; j < llvm::array_lengthof(Aliases[i].Aliases); j++) {
       if (!Aliases[i].Aliases[j])
         break;
@@ -578,7 +562,7 @@ bool TargetInfo::validateInputConstraint(ConstraintInfo *OutputConstraints,
         if (OutputConstraints[i].isReadWrite())
           return false;
 
-        // If the constraint is already tied, it must be tied to the 
+        // If the constraint is already tied, it must be tied to the
         // same operand referenced to by the number.
         if (Info.hasTiedOperand() && Info.getTiedOperand() != i)
           return false;
@@ -598,7 +582,7 @@ bool TargetInfo::validateInputConstraint(ConstraintInfo *OutputConstraints,
       if (!resolveSymbolicName(Name, OutputConstraints, NumOutputs, Index))
         return false;
 
-      // If the constraint is already tied, it must be tied to the 
+      // If the constraint is already tied, it must be tied to the
       // same operand referenced to by the number.
       if (Info.hasTiedOperand() && Info.getTiedOperand() != Index)
         return false;

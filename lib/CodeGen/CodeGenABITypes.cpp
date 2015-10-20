@@ -59,11 +59,9 @@ CodeGenABITypes::arrangeCXXMethodType(const CXXRecordDecl *RD,
   return CGM->getTypes().arrangeCXXMethodType(RD, FTP);
 }
 
-const CGFunctionInfo &
-CodeGenABITypes::arrangeFreeFunctionCall(CanQualType returnType,
-                                         ArrayRef<CanQualType> argTypes,
-                                         FunctionType::ExtInfo info,
-                                         RequiredArgs args) {
+const CGFunctionInfo &CodeGenABITypes::arrangeFreeFunctionCall(
+    CanQualType returnType, ArrayRef<CanQualType> argTypes,
+    FunctionType::ExtInfo info, RequiredArgs args) {
   return CGM->getTypes().arrangeLLVMFunctionInfo(
       returnType, /*IsInstanceMethod=*/false, /*IsChainCall=*/false, argTypes,
       info, args);
