@@ -1226,8 +1226,10 @@ public:
       llvm::DenseMap<const VarDecl *, unsigned> ReductionMap;
       llvm::StructType *ReductionRec;
       llvm::Value *ReductionRecVar;
+      llvm::Value *ReductionRecSize;
       llvm::Value *RedArg1;
       llvm::Value *RedArg2;
+      llvm::Value *RedArg3;
       llvm::Value *ReduceSwitch;
       llvm::BasicBlock *BB1;
       llvm::Instruction *BB1IP;
@@ -1360,9 +1362,10 @@ public:
       return OpenMPStack.back().IfClauseCondition;
     }
     CodeGenFunction &getCGFForReductionFunction();
-    void getReductionFunctionArgs(llvm::Value *&Arg1, llvm::Value *&Arg2);
+    void getReductionFunctionArgs(llvm::Value *&Arg1, llvm::Value *&Arg2, llvm::Value *&Arg3);
     void registerReductionVar(const VarDecl *VD, llvm::Type *Type);
     llvm::Value *getReductionRecVar(CodeGenFunction &CGF);
+    llvm::Value *getReductionRecSize(CodeGenFunction &CGF);
     llvm::Type *getReductionRec();
     llvm::Value *getReductionSwitch();
     void setReductionSwitch(llvm::Value *Switch);
@@ -1411,6 +1414,8 @@ public:
     void setKMPDependInfoType(llvm::Type *Ty, unsigned Align) { KMPDependInfoType = Ty; KMPDependInfoTypeAlign = Align; }
     llvm::Type *getKMPDependInfoType() { return KMPDependInfoType; }
     unsigned getKMPDependInfoTypeAlign() { return KMPDependInfoTypeAlign; }
+    void setNewTask(bool Flag);
+    bool getNewTask();
     void setNumTeams(Expr *Num);
     void setThreadLimit(Expr *Num);
     Expr *getNumTeams();

@@ -1270,19 +1270,27 @@ OMPReductionClause *OMPReductionClause::Create(
     const ASTContext &C, SourceLocation StartLoc, SourceLocation EndLoc,
     ArrayRef<Expr *> VL, ArrayRef<Expr *> OpExprs,
     ArrayRef<Expr *> HelperParams1, ArrayRef<Expr *> HelperParams2,
+    ArrayRef<Expr *> WholeStartAddresses,
+    ArrayRef<Expr *> WholeSizesEndAddresses,
+    ArrayRef<Expr *> CopyingStartAddresses,
+    ArrayRef<Expr *> CopyingSizesEndAddresses,
     ArrayRef<Expr *> DefaultInits, OpenMPReductionClauseOperator Op,
     NestedNameSpecifierLoc S, DeclarationNameInfo OpName) {
   assert(VL.size() == OpExprs.size() &&
          "Number of expressions is not the same as number of variables!");
   void *Mem = C.Allocate(llvm::RoundUpToAlignment(sizeof(OMPReductionClause),
                                                   llvm::alignOf<Expr *>()) +
-                         5 * sizeof(Expr *) * VL.size());
+                         9 * sizeof(Expr *) * VL.size());
   OMPReductionClause *Clause =
       new (Mem) OMPReductionClause(StartLoc, EndLoc, VL.size(), Op, S, OpName);
   Clause->setVars(VL);
   Clause->setOpExprs(OpExprs);
   Clause->setHelperParameters1st(HelperParams1);
   Clause->setHelperParameters2nd(HelperParams2);
+  Clause->setWholeStartAddresses(WholeStartAddresses);
+  Clause->setWholeSizesEndAddresses(WholeSizesEndAddresses);
+  Clause->setCopyingStartAddresses(CopyingStartAddresses);
+  Clause->setCopyingSizesEndAddresses(CopyingSizesEndAddresses);
   Clause->setDefaultInits(DefaultInits);
   return Clause;
 }
@@ -1319,6 +1327,38 @@ void OMPReductionClause::setDefaultInits(ArrayRef<Expr *> DefaultInits) {
          "Number of inits is not the same as the preallocated buffer");
   std::copy(DefaultInits.begin(), DefaultInits.end(),
             getHelperParameters2nd().end());
+}
+
+void
+OMPReductionClause::setWholeStartAddresses(ArrayRef<Expr *> WholeStartAddresses) {
+  assert(WholeStartAddresses.size() == varlist_size() &&
+         "Number of vars is not the same as the preallocated buffer");
+  std::copy(WholeStartAddresses.begin(), WholeStartAddresses.end(),
+            getDefaultInits().end());
+}
+
+void OMPReductionClause::setWholeSizesEndAddresses(
+    ArrayRef<Expr *> WholeSizesEndAddresses) {
+  assert(WholeSizesEndAddresses.size() == varlist_size() &&
+         "Number of vars is not the same as the preallocated buffer");
+  std::copy(WholeSizesEndAddresses.begin(), WholeSizesEndAddresses.end(),
+            getWholeStartAddresses().end());
+}
+
+void
+OMPReductionClause::setCopyingStartAddresses(ArrayRef<Expr *> CopyingStartAddresses) {
+  assert(CopyingStartAddresses.size() == varlist_size() &&
+         "Number of vars is not the same as the preallocated buffer");
+  std::copy(CopyingStartAddresses.begin(), CopyingStartAddresses.end(),
+            getWholeSizesEndAddresses().end());
+}
+
+void OMPReductionClause::setCopyingSizesEndAddresses(
+    ArrayRef<Expr *> CopyingSizesEndAddresses) {
+  assert(CopyingSizesEndAddresses.size() == varlist_size() &&
+         "Number of vars is not the same as the preallocated buffer");
+  std::copy(CopyingSizesEndAddresses.begin(), CopyingSizesEndAddresses.end(),
+            getCopyingStartAddresses().end());
 }
 
 void

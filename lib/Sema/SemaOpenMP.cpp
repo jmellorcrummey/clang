@@ -6554,6 +6554,181 @@ TryToFindDeclareReductionDecl(Sema &SemaRef, CXXScopeSpec &SS,
   return 0;
 }
 
+namespace {
+class ReductionArrayItemChecker : public StmtVisitor<ReductionArrayItemChecker, bool> {
+private:
+  Sema &SemaRef;
+  Expr *CopyBegin;
+  Expr *CopyEnd;
+  Expr *WholeBegin;
+  Expr *WholeEnd;
+  VarDecl *VD;
+  DeclRefExpr *DRE;
+  bool IsCEAN;
+
+  std::pair<Expr *, Expr *> CalculateSize(Expr *Begin, Expr *End) {
+    if (!Begin || !End)
+      return std::make_pair<Expr *, Expr *>(0, 0);
+    QualType CharPtrTy =
+        SemaRef.getASTContext().getPointerType(SemaRef.getASTContext().CharTy);
+    if (Begin == End) {
+      Expr *Size;
+      {
+        EnterExpressionEvaluationContext Unevaluated(
+            SemaRef, Sema::Unevaluated, Sema::ReuseLambdaContextDecl);
+
+        Size = SemaRef.CreateUnaryExprOrTypeTraitExpr(Begin, SourceLocation(),
+                                                      UETT_SizeOf).get();
+      }
+      ExprResult AddrBegin =
+          SemaRef.CreateBuiltinUnaryOp(Begin->getExprLoc(), UO_AddrOf, Begin);
+      if (AddrBegin.isInvalid())
+        return std::make_pair<Expr *, Expr *>(0, 0);
+      AddrBegin =
+          SemaRef.ImpCastExprToType(AddrBegin.get(), CharPtrTy, CK_BitCast);
+      if (AddrBegin.isInvalid())
+        return std::make_pair<Expr *, Expr *>(0, 0);
+      Expr *AB = SemaRef.DefaultLvalueConversion(AddrBegin.get()).get();
+      return std::make_pair(AB, Size);
+    }
+
+    ExprResult AddrEnd =
+        SemaRef.CreateBuiltinUnaryOp(End->getExprLoc(), UO_AddrOf, End);
+    if (AddrEnd.isInvalid())
+      return std::make_pair<Expr *, Expr *>(0, 0);
+    AddrEnd = SemaRef.CreateBuiltinBinOp(
+        End->getExprLoc(), BO_Add, AddrEnd.get(),
+        SemaRef.ActOnIntegerConstant(SourceLocation(), 1).get());
+    if (AddrEnd.isInvalid())
+      return std::make_pair<Expr *, Expr *>(0, 0);
+    ExprResult AddrBegin =
+        SemaRef.CreateBuiltinUnaryOp(Begin->getExprLoc(), UO_AddrOf, Begin);
+    if (AddrBegin.isInvalid())
+      return std::make_pair<Expr *, Expr *>(0, 0);
+    Expr *AE = SemaRef.DefaultLvalueConversion(AddrEnd.get()).get();
+    Expr *AB = SemaRef.DefaultLvalueConversion(AddrBegin.get()).get();
+    return std::make_pair(AB, AE);
+  }
+
+public:
+  bool VisitDeclRefExpr(DeclRefExpr *E) {
+    if (isa<VarDecl>(E->getDecl())) {
+      CopyBegin = CopyEnd = E;
+      WholeBegin = WholeEnd = E;
+      VD = cast<VarDecl>(E->getDecl());
+      DRE = E;
+      return false;
+    }
+    return true;
+  }
+  bool VisitArraySubscriptExpr(ArraySubscriptExpr *E) {
+    Expr *Base = E->getBase()->IgnoreImplicit();
+    bool Result = Visit(Base);
+    if (!CopyEnd || !CopyBegin)
+      return Result;
+    if (!WholeEnd || !WholeBegin)
+      return Result;
+    WholeBegin =
+        SemaRef.CreateBuiltinArraySubscriptExpr(
+                    WholeBegin, E->getExprLoc(),
+                    SemaRef.ActOnIntegerConstant(SourceLocation(), 0).get(),
+                    E->getExprLoc()).get();
+    QualType QTy = Base->getType();
+    Expr *Idx = 0;
+    if (const ArrayType *AT = QTy->getAsArrayTypeUnsafe()) {
+      if (const ConstantArrayType *CAT = dyn_cast<ConstantArrayType>(AT)) {
+        Idx = SemaRef.ActOnIntegerConstant(
+                          SourceLocation(),
+                          (CAT->getSize() - 1).getLimitedValue()).get();
+      } else if (const VariableArrayType *VAT =
+                     dyn_cast<VariableArrayType>(AT)) {
+        Idx = VAT->getSizeExpr();
+        Idx = SemaRef.CreateBuiltinBinOp(E->getExprLoc(), BO_Sub, Idx,
+                                         SemaRef.ActOnIntegerConstant(
+                                                     SourceLocation(), 1).get())
+                  .get();
+      } else if (const DependentSizedArrayType *DSAT =
+                     dyn_cast<DependentSizedArrayType>(AT)) {
+        Idx = DSAT->getSizeExpr();
+        Idx = SemaRef.CreateBuiltinBinOp(E->getExprLoc(), BO_Sub, Idx,
+                                         SemaRef.ActOnIntegerConstant(
+                                                     SourceLocation(), 1).get())
+                  .get();
+      }
+    }
+    Expr *LastIdx = 0;
+    if (CEANIndexExpr *CIE = dyn_cast_or_null<CEANIndexExpr>(E->getIdx())) {
+      IsCEAN = true;
+
+      // OpenMP 4.1 [2.14.3.6, Restrictions
+      // If a list item is an array section, its lower-bound must be zero.
+      Expr *LB = CIE->getLowerBound();
+      llvm::APSInt Value;
+      if (LB->EvaluateAsInt(Value, SemaRef.getASTContext()) &&
+            (Value.isNegative() || Value.getLimitedValue(1) != 0)) {
+        SemaRef.Diag(LB->getExprLoc(),
+          diag::err_omp_reduction_array_non_zero_lb) << LB->getSourceRange();
+        CopyBegin = CopyEnd = 0;
+        WholeBegin = WholeEnd = 0;
+        return Result;
+      }
+
+      LastIdx = SemaRef.CreateBuiltinBinOp(E->getExprLoc(), BO_Add,
+                                           CIE->getLowerBound(),
+                                           CIE->getLength()).get();
+      if (LastIdx == 0) {
+        CopyBegin = CopyEnd = 0;
+        WholeBegin = WholeEnd = 0;
+        return Result;
+      }
+      LastIdx = SemaRef.CreateBuiltinBinOp(
+                            E->getExprLoc(), BO_Sub, LastIdx,
+                            SemaRef.ActOnIntegerConstant(SourceLocation(), 1)
+                                .get()).get();
+      CopyBegin = SemaRef.CreateBuiltinArraySubscriptExpr(
+                              CopyBegin, E->getExprLoc(), CIE->getLowerBound(),
+                              E->getExprLoc()).get();
+    } else {
+      LastIdx = E->getIdx();
+      CopyBegin = SemaRef.CreateBuiltinArraySubscriptExpr(
+                              CopyBegin, E->getExprLoc(), LastIdx,
+                              E->getExprLoc()).get();
+    }
+    CopyEnd =
+        SemaRef.CreateBuiltinArraySubscriptExpr(CopyEnd, E->getExprLoc(),
+                                                LastIdx, E->getExprLoc()).get();
+    if (Idx == 0) {
+      Idx = LastIdx;
+    }
+    if (Idx == 0) {
+      CopyBegin = CopyEnd = 0;
+      WholeBegin = WholeEnd = 0;
+      return Result;
+    }
+    WholeEnd =
+        SemaRef.CreateBuiltinArraySubscriptExpr(WholeEnd, E->getExprLoc(), Idx,
+                                                E->getExprLoc()).get();
+    return Result;
+  }
+  bool VisitStmt(Stmt *S) { return true; }
+
+  ReductionArrayItemChecker(Sema &SemaRef)
+      : SemaRef(SemaRef), CopyBegin(0), CopyEnd(0), WholeBegin(0), WholeEnd(0),
+        VD(0), DRE(0), IsCEAN(false) {}
+
+  VarDecl *getBaseDecl() { return VD; }
+  DeclRefExpr *getDeclRefExprForBaseDecl() { return DRE; }
+  bool IsCEANExpr() const { return IsCEAN; }
+
+  std::pair<Expr *, Expr *> CalculateCopySize() {
+    return CalculateSize(CopyBegin, CopyEnd);
+  }
+  std::pair<Expr *, Expr *> CalculateWholeSize() {
+    return CalculateSize(WholeBegin, WholeEnd);
+  }
+};
+}
+
 OMPClause *Sema::ActOnOpenMPReductionClause(ArrayRef<Expr *> VarList,
                                             SourceLocation StartLoc,
                                             SourceLocation EndLoc,
@@ -6600,6 +6775,10 @@ OMPClause *Sema::ActOnOpenMPReductionClause(ArrayRef<Expr *> VarList,
   SmallVector<Expr *, 4> OpExprs;
   SmallVector<Expr *, 4> HelperParams1;
   SmallVector<Expr *, 4> HelperParams2;
+  SmallVector<Expr *, 4> WholeBegins;
+  SmallVector<Expr *, 4> WholeEnds;
+  SmallVector<Expr *, 4> CopyBegins;
+  SmallVector<Expr *, 4> CopyEnds;
   for (ArrayRef<Expr *>::iterator I = VarList.begin(), E = VarList.end();
        I != E; ++I) {
     assert(*I && "Null expr in omp reduction");
@@ -6610,37 +6789,52 @@ OMPClause *Sema::ActOnOpenMPReductionClause(ArrayRef<Expr *> VarList,
       OpExprs.push_back(0);
       HelperParams1.push_back(0);
       HelperParams2.push_back(0);
+      WholeBegins.push_back(0);
+      WholeEnds.push_back(0);
+      CopyBegins.push_back(0);
+      CopyEnds.push_back(0);
       continue;
     }
 
     SourceLocation ELoc = (*I)->getExprLoc();
-    // OpenMP [2.1, C/C++]
-    //  A list item is a variable name.
-    // OpenMP  [2.9.3.3, Restrictions, p.1]
-    //  A variable that is part of another variable (as an array or
-    //  structure element) cannot appear in a private clause.
-    DeclRefExpr *DE = dyn_cast_or_null<DeclRefExpr>(*I);
-    if (!DE || !isa<VarDecl>(DE->getDecl())) {
-      Diag(ELoc, diag::err_omp_expected_var_name) << (*I)->getSourceRange();
-      continue;
-    }
-    Decl *D = DE->getDecl();
-    VarDecl *VD = cast<VarDecl>(D);
 
-    QualType Type = VD->getType();
-    if (Type->isDependentType() || Type->isInstantiationDependentType()) {
+    // OpenMP [2.14.5, Restrictions]
+    //  A variable that is part of another variable (such as field of a
+    //  structure) but is not an array element or an array section cannot appear
+    //  in a reduction clause.
+    Expr *VE = (*I)->IgnoreParenLValueCasts();
+
+    if (VE->isValueDependent() || VE->isTypeDependent() ||
+        VE->isInstantiationDependent() ||
+        VE->containsUnexpandedParameterPack()) {
       // It will be analyzed later.
       Vars.push_back(*I);
       DefaultInits.push_back(0);
       OpExprs.push_back(0);
       HelperParams1.push_back(0);
       HelperParams2.push_back(0);
+      WholeBegins.push_back(0);
+      WholeEnds.push_back(0);
+      CopyBegins.push_back(0);
+      CopyEnds.push_back(0);
       continue;
     }
+
+    ReductionArrayItemChecker Checker(*this);
+    VarDecl *VD = 0;
+    DeclRefExpr *DE = 0;
+    if (Checker.Visit(VE) || !(VD = Checker.getBaseDecl()) ||
+        !(DE = Checker.getDeclRefExprForBaseDecl())) {
+      Diag(ELoc, diag::err_omp_expected_var_name_or_array_item)
+          << (*I)->getSourceRange();
+      continue;
+    }
+
 
     // OpenMP [2.9.3.6, Restrictions, C/C++, p.4]
     //  If a list-item is a reference type then it must bind to the same object
     //  for all threads of the team.
+    QualType Type = VD->getType();
     if (Type.getCanonicalType()->isReferenceType() && VD->hasInit()) {
       DSARefChecker Check(DSAStack);
       if (Check.Visit(VD->getInit())) {
@@ -6662,16 +6856,6 @@ OMPClause *Sema::ActOnOpenMPReductionClause(ArrayRef<Expr *> VarList,
                             diag::err_omp_reduction_incomplete_type))
       continue;
     Type = Type.getNonReferenceType().getCanonicalType();
-    if (Type->isArrayType()) {
-      Diag(ELoc, diag::err_omp_clause_array_type_arg)
-          << getOpenMPClauseName(OMPC_reduction);
-      bool IsDecl =
-          VD->isThisDeclarationADefinition(Context) == VarDecl::DeclarationOnly;
-      Diag(VD->getLocation(),
-           IsDecl ? diag::note_previous_decl : diag::note_defined_here)
-          << VD;
-      continue;
-    }
 
     // OpenMP [2.9.3.6, Restrictions, C/C++, p.3]
     //  A list item that appears in a reduction clause must not be
@@ -6788,7 +6972,12 @@ OMPClause *Sema::ActOnOpenMPReductionClause(ArrayRef<Expr *> VarList,
       DeclContext *DCtx = OMPDeclareTargetDecl::Create(Context,
           Context.getTranslationUnitDecl(),SourceLocation());
 
-      QualType PtrQTy = Context.getPointerType(DE->getType());
+      QualType DEBaseType = DE->getType();
+      // If the reduction variable is an array, create the operation on the
+      // element type
+      if (DEBaseType->isArrayType()) 
+        DEBaseType = cast<ArrayType>(DEBaseType)->getElementType();
+      QualType PtrQTy = Context.getPointerType(DEBaseType);
       TypeSourceInfo *TI =
           Context.getTrivialTypeSourceInfo(PtrQTy, SourceLocation());
       IdentifierInfo *Id1 = &Context.Idents.get(".ptr1.");
@@ -6842,7 +7031,12 @@ OMPClause *Sema::ActOnOpenMPReductionClause(ArrayRef<Expr *> VarList,
       DeclContext *DCtx = OMPDeclareTargetDecl::Create(Context,
           Context.getTranslationUnitDecl(),SourceLocation());
 
-      QualType PtrQTy = Context.getPointerType(DE->getType());
+      QualType DEBaseType = DE->getType();
+      // If the reduction variable is an array, create the operation on the
+      // element type
+      if (DEBaseType->isArrayType())
+        DEBaseType = cast<ArrayType>(DEBaseType)->getElementType();
+      QualType PtrQTy = Context.getPointerType(DEBaseType);
       TypeSourceInfo *TI =
           Context.getTrivialTypeSourceInfo(PtrQTy, SourceLocation());
       IdentifierInfo *Id1 = &Context.Idents.get(".ptr1.");
@@ -6956,6 +7150,20 @@ OMPClause *Sema::ActOnOpenMPReductionClause(ArrayRef<Expr *> VarList,
       HelperParams1.push_back(PtrDE1Expr);
       HelperParams2.push_back(PtrDE2Expr);
     }
+    std::pair<Expr *, Expr *> WholeSize = Checker.CalculateWholeSize();
+    if (!WholeSize.first || !WholeSize.second) {
+      continue;
+    }
+    std::pair<Expr *, Expr *> CopySize = Checker.CalculateCopySize();
+    if (!CopySize.first || !CopySize.second) {
+      continue;
+    }
+
+    WholeBegins.push_back(WholeSize.first);
+    WholeEnds.push_back(WholeSize.second);
+    CopyBegins.push_back(CopySize.first);
+    CopyEnds.push_back(CopySize.second);
+
     DSAStack->addDSA(VD, DE, OMPC_reduction);
   }
 
@@ -6964,6 +7172,7 @@ OMPClause *Sema::ActOnOpenMPReductionClause(ArrayRef<Expr *> VarList,
 
   return OMPReductionClause::Create(
       Context, StartLoc, EndLoc, Vars, OpExprs, HelperParams1, HelperParams2,
+      WholeBegins, WholeEnds, CopyBegins, CopyEnds,
       DefaultInits, Op, SS.getWithLocInContext(Context), OpName);
 }
 

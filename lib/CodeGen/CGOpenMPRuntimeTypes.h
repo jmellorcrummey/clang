@@ -75,7 +75,7 @@ typedef void(__kmpc_end_critical)(ident_t *loc, int32_t global_tid,
                                   kmp_critical_name *lck);
 typedef void(__kmpc_ordered)(ident_t *loc, int32_t global_tid);
 typedef void(__kmpc_end_ordered)(ident_t *loc, int32_t global_tid);
-typedef void (*kmp_copy_func)(void *lhs_data, void *rhs_data);
+typedef void (*kmp_copy_func)(void *lhs_data, void *rhs_data, void *size_data);
 typedef void(__kmpc_copyprivate)(ident_t *loc, int32_t global_tid,
                                  target_size_t cpy_size, void *cpy_data,
                                  kmp_copy_func cpy_func, int32_t didit);
@@ -218,7 +218,7 @@ typedef int32_t(omp_get_num_teams)();
 
 
 // Target-NVPTX specific functions, we may need to move these elsewhere
-typedef void(__kmpc_kernel_init)(int32_t thread_limit);
+typedef void(__kmpc_kernel_init)(int32_t omp_handle, int32_t thread_limit);
 typedef int(__kmpc_kernel_prepare_parallel)(int32_t num_threads,
                                             int32_t num_simd_lanes);
 typedef void(__kmpc_kernel_parallel)(int32_t num_simd_lanes);

@@ -8,7 +8,7 @@
 ///
 ///##############################################
 #ifdef TT1
-// RUN:   %clangxx -fopenmp -target powerpc64le-ibm-linux-gnu -omptargets=nvptx64sm_35-nvidia-cuda \
+// RUN:   %clangxx -fopenmp=libomp -target powerpc64le-ibm-linux-gnu -omptargets=nvptx64sm_35-nvidia-cuda \
 // RUN:   -DTT1 -O0 -S -emit-llvm %s 2>&1
 // RUN:   FileCheck -check-prefix=CK1 -input-file=target_codegen_for_cpp.ll %s
 // RUN:   FileCheck -check-prefix=CK1-TGT -input-file=target_codegen_for_cpp.ll.tgt-nvptx64sm_35-nvidia-cuda %s
@@ -218,7 +218,7 @@ void test(){
 ///
 ///##############################################
 #ifdef TT2
-// RUN:   %clangxx -fopenmp -target powerpc64le-ibm-linux-gnu -omptargets=nvptx64sm_35-nvidia-cuda \
+// RUN:   %clangxx -fopenmp=libomp -target powerpc64le-ibm-linux-gnu -omptargets=nvptx64sm_35-nvidia-cuda \
 // RUN:   -DTT2 -O0 -S -emit-llvm %s 2>&1
 // RUN:   FileCheck -check-prefix=CK2 -input-file=target_codegen_for_cpp.ll %s
 

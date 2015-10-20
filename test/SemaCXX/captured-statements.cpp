@@ -54,7 +54,7 @@ class test_this_capture {
 template <typename T>
 void template_capture_var() {
   T x; // expected-error{{declaration of reference variable 'x' requires an initializer}}
-  #pragma clang _debug captured
+  #pragma clang _debug captured // expected-warning {{unknown pragma ignored}}
   {
     (void)x;
   }
@@ -82,7 +82,7 @@ void test_capture_var() {
 
 template <typename S, typename T>
 S template_capture_var(S x, T y) {  // expected-note{{variable 'y' declared const here}}
-  #pragma clang _debug captured
+  #pragma clang _debug captured // expected-warning {{unknown pragma ignored}}
   {
     x++;
     y++;  // expected-error{{cannot assign to variable 'y' with const-qualified type 'const int'}}

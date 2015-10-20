@@ -1,4 +1,4 @@
-// RUN:   %clang -fopenmp -target x86_64-pc-linux-gnu -omptargets=nvptx64sm_35-nvidia-cuda \
+// RUN:   %clang -fopenmp=libomp -target x86_64-pc-linux-gnu -omptargets=nvptx64sm_35-nvidia-cuda \
 // RUN:   -O3 -S -emit-llvm %s 2>&1
 // RUN:   FileCheck -input-file=target_ignore_host_constraint.ll.tgt-nvptx64sm_35-nvidia-cuda %s
 

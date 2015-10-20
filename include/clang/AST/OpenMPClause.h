@@ -1122,6 +1122,42 @@ class OMPReductionClause : public OMPVarListClause<OMPReductionClause> {
                                          numberOfVariables());
   }
 
+  /// \brief Sets whole starting addresses for the items.
+  void setWholeStartAddresses(ArrayRef<Expr *> WholeStartAddresses);
+
+  /// \brief Return the list of whole starting addresses.
+  llvm::MutableArrayRef<Expr *> getWholeStartAddresses()  {
+    return llvm::MutableArrayRef<Expr *>(getDefaultInits().end(),
+                              numberOfVariables());
+  }
+
+  /// \brief Sets whole sizes/ending addresses for the items.
+  void setWholeSizesEndAddresses(ArrayRef<Expr *> WholeSizesEndAddresses);
+
+  /// \brief Return whole sizes/ending addresses for the items.
+  llvm::MutableArrayRef<Expr *> getWholeSizesEndAddresses()  {
+    return llvm::MutableArrayRef<Expr *>(getWholeStartAddresses().end(),
+                                         numberOfVariables());
+  }
+
+  /// \brief Sets starting addresses for the items to be copied.
+  void setCopyingStartAddresses(ArrayRef<Expr *> CopyingStartAddresses);
+
+  /// \brief Return the list of copied starting addresses.
+  llvm::MutableArrayRef<Expr *> getCopyingStartAddresses() {
+    return llvm::MutableArrayRef<Expr *>(getWholeSizesEndAddresses().end(),
+                                         numberOfVariables());
+  }
+
+  /// \brief Sets sizes/ending addresses for the copied items.
+  void setCopyingSizesEndAddresses(ArrayRef<Expr *> CopyingSizesEndAddresses);
+
+  /// \brief Return sizes/ending addresses for the copied items.
+  llvm::MutableArrayRef<Expr *> getCopyingSizesEndAddresses() {
+    return llvm::MutableArrayRef<Expr *>(getCopyingStartAddresses().end(),
+                                         numberOfVariables());
+  }
+
 public:
   /// \brief Creates clause with a list of variables \a VL and an operator
   /// \a Op.
@@ -1138,7 +1174,12 @@ public:
   Create(const ASTContext &C, SourceLocation StartLoc, SourceLocation EndLoc,
          ArrayRef<Expr *> VL, ArrayRef<Expr *> OpExprs,
          ArrayRef<Expr *> HelperParams1, ArrayRef<Expr *> HelperParams2,
-         ArrayRef<Expr *> DefaultInits, OpenMPReductionClauseOperator Op,
+         ArrayRef<Expr *> WholeStartAddresses,
+         ArrayRef<Expr *> WholeSizesEndAddresses,
+         ArrayRef<Expr *> CopyingStartAddresses,
+         ArrayRef<Expr *> CopyingSizesEndAddresses,
+         ArrayRef<Expr *> DefaultInits,
+         OpenMPReductionClauseOperator Op,
          NestedNameSpecifierLoc S, DeclarationNameInfo OpName);
   /// \brief Creates an empty clause with the place for \a N variables.
   ///
@@ -1178,6 +1219,30 @@ public:
   ArrayRef<const Expr *> getDefaultInits() const {
     return llvm::makeArrayRef(getHelperParameters2nd().end(),
                               numberOfVariables());
+  }
+
+  /// \brief Return the list of whole starting addresses.
+  ArrayRef<const Expr *> getWholeStartAddresses() const {
+    return llvm::makeArrayRef(getDefaultInits().end(),
+                              numberOfVariables());
+  }
+
+  /// \brief Return whole sizes/ending addresses for the items.
+  ArrayRef<const Expr *> getWholeSizesEndAddresses() const {
+    return llvm::makeArrayRef(getWholeStartAddresses().end(),
+                                         numberOfVariables());
+  }
+
+  /// \brief Return the list of copied starting addresses.
+  ArrayRef<const Expr *> getCopyingStartAddresses() const {
+    return llvm::makeArrayRef(getWholeSizesEndAddresses().end(),
+                                         numberOfVariables());
+  }
+
+  /// \brief Return sizes/ending addresses for the copied items.
+  ArrayRef<const Expr *> getCopyingSizesEndAddresses() const {
+    return llvm::makeArrayRef(getCopyingStartAddresses().end(),
+                                         numberOfVariables());
   }
 
   child_range children() {

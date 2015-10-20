@@ -121,13 +121,11 @@
 /// Check error if something wrong with nvptx sharing stack options
 // RUN:   not %clang -fopenmp -target powerpc64le-linux -omptargets=nvptx64-nvidia-cuda \
 // RUN:   -omp-nvptx-data-sharing-type=bla \
-// RUN:   -omp-nvptx-data-sharing-sizes-per-thread=64,x24 \
-// RUN:   -omp-nvptx-data-sharing-size-per-team=123x45 \
-// RUN:   -omp-nvptx-data-sharing-size-per-kernel=678x90 \
+// RUN:   -omp-nvptx-max-data-sharing-threads=4x24 \
+// RUN:   -omp-nvptx-max-data-sharing-teams=123x45 \
 // RUN:   %s 2>&1 \
 // RUN:   | FileCheck -check-prefix=CHK-NVPTX-SHARING %s
 // CHK-NVPTX-SHARING-DAG: error: invalid value 'bla' in '-omp-nvptx-data-sharing-type=bla'
-// CHK-NVPTX-SHARING-DAG: error: invalid value 'x24' in '-omp-nvptx-data-sharing-sizes-per-thread=64,x24'
-// CHK-NVPTX-SHARING-DAG: error: invalid value '123x45' in '-omp-nvptx-data-sharing-size-per-team=123x45'
-// CHK-NVPTX-SHARING-DAG: error: invalid value '678x90' in '-omp-nvptx-data-sharing-size-per-kernel=678x90'
+// CHK-NVPTX-SHARING-DAG: error: invalid value '4x24' in '-omp-nvptx-max-data-sharing-threads=4x24'
+// CHK-NVPTX-SHARING-DAG: error: invalid value '123x45' in '-omp-nvptx-max-data-sharing-teams=123x45'
 

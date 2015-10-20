@@ -4,7 +4,7 @@
 ///
 
 /// Check the codegen
-// RUN:   %clang -S -emit-llvm -O0 -fopenmp -target powerpc64-linux -omptargets=powerpc64-ibm-linux-gnu,nvptx64-nvidia-cuda %s 2>&1
+// RUN:   %clang -S -emit-llvm -O0 -fopenmp=libomp -target powerpc64-linux -omptargets=powerpc64-ibm-linux-gnu,nvptx64-nvidia-cuda %s 2>&1
 // RUN:   FileCheck -check-prefix=CHK-CODEGEN-HOST -input-file=target_codegen_multiple.ll %s
 // RUN:   FileCheck -check-prefix=CHK-CODEGEN-TARGET1 -input-file=target_codegen_multiple.ll.tgt-powerpc64-ibm-linux-gnu %s
 // RUN:   FileCheck -check-prefix=CHK-CODEGEN-TARGET2 -input-file=target_codegen_multiple.ll.tgt-nvptx64-nvidia-cuda %s
@@ -29,7 +29,7 @@
 
 // CHK-CODEGEN-TARGET1-DAG: @__omptgt__[[E0:[0-9]+]]_[[ID]]__entry_name = internal constant [{{[1-9][0-9]*}} x i8] c"__omptgt__[[E0]]_[[ID]]_\00"
 // CHK-CODEGEN-TARGET1-DAG: @__omptgt__[[E0]]_[[ID]]__entry = constant { i8*, i8*, i64 } {
-// CHK-CODEGEN-TARGET1-DAG: i8* bitcast (void (i32*)* @__omptgt__[[E0]]_[[ID]]_ to i8*),
+// CHK-CODEGEN-TARGET1-DAG: i8* bitcast (void (i32*, i32)* @__omptgt__[[E0]]_[[ID]]_ to i8*),
 // CHK-CODEGEN-TARGET1-DAG: i8* getelementptr inbounds ([{{[1-9][0-9]*}} x i8], [{{[1-9][0-9]*}} x i8]* @__omptgt__[[E0]]_[[ID]]__entry_name, i32 0, i32 0), i64 0 }, section ".openmptgt_host_entries", align 1
 
 // Entries and map type of 2nd target region
@@ -41,7 +41,7 @@
 
 // CHK-CODEGEN-TARGET1-DAG: @__omptgt__[[E1:[0-9]+]]_[[ID]]__entry_name = internal constant [{{[1-9][0-9]*}} x i8] c"__omptgt__[[E1]]_[[ID]]_\00"
 // CHK-CODEGEN-TARGET1-DAG: @__omptgt__[[E1]]_[[ID]]__entry = constant { i8*, i8*, i64 } {
-// CHK-CODEGEN-TARGET1-DAG: i8* bitcast (void (i32*)* @__omptgt__[[E1]]_[[ID]]_ to i8*),
+// CHK-CODEGEN-TARGET1-DAG: i8* bitcast (void (i32*, i32)* @__omptgt__[[E1]]_[[ID]]_ to i8*),
 // CHK-CODEGEN-TARGET1-DAG: i8* getelementptr inbounds ([{{[1-9][0-9]*}} x i8], [{{[1-9][0-9]*}} x i8]* @__omptgt__[[E1]]_[[ID]]__entry_name, i32 0, i32 0), i64 0 }, section ".openmptgt_host_entries", align 1
 
 // Host entries range defined by the linker

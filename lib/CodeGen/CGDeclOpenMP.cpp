@@ -37,22 +37,52 @@ using namespace CodeGen;
 #define OPENMPRTL_FUNC(name) OpenMPRuntime->Get_##name()
 
 void CodeGenModule::EmitOMPThreadPrivate(const VarDecl *VD, const Expr *TPE) {
-  // Create cache memory for threadprivate variable void **Var.cache;
-  std::string VarCache = getMangledName(VD).str() + ".cache.";
-  llvm::GlobalVariable *GV;
-  if (!(GV =
-            dyn_cast_or_null<llvm::GlobalVariable>(GetGlobalValue(VarCache)))) {
-    llvm::GlobalVariable *GV = cast<llvm::GlobalVariable>(
-        CreateRuntimeVariable(Int8PtrPtrTy, VarCache));
-    GV->setInitializer(llvm::Constant::getNullValue(Int8PtrPtrTy));
-    GV->setLinkage(llvm::GlobalValue::CommonLinkage);
+
+  // For some targets we rely on TLS to implement thread private, so we do not
+  // need special handling and the cache is not required.
+  if (getOpenMPRuntime().requiresSpecialThreadPrivateHandling()) {
+    // Create cache memory for threadprivate variable void **Var.cache;
+    std::string VarCache = getMangledName(VD).str() + ".cache.";
+    llvm::GlobalVariable *GV;
+    if (!(GV = dyn_cast_or_null<llvm::GlobalVariable>(
+              GetGlobalValue(VarCache)))) {
+      llvm::GlobalVariable *GV = cast<llvm::GlobalVariable>(
+          CreateRuntimeVariable(Int8PtrPtrTy, VarCache));
+      GV->setInitializer(llvm::Constant::getNullValue(Int8PtrPtrTy));
+      GV->setLinkage(llvm::GlobalValue::CommonLinkage);
+    }
   }
+
   // Do not define constructors/destructors for declaration, they are defined
   // for definitions.
-  if (!VD->isLocalVarDecl() && !getContext().DeclMustBeEmitted(VD))
+  bool GenerateCtorsDtors =
+      VD->isLocalVarDecl() || getContext().DeclMustBeEmitted(VD);
+
+  // We need to obtain the global address if we are about to generate any Ctors
+  // or Dtors, or if we can use the simplified TLS-based implementation, because
+  // we need to mark the global as thread local.
+  bool GenerateGlobalAddress =
+      GenerateCtorsDtors ||
+      !getOpenMPRuntime().requiresSpecialThreadPrivateHandling();
+
+  llvm::Value *Val = nullptr;
+  if (GenerateGlobalAddress)
+    Val = VD->isStaticLocal() ? getStaticLocalDeclAddress(VD)
+                              : GetAddrOfGlobal(VD);
+
+  if (!getOpenMPRuntime().requiresSpecialThreadPrivateHandling()) {
+    // If we have Val defined, we have also GV not null.
+    assert(Val && "Global address should have been generated!");
+    llvm::GlobalVariable *GV =
+        cast<llvm::GlobalVariable>(GetGlobalValue(getMangledName(VD)));
+    GV->setThreadLocal(true);
+  }
+
+  if (!GenerateCtorsDtors)
     return;
-  llvm::Value *Val =
-      VD->isStaticLocal() ? getStaticLocalDeclAddress(VD) : GetAddrOfGlobal(VD);
+
+  assert(Val && "Global address should have been generated!");
+
   bool isArray = false;
   const Type *TypePtr = VD->getType().getCanonicalType().getTypePtr();
   while (TypePtr->isArrayType()) {

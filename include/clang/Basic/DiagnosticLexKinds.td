@@ -454,7 +454,7 @@ def warn_pragma_message : Warning<"%0">,
    InGroup<PoundPragmaMessage>, DefaultWarnNoWerror;
 def err_pragma_message : Error<"%0">;
 def warn_pragma_ignored : Warning<"unknown pragma ignored">,
-   InGroup<UnknownPragmas>, DefaultIgnore;
+   InGroup<UnknownPragmas>, DefaultWarnNoWerror;
 def ext_stdc_pragma_ignored : ExtWarn<"unknown pragma in STDC namespace">,
    InGroup<UnknownPragmas>;
 def ext_on_off_switch_syntax :

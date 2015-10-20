@@ -782,10 +782,21 @@ void CodeGenModule::CreateOpenMPCXXInit(const VarDecl *Var,
 //                                                   AggValueSlot::IsNotAliased));
 //    //CGF.EmitCXXConstructorCall(CtorDecl, Ctor_Complete, false, false,
 //    //                           Fn->arg_begin(), 0, 0);
-    llvm::Value *Arg = CGF.EmitScalarConversion(Fn->arg_begin(), getContext().VoidPtrTy,
-                         getContext().getPointerType(Var->getType()), SourceLocation());
+    llvm::Value *Arg = nullptr;
+    llvm::Value *Ret = nullptr;
+    if (getOpenMPRuntime().requiresSpecialThreadPrivateHandling()) {
+      Arg =
+          CGF.EmitScalarConversion(Fn->arg_begin(), getContext().VoidPtrTy,
+                                   getContext().getPointerType(Var->getType()), SourceLocation());
+      Ret = Fn->arg_begin();
+    } else {
+      Arg = GetAddrOfGlobal(Var);
+      Ret = CGF.EmitScalarConversion(
+          Arg, getContext().getPointerType(Var->getType()),
+          getContext().VoidPtrTy, SourceLocation());
+    }
     CGF.EmitAnyExprToMem(Init, Arg, Init->getType().getQualifiers(), true);
-    CGF.Builder.CreateStore(Fn->arg_begin(), CGF.ReturnValue);
+    CGF.Builder.CreateStore(Ret, CGF.ReturnValue);
     CGF.FinishFunction();
     Ctor = Fn;
   }
@@ -853,8 +864,21 @@ void CodeGenModule::CreateOpenMPCXXInit(const VarDecl *Var,
                       Args, SourceLocation());
     //CGF.EmitCXXDestructorCall(DtorDecl, Dtor_Complete, false, false,
     //                          Fn->arg_begin());
-    CGF.emitDestroy(Fn->arg_begin(), QTy, CGF.getDestroyer(DtorKind), CGF.needsEHCleanup(DtorKind));
-    CGF.Builder.CreateStore(Fn->arg_begin(), CGF.ReturnValue);
+    llvm::Value *Arg = nullptr;
+    llvm::Value *Ret = nullptr;
+    if (getOpenMPRuntime().requiresSpecialThreadPrivateHandling()) {
+      Arg = Fn->arg_begin();
+      Ret = Fn->arg_begin();
+    } else {
+      Arg = GetAddrOfGlobal(Var);
+      Ret = CGF.EmitScalarConversion(
+          Arg, getContext().getPointerType(Var->getType()),
+          getContext().VoidPtrTy,SourceLocation());
+    }
+
+    CGF.emitDestroy(Arg, QTy, CGF.getDestroyer(DtorKind),
+                    CGF.needsEHCleanup(DtorKind));
+    CGF.Builder.CreateStore(Ret, CGF.ReturnValue);
     CGF.FinishFunction();
     Dtor = Fn;
   }// else {
@@ -956,10 +980,22 @@ void CodeGenModule::CreateOpenMPArrCXXInit(const VarDecl *Var,
 //                                          AggValueSlot::DoesNotNeedGCBarriers,
 //                                          AggValueSlot::IsNotAliased));
 //    CGF.Builder.CreateStore(Fn->arg_begin(), CGF.ReturnValue);
-    llvm::Value *Arg = CGF.EmitScalarConversion(Fn->arg_begin(), getContext().VoidPtrTy,
-                         getContext().getPointerType(Var->getType()), SourceLocation());
+    llvm::Value *Arg = nullptr;
+    llvm::Value *Ret = nullptr;
+    if (getOpenMPRuntime().requiresSpecialThreadPrivateHandling()) {
+      Arg =
+          CGF.EmitScalarConversion(Fn->arg_begin(), getContext().VoidPtrTy,
+                                   getContext().getPointerType(Var->getType()), SourceLocation());
+      Ret = Fn->arg_begin();
+    } else {
+      Arg = GetAddrOfGlobal(Var);
+      Ret = CGF.EmitScalarConversion(
+          Arg, getContext().getPointerType(Var->getType()),
+          getContext().VoidPtrTy,SourceLocation());
+    }
+
     CGF.EmitAnyExprToMem(Init, Arg, Init->getType().getQualifiers(), true);
-    CGF.Builder.CreateStore(Fn->arg_begin(), CGF.ReturnValue);
+    CGF.Builder.CreateStore(Ret, CGF.ReturnValue);
     CGF.FinishFunction();
     Ctor = Fn;
   }
@@ -1023,11 +1059,23 @@ void CodeGenModule::CreateOpenMPArrCXXInit(const VarDecl *Var,
     CodeGenFunction CGF(*this);
     CGF.StartFunction(GlobalDecl(), getContext().VoidPtrTy, Fn, FI,
                       Args, SourceLocation());
-    CGF.emitDestroy(Fn->arg_begin(), Var->getType(),
-                    CGF.getDestroyer(QualType::DK_cxx_destructor),
-                    false
+
+    llvm::Value *Arg = nullptr;
+    llvm::Value *Ret = nullptr;
+    if (getOpenMPRuntime().requiresSpecialThreadPrivateHandling()) {
+      Arg = Fn->arg_begin();
+      Ret = Fn->arg_begin();
+    } else {
+      Arg = GetAddrOfGlobal(Var);
+      Ret = CGF.EmitScalarConversion(
+          Arg, getContext().getPointerType(Var->getType()),
+          getContext().VoidPtrTy,SourceLocation());
+    }
+
+    CGF.emitDestroy(Arg, Var->getType(),
+                    CGF.getDestroyer(QualType::DK_cxx_destructor), false
                     /*CGF.needsEHCleanup(QualType::DK_cxx_destructor)*/);
-    CGF.Builder.CreateStore(Fn->arg_begin(), CGF.ReturnValue);
+    CGF.Builder.CreateStore(Ret, CGF.ReturnValue);
     CGF.FinishFunction();
     Dtor = Fn;
   } else {

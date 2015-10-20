@@ -7,7 +7,7 @@
 #define TEST TEST2(test)
 typedef int DWORD;
 
-#pragma sysheader begin
+#pragma sysheader begin // expected-warning {{unknown pragma ignored}}
 
 struct EXCEPTION_INFO{};
 
@@ -21,7 +21,7 @@ int __abnormal_termination();
 #define GetExceptionInformation __exception_info
 #define AbnormalTermination __abnormal_termination
 
-#pragma sysheader end
+#pragma sysheader end // expected-warning {{unknown pragma ignored}}
 
 DWORD FilterExpression(int); // expected-note{{declared here}}
 DWORD FilterExceptionInformation(struct EXCEPTION_INFO*);

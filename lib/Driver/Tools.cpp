@@ -4447,6 +4447,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
         // pass the targets we are generating code to
         if (Arg *Tgts = Args.getLastArg(options::OPT_omptargets_EQ)) {
 
+          // Communicate to the frontend that the user wants a listing of the
+          // offload kernels that are being generated.
+          if (Args.hasArg(options::OPT_omp_list_offload_kernels))
+            CmdArgs.push_back("-omp-list-offload-kernels");
+
           ArrayRef<const char *> Vals = Tgts->getValues();
 
           if (!Vals.empty()) {
@@ -4476,24 +4481,14 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
             CmdArgs.push_back(Args.MakeArgString(S.c_str()));
           }
           if (Arg *A = Args.getLastArg(
-                  options::OPT_omp_nvptx_data_sharing_sizes_per_thread)) {
-            SmallString<128> S("-omp-nvptx-data-sharing-sizes-per-thread=");
-            for (auto *SS : A->getValues()) {
-              S.append(SS);
-              S.append(",");
-            }
-            S.pop_back();
-            CmdArgs.push_back(Args.MakeArgString(S.c_str()));
-          }
-          if (Arg *A = Args.getLastArg(
-                  options::OPT_omp_nvptx_data_sharing_size_per_team)) {
-            SmallString<128> S("-omp-nvptx-data-sharing-size-per-team=");
+                  options::OPT_omp_nvptx_max_data_sharing_threads)) {
+            SmallString<128> S("-omp-nvptx-max-data-sharing-threads=");
             S.append(A->getValue());
             CmdArgs.push_back(Args.MakeArgString(S.c_str()));
           }
           if (Arg *A = Args.getLastArg(
-                  options::OPT_omp_nvptx_data_sharing_size_per_kernel)) {
-            SmallString<128> S("-omp-nvptx-data-sharing-size-per-kernel=");
+                  options::OPT_omp_nvptx_max_data_sharing_teams)) {
+            SmallString<128> S("-omp-nvptx-max-data-sharing-teams=");
             S.append(A->getValue());
             CmdArgs.push_back(Args.MakeArgString(S.c_str()));
           }

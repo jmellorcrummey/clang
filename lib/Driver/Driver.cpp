@@ -2217,8 +2217,17 @@ void Driver::BuildJobsForAction(Compilation &C, const Action *A,
     InputInfos.push_back(II);
   }
 
-  // Always use the first input as the base input.
-  const char *BaseInput = InputInfos[0].getBaseInput();
+  // In general we use the first input as the base input. However, for
+  // offloading linking the actual input may not be the first, so we look for it
+  // here.
+  const char *BaseInput = nullptr;
+  for (unsigned i=0; i<InputInfos.size(); ++i) {
+    BaseInput = InputInfos[i].getBaseInput();
+    if (!BaseInput)
+      continue;
+    if (!StringRef(BaseInput).empty())
+      break;
+  }
 
   // We need to propagate the information on whether a target suffix has to be
   // added to the name of the files.

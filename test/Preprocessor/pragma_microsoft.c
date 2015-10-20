@@ -53,7 +53,7 @@ __pragma(comment(linker," bar=" BAR))
 
 void f()
 {
-  __pragma()
+  __pragma() // expected-warning {{unknown pragma ignored}}
 // CHECK: #pragma
 
   // If we ever actually *support* __pragma(warning(disable: x)),

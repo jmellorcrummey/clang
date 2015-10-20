@@ -10,7 +10,7 @@
 ///##############################################
 
 #ifdef TT1
-// RUN:   %clang -fopenmp -target powerpc64le-ibm-linux-gnu -omptargets=nvptx64sm_35-nvidia-linux \
+// RUN:   %clang -fopenmp=libomp -target powerpc64le-ibm-linux-gnu -omptargets=nvptx64sm_35-nvidia-linux \
 // RUN:   -DTT1 -O0 -S -emit-llvm %s 2>&1
 // RUN:   FileCheck -check-prefix=CK1 -input-file=target_control_loop_codegen_for_c.ll.tgt-nvptx64sm_35-nvidia-linux %s
 
@@ -29,6 +29,8 @@ int foo() {
   return 0;
 }
 
+// CK1: %[[OMPHANDLEADDR:[a-zA-Z0-9_\.]+]] = alloca i32
+// CK1: store i32 %[[OMPHANDLE:[a-zA-Z0-9_\.]+]]
 // CK1: %[[PARNEST:[a-zA-Z0-9_\.]+]] = alloca i32
 // CK1-NEXT: store i32 0, i32* %[[PARNEST]]
 // CK1-NEXT: %[[NXTSTT:[a-zA-Z0-9_\.]+]] = alloca i32
@@ -98,7 +100,7 @@ int foo() {
 
 // CK1: [[FSTSQ]]:
 // CK1-NEXT: %[[THLIMGBL:[a-zA-Z0-9_\.]+]] = load i32, i32* @__omptgt__[[KERNUNQ]]__thread_limit
-// CK1-NEXT: call void @__kmpc_kernel_init(i32 %[[THLIMGBL]])
+// CK1-NEXT: call void @__kmpc_kernel_init(i32 %[[OMPHANDLE]], i32 %[[THLIMGBL]])
 // CK1-NEXT: %[[CTLSTTIDXVAL2:[a-zA-Z0-9_\.]+]] = load i32, i32* %[[CTLSTTIDX]]
 // CK1-NEXT: %[[CTLSTTPOSPT1:[a-zA-Z0-9_\.]+]] = getelementptr [2 x i32], [2 x i32] addrspace(3)* @__omptgt__ControlState, i32 0, i32 %[[CTLSTTIDXVAL2]]
 // CK1-NEXT: store i32 1, i32 addrspace(3)* %[[CTLSTTPOSPT1]]
@@ -113,7 +115,7 @@ int foo() {
 ///##############################################
 
 #ifdef TT2
-// RUN:   %clang -fopenmp -target powerpc64le-ibm-linux-gnu -omptargets=nvptx64sm_35-nvidia-linux \
+// RUN:   %clang -fopenmp=libomp -target powerpc64le-ibm-linux-gnu -omptargets=nvptx64sm_35-nvidia-linux \
 // RUN:   -DTT2 -O0 -S -emit-llvm %s 2>&1
 // RUN:   FileCheck -check-prefix=CK2 -input-file=target_control_loop_codegen_for_c.ll.tgt-nvptx64sm_35-nvidia-linux %s
 
@@ -133,7 +135,9 @@ int foo() {
   return 0;
 }
 
+// CK2: %[[OMPHANDLEADDR:[a-zA-Z0-9_\.]+]] = alloca i32
 // CK2: %[[AB:[a-zA-Z0-9_\.]+]] = alloca i32, align 4
+// CK2: store i32 %[[OMPHANDLE:[a-zA-Z0-9_\.]+]]
 // CK2-NEXT: %[[PARNEST:[a-zA-Z0-9_\.]+]] = alloca i32
 // CK2-NEXT: store i32 0, i32* %[[PARNEST]]
 // CK2-NEXT: %[[NXTSTT:[a-zA-Z0-9_\.]+]] = alloca i32
@@ -203,7 +207,7 @@ int foo() {
 
 // CK2: [[FSTSQ]]:
 // CK2-NEXT: %[[THLIMGBL:[a-zA-Z0-9_\.]+]] = load i32, i32* @__omptgt__[[KERNUNQ2]]__thread_limit
-// CK2-NEXT: call void @__kmpc_kernel_init(i32 %[[THLIMGBL]])
+// CK2-NEXT: call void @__kmpc_kernel_init(i32 %[[OMPHANDLE]], i32 %[[THLIMGBL]])
 // CK2-NEXT: store i32 1, i32* %[[AB]], align 4
 // CK2-NEXT: %[[CTLSTTIDXVAL2:[a-zA-Z0-9_\.]+]] = load i32, i32* %[[CTLSTTIDX]]
 // CK2-NEXT: %[[CTLSTTPOSPT1:[a-zA-Z0-9_\.]+]] = getelementptr [2 x i32], [2 x i32] addrspace(3)* @__omptgt__ControlState, i32 0, i32 %[[CTLSTTIDXVAL2]]
@@ -219,7 +223,7 @@ int foo() {
 ///##############################################
 
 #ifdef TT3
-// RUN:   %clang -fopenmp -target powerpc64le-ibm-linux-gnu -omptargets=nvptx64sm_35-nvidia-linux \
+// RUN:   %clang -fopenmp=libomp -target powerpc64le-ibm-linux-gnu -omptargets=nvptx64sm_35-nvidia-linux \
 // RUN:   -DTT3 -O0 -S -emit-llvm %s 2>&1
 // RUN:   FileCheck -check-prefix=CK3 -input-file=target_control_loop_codegen_for_c.ll.tgt-nvptx64sm_35-nvidia-linux %s
 
@@ -253,6 +257,7 @@ int foo() {
   return 0;
 }
 
+// CK3: %[[OMPHANDLEADDR:[a-zA-Z0-9_\.]+]] = alloca i32
 // CK3: %[[GBLUBSTK:[a-zA-Z0-9_\.]+]] = alloca i32, align 4
 // CK3-NEXT: %[[DBGUB:[a-zA-Z0-9_\.]+]] = alloca i32, align 4
 // CK3-NEXT: %[[LST:[a-zA-Z0-9_\.]+]] = alloca i32, align 4
@@ -261,6 +266,7 @@ int foo() {
 // CK3-NEXT: %[[ST:[a-zA-Z0-9_\.]+]] = alloca i32, align 4
 // CK3-NEXT: %[[IDX:[a-zA-Z0-9_\.]+]] = alloca i32, align 4
 // CK3-NEXT: %[[IPRIV:[a-zA-Z0-9_\.]+]] = alloca i32, align 4
+// CK3: store i32 %[[OMPHANDLE:[a-zA-Z0-9_\.]+]]
 // CK3: %[[PARNEST:[a-zA-Z0-9_\.]+]] = alloca i32
 // CK3-NEXT: store i32 0, i32* %[[PARNEST]]
 // CK3-NEXT: %[[NXTSTT:[a-zA-Z0-9\.]+]] = alloca i32
@@ -333,7 +339,7 @@ int foo() {
 
 // CK3: [[FSTSQ]]:
 // CK3-NEXT: %[[THLIMGBL:[a-zA-Z0-9_\.]+]] = load i32, i32* @__omptgt__[[KERNUNQ3]]__thread_limit
-// CK3-NEXT: call void @__kmpc_kernel_init(i32 %[[THLIMGBL]])
+// CK3-NEXT: call void @__kmpc_kernel_init(i32 %[[OMPHANDLE]], i32 %[[THLIMGBL]])
 // CK3-NEXT: store i32 1, i32* {{.*}} @__omptgt__shared_data_{{.*}} align 4
 // CK3-NEXT: store i32 1, i32 addrspace(3)* @__omptgt__SimdNumLanes
 // CK3-NEXT: %[[SMDNLNS:[a-zA-Z0-9_\.]+]] = load i32, i32 addrspace(3)* @__omptgt__SimdNumLanes

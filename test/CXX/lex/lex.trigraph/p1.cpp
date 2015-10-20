@@ -1,6 +1,6 @@
 // RUN: %clang_cc1 -fsyntax-only -ftrigraphs -Wtrigraphs -verify %s
 
-??=pragma // expected-warning {{trigraph converted to '#' character}}
+??=pragma // expected-warning {{trigraph converted to '#' character}} // expected-warning {{unknown pragma ignored}}
 
 int a = '??/0'; // expected-warning {{trigraph converted to '\' character}}
 

@@ -1,4 +1,4 @@
-// RUN:   %clang -fopenmp -target powerpc64le-ibm-linux-gnu -omptargets=nvptx64sm_35-nvidia-cuda \
+// RUN:   %clang -fopenmp=libomp -target powerpc64le-ibm-linux-gnu -omptargets=nvptx64sm_35-nvidia-cuda \
 // RUN:   -E -o preprocessor.i %s 2>&1
 // RUN:   FileCheck -check-prefix=CHKH -input-file=preprocessor.i %s
 // RUN:   FileCheck -check-prefix=CHKT -input-file=preprocessor.i.tgt-nvptx64sm_35-nvidia-cuda %s

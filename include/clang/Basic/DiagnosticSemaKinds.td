@@ -7624,6 +7624,8 @@ def err_omp_reduction_reference_type : Error<
   "a type name cannot be a reference type">;
 def err_omp_reduction_array_type : Error<
   "a type name cannot be an array type">;
+def err_omp_reduction_array_non_zero_lb : Error<
+  "array section lower-bound must be zero">;
 def err_omp_reduction_redeclared : Error<
   "previous declaration with type %0 is found">;
 def err_omp_reduction_non_function_init : Error<

@@ -2622,6 +2622,8 @@ void CodeGenFunction::InitOpenMPTargetFunction(const OMPExecutableDirective &D,
     }
 
     if (C->capturesThis()) {
+      CXXThisValue = Arg;
+      ++Arg;
       continue;
     }
 
@@ -2630,21 +2632,23 @@ void CodeGenFunction::InitOpenMPTargetFunction(const OMPExecutableDirective &D,
 
   // If 'this' is captured, load it into CXXThisValue. We only do this if we
   // have a context, otherwise we cannot emit anything.
-  if (CapturedStmtInfo->isCXXThisExprCaptured()) {
-    FieldDecl *FD = CapturedStmtInfo->getThisFieldDecl();
-    LValue LV = MakeNaturalAlignAddrLValue(CapturedStmtInfo->getContextValue(),
-                                           getContext().getTagDeclType(RD));
-    LValue ThisLValue = EmitLValueForField(LV, FD);
-    CXXThisValue = EmitLoadOfLValue(ThisLValue, FD->getLocStart()).getScalarVal();
-  }
+  //  if (CapturedStmtInfo->isCXXThisExprCaptured()) {
+  //    FieldDecl *FD = CapturedStmtInfo->getThisFieldDecl();
+  //    LValue LV =
+  //    MakeNaturalAlignAddrLValue(CapturedStmtInfo->getContextValue(),
+  //                                           getContext().getTagDeclType(RD));
+  //    LValue ThisLValue = EmitLValueForField(LV, FD);
+  //    CXXThisValue = EmitLoadOfLValue(ThisLValue,
+  //    FD->getLocStart()).getScalarVal();
+  //  }
 }
 
 void CodeGenFunction::InitOpenMPSharedizeParameters(
-		const CapturedStmt &S,
-		SmallVector<const VarDecl *, 8> &MappingDecls,
-		SmallVector<llvm::Value *, 8>   &MappingDeclVals,
-		SmallVector<llvm::Value**, 8> &VLAExprLocs,
-		SmallVector<llvm::Value *, 8>   &VLAExprVals) {
+    const CapturedStmt &S, bool isParallel,
+    SmallVector<const VarDecl *, 8> &MappingDecls,
+    SmallVector<llvm::Value *, 8> &MappingDeclVals,
+    SmallVector<llvm::Value **, 8> &VLAExprLocs,
+    SmallVector<llvm::Value *, 8> &VLAExprVals) {
 
   assert( MappingDecls.size() == MappingDeclVals.size()
        && "Inconsistent sizes for map information");
@@ -2682,7 +2686,7 @@ void CodeGenFunction::InitOpenMPSharedizeParameters(
       // memory during the postprocessing of the generated code.
       llvm::AllocaInst *Tmp = CreateTempAlloca(Vref->getType(),
                                                "VLA_size_tmp");
-      CGM.getOpenMPRuntime().addToSharedRegion(Tmp, NestingLevel);
+      CGM.getOpenMPRuntime().addToSharedRegion(Tmp, NestingLevel, isParallel);
       Builder.CreateStore(Vref,Tmp);
 
       // We need to save the original information so that it gets restored after
@@ -2691,7 +2695,7 @@ void CodeGenFunction::InitOpenMPSharedizeParameters(
       Vref = Builder.CreateLoad(Tmp);
 
       // Save the load as a shared variable as all the uses will have to load
-      CGM.getOpenMPRuntime().addToSharedRegion(Vref, NestingLevel);
+      CGM.getOpenMPRuntime().addToSharedRegion(Vref, NestingLevel, isParallel);
 
       VLAExprLocs.push_back(&Vref);
       VLAExprVals.push_back(OldV);
@@ -2729,8 +2733,8 @@ void CodeGenFunction::InitOpenMPSharedizeParameters(
             // We only need to force it to be shared if it is a local var
             // (alloc in in the stack).
             if (isa<llvm::AllocaInst>(GblCandidate)) {
-              CGM.getOpenMPRuntime().addToSharedRegion(GblCandidate,
-                                                       NestingLevel);
+              CGM.getOpenMPRuntime().addToSharedRegion(
+                  GblCandidate, NestingLevel, isParallel);
             }
 	    else if (!IsPrivateCandidate) {
 	      continue;

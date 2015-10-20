@@ -1988,7 +1988,7 @@ public:
                               const RecordData &Record, unsigned &Idx);
 
   /// \brief Read an integral value
-  static llvm::APInt ReadAPInt(const RecordData &Record, unsigned &Idx);
+  llvm::APInt ReadAPInt(const RecordData &Record, unsigned &Idx);
 
   /// \brief Read a signed integral value
   llvm::APSInt ReadAPSInt(const RecordData &Record, unsigned &Idx);

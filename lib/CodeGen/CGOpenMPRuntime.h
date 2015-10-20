@@ -163,8 +163,13 @@ protected:
   // Number of globals processed so far that are to be mapped into a target
   unsigned NumTargetGlobals;
 
-  // Name of the current function whose target regions are being identified
-  std::string CurTargetParentFunctionName;
+  // Stack with the name of the current function that (possibly) encloses target
+  // region and the corresponding declaration.
+  SmallVector<std::pair<StringRef, const FunctionDecl *>, 4>
+      CurTargetParentFunctionInfo;
+
+  // String that contains the list of all the kernels information.
+  SmallString<128> KernelListDump;
 
   // Set of all local variables that need to be turned global due to data sharing
   // constraints. This is organized as vector of trees.
@@ -229,6 +234,12 @@ protected:
   typedef llvm::DenseMap<const Decl *, llvm::Constant *> DeclsToEntriesMapTy;
   DeclsToEntriesMapTy DeclsToEntriesMap;
 
+  // Map of a target function to the constant number of threads and teams that
+  // will execute it. If the function is not in the map, it is either not a
+  // target function or the number of teams or threads is not constant.
+  llvm::DenseMap<llvm::Function *, std::pair<unsigned, unsigned>>
+      TeamsAndThreadForFunction;
+
   // Target regions descriptor for the current compilation unit
   llvm::Constant *TargetRegionsDescriptor;
 
@@ -248,16 +259,40 @@ protected:
                                  StringRef Name);
 
 public:
+  // Register constant number of teams and threads for the given target outlined
+  // function.
+  void registerConstantNumberOfTeamsAndThreads(llvm::Function *F,
+                                               unsigned NumTeams,
+                                               unsigned NumThreads) {
+    TeamsAndThreadForFunction[F] = std::make_pair(NumTeams, NumThreads);
+  }
+
+  // Return true if the current target function uses a constant number of teams
+  // or threads. NumTeams and NumThreads are set to the right value if so.
+  void getConstantNumberOfTeamsAndThreads(llvm::Function *F, unsigned &NumTeams,
+                                          unsigned &NumThreads) {
+    auto I = TeamsAndThreadForFunction.lookup(F);
+    NumTeams = I.first;
+    NumThreads = I.second;
+    return;
+  }
+
   // register the name of the current function whose target regions are being
   // identified
-  void registerCurTargetParentFunctionName(StringRef s) {
-    CurTargetParentFunctionName = s;
+  void registerCurTargetParentFunctionInfo(StringRef S, const FunctionDecl *D) {
+    CurTargetParentFunctionInfo.push_back(std::make_pair(S, D));
+  }
+  // un register the name of the current function whose target regions are being
+  // identified
+  void unregisterCurTargetParentFunctionInfo() {
+    assert(!CurTargetParentFunctionInfo.empty() &&
+           "No target enclosing functions names??");
+    CurTargetParentFunctionInfo.pop_back();
   }
 
   // hooks to register information that should match between host and target
   void registerGlobalVariable(const Decl *D, llvm::GlobalVariable *GV);
-  void registerTargetRegion(const Decl *D, llvm::Function *Fn,
-                            llvm::Function *ParentFunction);
+  void registerTargetRegion(const Decl *D, llvm::Function *Fn);
   virtual void registerCtorRegion(llvm::Function *Fn);
   virtual void registerDtorRegion(llvm::Function *Fn,
                                   llvm::Constant *Destructee);
@@ -303,11 +338,15 @@ public:
   // Return true if the current module has global initializers
   bool hasTargetGlobalInitializers();
 
+  // Return true if we should ignore the current sharing region
+  virtual bool ignoreSharedRegion(bool isParallel);
+
   // Start sharing region. This will initialize a new set of shared variables
   void startSharedRegion(unsigned NestingLevel);
 
   // Mark value as requiring to be moved to global memory
-  void addToSharedRegion(llvm::Value *V, unsigned NestingLevel);
+  void addToSharedRegion(llvm::Value *V, unsigned NestingLevel,
+                         bool isParallel);
 
   // Return the registered constant for a given declaration
   llvm::Constant *getEntryForDeclaration(const Decl *D);
@@ -441,6 +480,9 @@ public:
   // Special processing for __kmpc_reduce_nowait
   // DEFAULT_GET_OPENMP_FUNC(reduce_nowait)
   virtual llvm::Constant * Get_reduce_nowait();
+  // Special processing for __kmpc_reduce_combined
+  // DEFAULT_GET_OPENMP_FUNC(reduce_combined)
+  virtual llvm::Constant * Get_reduce_combined();
   // Special processing for __kmpc_reduce
   // DEFAULT_GET_OPENMP_FUNC(reduce)
   virtual llvm::Constant *Get_reduce();
@@ -487,6 +529,10 @@ public:
   virtual llvm::Value *GetAtomicFunc(CodeGenFunction &CGF, QualType QTy,
       OpenMPReductionClauseOperator Op);
 
+  virtual llvm::Value *GetAtomicFuncArrayGeneral(CodeGenFunction &CGF, 
+     QualType QTyRes, QualType QTyIn, EAtomicOperation Aop,
+     bool Capture, bool Reverse);
+
   /// Return reduction call to perform specialized reduction in a single OpenMP
   /// team if the target can benefit from it.
   virtual llvm::Value *GetTeamReduFunc(CodeGenFunction &CGF, QualType QTy,
@@ -517,6 +563,10 @@ public:
                                                SourceLocation Loc,
                                                CodeGenFunction &CGF,
                                                bool NoCast = false);
+
+  // \brief Returns true if the target requires special handling of thread
+  // thread private
+  virtual bool requiresSpecialThreadPrivateHandling();
 
   /// \brief  Return a string with the mangled name of a target region or global
   /// entry point. The client can choose to invalidate the used order entry.
@@ -555,6 +605,11 @@ public:
   ///
   llvm::Constant* GetDeviceImageEndPointer(llvm::Triple TargetTriple);
 
+  /// \brief Helper to dump the information about a given target region to the
+  /// the screen if so was requested by the user.
+  void DumpTargetRegionInfo(const OMPExecutableDirective &D,
+                            StringRef TargetRegionName);
+
   // \brief If needed, re-initialize part of the state
   virtual void StartNewTargetRegion();
 
@@ -568,13 +623,23 @@ public:
 
   /// \brief Code generation helper in target regions. Create a control-loop
   //  with inspector/executor for special back-ends (e.g. nvptx)
-  virtual void EnterTargetControlLoop(SourceLocation Loc, CodeGenFunction &CGF,
-                                      StringRef TgtFunName);
+  virtual void EnterTargetControlLoop(SourceLocation Loc,
+      CodeGenFunction &CGF, StringRef TgtFunName, OpenMPDirectiveKind DKind,
+      OpenMPDirectiveKind &SKind, const OMPExecutableDirective &S);
+
+  virtual void EnterTargetLoop(SourceLocation Loc,
+      CodeGenFunction &CGF, StringRef TgtFunName, OpenMPDirectiveKind DKind,
+      OpenMPDirectiveKind &SKind, const OMPExecutableDirective &S, bool &combined);
 
   // \brief Code generation for closing of sequential region. Set ups the next
   // labels for special back-ends (e.g. nvptx)
-  virtual void ExitTargetControlLoop(SourceLocation Loc, CodeGenFunction &CGF,
-                                     bool prevIsParallel, StringRef TgtFunName);
+  virtual void ExitTargetControlLoop(SourceLocation Loc,
+      CodeGenFunction &CGF, bool prevIsParallel, StringRef TgtFunName,
+      OpenMPDirectiveKind SKind);
+
+  virtual void ExitTargetLoop(SourceLocation Loc,
+      CodeGenFunction &CGF, bool prevIsParallel, StringRef TgtFunName,
+      OpenMPDirectiveKind SKind, bool combined);
 
   // \brief Function to close an openmp region. Set the labels and generate
   // new switch case

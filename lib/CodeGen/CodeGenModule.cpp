@@ -1160,14 +1160,16 @@ static void FindAndProcessTargetRegions(CodeGenFunction &CGF, const Stmt *S){
     FindAndProcessTargetRegions(CGF,*ii);
   }
 }
-static void ScanFunctionTargetRegions(CodeGenModule &CGM, const FunctionDecl*D){
+static void ScanFunctionTargetRegions(CodeGenModule &CGM, GlobalDecl GD) {
 
   CodeGenFunction CGF(CGM);
+  const FunctionDecl *D = cast<FunctionDecl>(GD.getDecl());
   CGF.CurFuncDecl = D;
 
-  CGM.getOpenMPRuntime().registerCurTargetParentFunctionName(
-      CGM.getMangledName(GlobalDecl(D)));
+  CGM.getOpenMPRuntime().registerCurTargetParentFunctionInfo(
+      CGM.getMangledName(GD), D);
   FindAndProcessTargetRegions(CGF, D->getBody());
+  CGM.getOpenMPRuntime().unregisterCurTargetParentFunctionInfo();
   return;
 }
 
@@ -1678,16 +1680,34 @@ void CodeGenModule::EmitGlobalDefinition(GlobalDecl GD, llvm::GlobalValue *GV) {
   
   if (isa<FunctionDecl>(D)) {
 
-    if (getLangOpts().OpenMPTargetMode) {
-      StringRef N = getMangledName(GD);
-      if (!getOpenMPRuntime().isValidTargetRegionParent(N) &&
-          !getOpenMPRuntime().isValidOtherTargetFunction(N))
+    // If we are generating code for a target we need to look
+    // into the function declarations for target regions instead
+    // of codegening the function if it is a valid parent.
+    if (LangOpts.OpenMPTargetMode) {
+      StringRef Name = getMangledName(GD);
+      if (getOpenMPRuntime().isValidTargetRegionParent(Name)) {
+        ScanFunctionTargetRegions(*this, GD);
+        return;
+      }
+      if (!getOpenMPRuntime().isValidOtherTargetFunction(Name))
         return;
     }
+
+    //    if (getLangOpts().OpenMPTargetMode) {
+    //      StringRef N = getMangledName(GD);
+    //      if (!getOpenMPRuntime().isValidTargetRegionParent(N) &&
+    //          !getOpenMPRuntime().isValidOtherTargetFunction(N))
+    //        return;
+    //    }
+
     // At -O0, don't generate IR for functions with available_externally 
     // linkage.
     if (!shouldEmitFunction(GD))
       return;
+
+    if (hasOpenMPRuntime() && !getLangOpts().OpenMPTargetMode)
+      getOpenMPRuntime().registerCurTargetParentFunctionInfo(
+          getMangledName(GD), cast<FunctionDecl>(D));
 
     if (const auto *Method = dyn_cast<CXXMethodDecl>(D)) {
       CompleteDIClassType(Method);
@@ -1703,10 +1723,13 @@ void CodeGenModule::EmitGlobalDefinition(GlobalDecl GD, llvm::GlobalValue *GV) {
       if (Method->isVirtual())
         getVTables().EmitThunks(GD);
 
-      return;
-    }
+    } else
+      EmitGlobalFunctionDefinition(GD, GV);
 
-    return EmitGlobalFunctionDefinition(GD, GV);
+    if (hasOpenMPRuntime() && !getLangOpts().OpenMPTargetMode)
+      getOpenMPRuntime().unregisterCurTargetParentFunctionInfo();
+
+    return;
   }
 
   if (const auto *VD = dyn_cast<VarDecl>(D)) {
@@ -2711,19 +2734,6 @@ void CodeGenModule::HandleCXXStaticMemberVarInstantiation(VarDecl *VD) {
 void CodeGenModule::EmitGlobalFunctionDefinition(GlobalDecl GD,
                                                  llvm::GlobalValue *GV) {
   const auto *D = cast<FunctionDecl>(GD.getDecl());
-
-  // If we are generating code for a target we need to look
-  // into the function declarations for target regions instead
-  // of codegening the function if it is a valid parent.
-  if (LangOpts.OpenMPTargetMode) {
-    StringRef Name = getMangledName(GD);
-    if (getOpenMPRuntime().isValidTargetRegionParent(Name)) {
-      ScanFunctionTargetRegions(*this, D);
-      return;
-    }
-    if (!getOpenMPRuntime().isValidOtherTargetFunction(Name))
-      return;
-  }
 
   // If a method is deffered then defer its omp directive too.
   if (const CXXMethodDecl *MD = dyn_cast_or_null<CXXMethodDecl>(D)) {
@@ -4007,8 +4017,29 @@ CodeGenModule::OpenMPSupportStackTy::getReductionRecVar(CodeGenFunction &CGF) {
                                                 "reduction.rec.var");
     AI->setAlignment(CGF.CGM.PointerAlignInBytes);
     OpenMPStack.back().ReductionRecVar = AI;
+    llvm::AllocaInst *AI1 = CGF.CreateTempAlloca(
+	OpenMPStack.back().ReductionRec, "reduction.rec.size");
+    AI1->setAlignment(CGF.CGM.PointerAlignInBytes);
+    OpenMPStack.back().ReductionRecSize = AI1;
   }
   return OpenMPStack.back().ReductionRecVar;
+}
+
+llvm::Value *
+CodeGenModule::OpenMPSupportStackTy::getReductionRecSize(CodeGenFunction &CGF) {
+  if (!OpenMPStack.back().ReductionRecSize) {
+    OpenMPStack.back().ReductionRec =
+                 llvm::StructType::get(CGM.getLLVMContext(),
+                                       OpenMPStack.back().ReductionTypes);
+    llvm::AllocaInst *AI = CGF.CreateTempAlloca(OpenMPStack.back().ReductionRec,
+                                                "reduction.rec.var");
+    AI->setAlignment(CGF.CGM.PointerAlignInBytes);
+    llvm::AllocaInst *AI1 = CGF.CreateTempAlloca(
+	OpenMPStack.back().ReductionRec, "reduction.rec.size");
+    AI1->setAlignment(CGF.CGM.PointerAlignInBytes);
+    OpenMPStack.back().ReductionRecSize = AI1;
+  }
+  return OpenMPStack.back().ReductionRecSize;
 }
 
 llvm::Type *
@@ -4019,21 +4050,29 @@ CodeGenModule::OpenMPSupportStackTy::getReductionRec() {
 }
 
 void CodeGenModule::OpenMPSupportStackTy::getReductionFunctionArgs(
-                                      llvm::Value *&Arg1, llvm::Value *&Arg2) {
+                                      llvm::Value *&Arg1, llvm::Value *&Arg2, 
+				      llvm::Value *&Arg3) {
   assert(OpenMPStack.back().RedCGF && OpenMPStack.back().RedCGF->CurFn &&
          "Reduction function is closed.");
   if (!OpenMPStack.back().RedArg1 && !OpenMPStack.back().RedArg2) {
     CodeGenFunction &CGF = *OpenMPStack.back().RedCGF;
     llvm::Value *Arg1 = &CGF.CurFn->getArgumentList().front();
-    llvm::Value *Arg2 = &CGF.CurFn->getArgumentList().back();
+
+    auto AI =  CGF.CurFn->arg_begin();
+    ++AI;
+    llvm::Value *Arg2 = &(*AI);
+    llvm::Value *Arg3 = &CGF.CurFn->getArgumentList().back();
     llvm::Type *PtrTy = OpenMPStack.back().ReductionRec->getPointerTo();
     OpenMPStack.back().RedArg1 = CGF.Builder.CreateBitCast(Arg1, PtrTy,
                                                            "reduction.lhs");
     OpenMPStack.back().RedArg2 = CGF.Builder.CreateBitCast(Arg2, PtrTy,
                                                            "reduction.rhs");
+    OpenMPStack.back().RedArg3 = CGF.Builder.CreateBitCast(Arg3, PtrTy,
+                                                           "reduction.size");
   }
   Arg1 = OpenMPStack.back().RedArg1;
   Arg2 = OpenMPStack.back().RedArg2;
+  Arg3 = OpenMPStack.back().RedArg3;
 }
 
 unsigned
@@ -4326,6 +4365,14 @@ void CodeGenModule::OpenMPSupportStackTy::getParentUntiedData(llvm::Value *&Unti
     }
     FirstTaskFound = FirstTaskFound || I->NewTask;
   }
+}
+
+void CodeGenModule::OpenMPSupportStackTy::setNewTask(bool Flag){
+  OpenMPStack.back().NewTask = Flag;
+}
+
+bool CodeGenModule::OpenMPSupportStackTy::getNewTask(){
+  return OpenMPStack.back().NewTask;
 }
 
 void CodeGenModule::OpenMPSupportStackTy::setNumTeams(Expr *Num) {

@@ -315,13 +315,11 @@ def W_Joined : Joined<["-"], "W">, Group<W_Group>, Flags<[CC1Option, CoreOption]
   MetaVarName<"<warning>">, HelpText<"Enable the specified warning">;
 def Womp_implicit_target_files : Flag<["-"], "Womp-implicit-target-files">, Group<W_Group>, Flags<[CC1Option, NoArgumentUnused]>;
 def omp_nvptx_data_sharing_type : Joined<["-"], "omp-nvptx-data-sharing-type=">, Flags<[DriverOption,CC1Option,NoArgumentUnused]>,
-  HelpText<"Data sharing scheme to use in OpenMP codegeneration for nvptx target. Possible options are 'fast' (use CUDA shared memory - default) and 'regular' (use CUDA global memory).">;
-def omp_nvptx_data_sharing_sizes_per_thread : CommaJoined<["-"], "omp-nvptx-data-sharing-sizes-per-thread=">, Flags<[DriverOption,CC1Option,NoArgumentUnused]>,
-  HelpText<"Specify the comma separated sizes in bytes for the data sharing storage for each each level of parallelism. Default is 1024,32.">;
-def omp_nvptx_data_sharing_size_per_team : Joined<["-"], "omp-nvptx-data-sharing-size-per-team=">, Flags<[DriverOption,CC1Option,NoArgumentUnused]>,
-  HelpText<"Specify the size in bytes for the data sharing storage for each team. Default is 33792 (=1024+1024*32).">;
-def omp_nvptx_data_sharing_size_per_kernel : Joined<["-"], "omp-nvptx-data-sharing-size-per-kernel=">, Flags<[DriverOption,CC1Option,NoArgumentUnused]>,
-  HelpText<"Specify the size in bytes for the data sharing storage for each kernel. Default is 69206016 (=33792*2048).">;
+  HelpText<"Data sharing scheme to use in OpenMP codegeneration for nvptx target. Possible options are 'shared' (use CUDA shared memory - default) and 'global' (use CUDA global memory).">;
+def omp_nvptx_max_data_sharing_threads : Joined<["-"], "omp-nvptx-max-data-sharing-threads=">, Flags<[DriverOption,CC1Option,NoArgumentUnused]>,
+  HelpText<"Specify the maximum number of threads that would be sharing data in the current compilation unit. Default is 32.">;
+def omp_nvptx_max_data_sharing_teams : Joined<["-"], "omp-nvptx-max-data-sharing-teams=">, Flags<[DriverOption,CC1Option,NoArgumentUnused]>,
+  HelpText<"Specify the maximum number of teams that would be sharing data in the current compilation unit. Default is 2048.">;
 def Xanalyzer : Separate<["-"], "Xanalyzer">,
   HelpText<"Pass <arg> to the static analyzer">, MetaVarName<"<arg>">;
 def Xarch__ : JoinedAndSeparate<["-"], "Xarch_">, Flags<[DriverOption]>;
@@ -1572,6 +1570,7 @@ def object : Flag<["-"], "object">;
 def o : JoinedOrSeparate<["-"], "o">, Flags<[DriverOption, RenderAsInput, CC1Option, CC1AsOption]>,
   HelpText<"Write output to <file>">, MetaVarName<"<file>">;
 def omptargets_EQ : CommaJoined<["-"], "omptargets=">, Flags<[DriverOption, CC1Option]>;
+def omp_list_offload_kernels : Flag<["-", "--"], "omp-list-offload-kernels">, Flags<[DriverOption, CC1Option]>;
 def pagezero__size : JoinedOrSeparate<["-"], "pagezero_size">;
 def pass_exit_codes : Flag<["-", "--"], "pass-exit-codes">, Flags<[Unsupported]>;
 def pedantic_errors : Flag<["-", "--"], "pedantic-errors">, Group<pedantic_Group>, Flags<[CC1Option]>;

@@ -127,6 +127,10 @@ public:
     unsigned Index;
   };
 
+  /// Flag to signal the handling of a combination of directives which involves
+  /// different level of parallelism (threads, warps, blocks)
+  bool combined = false;
+
   CodeGenModule &CGM;  // Per-module state.
   const TargetInfo &Target;
 
@@ -2216,11 +2220,12 @@ public:
   void InitOpenMPTargetFunction(const OMPExecutableDirective &D,
                                 const CapturedStmt &S,
                                 SmallVector<llvm::Value**, 8> &VLAToLoad);
-  void InitOpenMPSharedizeParameters(const CapturedStmt &S,
-                                     SmallVector<const VarDecl *, 8> &MappingDecls,
-                                     SmallVector<llvm::Value *, 8>   &MappingDeclVals,
-                                     SmallVector<llvm::Value**, 8>   &VLAExprLocs,
-                                     SmallVector<llvm::Value *, 8>   &VLAExprVals);
+  void
+  InitOpenMPSharedizeParameters(const CapturedStmt &S, bool isParallel,
+                                SmallVector<const VarDecl *, 8> &MappingDecls,
+                                SmallVector<llvm::Value *, 8> &MappingDeclVals,
+                                SmallVector<llvm::Value **, 8> &VLAExprLocs,
+                                SmallVector<llvm::Value *, 8> &VLAExprVals);
   bool IsCombinedDirectiveLoopBoundCapture(const OMPExecutableDirective &S,
                                            const DeclRefExpr *DE);
 
@@ -2384,6 +2389,10 @@ public:
                                 OpenMPDirectiveKind SKind,
                                 const OMPExecutableDirective &S,
                                 bool IsDistribute = false);
+  void EmitOMPDirectiveWithFlexibleLoop(OpenMPDirectiveKind DKind,
+                                        OpenMPDirectiveKind SKind,
+                                        const OMPExecutableDirective &S,
+                                        bool IsDistribute = false);
   void EmitOMPSectionsDirective(
     OpenMPDirectiveKind DKind,
     OpenMPDirectiveKind SKind,

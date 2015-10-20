@@ -1677,6 +1677,9 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   Opts.OpenMPTargetMode = Args.hasArg(OPT_omp_target_mode);
   Opts.OpenMPHostIRDump = Args.hasArg(OPT_omp_dump_host_ir);
   Opts.OpenMPTargetIRDump = Args.hasArg(OPT_omp_dump_target_ir);
+  // We only need to dump the kernels for the host.
+  Opts.OpenMPTargetListKernels = Opts.OpenMP && !Opts.OpenMPTargetMode &&
+                                 Args.hasArg(OPT_omp_list_offload_kernels);
 
   // Get the OpenMP target triples if any
   if ( Arg *A = Args.getLastArg(options::OPT_omptargets_EQ) ){
@@ -1719,42 +1722,31 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
     if (Arg *A = Args.getLastArg(options::OPT_omp_nvptx_data_sharing_type)) {
       StringRef S = A->getValue();
       unsigned R = llvm::StringSwitch<unsigned>(S)
-                       .Case("fast", 1)
-                       .Case("regular", 0)
+                       .Case("shared", 0)
+                       .Case("global", 1)
                        .Default(~0U);
       if (R == ~0U)
         Diags.Report(diag::err_drv_invalid_value) << A->getAsString(Args) << S;
       else
-        Opts.OpenMPNVPTXFastShare = R;
+        Opts.OpenMPNVPTXUseGlobalDataSharing = R;
     }
-    if (Arg *A = Args.getLastArg(
-            options::OPT_omp_nvptx_data_sharing_sizes_per_thread)) {
-      for (auto *SS : A->getValues()) {
-        StringRef SR = SS;
-        Opts.OMPNVPTXSharingSizesPerThread.push_back(0u);
-        if (SR.getAsInteger(0, Opts.OMPNVPTXSharingSizesPerThread.back()))
-          Diags.Report(diag::err_drv_invalid_value) << A->getAsString(Args)
-                                                    << SR;
-      }
-    } else {
-      Opts.OMPNVPTXSharingSizesPerThread.push_back(1024u);
-      Opts.OMPNVPTXSharingSizesPerThread.push_back(32u);
-    }
-    if (Arg *A = Args.getLastArg(
-            options::OPT_omp_nvptx_data_sharing_size_per_team)) {
+    if (Arg *A =
+            Args.getLastArg(options::OPT_omp_nvptx_max_data_sharing_threads)) {
       StringRef SR = A->getValue();
-      if (SR.getAsInteger(0, Opts.OMPNVPTXSharingSizePerTeam))
+      unsigned Val = Opts.OMPNVPTXDataSharingThreads;
+      if (SR.getAsInteger(0, Val))
         Diags.Report(diag::err_drv_invalid_value) << A->getAsString(Args) << SR;
-    } else {
-      Opts.OMPNVPTXSharingSizePerTeam = 33792u;
+      else
+        Opts.OMPNVPTXDataSharingThreads = Val;
     }
-    if (Arg *A = Args.getLastArg(
-            options::OPT_omp_nvptx_data_sharing_size_per_kernel)) {
+    if (Arg *A =
+            Args.getLastArg(options::OPT_omp_nvptx_max_data_sharing_teams)) {
       StringRef SR = A->getValue();
-      if (SR.getAsInteger(0, Opts.OMPNVPTXSharingSizePerKernel))
+      unsigned Val = Opts.OMPNVPTXDataSharingTeams;
+      if (SR.getAsInteger(0, Val))
         Diags.Report(diag::err_drv_invalid_value) << A->getAsString(Args) << SR;
-    } else {
-      Opts.OMPNVPTXSharingSizePerKernel = 69206016u;
+      else
+        Opts.OMPNVPTXDataSharingTeams = Val;
     }
   }
 
