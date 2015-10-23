@@ -118,19 +118,11 @@ static void getDarwinDefines(MacroBuilder &Builder, const LangOptions &Opts,
   if (Opts.Sanitize.has(SanitizerKind::Address))
     Builder.defineMacro("_FORTIFY_SOURCE", "0");
 
-  if (!Opts.ObjCAutoRefCount) {
+  // Darwin defines __weak, __strong, and __unsafe_unretained even in C mode.
+  if (!Opts.ObjC1) {
     // __weak is always defined, for use in blocks and with objc pointers.
     Builder.defineMacro("__weak", "__attribute__((objc_gc(weak)))");
-
-    // Darwin defines __strong even in C mode (just to nothing).
-    if (Opts.getGC() != LangOptions::NonGC)
-      Builder.defineMacro("__strong", "__attribute__((objc_gc(strong)))");
-    else
-      Builder.defineMacro("__strong", "");
-
-    // __unsafe_unretained is defined to nothing in non-ARC mode. We even
-    // allow this in C, since one might have block pointers in structs that
-    // are used in pure C code and in Objective-C ARC.
+    Builder.defineMacro("__strong", "");
     Builder.defineMacro("__unsafe_unretained", "");
   }
 
@@ -4526,10 +4518,10 @@ public:
         CRC = 1;
       } else if (Feature == "+crypto") {
         Crypto = 1;
-      } else if (Feature == "+t2dsp") {
+      } else if (Feature == "+dsp") {
         DSP = 1;
       } else if (Feature == "+fp-only-sp") {
-        HW_FP_remove |= HW_FP_DP | HW_FP_HP;
+        HW_FP_remove |= HW_FP_DP; 
       } else if (Feature == "+strict-align") {
         Unaligned = 0;
       } else if (Feature == "+fp16") {
