@@ -765,6 +765,10 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Stmt::PackExpansionExprClass:
     case Stmt::SubstNonTypeTemplateParmPackExprClass:
     case Stmt::FunctionParmPackExprClass:
+    case Stmt::CoroutineBodyStmtClass:
+    case Stmt::CoawaitExprClass:
+    case Stmt::CoreturnStmtClass:
+    case Stmt::CoyieldExprClass:
     case Stmt::SEHTryStmtClass:
     case Stmt::SEHExceptStmtClass:
     case Stmt::SEHLeaveStmtClass:
@@ -1855,13 +1859,20 @@ void ExprEngine::VisitCommonDeclRefExpr(const Expr *Ex, const NamedDecl *D,
       FieldDecl *LambdaThisCaptureField;
       CXXRec->getCaptureFields(LambdaCaptureFields, LambdaThisCaptureField);
       const FieldDecl *FD = LambdaCaptureFields[VD];
-      Loc CXXThis =
-          svalBuilder.getCXXThis(MD, LocCtxt->getCurrentStackFrame());
-      SVal CXXThisVal = state->getSVal(CXXThis);
-      V = state->getLValue(FD, CXXThisVal);
-      if (FD->getType()->isReferenceType() &&
-          !VD->getType()->isReferenceType())
-        CaptureByReference = true;
+      if (!FD) {
+        // When a constant is captured, sometimes no corresponding field is
+        // created in the lambda object.
+        assert(VD->getType().isConstQualified());
+        V = state->getLValue(VD, LocCtxt);
+      } else {
+        Loc CXXThis =
+            svalBuilder.getCXXThis(MD, LocCtxt->getCurrentStackFrame());
+        SVal CXXThisVal = state->getSVal(CXXThis);
+        V = state->getLValue(FD, CXXThisVal);
+        if (FD->getType()->isReferenceType() &&
+            !VD->getType()->isReferenceType())
+          CaptureByReference = true;
+      }
     } else {
       V = state->getLValue(VD, LocCtxt);
     }
