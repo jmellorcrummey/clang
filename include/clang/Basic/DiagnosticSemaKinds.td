@@ -2590,6 +2590,9 @@ def warn_impcast_complex_scalar : Warning<
 def warn_impcast_float_precision : Warning<
   "implicit conversion loses floating-point precision: %0 to %1">,
   InGroup<Conversion>, DefaultIgnore;
+def warn_impcast_double_promotion : Warning<
+  "implicit conversion increases floating-point precision: %0 to %1">,
+  InGroup<DoublePromotion>, DefaultIgnore;
 def warn_impcast_float_integer : Warning<
   "implicit conversion turns floating-point number into integer: %0 to %1">,
   InGroup<FloatConversion>, DefaultIgnore;
@@ -2632,6 +2635,10 @@ def warn_impcast_null_pointer_to_integer : Warning<
 def warn_impcast_floating_point_to_bool : Warning<
     "implicit conversion turns floating-point number into bool: %0 to %1">,
     InGroup<ImplicitConversionFloatingPointToBool>;
+def ext_ms_impcast_fn_obj : ExtWarn<
+  "implicit conversion between pointer-to-function and pointer-to-object is a "
+  "Microsoft extension">,
+  InGroup<MicrosoftCast>, DefaultError, SFINAEFailure;
 
 def warn_impcast_pointer_to_bool : Warning<
     "address of%select{| function| array}0 '%1' will always evaluate to "
@@ -3992,8 +3999,6 @@ def err_unavailable_message : Error<"%0 is unavailable: %1">;
 def warn_unavailable_fwdclass_message : Warning<
     "%0 may be unavailable because the receiver type is unknown">,
     InGroup<UnavailableDeclarations>;
-def note_unavailability_inferred_here : Note<
-    "unsupported declaration here">;
 def note_availability_specified_here : Note<
   "%0 has been explicitly marked "
   "%select{unavailable|deleted|deprecated|partial}1 here">;
@@ -4554,6 +4559,21 @@ def err_arc_convesion_of_weak_unavailable : Error<
 } // end "ARC Weak References" category
 
 let CategoryName = "ARC Restrictions" in {
+
+def err_unavailable_in_arc : Error<
+  "%0 is unavailable in ARC">;
+def note_arc_forbidden_type : Note<
+  "declaration uses type that is ill-formed in ARC">;
+def note_performs_forbidden_arc_conversion : Note<
+  "inline function performs a conversion which is forbidden in ARC">;
+def note_arc_init_returns_unrelated : Note<
+  "init method must return a type related to its receiver type">;
+def note_arc_weak_disabled : Note<
+  "declaration uses __weak, but ARC is disabled">;
+def note_arc_weak_no_runtime : Note<"declaration uses __weak, which "
+  "the current deployment target does not support">;
+def note_arc_field_with_ownership : Note<
+  "field has non-trivial ownership qualification">;
 
 def err_arc_illegal_explicit_message : Error<
   "ARC forbids explicit message send of %0">;
@@ -6243,6 +6263,12 @@ def err_atomic_op_bitwise_needs_atomic_int : Error<
 def warn_atomic_op_has_invalid_memory_order : Warning<
   "memory order argument to atomic operation is invalid">,
   InGroup<DiagGroup<"atomic-memory-ordering">>;
+
+def err_overflow_builtin_must_be_int : Error<
+  "operand argument to overflow builtin must be an integer (%0 invalid)">;
+def err_overflow_builtin_must_be_ptr_int : Error<
+  "result argument to overflow builtin must be a pointer "
+  "to a non-const integer (%0 invalid)">;
 
 def err_atomic_load_store_uses_lib : Error<
   "atomic %select{load|store}0 requires runtime support that is not "
