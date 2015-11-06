@@ -627,7 +627,8 @@ void Driver::setLTOMode(const llvm::opt::ArgList &Args) {
   StringRef LTOName("full");
 
   const Arg *A = Args.getLastArg(options::OPT_flto_EQ);
-  if (A) LTOName = A->getValue();
+  if (A)
+    LTOName = A->getValue();
 
   LTOMode = llvm::StringSwitch<LTOKind>(LTOName)
                 .Case("full", LTOK_Full)
@@ -2570,6 +2571,8 @@ Driver::getToolChain(const ArgList &Args, const llvm::Triple &Target,
     case llvm::Triple::Darwin:
     case llvm::Triple::MacOSX:
     case llvm::Triple::IOS:
+    case llvm::Triple::TvOS:
+    case llvm::Triple::WatchOS:
       TC = new toolchains::DarwinClang(*this, Target, Args);
       break;
     case llvm::Triple::DragonFly:
