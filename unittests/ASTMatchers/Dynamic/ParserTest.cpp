@@ -318,9 +318,10 @@ TEST(ParserTest, CompletionNamedValues) {
       Comps[1].MatcherDecl);
 
   EXPECT_EQ("arent(", Comps[2].TypedText);
-  EXPECT_EQ("Matcher<Decl> "
-            "hasParent(Matcher<NestedNameSpecifierLoc|TypeLoc|Decl|...>)",
-            Comps[2].MatcherDecl);
+  EXPECT_EQ(
+      "Matcher<Decl> "
+      "hasParent(Matcher<TemplateArgument|NestedNameSpecifierLoc|Decl|...>)",
+      Comps[2].MatcherDecl);
 }
 
 }  // end anonymous namespace
