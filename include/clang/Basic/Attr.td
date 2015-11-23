@@ -890,6 +890,13 @@ def ReturnsTwice : InheritableAttr {
   let Documentation = [Undocumented];
 }
 
+def DisableTailCalls : InheritableAttr {
+  let Spellings = [GNU<"disable_tail_calls">,
+                   CXX11<"clang", "disable_tail_calls">];
+  let Subjects = SubjectList<[Function, ObjCMethod]>;
+  let Documentation = [DisableTailCallsDocs];
+}
+
 def NoAlias : InheritableAttr {
   let Spellings = [Declspec<"noalias">];
   let Subjects = SubjectList<[Function]>;
@@ -1027,6 +1034,12 @@ def NoInstrumentFunction : InheritableAttr {
   let Spellings = [GCC<"no_instrument_function">];
   let Subjects = SubjectList<[Function]>;
   let Documentation = [Undocumented];
+}
+
+def NotTailCalled : InheritableAttr {
+  let Spellings = [GNU<"not_tail_called">, CXX11<"clang", "not_tail_called">];
+  let Subjects = SubjectList<[Function]>;
+  let Documentation = [NotTailCalledDocs];
 }
 
 def NoThrow : InheritableAttr {
@@ -2125,4 +2138,10 @@ def OMPThreadPrivateDecl : InheritableAttr {
   let Spellings = [];
   let SemaHandler = 0;
   let Documentation = [Undocumented];
+}
+
+def InternalLinkage : InheritableAttr {
+  let Spellings = [GNU<"internal_linkage">, CXX11<"clang", "internal_linkage">];
+  let Subjects = SubjectList<[Var, Function, CXXRecord]>;
+  let Documentation = [InternalLinkageDocs];
 }
