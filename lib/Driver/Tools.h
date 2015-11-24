@@ -57,7 +57,8 @@ private:
                                const Driver &D, const llvm::opt::ArgList &Args,
                                llvm::opt::ArgStringList &CmdArgs,
                                const InputInfo &Output,
-                               const InputInfoList &Inputs) const;
+                               const InputInfoList &Inputs,
+                               const ToolChain *AuxToolChain) const;
 
   void AddAArch64TargetArgs(const llvm::opt::ArgList &Args,
                             llvm::opt::ArgStringList &CmdArgs) const;
@@ -283,6 +284,8 @@ NanEncoding getSupportedNanEncoding(StringRef &CPU);
 void getMipsCPUAndABI(const llvm::opt::ArgList &Args,
                       const llvm::Triple &Triple, StringRef &CPUName,
                       StringRef &ABIName);
+std::string getMipsABILibSuffix(const llvm::opt::ArgList &Args,
+                                const llvm::Triple &Triple);
 bool hasMipsAbiArg(const llvm::opt::ArgList &Args, const char *Value);
 bool isUCLibc(const llvm::opt::ArgList &Args);
 bool isNaN2008(const llvm::opt::ArgList &Args, const llvm::Triple &Triple);
@@ -566,9 +569,9 @@ public:
                     const char *LinkingOutput) const override;
 };
 
-class LLVM_LIBRARY_VISIBILITY Linker : public Tool {
+class LLVM_LIBRARY_VISIBILITY Linker : public GnuTool {
 public:
-  Linker(const ToolChain &TC) : Tool("NaCl::Linker", "linker", TC) {}
+  Linker(const ToolChain &TC) : GnuTool("NaCl::Linker", "linker", TC) {}
 
   bool hasIntegratedCPP() const override { return false; }
   bool isLinkJob() const override { return true; }
