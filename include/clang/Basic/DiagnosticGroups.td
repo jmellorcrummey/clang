@@ -24,6 +24,7 @@ def : DiagGroup<"aggregate-return">;
 def GNUAlignofExpression : DiagGroup<"gnu-alignof-expression">;
 def AmbigMemberTemplate : DiagGroup<"ambiguous-member-template">;
 def GNUAnonymousStruct : DiagGroup<"gnu-anonymous-struct">;
+def GNUAutoType : DiagGroup<"gnu-auto-type">;
 def ArrayBounds : DiagGroup<"array-bounds">;
 def ArrayBoundsPointerArithmetic : DiagGroup<"array-bounds-pointer-arithmetic">;
 def Availability : DiagGroup<"availability">;
@@ -82,6 +83,7 @@ def AbstractFinalClass : DiagGroup<"abstract-final-class">;
 def CXX11CompatDeprecatedWritableStr :
   DiagGroup<"c++11-compat-deprecated-writable-strings">;
 
+def DeprecatedAttributes : DiagGroup<"deprecated-attributes">;
 def DeprecatedDeclarations : DiagGroup<"deprecated-declarations">;
 def UnavailableDeclarations : DiagGroup<"unavailable-declarations">;
 def PartialAvailability : DiagGroup<"partial-availability">;
@@ -91,7 +93,8 @@ def DeprecatedRegister : DiagGroup<"deprecated-register">;
 def DeprecatedWritableStr : DiagGroup<"deprecated-writable-strings",
                                       [CXX11CompatDeprecatedWritableStr]>;
 // FIXME: Why is DeprecatedImplementations not in this group?
-def Deprecated : DiagGroup<"deprecated", [DeprecatedDeclarations,
+def Deprecated : DiagGroup<"deprecated", [DeprecatedAttributes,
+                                          DeprecatedDeclarations,
                                           DeprecatedIncrementBool,
                                           DeprecatedRegister,
                                           DeprecatedWritableStr]>,
@@ -707,6 +710,7 @@ def C99 : DiagGroup<"c99-extensions">;
 
 // A warning group for warnings about GCC extensions.
 def GNU : DiagGroup<"gnu", [GNUAlignofExpression, GNUAnonymousStruct,
+                            GNUAutoType,
                             GNUBinaryLiteral, GNUCaseRange,
                             GNUComplexInteger, GNUCompoundLiteralInitializer,
                             GNUConditionalOmittedOperand, GNUDesignator,
