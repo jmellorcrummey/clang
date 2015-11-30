@@ -456,6 +456,10 @@ void OMPClauseProfiler::VisitOMPMapClause(const OMPMapClause *C) {
 void OMPClauseProfiler::VisitOMPNumTeamsClause(const OMPNumTeamsClause *C) {
   Profiler->VisitStmt(C->getNumTeams());
 }
+void OMPClauseProfiler::VisitOMPThreadLimitClause(
+    const OMPThreadLimitClause *C) {
+  Profiler->VisitStmt(C->getThreadLimit());
+}
 }
 
 void
@@ -1127,6 +1131,11 @@ void StmtProfiler::VisitCXXUuidofExpr(const CXXUuidofExpr *S) {
 void StmtProfiler::VisitMSPropertyRefExpr(const MSPropertyRefExpr *S) {
   VisitExpr(S);
   VisitDecl(S->getPropertyDecl());
+}
+
+void StmtProfiler::VisitMSPropertySubscriptExpr(
+    const MSPropertySubscriptExpr *S) {
+  VisitExpr(S);
 }
 
 void StmtProfiler::VisitCXXThisExpr(const CXXThisExpr *S) {
