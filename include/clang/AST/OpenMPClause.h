@@ -2728,6 +2728,171 @@ public:
   }
 };
 
+/// \brief This represents 'num_teams' clause in the '#pragma omp ...'
+/// directive.
+///
+/// \code
+/// #pragma omp teams num_teams(n)
+/// \endcode
+/// In this example directive '#pragma omp teams' has clause 'num_teams'
+/// with single expression 'n'.
+///
+class OMPNumTeamsClause : public OMPClause {
+  friend class OMPClauseReader;
+  /// \brief Location of '('.
+  SourceLocation LParenLoc;
+  /// \brief NumTeams number.
+  Stmt *NumTeams;
+  /// \brief Set the NumTeams number.
+  ///
+  /// \param E NumTeams number.
+  ///
+  void setNumTeams(Expr *E) { NumTeams = E; }
+
+public:
+  /// \brief Build 'num_teams' clause.
+  ///
+  /// \param E Expression associated with this clause.
+  /// \param StartLoc Starting location of the clause.
+  /// \param LParenLoc Location of '('.
+  /// \param EndLoc Ending location of the clause.
+  ///
+  OMPNumTeamsClause(Expr *E, SourceLocation StartLoc, SourceLocation LParenLoc,
+                    SourceLocation EndLoc)
+      : OMPClause(OMPC_num_teams, StartLoc, EndLoc), LParenLoc(LParenLoc), 
+        NumTeams(E) {}
+
+  /// \brief Build an empty clause.
+  ///
+  OMPNumTeamsClause()
+      : OMPClause(OMPC_num_teams, SourceLocation(), SourceLocation()), 
+        LParenLoc(SourceLocation()), NumTeams(nullptr) {}
+  /// \brief Sets the location of '('.
+  void setLParenLoc(SourceLocation Loc) { LParenLoc = Loc; }
+  /// \brief Returns the location of '('.
+  SourceLocation getLParenLoc() const { return LParenLoc; }
+  /// \brief Return NumTeams number.
+  Expr *getNumTeams() { return cast<Expr>(NumTeams); }
+  /// \brief Return NumTeams number.
+  Expr *getNumTeams() const { return cast<Expr>(NumTeams); }
+
+  static bool classof(const OMPClause *T) {
+    return T->getClauseKind() == OMPC_num_teams;
+  }
+
+  child_range children() { return child_range(&NumTeams, &NumTeams + 1); }
+};
+
+/// \brief This represents 'thread_limit' clause in the '#pragma omp ...'
+/// directive.
+///
+/// \code
+/// #pragma omp teams thread_limit(n)
+/// \endcode
+/// In this example directive '#pragma omp teams' has clause 'thread_limit'
+/// with single expression 'n'.
+///
+class OMPThreadLimitClause : public OMPClause {
+  friend class OMPClauseReader;
+  /// \brief Location of '('.
+  SourceLocation LParenLoc;
+  /// \brief ThreadLimit number.
+  Stmt *ThreadLimit;
+  /// \brief Set the ThreadLimit number.
+  ///
+  /// \param E ThreadLimit number.
+  ///
+  void setThreadLimit(Expr *E) { ThreadLimit = E; }
+
+public:
+  /// \brief Build 'thread_limit' clause.
+  ///
+  /// \param E Expression associated with this clause.
+  /// \param StartLoc Starting location of the clause.
+  /// \param LParenLoc Location of '('.
+  /// \param EndLoc Ending location of the clause.
+  ///
+  OMPThreadLimitClause(Expr *E, SourceLocation StartLoc,
+                       SourceLocation LParenLoc, SourceLocation EndLoc)
+      : OMPClause(OMPC_thread_limit, StartLoc, EndLoc), LParenLoc(LParenLoc),
+        ThreadLimit(E) {}
+
+  /// \brief Build an empty clause.
+  ///
+  OMPThreadLimitClause()
+      : OMPClause(OMPC_thread_limit, SourceLocation(), SourceLocation()),
+        LParenLoc(SourceLocation()), ThreadLimit(nullptr) {}
+  /// \brief Sets the location of '('.
+  void setLParenLoc(SourceLocation Loc) { LParenLoc = Loc; }
+  /// \brief Returns the location of '('.
+  SourceLocation getLParenLoc() const { return LParenLoc; }
+  /// \brief Return ThreadLimit number.
+  Expr *getThreadLimit() { return cast<Expr>(ThreadLimit); }
+  /// \brief Return ThreadLimit number.
+  Expr *getThreadLimit() const { return cast<Expr>(ThreadLimit); }
+
+  static bool classof(const OMPClause *T) {
+    return T->getClauseKind() == OMPC_thread_limit;
+  }
+
+  child_range children() { return child_range(&ThreadLimit, &ThreadLimit + 1); }
+};
+
+/// \brief This represents 'priority' clause in the '#pragma omp ...'
+/// directive.
+///
+/// \code
+/// #pragma omp task priority(n)
+/// \endcode
+/// In this example directive '#pragma omp teams' has clause 'priority' with
+/// single expression 'n'.
+///
+class OMPPriorityClause : public OMPClause {
+  friend class OMPClauseReader;
+  /// \brief Location of '('.
+  SourceLocation LParenLoc;
+  /// \brief Priority number.
+  Stmt *Priority;
+  /// \brief Set the Priority number.
+  ///
+  /// \param E Priority number.
+  ///
+  void setPriority(Expr *E) { Priority = E; }
+
+public:
+  /// \brief Build 'priority' clause.
+  ///
+  /// \param E Expression associated with this clause.
+  /// \param StartLoc Starting location of the clause.
+  /// \param LParenLoc Location of '('.
+  /// \param EndLoc Ending location of the clause.
+  ///
+  OMPPriorityClause(Expr *E, SourceLocation StartLoc, SourceLocation LParenLoc,
+                    SourceLocation EndLoc)
+      : OMPClause(OMPC_priority, StartLoc, EndLoc), LParenLoc(LParenLoc),
+        Priority(E) {}
+
+  /// \brief Build an empty clause.
+  ///
+  OMPPriorityClause()
+      : OMPClause(OMPC_priority, SourceLocation(), SourceLocation()),
+        LParenLoc(SourceLocation()), Priority(nullptr) {}
+  /// \brief Sets the location of '('.
+  void setLParenLoc(SourceLocation Loc) { LParenLoc = Loc; }
+  /// \brief Returns the location of '('.
+  SourceLocation getLParenLoc() const { return LParenLoc; }
+  /// \brief Return Priority number.
+  Expr *getPriority() { return cast<Expr>(Priority); }
+  /// \brief Return Priority number.
+  Expr *getPriority() const { return cast<Expr>(Priority); }
+
+  static bool classof(const OMPClause *T) {
+    return T->getClauseKind() == OMPC_priority;
+  }
+
+  child_range children() { return child_range(&Priority, &Priority + 1); }
+};
+
 } // end namespace clang
 
 #endif // LLVM_CLANG_AST_OPENMPCLAUSE_H

@@ -1662,6 +1662,13 @@ void ASTStmtReader::VisitMSPropertyRefExpr(MSPropertyRefExpr *E) {
   E->TheDecl = ReadDeclAs<MSPropertyDecl>(Record, Idx);
 }
 
+void ASTStmtReader::VisitMSPropertySubscriptExpr(MSPropertySubscriptExpr *E) {
+  VisitExpr(E);
+  E->setBase(Reader.ReadSubExpr());
+  E->setIdx(Reader.ReadSubExpr());
+  E->setRBracketLoc(ReadSourceLocation(Record, Idx));
+}
+
 void ASTStmtReader::VisitCXXUuidofExpr(CXXUuidofExpr *E) {
   VisitExpr(E);
   E->setSourceRange(ReadSourceRange(Record, Idx));
@@ -1842,6 +1849,15 @@ OMPClause *OMPClauseReader::readClause() {
     break;
   case OMPC_map:
     C = OMPMapClause::CreateEmpty(Context, Record[Idx++]);
+    break;
+  case OMPC_num_teams:
+    C = new (Context) OMPNumTeamsClause();
+    break;
+  case OMPC_thread_limit:
+    C = new (Context) OMPThreadLimitClause();
+    break;
+  case OMPC_priority:
+    C = new (Context) OMPPriorityClause();
     break;
   }
   Visit(C);
@@ -2167,6 +2183,21 @@ void OMPClauseReader::VisitOMPMapClause(OMPMapClause *C) {
   C->setVarRefs(Vars);
 }
 
+void OMPClauseReader::VisitOMPNumTeamsClause(OMPNumTeamsClause *C) {
+  C->setNumTeams(Reader->Reader.ReadSubExpr());
+  C->setLParenLoc(Reader->ReadSourceLocation(Record, Idx));
+}
+
+void OMPClauseReader::VisitOMPThreadLimitClause(OMPThreadLimitClause *C) {
+  C->setThreadLimit(Reader->Reader.ReadSubExpr());
+  C->setLParenLoc(Reader->ReadSourceLocation(Record, Idx));
+}
+
+void OMPClauseReader::VisitOMPPriorityClause(OMPPriorityClause *C) {
+  C->setPriority(Reader->Reader.ReadSubExpr());
+  C->setLParenLoc(Reader->ReadSourceLocation(Record, Idx));
+}
+
 //===----------------------------------------------------------------------===//
 // OpenMP Directives.
 //===----------------------------------------------------------------------===//
@@ -2387,6 +2418,10 @@ void ASTStmtReader::VisitOMPCancelDirective(OMPCancelDirective *D) {
   ++Idx;
   VisitOMPExecutableDirective(D);
   D->setCancelRegion(static_cast<OpenMPDirectiveKind>(Record[Idx++]));
+}
+
+void ASTStmtReader::VisitOMPTaskLoopDirective(OMPTaskLoopDirective *D) {
+  VisitOMPLoopDirective(D);
 }
 
 //===----------------------------------------------------------------------===//
@@ -3011,6 +3046,14 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
           Context, Record[ASTStmtReader::NumStmtFields], Empty);
       break;
 
+    case STMT_OMP_TASKLOOP_DIRECTIVE: {
+      unsigned NumClauses = Record[ASTStmtReader::NumStmtFields];
+      unsigned CollapsedNum = Record[ASTStmtReader::NumStmtFields + 1];
+      S = OMPTaskLoopDirective::CreateEmpty(Context, NumClauses, CollapsedNum,
+                                            Empty);
+      break;
+    }
+
     case EXPR_CXX_OPERATOR_CALL:
       S = new (Context) CXXOperatorCallExpr(Context, Empty);
       break;
@@ -3077,6 +3120,9 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       break;
     case EXPR_CXX_PROPERTY_REF_EXPR:
       S = new (Context) MSPropertyRefExpr(Empty);
+      break;
+    case EXPR_CXX_PROPERTY_SUBSCRIPT_EXPR:
+      S = new (Context) MSPropertySubscriptExpr(Empty);
       break;
     case EXPR_CXX_UUIDOF_TYPE:
       S = new (Context) CXXUuidofExpr(Empty, false);

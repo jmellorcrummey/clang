@@ -2031,10 +2031,14 @@ static bool DecodeAArch64Features(const Driver &D, StringRef text,
                              .Case("simd", "+neon")
                              .Case("crc", "+crc")
                              .Case("crypto", "+crypto")
+                             .Case("fp16", "+fullfp16")
+                             .Case("profile", "+spe")
                              .Case("nofp", "-fp-armv8")
                              .Case("nosimd", "-neon")
                              .Case("nocrc", "-crc")
                              .Case("nocrypto", "-crypto")
+                             .Case("nofp16", "-fullfp16")
+                             .Case("noprofile", "-spe")
                              .Default(nullptr);
     if (result)
       Features.push_back(result);
@@ -2053,7 +2057,7 @@ static bool DecodeAArch64Mcpu(const Driver &D, StringRef Mcpu, StringRef &CPU,
   std::pair<StringRef, StringRef> Split = Mcpu.split("+");
   CPU = Split.first;
   if (CPU == "cyclone" || CPU == "cortex-a53" || CPU == "cortex-a57" ||
-      CPU == "cortex-a72") {
+      CPU == "cortex-a72" || CPU == "cortex-a35") {
     Features.push_back("+neon");
     Features.push_back("+crc");
     Features.push_back("+crypto");
@@ -2080,6 +2084,8 @@ getAArch64ArchFeaturesFromMarch(const Driver &D, StringRef March,
     // ok, no additional features.
   } else if (Split.first == "armv8.1-a" || Split.first == "armv8.1a") {
     Features.push_back("+v8.1a");
+  } else if (Split.first == "armv8.2-a" || Split.first == "armv8.2a" ) {
+    Features.push_back("+v8.2a");
   } else {
     return false;
   }

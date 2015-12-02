@@ -213,8 +213,11 @@ def warn_auto_storage_class : Warning<
   InGroup<CXX11Compat>, DefaultIgnore;
 
 def warn_deprecated_register : Warning<
-  "'register' storage class specifier is deprecated">,
-  InGroup<DeprecatedRegister>;
+  "'register' storage class specifier is deprecated "
+  "and incompatible with C++1z">, InGroup<DeprecatedRegister>;
+def ext_register_storage_class : ExtWarn<
+  "ISO C++1z does not allow 'register' storage class specifier">,
+  DefaultError, InGroup<Register>;
 
 def err_invalid_decl_spec_combination : Error<
   "cannot combine with previous '%0' declaration specifier">;
@@ -252,6 +255,10 @@ def err_bad_variable_name : Error<
 def err_bad_parameter_name : Error<
   "%0 cannot be the name of a parameter">;
 def err_parameter_name_omitted : Error<"parameter name omitted">;
+def warn_mips_interrupt_attribute : Warning<
+   "MIPS 'interrupt' attribute only applies to functions that have "
+   "%select{no parameters|a 'void' return type}0">,
+   InGroup<IgnoredAttributes>;
 def warn_unused_parameter : Warning<"unused parameter %0">,
   InGroup<UnusedParameter>, DefaultIgnore;
 def warn_unused_variable : Warning<"unused variable %0">,
@@ -5724,8 +5731,11 @@ def note_member_declared_here : Note<
   "member %0 declared here">;
 def err_decrement_bool : Error<"cannot decrement expression of type bool">;
 def warn_increment_bool : Warning<
-  "incrementing expression of type bool is deprecated">,
-  InGroup<DeprecatedIncrementBool>;
+  "incrementing expression of type bool is deprecated and "
+  "incompatible with C++1z">, InGroup<DeprecatedIncrementBool>;
+def ext_increment_bool : ExtWarn<
+  "ISO C++1z does not allow incrementing expression of type bool">,
+  DefaultError, InGroup<IncrementBool>;
 def err_increment_decrement_enum : Error<
   "cannot %select{decrement|increment}0 expression of enum type %1">;
 def err_catch_incomplete_ptr : Error<
@@ -7691,7 +7701,7 @@ def err_omp_not_for : Error<
 def note_omp_collapse_ordered_expr : Note<
   "as specified in %select{'collapse'|'ordered'|'collapse' and 'ordered'}0 clause%select{||s}0">;
 def err_omp_negative_expression_in_clause : Error<
-  "argument to '%0' clause must be a positive integer value">;
+  "argument to '%0' clause must be a %select{non-negative|strictly positive}1 integer value">;
 def err_omp_not_integral : Error<
   "expression must have integral or unscoped enumeration "
   "type, not %0">;
@@ -7895,6 +7905,10 @@ def note_omp_static_member_in_target : Note<
   "mappable type cannot contain static members">;
 def err_omp_threadprivate_in_map : Error<
   "threadprivate variables are not allowed in map clause">;
+def err_omp_wrong_ordered_loop_count : Error<
+  "the parameter of the 'ordered' clause must be greater than or equal to the parameter of the 'collapse' clause">;
+def note_collapse_loop_count : Note<
+  "parameter of the 'collapse' clause">;
 } // end of OpenMP category
 
 let CategoryName = "Related Result Type Issue" in {
