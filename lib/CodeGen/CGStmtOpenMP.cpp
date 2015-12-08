@@ -185,7 +185,7 @@ CodeGenFunction::GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S) {
     ++Cnt, ++I;
   }
 
-  PGO.assignRegionCounters(CD, F);
+  PGO.assignRegionCounters(GlobalDecl(CD), F);
   CapturedStmtInfo->EmitBody(*this, CD->getBody());
   FinishFunction(CD->getBodyRBrace());
 
@@ -2045,6 +2045,11 @@ void CodeGenFunction::EmitOMPFlushDirective(const OMPFlushDirective &S) {
   }(), S.getLocStart());
 }
 
+void CodeGenFunction::EmitOMPDistributeDirective(
+    const OMPDistributeDirective &S) {
+  llvm_unreachable("CodeGen for 'omp distribute' is not supported yet.");
+}
+
 static llvm::Function *emitOutlinedOrderedFunction(CodeGenModule &CGM,
                                                    const CapturedStmt *S) {
   CodeGenFunction CGF(CGM, /*suppressNewContext=*/true);
@@ -2481,6 +2486,9 @@ static void EmitOMPAtomicExpr(CodeGenFunction &CGF, OpenMPClauseKind Kind,
   case OMPC_num_teams:
   case OMPC_thread_limit:
   case OMPC_priority:
+  case OMPC_grainsize:
+  case OMPC_nogroup:
+  case OMPC_num_tasks:
     llvm_unreachable("Clause is not allowed in 'omp atomic'.");
   }
 }
@@ -2599,6 +2607,15 @@ void CodeGenFunction::EmitOMPTaskLoopDirective(const OMPTaskLoopDirective &S) {
   auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
   CGM.getOpenMPRuntime().emitInlinedDirective(
       *this, OMPD_taskloop,
+      [&CS](CodeGenFunction &CGF) { CGF.EmitStmt(CS->getCapturedStmt()); });
+}
+
+void CodeGenFunction::EmitOMPTaskLoopSimdDirective(
+    const OMPTaskLoopSimdDirective &S) {
+  // emit the code inside the construct for now
+  auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
+  CGM.getOpenMPRuntime().emitInlinedDirective(
+      *this, OMPD_taskloop_simd,
       [&CS](CodeGenFunction &CGF) { CGF.EmitStmt(CS->getCapturedStmt()); });
 }
 

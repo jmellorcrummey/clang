@@ -677,6 +677,10 @@ void OMPClausePrinter::VisitOMPUntiedClause(OMPUntiedClause *) {
   OS << "untied";
 }
 
+void OMPClausePrinter::VisitOMPNogroupClause(OMPNogroupClause *) {
+  OS << "nogroup";
+}
+
 void OMPClausePrinter::VisitOMPMergeableClause(OMPMergeableClause *) {
   OS << "mergeable";
 }
@@ -724,6 +728,18 @@ void OMPClausePrinter::VisitOMPThreadLimitClause(OMPThreadLimitClause *Node) {
 void OMPClausePrinter::VisitOMPPriorityClause(OMPPriorityClause *Node) {
   OS << "priority(";
   Node->getPriority()->printPretty(OS, nullptr, Policy, 0);
+  OS << ")";
+}
+
+void OMPClausePrinter::VisitOMPGrainsizeClause(OMPGrainsizeClause *Node) {
+  OS << "grainsize(";
+  Node->getGrainsize()->printPretty(OS, nullptr, Policy, 0);
+  OS << ")";
+}
+
+void OMPClausePrinter::VisitOMPNumTasksClause(OMPNumTasksClause *Node) {
+  OS << "num_tasks(";
+  Node->getNumTasks()->printPretty(OS, nullptr, Policy, 0);
   OS << ")";
 }
 
@@ -1038,6 +1054,17 @@ void StmtPrinter::VisitOMPCancelDirective(OMPCancelDirective *Node) {
 
 void StmtPrinter::VisitOMPTaskLoopDirective(OMPTaskLoopDirective *Node) {
   Indent() << "#pragma omp taskloop ";
+  PrintOMPExecutableDirective(Node);
+}
+
+void StmtPrinter::VisitOMPTaskLoopSimdDirective(
+    OMPTaskLoopSimdDirective *Node) {
+  Indent() << "#pragma omp taskloop simd ";
+  PrintOMPExecutableDirective(Node);
+}
+
+void StmtPrinter::VisitOMPDistributeDirective(OMPDistributeDirective *Node) {
+  Indent() << "#pragma omp distribute ";
   PrintOMPExecutableDirective(Node);
 }
 
