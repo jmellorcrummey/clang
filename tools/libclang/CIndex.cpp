@@ -1944,7 +1944,6 @@ public:
   void VisitOMPTeamsDirective(const OMPTeamsDirective *D);
   void VisitOMPTaskLoopDirective(const OMPTaskLoopDirective *D);
   void VisitOMPTaskLoopSimdDirective(const OMPTaskLoopSimdDirective *D);
-  void VisitOMPDistributeDirective(const OMPDistributeDirective *D);
 
 private:
   void AddDeclarationNameInfo(const Stmt *S);
@@ -2630,11 +2629,6 @@ void EnqueueVisitor::VisitOMPTaskLoopDirective(const OMPTaskLoopDirective *D) {
 
 void EnqueueVisitor::VisitOMPTaskLoopSimdDirective(
     const OMPTaskLoopSimdDirective *D) {
-  VisitOMPLoopDirective(D);
-}
-
-void EnqueueVisitor::VisitOMPDistributeDirective(
-    const OMPDistributeDirective *D) {
   VisitOMPLoopDirective(D);
 }
 
@@ -4031,8 +4025,7 @@ CXStringSet *clang_Cursor_getCXXManglings(CXCursor C) {
     Manglings.emplace_back(getMangledStructor(M, DL, DD, Dtor_Base));
     if (Ctx.getTargetInfo().getCXXABI().isItaniumFamily()) {
       Manglings.emplace_back(getMangledStructor(M, DL, DD, Dtor_Complete));
-
-      if (!DD->isVirtual())
+      if (DD->isVirtual())
         Manglings.emplace_back(getMangledStructor(M, DL, DD, Dtor_Deleting));
     }
   }
@@ -4498,8 +4491,6 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
     return cxstring::createRef("OMPTaskLoopDirective");
   case CXCursor_OMPTaskLoopSimdDirective:
     return cxstring::createRef("OMPTaskLoopSimdDirective");
-  case CXCursor_OMPDistributeDirective:
-    return cxstring::createRef("OMPDistributeDirective");
   case CXCursor_OverloadCandidate:
       return cxstring::createRef("OverloadCandidate");
   case CXCursor_TypeAliasTemplateDecl:
