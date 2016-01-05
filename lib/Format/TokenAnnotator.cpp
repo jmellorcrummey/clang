@@ -287,9 +287,11 @@ private:
         Left->Type = TT_JsComputedPropertyName;
       } else if (Style.Language == FormatStyle::LK_Proto ||
                  (Parent &&
-                  Parent->isOneOf(tok::at, tok::equal, tok::comma, tok::l_paren,
-                                  tok::l_square, tok::question, tok::colon,
-                                  tok::kw_return))) {
+                  Parent->isOneOf(TT_BinaryOperator, tok::at, tok::comma,
+                                  tok::l_paren, tok::l_square, tok::question,
+                                  tok::colon, tok::kw_return,
+                                  // Should only be relevant to JavaScript:
+                                  tok::kw_default))) {
         Left->Type = TT_ArrayInitializerLSquare;
       } else {
         BindingIncrease = 10;
@@ -1328,6 +1330,8 @@ public:
       } else {
         // Operator found.
         if (CurrentPrecedence == Precedence) {
+          if (LatestOperator)
+            LatestOperator->NextOperator = Current;
           LatestOperator = Current;
           Current->OperatorIndex = OperatorIndex;
           ++OperatorIndex;
@@ -1337,7 +1341,7 @@ public:
     }
 
     if (LatestOperator && (Current || Precedence > 0)) {
-      LatestOperator->LastOperator = true;
+      // LatestOperator->LastOperator = true;
       if (Precedence == PrecedenceArrowAndPeriod) {
         // Call expressions don't have a binary operator precedence.
         addFakeParenthesis(Start, prec::Unknown);
@@ -1769,7 +1773,15 @@ unsigned TokenAnnotator::splitPenalty(const AnnotatedLine &Line,
     // which might otherwise be blown up onto many lines. Here, clang-format
     // won't produce "hanging" indents anyway as there is no other trailing
     // call.
-    return Right.LastOperator ? 150 : 35;
+    //
+    // Also apply higher penalty is not a call as that might lead to a wrapping
+    // like:
+    //
+    //   aaaaaaa
+    //       .aaaaaaaaa.bbbbbbbb(cccccccc);
+    return !Right.NextOperator || !Right.NextOperator->Previous->closesScope()
+               ? 150
+               : 35;
   }
 
   if (Right.is(TT_TrailingAnnotation) &&
@@ -1821,7 +1833,7 @@ unsigned TokenAnnotator::splitPenalty(const AnnotatedLine &Line,
 
   if (Right.is(tok::lessless)) {
     if (Left.is(tok::string_literal) &&
-        (!Right.LastOperator || Right.OperatorIndex != 1)) {
+        (Right.NextOperator || Right.OperatorIndex != 1)) {
       StringRef Content = Left.TokenText;
       if (Content.startswith("\""))
         Content = Content.drop_front(1);
@@ -1998,6 +2010,9 @@ bool TokenAnnotator::spaceRequiredBefore(const AnnotatedLine &Line,
   } else if (Style.Language == FormatStyle::LK_JavaScript) {
     if (Left.isOneOf(Keywords.kw_let, Keywords.kw_var, TT_JsFatArrow,
                      Keywords.kw_in))
+      return true;
+    if (Left.is(tok::kw_default) && Left.Previous &&
+        Left.Previous->is(tok::kw_export))
       return true;
     if (Left.is(Keywords.kw_is) && Right.is(tok::l_brace))
       return true;
