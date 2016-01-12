@@ -3824,6 +3824,76 @@ void CGOpenMPRuntime::emitTargetOutlinedFunction(
   return;
 }
 
+namespace {
+/// \brief Values for bit flags used to specify the mapping type for offloading.
+/// This has to be consistent with the offloading runtime library.
+enum OpenMPOffloadMappingFlags {
+  /// \brief Only allocate memory on the device,
+  OMP_MAP_ALLOC = 0x00,
+  /// \brief Allocate memory on the device and move data from host to device.
+  OMP_MAP_TO = 0x01,
+  /// \brief Allocate memory on the device and move data from device to host.
+  OMP_MAP_FROM = 0x02,
+  /// \brief The element passed to the device is a pointer.
+  OMP_MAP_PTR = 0x20,
+  /// \brief Pass the element to the device by value.
+  OMP_MAP_BYCOPY = 0x80
+};
+}
+
+
+/// \brief Obtain the information from the map clauses in the directive \D
+/// associated with \a VD. If no information is found, false is returned.
+static bool GetAssociatedMapClauseInformation(const OMPExecutableDirective &D, const VarDecl *VD, unsigned &MapBits){
+
+  // Helper to obtain the mapping flags bits from the map modifier.
+  auto MappingFlagsBits = [](const OMPMapClause *MC) -> unsigned {
+    switch(MC->getMapType()) {
+    case OMPC_MAP_unknown:
+      break;
+    case OMPC_MAP_alloc:
+      return OMP_MAP_ALLOC;
+    case OMPC_MAP_to:
+      return OMP_MAP_TO;
+    case OMPC_MAP_from:
+      return OMP_MAP_FROM;
+    case OMPC_MAP_tofrom:
+      return OMP_MAP_TO | OMP_MAP_FROM;
+    case OMPC_MAP_delete:
+    case OMPC_MAP_release:
+    case OMPC_MAP_always:
+      llvm_unreachable("Map clause modifier code generation is not implemented yet.");
+      break;
+    }
+
+    // If no modifier is used, to+from is the default.
+    return OMP_MAP_TO | OMP_MAP_FROM;
+  };
+
+  for ( auto *C : D.getClausesOfKind<OMPMapClause>()) {
+    auto *MC = cast<OMPMapClause>(C);
+    for ( auto *E : MC->getVarRefs()) {
+
+      // Check if the variable declaration exists in the expression used in the
+      // map clause.
+
+      if (const auto *DE = dyn_cast<DeclRefExpr>(E)) {
+        // The expression is expected to be either a reference to a
+        // declaration...
+        if (VD == cast<VarDecl>(DE->getDecl())) {
+          MapBits = MappingFlagsBits(MC);
+          return true;
+        }
+      } else {
+        // ... or an array section.
+        llvm_unreachable("Array section maps are not implemented yet.");
+      }
+    }
+  }
+
+  return false;
+}
+
 void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
                                      const OMPExecutableDirective &D,
                                      llvm::Value *OutlinedFn,
@@ -3832,18 +3902,6 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
                                      ArrayRef<llvm::Value *> CapturedVars) {
   if (!CGF.HaveInsertPoint())
     return;
-  /// \brief Values for bit flags used to specify the mapping type for
-  /// offloading.
-  enum OpenMPOffloadMappingFlags {
-    /// \brief Allocate memory on the device and move data from host to device.
-    OMP_MAP_TO = 0x01,
-    /// \brief Allocate memory on the device and move data from device to host.
-    OMP_MAP_FROM = 0x02,
-    /// \brief The element passed to the device is a pointer.
-    OMP_MAP_PTR = 0x20,
-    /// \brief Pass the element to the device by value.
-    OMP_MAP_BYCOPY = 0x80,
-  };
 
   enum OpenMPOffloadingReservedDeviceIDs {
     /// \brief Device ID if the device was not defined, runtime should get it
@@ -3891,7 +3949,12 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
       // Default map type.
       MapType = OMP_MAP_TO | OMP_MAP_FROM;
     } else if (CI->capturesVariableByCopy()) {
-      MapType = OMP_MAP_BYCOPY;
+      // If we have a map clause associated with the current variable, we append
+      // that information to the map type bits.
+      if (GetAssociatedMapClauseInformation(D, CI->getCapturedVar(), MapType))
+        MapType |= OMP_MAP_BYCOPY;
+      else
+        MapType = OMP_MAP_BYCOPY;
       if (!RI->getType()->isAnyPointerType()) {
         // If the field is not a pointer, we need to save the actual value and
         // load it as a void pointer.
@@ -3925,10 +3988,14 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
           cast<ReferenceType>(RI->getType().getTypePtr());
       QualType ElementType = PtrTy->getPointeeType();
       Size = getTypeSize(CGF, ElementType);
-      // The default map type for a scalar/complex type is 'to' because by
-      // default the value doesn't have to be retrieved. For an aggregate type,
-      // the default is 'tofrom'.
-      MapType = ElementType->isAggregateType() ? (OMP_MAP_TO | OMP_MAP_FROM)
+
+      // If we can get a modifier from the map clause, we use it, otherwise
+      // we use the implicit mapping defaults.
+      if (!GetAssociatedMapClauseInformation(D, CI->getCapturedVar(), MapType))
+        // The default map type for a scalar/complex type is 'to' because by
+        // default the value doesn't have to be retrieved. For an aggregate
+        // type, the default is 'tofrom'.
+        MapType = ElementType->isAggregateType() ? (OMP_MAP_TO | OMP_MAP_FROM)
                                                : OMP_MAP_TO;
       if (ElementType->isAnyPointerType())
         MapType |= OMP_MAP_PTR;

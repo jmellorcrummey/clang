@@ -1012,4 +1012,128 @@ void implicit_maps_template_type_capture (int a){
 // CK18-32: {{.+}} = load i32, i32* [[ADDR]],
 
 #endif
+///==========================================================================///
+// RxUN: %clang_cc1 -DCK19 -verify -fopenmp -omptargets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -emit-llvm %s -o - | FileCheck %s --check-prefix CK19 --check-prefix CK19-64
+// RxUN: %clang_cc1 -DCK19 -fopenmp -omptargets=powerpc64le-ibm-linux-gnu -x c++ -std=c++11 -triple powerpc64le-unknown-unknown -emit-pch -o %t %s
+// RxUN: %clang_cc1 -fopenmp -omptargets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -std=c++11 -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s  --check-prefix CK19 --check-prefix CK19-64
+// RxUN: %clang_cc1 -DCK19 -verify -fopenmp -omptargets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -emit-llvm %s -o - | FileCheck %s  --check-prefix CK19 --check-prefix CK19-32
+// RxUN: %clang_cc1 -DCK19 -fopenmp -omptargets=i386-pc-linux-gnu -x c++ -std=c++11 -triple i386-unknown-unknown -emit-pch -o %t %s
+// RxUN: %clang_cc1 -fopenmp -omptargets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -std=c++11 -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s  --check-prefix CK19 --check-prefix CK19-32
+#ifndef CK19
+
+// CK19-LABEL: explicit_maps_single
+void explicit_maps_single (int ii){
+
+  // Map of a scalar.
+  int a = ii;
+  #pragma omp target map(to:a)
+  {
+    ++a;
+  }
+
+  #pragma omp target map(from:a)
+  {
+    ++a;
+  }
+
+//  #pragma omp target map(tofrom:a)
+//  {
+//    ++a;
+//  }
+//
+//  // Map of an array.
+//  int arra[100];
+//  #pragma omp target map(to:arra)
+//  {
+//    arra[50]++;
+//  }
+//
+//  #pragma omp target map(from:arra)
+//  {
+//    arra[50]++;
+//  }
+//
+//  #pragma omp target map(tofrom:arra)
+//  {
+//    arra[50]++;
+//  }
+//
+//  #pragma omp target map(to:arra[20:60])
+//  {
+//    arra[50]++;
+//  }
+//
+//  #pragma omp target map(from:arra[20:60])
+//  {
+//    arra[50]++;
+//  }
+//
+//  #pragma omp target map(tofrom:arra[20:60])
+//  {
+//    arra[50]++;
+//  }
+//
+//  #pragma omp target map(to:arra[:60])
+//  {
+//    arra[50]++;
+//  }
+//
+//  #pragma omp target map(from:arra[:60])
+//  {
+//    arra[50]++;
+//  }
+//
+//  #pragma omp target map(tofrom:arra[:60])
+//  {
+//    arra[50]++;
+//  }
+//
+//  // Map of a pointer.
+//  int *pa;
+//  #pragma omp target map(to:pa)
+//  {
+//    pa[50]++;
+//  }
+//
+//  #pragma omp target map(from:pa)
+//  {
+//    pa[50]++;
+//  }
+//
+//  #pragma omp target map(tofrom:pa)
+//  {
+//    pa[50]++;
+//  }
+//
+//  #pragma omp target map(to:pa[20:60])
+//  {
+//    pa[50]++;
+//  }
+//
+//  #pragma omp target map(from:pa[20:60])
+//  {
+//    pa[50]++;
+//  }
+//
+//  #pragma omp target map(tofrom:pa[20:60])
+//  {
+//    pa[50]++;
+//  }
+//
+//  #pragma omp target map(to:pa[:60])
+//  {
+//    pa[50]++;
+//  }
+//
+//  #pragma omp target map(from:pa[:60])
+//  {
+//    pa[50]++;
+//  }
+//
+//  #pragma omp target map(tofrom:pa[:60])
+//  {
+//    pa[50]++;
+//  }
+}
+#endif
 #endif

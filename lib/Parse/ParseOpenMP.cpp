@@ -311,7 +311,7 @@ Parser::ParseOpenMPDeclarativeOrExecutableDirective(bool StandAloneAllowed) {
     if (HasAssociatedStatement) {
       // The body is a block scope like in Lambdas and Blocks.
       Sema::CompoundScopeRAII CompoundScope(Actions);
-      Actions.ActOnOpenMPRegionStart(DKind, getCurScope());
+      Actions.ActOnOpenMPRegionStart(DKind, getCurScope(), Clauses);
       Actions.ActOnStartOfCompoundStmt();
       // Parse statement
       AssociatedStmt = ParseStatement();

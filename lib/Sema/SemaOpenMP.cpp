@@ -113,12 +113,13 @@ private:
     bool CancelRegion;
     unsigned AssociatedLoops;
     SourceLocation InnerTeamsRegionLoc;
+    ArrayRef<OMPClause *> Clauses;
     SharingMapTy(OpenMPDirectiveKind DKind, DeclarationNameInfo Name,
                  Scope *CurScope, SourceLocation Loc)
         : SharingMap(), AlignedMap(), LCVMap(), DefaultAttr(DSA_unspecified),
           Directive(DKind), DirectiveName(std::move(Name)), CurScope(CurScope),
           ConstructLoc(Loc), OrderedRegion(), NowaitRegion(false),
-          CancelRegion(false), AssociatedLoops(1), InnerTeamsRegionLoc() {}
+          CancelRegion(false), AssociatedLoops(1), InnerTeamsRegionLoc(), Clauses() {}
     SharingMapTy()
         : SharingMap(), AlignedMap(), LCVMap(), DefaultAttr(DSA_unspecified),
           Directive(OMPD_unknown), DirectiveName(), CurScope(nullptr),
@@ -245,8 +246,10 @@ public:
       return Stack[Stack.size() - 2].Directive;
     return OMPD_unknown;
   }
-  /// \brief Return the directive associated with the provided scope.
-  OpenMPDirectiveKind getDirectiveForScope(const Scope *S) const;
+  /// \brief Return the directive associated with the provided scope. If the
+  /// directive exists set \a Clauses to point to the clauses of the region
+  /// associated with the provided scope.
+  OpenMPDirectiveKind getDirectiveForScope(const Scope *S, ArrayRef<OMPClause *> &Clauses) const;
 
   /// \brief Set default data sharing attribute to none.
   void setDefaultDSANone(SourceLocation Loc) {
@@ -362,6 +365,17 @@ public:
       VarMI = Stack.back().MappedDecls[VD];
     }
     return VarMI;
+  }
+
+  // Set the current clauses associated with the region.
+  void setClauses(ArrayRef<OMPClause *> Clauses) {
+    Stack.back().Clauses = Clauses;
+  }
+
+  // Return the current clauses associated with the region. If no clauses are
+  // associated with the region, an invalid reference is returned.
+  ArrayRef<OMPClause *> getClauses() const {
+    return Stack.back().Clauses;
   }
 };
 bool isParallelOrTaskRegion(OpenMPDirectiveKind DKind) {
@@ -758,10 +772,12 @@ bool DSAStackTy::hasDirective(NamedDirectivesPredicate DPred, bool FromParent) {
   return false;
 }
 
-OpenMPDirectiveKind DSAStackTy::getDirectiveForScope(const Scope *S) const {
+OpenMPDirectiveKind DSAStackTy::getDirectiveForScope(const Scope *S, ArrayRef<OMPClause *> &Clauses) const {
   for (auto I = Stack.rbegin(), EE = Stack.rend(); I != EE; ++I)
-    if (I->CurScope == S)
+    if (I->CurScope == S) {
+      Clauses  = I->Clauses;
       return I->Directive;
+    }
   return OMPD_unknown;
 }
 
@@ -778,8 +794,11 @@ bool Sema::IsOpenMPCapturedByRef(VarDecl *VD,
   auto &Ctx = getASTContext();
   bool IsByRef = true;
 
-  // Find the directive that is associated with the provided scope.
-  auto DKind = DSAStack->getDirectiveForScope(RSI->TheScope);
+  // Find the directive that is associated with the provided scope. Also,
+  // retrieve the clauses associated with that scope, if any, because they may
+  // influence the way data is captured in this region.
+  ArrayRef<OMPClause *> Clauses;
+  auto DKind = DSAStack->getDirectiveForScope(RSI->TheScope, Clauses);
   auto Ty = VD->getType();
 
   if (isOpenMPTargetDirective(DKind)) {
@@ -837,13 +856,59 @@ bool Sema::IsOpenMPCapturedByRef(VarDecl *VD,
     //    array section, the runtime library may pass the NULL value to the
     //    device instead of the value passed to it by the compiler.
 
-    // FIXME: Right now, only implicit maps are implemented. Properly mapping
-    // values requires having the map, private, and firstprivate clauses SEMA
-    // and parsing in place, which we don't yet.
-
     if (Ty->isReferenceType())
       Ty = Ty->castAs<ReferenceType>()->getPointeeType();
-    IsByRef = !Ty->isScalarType();
+
+    // FIXME: Right now, only some of the maps are implemented. Properly mapping
+    // values requires having the private, and firstprivate clauses SEMA
+    // and parsing in place, which we don't yet.
+
+    // Flag to trace whether a conclusion about the kind of capture was already
+    // reached.
+    bool Done = false;
+
+    // Locate map clauses and see if the variable being captured is referred to
+    // in any of those clauses.
+    {
+      bool IsVariableUsedInMapClause = false;
+      bool IsVariableUsingArraySection= false;
+
+      if (!Done && !Clauses.empty()) {
+        for (const auto *C : Clauses) {
+          if (const auto *MC  = dyn_cast<OMPMapClause>(C)) {
+            for (const auto *E : MC->getVarRefs()) {
+              // Extract the mapped variable from the mapped expression.
+
+              // The expression is expected to be either a reference to a
+              // declaration...
+              if (const auto *DE = dyn_cast<DeclRefExpr>(E))
+                IsVariableUsedInMapClause = (VD == cast<VarDecl>(DE->getDecl()));
+              // ... or an array section.
+              else {
+                llvm_unreachable("Array section maps are not implemented yet.");
+              }
+
+              if (IsVariableUsedInMapClause)
+                break;
+            }
+          }
+
+          if(IsVariableUsedInMapClause)
+            break;
+        }
+      }
+
+      // If variable is identified in a map clause it is always captured by
+      // reference except if it is a pointer with an array section associated.
+      if (IsVariableUsedInMapClause) {
+        IsByRef = !(Ty->isPointerType() && IsVariableUsingArraySection);
+        Done = true;
+      }
+    }
+
+    // By default, all the data that has a scalar type is mapped by copy.
+    if (!Done)
+      IsByRef = !Ty->isScalarType();
   }
 
   // When passing data by value, we need to make sure it fits the uintptr size
@@ -1390,7 +1455,13 @@ public:
 };
 } // namespace
 
-void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
+void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope, ArrayRef<OMPClause *> Clauses) {
+  // Save the clauses in the data sharing attributes stack because they may
+  // contain information to drive how data is captured in a given OpenMP region.
+  // E.g. the contents of the map clause are required to decide whether a
+  // variable is mapped by copy or by reference.
+  DSAStack->setClauses(Clauses);
+
   switch (DKind) {
   case OMPD_parallel: {
     QualType KmpInt32Ty = Context.getIntTypeForBitwidth(32, 1);
