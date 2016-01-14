@@ -2539,8 +2539,14 @@ public:
   LValue EmitUnaryOpLValue(const UnaryOperator *E);
   LValue EmitArraySubscriptExpr(const ArraySubscriptExpr *E,
                                 bool Accessed = false);
+  // Emit array expression and save the index in SavedIndex if provided. If
+  // EmitIndexOnly is true, only the index is computed and an empty LValue is
+  // returned.
   LValue EmitOMPArraySectionExpr(const OMPArraySectionExpr *E,
-                                 bool IsLowerBound = true);
+                                 bool IsLowerBound = true,
+                                 bool EmitIndexOnly = false,
+                                 llvm::Value **SavedIndex = nullptr,
+                                 QualType *SavedElemQTy = nullptr);
   LValue EmitExtVectorElementExpr(const ExtVectorElementExpr *E);
   LValue EmitMemberExpr(const MemberExpr *E);
   LValue EmitObjCIsaExpr(const ObjCIsaExpr *E);

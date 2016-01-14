@@ -1024,25 +1024,35 @@ void implicit_maps_template_type_capture (int a){
 // CK19-LABEL: explicit_maps_single
 void explicit_maps_single (int ii){
 
-  // Map of a scalar.
+//  // Map of a scalar.
   int a = ii;
-  #pragma omp target map(to:a)
-  {
-    ++a;
-  }
-
-  #pragma omp target map(from:a)
-  {
-    ++a;
-  }
-
+//  #pragma omp target map(alloc:a)
+//  {
+//    ++a;
+//  }
+//
+//  #pragma omp target map(to:a)
+//  {
+//    ++a;
+//  }
+//
+//  #pragma omp target map(from:a)
+//  {
+//    ++a;
+//  }
+//
 //  #pragma omp target map(tofrom:a)
 //  {
 //    ++a;
 //  }
 //
-//  // Map of an array.
-//  int arra[100];
+  // Map of an array.
+  int arra[100];
+//  #pragma omp target map(alloc:arra)
+//  {
+//    arra[50]++;
+//  }
+//
 //  #pragma omp target map(to:arra)
 //  {
 //    arra[50]++;
@@ -1054,6 +1064,11 @@ void explicit_maps_single (int ii){
 //  }
 //
 //  #pragma omp target map(tofrom:arra)
+//  {
+//    arra[50]++;
+//  }
+//
+//  #pragma omp target map(alloc:arra[20:60])
 //  {
 //    arra[50]++;
 //  }
@@ -1073,6 +1088,11 @@ void explicit_maps_single (int ii){
 //    arra[50]++;
 //  }
 //
+//  #pragma omp target map(alloc:arra[:60])
+//  {
+//    arra[50]++;
+//  }
+//
 //  #pragma omp target map(to:arra[:60])
 //  {
 //    arra[50]++;
@@ -1088,8 +1108,53 @@ void explicit_maps_single (int ii){
 //    arra[50]++;
 //  }
 //
+//  #pragma omp target map(alloc:arra[:])
+//  {
+//    arra[50]++;
+//  }
+//
+//  #pragma omp target map(to:arra[:])
+//  {
+//    arra[50]++;
+//  }
+//
+//  #pragma omp target map(from:arra[:])
+//  {
+//    arra[50]++;
+//  }
+//
+//  #pragma omp target map(tofrom:arra[:])
+//  {
+//    arra[50]++;
+//  }
+//
+//  #pragma omp target map(alloc:arra[15])
+//  {
+//    arra[50]++;
+//  }
+//
+//  #pragma omp target map(to:arra[15])
+//  {
+//    arra[50]++;
+//  }
+//
+//  #pragma omp target map(from:arra[15])
+//  {
+//    arra[50]++;
+//  }
+//
+  #pragma omp target map(tofrom:arra[15])
+  {
+    arra[50]++;
+  }
+//
 //  // Map of a pointer.
 //  int *pa;
+//  #pragma omp target map(alloc:pa)
+//  {
+//    pa[50]++;
+//  }
+//
 //  #pragma omp target map(to:pa)
 //  {
 //    pa[50]++;
@@ -1101,6 +1166,11 @@ void explicit_maps_single (int ii){
 //  }
 //
 //  #pragma omp target map(tofrom:pa)
+//  {
+//    pa[50]++;
+//  }
+//
+//  #pragma omp target map(alloc:pa[20:60])
 //  {
 //    pa[50]++;
 //  }
@@ -1120,6 +1190,11 @@ void explicit_maps_single (int ii){
 //    pa[50]++;
 //  }
 //
+//  #pragma omp target map(alloc:pa[:60])
+//  {
+//    pa[50]++;
+//  }
+//
 //  #pragma omp target map(to:pa[:60])
 //  {
 //    pa[50]++;
@@ -1134,6 +1209,7 @@ void explicit_maps_single (int ii){
 //  {
 //    pa[50]++;
 //  }
+
 }
 #endif
 #endif

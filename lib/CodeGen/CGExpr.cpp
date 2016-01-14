@@ -2828,14 +2828,26 @@ LValue CodeGenFunction::EmitArraySubscriptExpr(const ArraySubscriptExpr *E,
 }
 
 LValue CodeGenFunction::EmitOMPArraySectionExpr(const OMPArraySectionExpr *E,
-                                                bool IsLowerBound) {
+                                                bool IsLowerBound,
+                                                bool EmitIndexOnly,
+                                                llvm::Value **SavedIndex,
+                                                QualType *SavedElemQTy) {
   LValue Base;
   if (auto *ASE =
           dyn_cast<OMPArraySectionExpr>(E->getBase()->IgnoreParenImpCasts()))
     Base = EmitOMPArraySectionExpr(ASE, IsLowerBound);
   else
     Base = EmitLValue(E->getBase());
+
   QualType BaseTy = Base.getType();
+
+  // If the base is a pointer instead of the array we need to make sure we
+  // dereference it instead of its reference.
+  if (BaseTy->isAnyPointerType()){
+    auto *Val = EmitLoadOfLValue(Base, E->getBase()->getExprLoc()).getScalarVal();
+    Base = MakeNaturalAlignAddrLValue(Val, BaseTy->getPointeeType());
+  }
+
   llvm::Value *Idx = nullptr;
   QualType ResultExprTy;
   if (auto *AT = getContext().getAsArrayType(BaseTy))
@@ -2924,6 +2936,18 @@ LValue CodeGenFunction::EmitOMPArraySectionExpr(const OMPArraySectionExpr *E,
     }
   }
   assert(Idx);
+
+  // Save the index if required.
+  if (SavedIndex)
+    *SavedIndex = Idx;
+
+  // Save the lement type if required.
+  if (SavedElemQTy)
+    *SavedElemQTy = ResultExprTy;
+
+  // If the client is only interested in the index, return here.
+  if (EmitIndexOnly)
+    return LValue();
 
   llvm::Value *EltPtr;
   QualType FixedSizeEltType = ResultExprTy;

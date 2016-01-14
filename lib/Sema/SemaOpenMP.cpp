@@ -871,7 +871,7 @@ bool Sema::IsOpenMPCapturedByRef(VarDecl *VD,
     // in any of those clauses.
     {
       bool IsVariableUsedInMapClause = false;
-      bool IsVariableUsingArraySection= false;
+      bool IsVariableUsingArrayNotation = false;
 
       if (!Done && !Clauses.empty()) {
         for (const auto *C : Clauses) {
@@ -879,13 +879,22 @@ bool Sema::IsOpenMPCapturedByRef(VarDecl *VD,
             for (const auto *E : MC->getVarRefs()) {
               // Extract the mapped variable from the mapped expression.
 
-              // The expression is expected to be either a reference to a
-              // declaration...
-              if (const auto *DE = dyn_cast<DeclRefExpr>(E))
-                IsVariableUsedInMapClause = (VD == cast<VarDecl>(DE->getDecl()));
-              // ... or an array section.
-              else {
-                llvm_unreachable("Array section maps are not implemented yet.");
+              if (const auto *DE = dyn_cast<DeclRefExpr>(E)) {
+                // The expression is expected to be either a reference to a
+                // declaration, ...
+                const auto *CurVD = cast<VarDecl>(DE->getDecl());
+                IsVariableUsedInMapClause = (VD == CurVD);
+              } else if (const auto *OAE = dyn_cast<OMPArraySectionExpr>(E)) {
+                // ..., an array section, ...
+                const auto *CurVD = cast<VarDecl>(cast<DeclRefExpr>(OAE->getBase())->getDecl());
+                IsVariableUsedInMapClause = IsVariableUsingArrayNotation = (VD == CurVD);
+              } else {
+                // ... or an array expression.
+
+                // We expect only array subscript expression be cause all the other cases should have been dealt with before.
+                const auto *ASE = cast<ArraySubscriptExpr>(E);
+                const auto *CurVD = cast<VarDecl>(cast<DeclRefExpr>(ASE->getBase())->getDecl());
+                IsVariableUsedInMapClause = IsVariableUsingArrayNotation = (VD == CurVD);
               }
 
               if (IsVariableUsedInMapClause)
@@ -899,9 +908,10 @@ bool Sema::IsOpenMPCapturedByRef(VarDecl *VD,
       }
 
       // If variable is identified in a map clause it is always captured by
-      // reference except if it is a pointer with an array section associated.
+      // reference except if it is a pointer with an array section/expression
+      // associated.
       if (IsVariableUsedInMapClause) {
-        IsByRef = !(Ty->isPointerType() && IsVariableUsingArraySection);
+        IsByRef = !(Ty->isPointerType() && IsVariableUsingArrayNotation);
         Done = true;
       }
     }

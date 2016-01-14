@@ -3841,10 +3841,15 @@ enum OpenMPOffloadMappingFlags {
 };
 }
 
-
 /// \brief Obtain the information from the map clauses in the directive \D
-/// associated with \a VD. If no information is found, false is returned.
-static bool GetAssociatedMapClauseInformation(const OMPExecutableDirective &D, const VarDecl *VD, unsigned &MapBits){
+/// associated with \a VD. If no information is found, \a SectionBegin ,
+/// \a SectionSize and \MapBits are all set to null and false is returned.
+static bool GetAssociatedMapClauseInformation(CodeGenFunction &CGF, const OMPExecutableDirective &D, const VarDecl *VD, llvm::Value *BasePointer, llvm::Value *&SectionBegin, llvm::Value *&SectionSize, unsigned &MapBits){
+  SectionBegin = nullptr;
+  SectionSize = nullptr;
+  MapBits = 0u;
+
+  assert(BasePointer && "Invalid base pointer associated with the current capture.");
 
   // Helper to obtain the mapping flags bits from the map modifier.
   auto MappingFlagsBits = [](const OMPMapClause *MC) -> unsigned {
@@ -3876,18 +3881,148 @@ static bool GetAssociatedMapClauseInformation(const OMPExecutableDirective &D, c
 
       // Check if the variable declaration exists in the expression used in the
       // map clause.
-
       if (const auto *DE = dyn_cast<DeclRefExpr>(E)) {
         // The expression is expected to be either a reference to a
-        // declaration...
-        if (VD == cast<VarDecl>(DE->getDecl())) {
+        // declaration, ...
+        const auto *CurVD = cast<VarDecl>(DE->getDecl());
+        if (VD == CurVD) {
           MapBits = MappingFlagsBits(MC);
           return true;
         }
+      } else if (const auto *OAE = dyn_cast<OMPArraySectionExpr>(E)) {
+        // ..., an array section, ...
+        const auto *CurVD = cast<VarDecl>(cast<DeclRefExpr>(OAE->getBase())->getDecl());
+        if (VD == CurVD) {
+          MapBits = MappingFlagsBits(MC);
+
+          QualType ElemQTy;
+//          if (VD->getType()->isArrayType()) {
+//            ElemQTy = cast<ArrayType>(VD->getType().getTypePtr())->getElementType();
+//          }
+//          else {
+//            assert(VD->getType()->isAnyPointerType() && "Expected pointer type variable associated with array section.");
+//            // If this is a pointer type the element pointer is the pointee type
+//            // and that is what we use in the GEP.
+//            ElemQTy = VD->getType()->getAs<PointerType>()->getPointeeType();
+//          }
+//          llvm::Value *ElemSize;
+
+          // Obtain information about the lower bound.
+          llvm::Value *LowerBoundIdx;
+          auto LowerBoundAddr = CGF.EmitOMPArraySectionExpr(OAE, /*IsLowerBound=*/true, /*EmitIndexOnly=*/false, &LowerBoundIdx, &ElemQTy).getAddress();
+
+          // Obtain information about the upper bound.
+          llvm::Value *UpperBoundIdx;
+          CGF.EmitOMPArraySectionExpr(OAE, /*IsLowerBound=*/false, /*EmitIndexOnly=*/true, &UpperBoundIdx, &ElemQTy);
+
+          // The section begin is the address of the lower bound.
+          SectionBegin = LowerBoundAddr.getPointer();
+
+          // The size of the section is computed as:
+          // (size_t)(UpperBoundInIdx - LowerBoundIdx + 1) * ElementSize.
+          //
+          // From a functional view point we could have relied on the addresses
+          // but that would preclude the folding of constants, and therefore
+          // a constant array of sizes. Therefore, we calculate the sizes
+          // from the indexes computed during the emission of the array section.
+          SectionSize = CGF.Builder.CreateSub(UpperBoundIdx, LowerBoundIdx, "idx_diff", /*HasNUW=*/false, !CGF.getLangOpts().isSignedOverflowDefined());
+          SectionSize = CGF.Builder.CreateAdd(SectionSize, llvm::ConstantInt::get(SectionSize->getType(), /*V=*/1), "idx_diff_inc", /*HasNUW=*/false, !CGF.getLangOpts().isSignedOverflowDefined());
+          SectionSize = CGF.Builder.CreateIntCast(SectionSize, CGF.SizeTy, /*isSigned=*/true);
+          SectionSize = CGF.Builder.CreateNUWMul(SectionSize, getTypeSize(CGF, ElemQTy), "sec_size");
+
+          SectionBegin->dump();
+          SectionSize->dump();
+
+          //if (OAE->getLowerBound()) {
+          //  SectionBegin = CGF.EmitOMPArraySectionExpr(OAE, /*IsLowerBound=*/true).getPointer();
+         // }
+//          if (OAE->getLength()) {
+//            auto *LengthInElems = CGF.Builder.CreateIntCast(CGF.EmitScalarExpr(OAE->getLength()), CGF.SizeTy,/*isSigned=*/false);
+//            SectionSize = CGF.Builder.CreateNUWMul(LengthInElems, ElemSize);
+//          }
+
+//          // Get the element type of the variable so that the sizes in bytes
+//          // can be computed. Also, initialize the indexes of the GEP to obtain
+//          // a pointer to the right offset in case the user provided a lower
+//          // bound for the array section.
+//          QualType ElemQTy;
+//          QualType GEPQTy;
+//          SmallVector<llvm::Value*,2> Idxs;
+//          if (VD->getType()->isArrayType()) {
+//            // If this is an array the element associated with the pointer is
+//            // the array itself.
+//            GEPQTy = VD->getType();
+//            ElemQTy = cast<ArrayType>(GEPQTy.getTypePtr())->getElementType();
+//            // If this is an array we need to dereference the pointer first in
+//            // the GEP.
+//            Idxs.push_back(llvm::ConstantInt::get(CGF.SizeTy,0));
+//          }
+//          else {
+//            assert(VD->getType()->isAnyPointerType() && "Expected pointer type variable associated with array section.");
+//            // If this is a pointer type the element pointer is the pointee type
+//            // and that is what we use in the GEP.
+//            ElemQTy = GEPQTy = VD->getType()->getAs<PointerType>()->getPointeeType();
+//          }
+//          llvm::Value *ElemSize = getTypeSize(CGF, ElemQTy);
+//
+//          if (OAE->getLowerBound()) {
+//            Idxs.push_back(CGF.EmitScalarExpr(OAE->getLowerBound()));
+//            llvm::Type *GEPTy = CGF.ConvertTypeForMem(GEPQTy);
+//            SectionBegin = CGF.Builder.CreateInBoundsGEP(GEPTy, BasePointer, Idxs);
+//          }
+//          if (OAE->getLength()) {
+//            auto *LengthInElems = CGF.Builder.CreateIntCast(CGF.EmitScalarExpr(OAE->getLength()), CGF.SizeTy,/*isSigned=*/false);
+//            SectionSize = CGF.Builder.CreateNUWMul(LengthInElems, ElemSize);
+//          }
+          return true;
+        }
       } else {
-        // ... or an array section.
-        llvm_unreachable("Array section maps are not implemented yet.");
+        // ... or an array expression.
+//        const auto *ASE = cast<ArraySubscriptExpr>(E);
+//        const auto *CurVD = cast<VarDecl>(cast<DeclRefExpr>(ASE->getBase())->getDecl());
+//        if (VD == CurVD) {
+//          MapBits = MappingFlagsBits(MC);
+//
+//          CGF.EmitArraySubscriptExpr()
+//
+//          // Get the element type of the variable so that the sizes in bytes
+//          // can be computed. Also, initialize the indexes of the GEP to obtain
+//          // a pointer to the right offset in case the user provided a lower
+//          // bound for the array section.
+//          QualType ElemQTy;
+//          QualType GEPQTy;
+//          SmallVector<llvm::Value*,2> Idxs;
+//          if (VD->getType()->isArrayType()) {
+//            // If this is an array the element associated with the pointer is
+//            // the array itself.
+//            GEPQTy = VD->getType();
+//            ElemQTy = cast<ArrayType>(GEPQTy.getTypePtr())->getElementType();
+//            // If this is an array we need to dereference the pointer first in
+//            // the GEP.
+//            Idxs.push_back(llvm::ConstantInt::get(CGF.SizeTy,0));
+//          }
+//          else {
+//            assert(VD->getType()->isAnyPointerType() && "Expected pointer type variable associated with array section.");
+//            // If this is a pointer type the element pointer is the pointee type
+//            // and that is what we use in the GEP.
+//            ElemQTy = GEPQTy = VD->getType()->getAs<PointerType>()->getPointeeType();
+//          }
+//          llvm::Value *ElemSize = getTypeSize(CGF, ElemQTy);
+//
+//          if (OAE->getLowerBound()) {
+//            Idxs.push_back(CGF.EmitScalarExpr(OAE->getLowerBound()));
+//            llvm::Type *GEPTy = CGF.ConvertTypeForMem(GEPQTy);
+//            SectionBegin = CGF.Builder.CreateInBoundsGEP(GEPTy, BasePointer, Idxs);
+//          }
+//          if (OAE->getLength()) {
+//            auto *LengthInElems = CGF.Builder.CreateIntCast(CGF.EmitScalarExpr(OAE->getLength()), CGF.SizeTy,/*isSigned=*/false);
+//            SectionSize = CGF.Builder.CreateNUWMul(LengthInElems, ElemSize);
+//          }
+//          return true;
+//        }
+        llvm_unreachable("Array expression maps are not implemented yet.");
       }
+
     }
   }
 
@@ -3919,7 +4054,7 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
   SmallVector<llvm::Value *, 16> Sizes;
   SmallVector<unsigned, 16> MapTypes;
 
-  bool hasVLACaptures = false;
+  bool hasCaptureRuntimeSizes = false;
 
   const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
   auto RI = CS.getCapturedRecordDecl()->field_begin();
@@ -3941,7 +4076,6 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
       Size = getTypeSize(CGF, RI->getType());
       // Copy to the device as an argument. No need to retrieve it.
       MapType = OMP_MAP_BYCOPY;
-      hasVLACaptures = true;
     } else if (CI->capturesThis()) {
       BasePointer = Pointer = *CV;
       const PointerType *PtrTy = cast<PointerType>(RI->getType().getTypePtr());
@@ -3949,12 +4083,7 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
       // Default map type.
       MapType = OMP_MAP_TO | OMP_MAP_FROM;
     } else if (CI->capturesVariableByCopy()) {
-      // If we have a map clause associated with the current variable, we append
-      // that information to the map type bits.
-      if (GetAssociatedMapClauseInformation(D, CI->getCapturedVar(), MapType))
-        MapType |= OMP_MAP_BYCOPY;
-      else
-        MapType = OMP_MAP_BYCOPY;
+      MapType = OMP_MAP_BYCOPY;
       if (!RI->getType()->isAnyPointerType()) {
         // If the field is not a pointer, we need to save the actual value and
         // load it as a void pointer.
@@ -3973,38 +4102,61 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
         CGF.EmitStoreThroughLValue(RValue::get(*CV), SrcLV);
 
         // Load the value using the destination type pointer.
-        BasePointer = Pointer =
+        BasePointer =
             CGF.EmitLoadOfLValue(DstLV, SourceLocation()).getScalarVal();
       } else {
         MapType |= OMP_MAP_PTR;
-        BasePointer = Pointer = *CV;
+        BasePointer = *CV;
       }
-      Size = getTypeSize(CGF, RI->getType());
+
+      // If we have a map clause associated with the current variable, we append
+      // map type bits, and use the pointer and size of the the array section
+      // specified in the clause.
+      llvm::Value *MCPointer;
+      llvm::Value *MCSize;
+      unsigned MCMapType;
+      if (GetAssociatedMapClauseInformation(CGF, D, CI->getCapturedVar(), BasePointer, MCPointer, MCSize, MCMapType))
+        MapType |= MCMapType;
+
+      Pointer = (MCPointer) ? MCPointer : BasePointer;
+      Size = (MCSize) ? MCSize : getTypeSize(CGF, RI->getType());
     } else {
       assert(CI->capturesVariable() && "Expected captured reference.");
-      BasePointer = Pointer = *CV;
+      BasePointer = *CV;
 
       const ReferenceType *PtrTy =
           cast<ReferenceType>(RI->getType().getTypePtr());
       QualType ElementType = PtrTy->getPointeeType();
-      Size = getTypeSize(CGF, ElementType);
 
-      // If we can get a modifier from the map clause, we use it, otherwise
-      // we use the implicit mapping defaults.
-      if (!GetAssociatedMapClauseInformation(D, CI->getCapturedVar(), MapType))
-        // The default map type for a scalar/complex type is 'to' because by
+      // If we have a map clause associated with the current variable, we append
+      // map type bits, and use the pointer and size of the the array section
+      // specified in the clause.
+      llvm::Value *MCPointer;
+      llvm::Value *MCSize;
+      unsigned MCMapType;
+      if (GetAssociatedMapClauseInformation(CGF, D, CI->getCapturedVar(), BasePointer, MCPointer, MCSize, MCMapType))
+        MapType = MCMapType;
+      else
+        // The implicit map type for a scalar/complex type is 'to' because by
         // default the value doesn't have to be retrieved. For an aggregate
         // type, the default is 'tofrom'.
         MapType = ElementType->isAggregateType() ? (OMP_MAP_TO | OMP_MAP_FROM)
                                                : OMP_MAP_TO;
+
       if (ElementType->isAnyPointerType())
         MapType |= OMP_MAP_PTR;
+
+      Pointer = (MCPointer) ? MCPointer : BasePointer;
+      Size = (MCSize) ? MCSize : getTypeSize(CGF, ElementType);
     }
 
     BasePointers.push_back(BasePointer);
     Pointers.push_back(Pointer);
     Sizes.push_back(Size);
     MapTypes.push_back(MapType);
+
+    if (!isa<llvm::ConstantInt>(Size))
+      hasCaptureRuntimeSizes = true;
   }
 
   // Keep track on whether the host function has to be executed.
@@ -4018,7 +4170,7 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
 
   // Fill up the pointer arrays and transfer execution to the device.
   auto &&ThenGen = [this, &Ctx, &BasePointers, &Pointers, &Sizes, &MapTypes,
-                    hasVLACaptures, Device, OutlinedFnID, OffloadError,
+                    hasCaptureRuntimeSizes, Device, OutlinedFnID, OffloadError,
                     OffloadErrorQType](CodeGenFunction &CGF) {
     unsigned PointerNumVal = BasePointers.size();
     llvm::Value *PointerNum = CGF.Builder.getInt32(PointerNumVal);
@@ -4041,7 +4193,7 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
       // If we don't have any VLA types, we can use a constant array for the map
       // sizes, otherwise we need to fill up the arrays as we do for the
       // pointers.
-      if (hasVLACaptures) {
+      if (hasCaptureRuntimeSizes) {
         QualType SizeArrayType = Ctx.getConstantArrayType(
             Ctx.getSizeType(), PointerNumAP, ArrayType::Normal,
             /*IndexTypeQuals=*/0);
@@ -4105,7 +4257,7 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
         Address PAddr(P, Ctx.getTypeAlignInChars(Ctx.VoidPtrTy));
         CGF.Builder.CreateStore(PVal, PAddr);
 
-        if (hasVLACaptures) {
+        if (hasCaptureRuntimeSizes) {
           llvm::Value *S = CGF.Builder.CreateConstInBoundsGEP2_32(
               llvm::ArrayType::get(CGM.SizeTy, PointerNumVal), SizesArray,
               /*Idx0=*/0,
