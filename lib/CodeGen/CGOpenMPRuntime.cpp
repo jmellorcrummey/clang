@@ -3891,32 +3891,21 @@ static bool GetAssociatedMapClauseInformation(CodeGenFunction &CGF, const OMPExe
         }
       } else if (const auto *OAE = dyn_cast<OMPArraySectionExpr>(E)) {
         // ..., an array section, ...
-        const auto *CurVD = cast<VarDecl>(cast<DeclRefExpr>(OAE->getBase())->getDecl());
+        const auto *CurVD = cast<VarDecl>(cast<DeclRefExpr>(OAE->getBase()->IgnoreParenImpCasts())->getDecl());
         if (VD == CurVD) {
           MapBits = MappingFlagsBits(MC);
-
           QualType ElemQTy;
-//          if (VD->getType()->isArrayType()) {
-//            ElemQTy = cast<ArrayType>(VD->getType().getTypePtr())->getElementType();
-//          }
-//          else {
-//            assert(VD->getType()->isAnyPointerType() && "Expected pointer type variable associated with array section.");
-//            // If this is a pointer type the element pointer is the pointee type
-//            // and that is what we use in the GEP.
-//            ElemQTy = VD->getType()->getAs<PointerType>()->getPointeeType();
-//          }
-//          llvm::Value *ElemSize;
 
           // Obtain information about the lower bound.
           llvm::Value *LowerBoundIdx;
-          auto LowerBoundAddr = CGF.EmitOMPArraySectionExpr(OAE, /*IsLowerBound=*/true, /*EmitIndexOnly=*/false, &LowerBoundIdx, &ElemQTy).getAddress();
+          auto *LowerBoundAddr = CGF.EmitOMPArraySectionExpr(OAE, /*IsLowerBound=*/true, /*EmitIndexOnly=*/false, &LowerBoundIdx, &ElemQTy).getPointer();
 
           // Obtain information about the upper bound.
           llvm::Value *UpperBoundIdx;
           CGF.EmitOMPArraySectionExpr(OAE, /*IsLowerBound=*/false, /*EmitIndexOnly=*/true, &UpperBoundIdx, &ElemQTy);
 
           // The section begin is the address of the lower bound.
-          SectionBegin = LowerBoundAddr.getPointer();
+          SectionBegin = LowerBoundAddr;
 
           // The size of the section is computed as:
           // (size_t)(UpperBoundInIdx - LowerBoundIdx + 1) * ElementSize.
@@ -3929,18 +3918,27 @@ static bool GetAssociatedMapClauseInformation(CodeGenFunction &CGF, const OMPExe
           SectionSize = CGF.Builder.CreateAdd(SectionSize, llvm::ConstantInt::get(SectionSize->getType(), /*V=*/1), "idx_diff_inc", /*HasNUW=*/false, !CGF.getLangOpts().isSignedOverflowDefined());
           SectionSize = CGF.Builder.CreateIntCast(SectionSize, CGF.SizeTy, /*isSigned=*/true);
           SectionSize = CGF.Builder.CreateNUWMul(SectionSize, getTypeSize(CGF, ElemQTy), "sec_size");
+          return true;
+        }
+      } else {
+        // ... or an array expression.
+        const auto *ASE = cast<ArraySubscriptExpr>(E);
+        const auto *CurVD = cast<VarDecl>(cast<DeclRefExpr>(ASE->getBase()->IgnoreParenImpCasts())->getDecl());
+        if (VD == CurVD) {
+          MapBits = MappingFlagsBits(MC);
 
-          SectionBegin->dump();
-          SectionSize->dump();
+          // The address of the element is the beginning of the section.
+          SectionBegin = CGF.EmitArraySubscriptExpr(ASE, /*Accessed=*/true).getPointer();
 
-          //if (OAE->getLowerBound()) {
-          //  SectionBegin = CGF.EmitOMPArraySectionExpr(OAE, /*IsLowerBound=*/true).getPointer();
-         // }
-//          if (OAE->getLength()) {
-//            auto *LengthInElems = CGF.Builder.CreateIntCast(CGF.EmitScalarExpr(OAE->getLength()), CGF.SizeTy,/*isSigned=*/false);
-//            SectionSize = CGF.Builder.CreateNUWMul(LengthInElems, ElemSize);
-//          }
+          // The size of the section is the size of one element.
+          QualType ElemTy;
+          if (auto *ArrTy = CGF.getContext().getAsArrayType(VD->getType()))
+            ElemTy = ArrTy->getElementType();
+          else
+            ElemTy = VD->getType()->getPointeeType();
 
+          SectionSize = getTypeSize(CGF, ElemTy);
+//
 //          // Get the element type of the variable so that the sizes in bytes
 //          // can be computed. Also, initialize the indexes of the GEP to obtain
 //          // a pointer to the right offset in case the user provided a lower
@@ -3976,50 +3974,6 @@ static bool GetAssociatedMapClauseInformation(CodeGenFunction &CGF, const OMPExe
 //          }
           return true;
         }
-      } else {
-        // ... or an array expression.
-//        const auto *ASE = cast<ArraySubscriptExpr>(E);
-//        const auto *CurVD = cast<VarDecl>(cast<DeclRefExpr>(ASE->getBase())->getDecl());
-//        if (VD == CurVD) {
-//          MapBits = MappingFlagsBits(MC);
-//
-//          CGF.EmitArraySubscriptExpr()
-//
-//          // Get the element type of the variable so that the sizes in bytes
-//          // can be computed. Also, initialize the indexes of the GEP to obtain
-//          // a pointer to the right offset in case the user provided a lower
-//          // bound for the array section.
-//          QualType ElemQTy;
-//          QualType GEPQTy;
-//          SmallVector<llvm::Value*,2> Idxs;
-//          if (VD->getType()->isArrayType()) {
-//            // If this is an array the element associated with the pointer is
-//            // the array itself.
-//            GEPQTy = VD->getType();
-//            ElemQTy = cast<ArrayType>(GEPQTy.getTypePtr())->getElementType();
-//            // If this is an array we need to dereference the pointer first in
-//            // the GEP.
-//            Idxs.push_back(llvm::ConstantInt::get(CGF.SizeTy,0));
-//          }
-//          else {
-//            assert(VD->getType()->isAnyPointerType() && "Expected pointer type variable associated with array section.");
-//            // If this is a pointer type the element pointer is the pointee type
-//            // and that is what we use in the GEP.
-//            ElemQTy = GEPQTy = VD->getType()->getAs<PointerType>()->getPointeeType();
-//          }
-//          llvm::Value *ElemSize = getTypeSize(CGF, ElemQTy);
-//
-//          if (OAE->getLowerBound()) {
-//            Idxs.push_back(CGF.EmitScalarExpr(OAE->getLowerBound()));
-//            llvm::Type *GEPTy = CGF.ConvertTypeForMem(GEPQTy);
-//            SectionBegin = CGF.Builder.CreateInBoundsGEP(GEPTy, BasePointer, Idxs);
-//          }
-//          if (OAE->getLength()) {
-//            auto *LengthInElems = CGF.Builder.CreateIntCast(CGF.EmitScalarExpr(OAE->getLength()), CGF.SizeTy,/*isSigned=*/false);
-//            SectionSize = CGF.Builder.CreateNUWMul(LengthInElems, ElemSize);
-//          }
-//          return true;
-//        }
         llvm_unreachable("Array expression maps are not implemented yet.");
       }
 

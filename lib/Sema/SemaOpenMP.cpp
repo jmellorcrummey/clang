@@ -90,7 +90,7 @@ private:
   typedef llvm::SmallDenseMap<VarDecl *, DSAInfo, 64> DeclSAMapTy;
   typedef llvm::SmallDenseMap<VarDecl *, DeclRefExpr *, 64> AlignedMapTy;
   typedef llvm::DenseMap<VarDecl *, unsigned> LoopControlVariablesMapTy;
-  typedef llvm::SmallDenseMap<VarDecl *, MapInfo, 64> MappedDeclsTy;
+  typedef llvm::SmallDenseMap<ValueDecl *, MapInfo, 64> MappedDeclsTy;
   typedef llvm::StringMap<std::pair<OMPCriticalDirective *, llvm::APSInt>>
       CriticalsWithHintsTy;
 
@@ -341,7 +341,7 @@ public:
   Scope *getCurScope() { return Stack.back().CurScope; }
   SourceLocation getConstructLoc() { return Stack.back().ConstructLoc; }
 
-  MapInfo getMapInfoForVar(VarDecl *VD) {
+  MapInfo getMapInfoForVar(ValueDecl *VD) {
     MapInfo VarMI = {0};
     for (auto Cnt = Stack.size() - 1; Cnt > 0; --Cnt) {
       if (Stack[Cnt].MappedDecls.count(VD)) {
@@ -352,13 +352,13 @@ public:
     return VarMI;
   }
 
-  void addMapInfoForVar(VarDecl *VD, MapInfo MI) {
+  void addMapInfoForVar(ValueDecl *VD, MapInfo MI) {
     if (Stack.size() > 1) {
       Stack.back().MappedDecls[VD] = MI;
     }
   }
 
-  MapInfo IsMappedInCurrentRegion(VarDecl *VD) {
+  MapInfo IsMappedInCurrentRegion(ValueDecl *VD) {
     assert(Stack.size() > 1 && "Target level is 0");
     MapInfo VarMI = {0};
     if (Stack.size() > 1 && Stack.back().MappedDecls.count(VD)) {
@@ -877,28 +877,40 @@ bool Sema::IsOpenMPCapturedByRef(VarDecl *VD,
         for (const auto *C : Clauses) {
           if (const auto *MC  = dyn_cast<OMPMapClause>(C)) {
             for (const auto *E : MC->getVarRefs()) {
-              // Extract the mapped variable from the mapped expression.
 
-              if (const auto *DE = dyn_cast<DeclRefExpr>(E)) {
-                // The expression is expected to be either a reference to a
-                // declaration, ...
-                const auto *CurVD = cast<VarDecl>(DE->getDecl());
-                IsVariableUsedInMapClause = (VD == CurVD);
-              } else if (const auto *OAE = dyn_cast<OMPArraySectionExpr>(E)) {
-                // ..., an array section, ...
-                const auto *CurVD = cast<VarDecl>(cast<DeclRefExpr>(OAE->getBase())->getDecl());
-                IsVariableUsedInMapClause = IsVariableUsingArrayNotation = (VD == CurVD);
-              } else {
-                // ... or an array expression.
+              // Obtain the declaration of the variable associated with the
+              // expressions in the map clause. If the expression as an array
+              // expression associated, we are interested in the base.
 
-                // We expect only array subscript expression be cause all the other cases should have been dealt with before.
-                const auto *ASE = cast<ArraySubscriptExpr>(E);
-                const auto *CurVD = cast<VarDecl>(cast<DeclRefExpr>(ASE->getBase())->getDecl());
-                IsVariableUsedInMapClause = IsVariableUsingArrayNotation = (VD == CurVD);
-              }
+              bool OriginatesInArrayExpression = true;
+              if (const auto *OAE = dyn_cast<OMPArraySectionExpr>(E))
+                E = OAE->getBase()->IgnoreParenImpCasts();
+              else if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(E))
+                E = ASE->getBase()->IgnoreParenImpCasts();
+              else
+                OriginatesInArrayExpression = false;
 
-              if (IsVariableUsedInMapClause)
+              // The base expression is expected to be a reference to a variable
+              // or a field in a record.
+              const Decl *CurD = nullptr;
+              if (const auto *DRE = dyn_cast<DeclRefExpr>(E))
+                CurD = DRE->getDecl();
+              else if (const auto *ME = dyn_cast<MemberExpr>(E))
+                CurD = ME->getMemberDecl();
+              else
+                llvm_unreachable("Unexpected expression in map clause!");
+
+              assert(CurD);
+
+              // Did we find a matching declaration? If so stop looking and
+              // save the information on whether it has some sort of array
+              // expression associated.
+              IsVariableUsedInMapClause = (VD == CurD);
+
+              if (IsVariableUsedInMapClause) {
+                IsVariableUsingArrayNotation = OriginatesInArrayExpression;
                 break;
+              }
             }
           }
 
@@ -8417,6 +8429,8 @@ OMPClause *Sema::ActOnOpenMPMapClause(
     SourceLocation StartLoc, SourceLocation LParenLoc, SourceLocation EndLoc) {
   SmallVector<Expr *, 4> Vars;
 
+  llvm::errs() << "Getting into the map clause.\n";
+
   for (auto &RE : VarList) {
     assert(RE && "Null expr in omp map");
     if (isa<DependentScopeDeclRefExpr>(RE)) {
@@ -8426,68 +8440,112 @@ OMPClause *Sema::ActOnOpenMPMapClause(
     }
     SourceLocation ELoc = RE->getExprLoc();
 
-    // OpenMP [2.14.5, Restrictions]
-    //  A variable that is part of another variable (such as field of a
-    //  structure) but is not an array element or an array section cannot appear
-    //  in a map clause.
     auto *VE = RE->IgnoreParenLValueCasts();
 
     if (VE->isValueDependent() || VE->isTypeDependent() ||
         VE->isInstantiationDependent() ||
         VE->containsUnexpandedParameterPack()) {
-      // It will be analyzed later.
+      // We can only analyze this information once the missing information is
+      // resolved.
       Vars.push_back(RE);
       continue;
     }
 
+// Missing checks:
+//    2 If a list item is an array section, it must specify contiguous storage.
+//
+//    6 If a list item is an element of a structure, and a different element of the structure has a corresponding list item in the device data environment prior to a task encountering the construct associated with the map clause, then the list item must also have a correspnding list item in the device data environment prior to the task encountering the construct.
+//
+//    7 If a list item is an element of a structure, only the rightmost symbol of the variable reference can be an array section.
+//
+//    C/C++ 2 A list item cannot be a variable that is a member of a structure with a union type.
+//
+//    C/C++ 3 A bit-field cannot appear in a map clause.
+
     auto *SimpleExpr = RE->IgnoreParenCasts();
     auto *DE = dyn_cast<DeclRefExpr>(SimpleExpr);
+    auto *ME = dyn_cast<MemberExpr>(SimpleExpr);
     auto *ASE = dyn_cast<ArraySubscriptExpr>(SimpleExpr);
     auto *OASE = dyn_cast<OMPArraySectionExpr>(SimpleExpr);
 
     if (!RE->IgnoreParenImpCasts()->isLValue() ||
-        (!OASE && !ASE && !DE) ||
+        (!OASE && !ASE && !DE && !ME) ||
         (DE && !isa<VarDecl>(DE->getDecl())) ||
+        (ME && !isa<FieldDecl>(ME->getMemberDecl())) ||
         (ASE && !ASE->getBase()->getType()->isAnyPointerType() &&
-         !ASE->getBase()->getType()->isArrayType())) {
+         !ASE->getBase()->getType()->isArrayType()) ||
+        (OASE && !OASE->getBase()->getType()->isAnyPointerType() &&
+         !OASE->getBase()->getType()->isArrayType())) {
       Diag(ELoc, diag::err_omp_expected_var_name_or_array_item)
         << RE->getSourceRange();
       continue;
     }
 
-    Decl *D = nullptr;
+    // Obtain the array or member expression bases if required.
+    if (ASE) {
+      DE = dyn_cast<DeclRefExpr>(ASE->getBase()->IgnoreParenImpCasts());
+      ME = dyn_cast<MemberExpr>(ASE->getBase()->IgnoreParenImpCasts());
+    } else if (OASE) {
+      DE = dyn_cast<DeclRefExpr>(OASE->getBase()->IgnoreParenImpCasts());
+      ME = dyn_cast<MemberExpr>(OASE->getBase()->IgnoreParenImpCasts());
+    } else if (ME) {
+      // If we have a member expression, it has to be the end of a chain of
+      // member expressions where base is either 'this' or a reference to a
+      // variable.
+      const Expr *CE = ME;
+      while(isa<MemberExpr>(CE))
+        CE = cast<MemberExpr>(CE)->getBase()->IgnoreParenImpCasts();
+
+      DE = dyn_cast<DeclRefExpr>(CE);
+      if (!DE && !isa<CXXThisExpr>(CE))
+
+    }
+
+    // Check if the base of the array expressions are valid.
+    if ((ASE || OASE) && !DE && !ME) {
+      Diag(ELoc, diag::err_omp_expected_var_name_in_array_expression)
+        << RE->getSourceRange();
+      continue;
+    }
+
+    ValueDecl *D = nullptr;
     if (DE) {
       D = DE->getDecl();
-    } else if (ASE) {
-      auto *B = ASE->getBase()->IgnoreParenCasts();
-      D = dyn_cast<DeclRefExpr>(B)->getDecl();
-    } else if (OASE) {
-      auto *B = OASE->getBase();
-      D = dyn_cast<DeclRefExpr>(B)->getDecl();
+    } else if (ME) {
+      D = ME->getMemberDecl();
+    } else {
+      llvm_unreachable("Expecting a valid expression!");
     }
-    assert(D && "Null decl on map clause.");
-    auto *VD = cast<VarDecl>(D);
 
-    // OpenMP [2.14.5, Restrictions, p.8]
-    // threadprivate variables cannot appear in a map clause.
-    if (DSAStack->isThreadPrivate(VD)) {
+    assert(D && "Null decl on map clause.");
+
+    auto *VD = dyn_cast<VarDecl>(D);
+    auto *FD = dyn_cast<FieldDecl>(D);
+
+    assert((VD || FD) && "Only variables or fields are expected here!");
+
+    // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.10]
+    //  threadprivate variables cannot appear in a map clause.
+    if (VD && DSAStack->isThreadPrivate(VD)) {
       auto DVar = DSAStack->getTopDSA(VD, false);
       Diag(ELoc, diag::err_omp_threadprivate_in_map);
       ReportOriginalDSA(*this, DSAStack, VD, DVar);
       continue;
     }
 
-    // OpenMP [2.14.5, Restrictions, p.2]
-    //  At most one list item can be an array item derived from a given variable
-    //  in map clauses of the same construct.
-    // OpenMP [2.14.5, Restrictions, p.3]
-    //  List items of map clauses in the same construct must not share original
-    //  storage.
-    // OpenMP [2.14.5, Restrictions, C/C++, p.2]
-    //  A variable for which the type is pointer, reference to array, or
-    //  reference to pointer and an array section derived from that variable
-    //  must not appear as list items of map clauses of the same construct.
-    DSAStackTy::MapInfo MI = DSAStack->IsMappedInCurrentRegion(VD);
+    // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.9]
+    //  A list item cannot appear in both a map clause and a data-sharing attribute clause on the same construct.
+    //
+    // TODO: Implement this check - it cannot currently be tested because of
+    // missing implementation of the other data sharing clauses.
+
+    // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.3]
+    //  At most one list item can be an array item derived from a given variable in map clauses of the same construct.
+    // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.4]
+    //  List items of map clauses in the same construct must not share original storage.
+    // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, C/C++, p.1]
+    //  A variable for which the type is pointer and an array section derived from that variable must not appear as list items of map clauses of the same construct.
+    DSAStackTy::MapInfo MI = DSAStack->IsMappedInCurrentRegion(D);
     if (MI.RefExpr) {
       Diag(ELoc, diag::err_omp_map_shared_storage) << ELoc;
       Diag(MI.RefExpr->getExprLoc(), diag::note_used_here)
@@ -8495,27 +8553,32 @@ OMPClause *Sema::ActOnOpenMPMapClause(
       continue;
     }
 
-    // OpenMP [2.14.5, Restrictions, C/C++, p.3,4]
-    //  A variable for which the type is pointer, reference to array, or
-    //  reference to pointer must not appear as a list item if the enclosing
-    //  device data environment already contains an array section derived from
-    //  that variable.
-    //  An array section derived from a variable for which the type is pointer,
-    //  reference to array, or reference to pointer must not appear as a list
-    //  item if the enclosing device data environment already contains that
-    //  variable.
-    QualType Type = VD->getType();
-    MI = DSAStack->getMapInfoForVar(VD);
-    if (MI.RefExpr && (isa<DeclRefExpr>(MI.RefExpr->IgnoreParenLValueCasts()) !=
-                       isa<DeclRefExpr>(VE)) &&
-        (Type->isPointerType() || Type->isReferenceType())) {
-      Diag(ELoc, diag::err_omp_map_shared_storage) << ELoc;
-      Diag(MI.RefExpr->getExprLoc(), diag::note_used_here)
-          << MI.RefExpr->getSourceRange();
-      continue;
+    // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, C++, p.1]
+    //  If the type of a list item is a reference to a type T then the type will be considered to be T for all purposes of this clause.
+    QualType Type = D->getType();
+    if (Type->isReferenceType())
+      Type = Type->getPointeeType();
+
+    // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.5]
+    //  If any part of the original storage of a list item has corresponding storage in the device data environment, all of the original storage must have corresponding storage in the device data environment.
+    //
+    // Most of this restriction can only be checked at runtime, given that it depends on the evaluation of the array expression. Here, we only check if a pointer is mapped with and without an array expression in the data environment nesting.
+
+    MI = DSAStack->getMapInfoForVar(D);
+    if (MI.RefExpr && Type->isAnyPointerType()){
+      auto *PASE = dyn_cast<ArraySubscriptExpr>(MI.RefExpr->IgnoreParenImpCasts());
+      auto *POASE = dyn_cast<OMPArraySectionExpr>(MI.RefExpr->IgnoreParenImpCasts());
+
+      // A pointer as to use an array expression in all places or none of them.
+      if ((PASE || POASE) != (ASE || OASE)) {
+        Diag(ELoc, diag::err_omp_map_shared_storage) << ELoc;
+        Diag(MI.RefExpr->getExprLoc(), diag::note_used_here)
+            << MI.RefExpr->getSourceRange();
+        continue;
+      }
     }
 
-    // OpenMP [2.14.5, Restrictions, C/C++, p.7]
+    // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.9]
     //  A list item must have a mappable type.
     if (!CheckTypeMappable(VE->getExprLoc(), VE->getSourceRange(), *this,
                            DSAStack, Type))
@@ -8523,7 +8586,7 @@ OMPClause *Sema::ActOnOpenMPMapClause(
 
     Vars.push_back(RE);
     MI.RefExpr = RE;
-    DSAStack->addMapInfoForVar(VD, MI);
+    DSAStack->addMapInfoForVar(D, MI);
   }
   if (Vars.empty())
     return nullptr;

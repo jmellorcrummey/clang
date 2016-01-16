@@ -7696,6 +7696,12 @@ def err_omp_expected_var_name : Error<
   "expected variable name">;
 def err_omp_expected_var_name_or_array_item : Error<
   "expected variable name, array element or array section">;
+def err_omp_expected_var_name_in_array_expression : Error<
+  "expected variable name associated with array expression">;
+  
+def err_omp_expected_chainvar_name_in_array_expression : Error<
+  "expected variable name associated with array expression">;
+  
 def note_omp_task_predetermined_firstprivate_here : Note<
   "predetermined as a firstprivate in a task construct here">;
 def err_omp_threadprivate_incomplete_type : Error<
