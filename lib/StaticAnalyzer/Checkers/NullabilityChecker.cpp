@@ -366,24 +366,20 @@ static bool checkPreconditionViolation(ProgramStateRef State, ExplodedNode *N,
   if (!D)
     return false;
 
-  if (const auto *BlockD = dyn_cast<BlockDecl>(D)) {
-    if (checkParamsForPreconditionViolation(BlockD->parameters(), State,
-                                            LocCtxt)) {
-      if (!N->isSink())
-        C.addTransition(State->set<PreconditionViolated>(true), N);
-      return true;
-    }
+  ArrayRef<ParmVarDecl*> Params;
+  if (const auto *BD = dyn_cast<BlockDecl>(D))
+    Params = BD->parameters();
+  else if (const auto *FD = dyn_cast<FunctionDecl>(D))
+    Params = FD->parameters();
+  else if (const auto *MD = dyn_cast<ObjCMethodDecl>(D))
+    Params = MD->parameters();
+  else
     return false;
-  }
 
-  if (const auto *FuncDecl = dyn_cast<FunctionDecl>(D)) {
-    if (checkParamsForPreconditionViolation(FuncDecl->parameters(), State,
-                                            LocCtxt)) {
-      if (!N->isSink())
-        C.addTransition(State->set<PreconditionViolated>(true), N);
-      return true;
-    }
-    return false;
+  if (checkParamsForPreconditionViolation(Params, State, LocCtxt)) {
+    if (!N->isSink())
+      C.addTransition(State->set<PreconditionViolated>(true), N);
+    return true;
   }
   return false;
 }
@@ -460,6 +456,20 @@ void NullabilityChecker::checkEvent(ImplicitNullDerefEvent Event) const {
   }
 }
 
+/// Find the outermost subexpression of E that is not an implicit cast.
+/// This looks through the implicit casts to _Nonnull that ARC adds to
+/// return expressions of ObjC types when the return type of the function or
+/// method is non-null but the express is not.
+static const Expr *lookThroughImplicitCasts(const Expr *E) {
+  assert(E);
+
+  while (auto *ICE = dyn_cast<ImplicitCastExpr>(E)) {
+    E = ICE->getSubExpr();
+  }
+
+  return E;
+}
+
 /// This method check when nullable pointer or null value is returned from a
 /// function that has nonnull return type.
 ///
@@ -484,16 +494,20 @@ void NullabilityChecker::checkPreStmt(const ReturnStmt *S,
   if (!RetSVal)
     return;
 
+  QualType RequiredRetType;
   AnalysisDeclContext *DeclCtxt =
       C.getLocationContext()->getAnalysisDeclContext();
-  const FunctionType *FuncType = DeclCtxt->getDecl()->getFunctionType();
-  if (!FuncType)
+  const Decl *D = DeclCtxt->getDecl();
+  if (auto *MD = dyn_cast<ObjCMethodDecl>(D))
+    RequiredRetType = MD->getReturnType();
+  else if (auto *FD = dyn_cast<FunctionDecl>(D))
+    RequiredRetType = FD->getReturnType();
+  else
     return;
 
   NullConstraint Nullness = getNullConstraint(*RetSVal, State);
 
-  Nullability RequiredNullability =
-      getNullabilityAnnotation(FuncType->getReturnType());
+  Nullability RequiredNullability = getNullabilityAnnotation(RequiredRetType);
 
   // If the returned value is null but the type of the expression
   // generating it is nonnull then we will suppress the diagnostic.
@@ -501,7 +515,7 @@ void NullabilityChecker::checkPreStmt(const ReturnStmt *S,
   // function with a _Nonnull return type:
   //    return (NSString * _Nonnull)0;
   Nullability RetExprTypeLevelNullability =
-        getNullabilityAnnotation(RetExpr->getType());
+        getNullabilityAnnotation(lookThroughImplicitCasts(RetExpr)->getType());
 
   if (Filter.CheckNullReturnedFromNonnull &&
       Nullness == NullConstraint::IsNull &&

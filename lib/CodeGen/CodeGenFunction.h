@@ -36,6 +36,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Transforms/Utils/SanitizerStats.h"
 
 namespace llvm {
 class BasicBlock;
@@ -2335,6 +2336,8 @@ public:
   void EmitOMPAtomicDirective(const OMPAtomicDirective &S);
   void EmitOMPTargetDirective(const OMPTargetDirective &S);
   void EmitOMPTargetDataDirective(const OMPTargetDataDirective &S);
+  void EmitOMPTargetEnterDataDirective(const OMPTargetEnterDataDirective &S);
+  void EmitOMPTargetExitDataDirective(const OMPTargetExitDataDirective &S);
   void EmitOMPTeamsDirective(const OMPTeamsDirective &S);
   void
   EmitOMPCancellationPointDirective(const OMPCancellationPointDirective &S);
@@ -3192,6 +3195,8 @@ public:
   ///   explicit source.
   Address EmitPointerWithAlignment(const Expr *Addr,
                                    AlignmentSource *Source = nullptr);
+
+  void EmitSanitizerStatReport(llvm::SanitizerStatKind SSK);
 
 private:
   QualType getVarArgType(const Expr *Arg);
