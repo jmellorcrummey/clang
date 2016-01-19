@@ -57,6 +57,9 @@ struct SB {
   unsigned B;
   float Arr[100];
   float *Ptr;
+  float *foo() {
+    return &Arr[0];
+  }
 };
 
 struct SC {
@@ -87,9 +90,19 @@ void SAclient(int arg) {
   SC r,t;
 //  #pragma omp target map(r)
 //  {}
-  #pragma omp target map(r.C, r.D)
+  #pragma omp target map(r.ArrS[0].B)
   {}
-//  #pragma omp target map(r.C, r.S)  // exxpected-error
+//  #pragma omp target map(r.ArrS[0].Arr[1:23])
+//  {}
+//  #pragma omp target map(r.ArrS[0].Error) / exxpected-error
+//  {}
+//  #pragma omp target map(r.S.Arr[:12])
+//  {}
+//  #pragma omp target map(r.S.foo()[:12]) // exxpected-error
+//  {}
+//  #pragma omp target map(r.C, r.D)
+//  {}
+//  #pragma omp target map(r.C, r.S)  // exxpected-error - but Sema would like to check the order of the fields in a struct
 //  {}
 //  #pragma omp target map(r, r.S)  // exxpected-warning
 //  {}
@@ -103,9 +116,9 @@ void SAclient(int arg) {
 //  {}
 //  #pragma omp target map(r.Ptr[3:5])
 //  {}
-//  #pragma omp target map(r.ArrS[3:5].A)   // exxpected-error
+//  #pragma omp target map(r.ArrS[3:5].A)   // exxpected-error - but the fields of the right most expression would have to be interpreted by Sema and they aren't.
 //  {}
-//  #pragma omp target map(r.ArrS[3:5].Arr[6:7])   // exxpected-error
+//  #pragma omp target map(r.ArrS[3:5].Arr[6:7])   // exxpected-error - but the fields of the right most array would have to be interpreted by Sema and they aren't.
 //  {}
 //  #pragma omp target map(r.S.Arr[4:5])
 //  {}
