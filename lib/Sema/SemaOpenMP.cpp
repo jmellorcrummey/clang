@@ -8587,6 +8587,19 @@ static Expr* GetMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
   return RelevantExpr;
 }
 
+namespace {
+  // Types used to organize the components of a valid map clause.
+  typedef std::pair<Expr*, ValueDecl*> MapExpressionComponent;
+  typedef SmallVector<MapExpressionComponent, 4> MapExpressionComponents;
+}
+
+// Extract the components in the map clause expression \a E and store them into
+// \a MEC. This assumes that \a E is a valid map clause expression, i.e. it has
+// already passed the single clause checks.
+static void ExtractMapExpressionComponents(Expr *E, MapExpressionComponents &MEC) {
+
+}
+
 // Return true if expression E associated with value VD has conflicts with the enclosing map information.
 static bool CheckSameConstructMapConflicts(Sema &SemaRef, ValueDecl *VD, Expr *E) {
   // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.3]
@@ -8597,6 +8610,10 @@ static bool CheckSameConstructMapConflicts(Sema &SemaRef, ValueDecl *VD, Expr *E
   //  A variable for which the type is pointer and an array section derived from that variable must not appear as list items of map clauses of the same construct.
 
   SourceLocation ELoc = E->getExprLoc();
+
+  // In order to easily check the conflicts we need to match each component of
+  // the expression under test with the components of the expressions that are
+  // already in the stack.
 
   return DSAStack->checkMapInfoForVar(VD, /*CurrentRegionOnly=*/true, [&](Expr *RE) -> bool {
 
