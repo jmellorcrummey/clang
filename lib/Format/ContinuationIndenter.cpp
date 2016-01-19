@@ -182,7 +182,7 @@ bool ContinuationIndenter::mustBreak(const LineState &State) {
     return true;
 
   unsigned NewLineColumn = getNewLineColumn(State);
-  if (Current.isMemberAccess() &&
+  if (Current.isMemberAccess() && Style.ColumnLimit != 0 &&
       State.Column + getLengthToNextOperator(Current) > Style.ColumnLimit &&
       (State.Column > NewLineColumn ||
        Current.NestingLevel < State.StartOfLineLevel))
@@ -914,8 +914,12 @@ void ContinuationIndenter::moveStatePastScopeOpener(LineState &State,
       NewIndent = State.Stack.back().LastSpace + Style.ContinuationIndentWidth;
     }
     const FormatToken *NextNoComment = Current.getNextNonComment();
+    bool EndsInComma = Current.MatchingParen &&
+                       Current.MatchingParen->Previous &&
+                       Current.MatchingParen->Previous->is(tok::comma);
     AvoidBinPacking =
-        Current.isOneOf(TT_ArrayInitializerLSquare, TT_DictLiteral) ||
+        (Current.is(TT_ArrayInitializerLSquare) && EndsInComma) ||
+        Current.is(TT_DictLiteral) ||
         Style.Language == FormatStyle::LK_Proto || !Style.BinPackArguments ||
         (NextNoComment && NextNoComment->is(TT_DesignatedInitializerPeriod));
     if (Current.ParameterCount > 1)
