@@ -900,7 +900,6 @@ OMPClause *Parser::ParseOpenMPVarListClause(OpenMPDirectiveKind DKind,
   OpenMPMapClauseKind MapTypeModifier = OMPC_MAP_unknown;
   bool MapTypeIsImplicit = false;
   bool MapTypeModifierSpecified = false;
-  bool UnexpectedId = false;
   SourceLocation DepLinMapLoc;
 
   // Parse '('.
@@ -1021,7 +1020,8 @@ OMPClause *Parser::ParseOpenMPVarListClause(OpenMPDirectiveKind DKind,
         MapTypeIsImplicit = true;
       }
     } else {
-      UnexpectedId = true;
+      MapType = OMPC_MAP_tofrom;
+      MapTypeIsImplicit = true;
     }
 
     if (Tok.is(tok::colon)) {
@@ -1036,7 +1036,7 @@ OMPClause *Parser::ParseOpenMPVarListClause(OpenMPDirectiveKind DKind,
       ((Kind != OMPC_reduction) && (Kind != OMPC_depend) &&
        (Kind != OMPC_map)) ||
       ((Kind == OMPC_reduction) && !InvalidReductionId) ||
-      ((Kind == OMPC_map) && (UnexpectedId || MapType != OMPC_MAP_unknown) &&
+      ((Kind == OMPC_map) && (MapType != OMPC_MAP_unknown) &&
        (!MapTypeModifierSpecified ||
         (MapTypeModifierSpecified && MapTypeModifier == OMPC_MAP_always))) ||
       ((Kind == OMPC_depend) && DepKind != OMPC_DEPEND_unknown);
