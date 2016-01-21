@@ -78,7 +78,7 @@ public:
   };
 
 private:
-  typedef SmallVector<Expr*,4> MapInfo;
+  typedef SmallVector<Expr *, 4> MapInfo;
 
   struct DSAInfo {
     OpenMPClauseKind Attributes;
@@ -337,8 +337,9 @@ public:
 
   // Do the check specified in MapInfoCheck and return true if any issue is
   // found.
-  template<class MapInfoCheck>
-  bool checkMapInfoForVar(ValueDecl *VD, bool CurrentRegionOnly, MapInfoCheck Check) {
+  template <class MapInfoCheck>
+  bool checkMapInfoForVar(ValueDecl *VD, bool CurrentRegionOnly,
+                          MapInfoCheck Check) {
     auto SI = Stack.rbegin();
     auto SE = Stack.rend();
 
@@ -8484,7 +8485,7 @@ static bool CheckTypeMappable(SourceLocation SL, SourceRange SR, Sema &SemaRef,
 // Return the expression of the base of the map clause or null if it cannot
 // be determined and do all the necessary checks to see if the expression is
 // valid as a standalone map clause expression.
-static Expr* CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
+static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
   SourceLocation ELoc = E->getExprLoc();
   SourceRange ERange = E->getSourceRange();
 
@@ -8529,13 +8530,13 @@ static Expr* CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
 
   bool IsRightMostExpression = true;
 
-  while (!RelevantExpr){
+  while (!RelevantExpr) {
     auto AllowArraySection = IsRightMostExpression;
     IsRightMostExpression = false;
 
     E = E->IgnoreParenImpCasts();
 
-    if (auto *CurE = dyn_cast<DeclRefExpr>(E)){
+    if (auto *CurE = dyn_cast<DeclRefExpr>(E)) {
       if (!isa<VarDecl>(CurE->getDecl()))
         break;
 
@@ -8543,7 +8544,7 @@ static Expr* CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
       continue;
     }
 
-    if (auto *CurE = dyn_cast<MemberExpr>(E)){
+    if (auto *CurE = dyn_cast<MemberExpr>(E)) {
       auto *BaseE = CurE->getBase()->IgnoreParenImpCasts();
 
       if (isa<CXXThisExpr>(BaseE))
@@ -8552,9 +8553,9 @@ static Expr* CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
       else
         E = BaseE;
 
-      if (!isa<FieldDecl>(CurE->getMemberDecl())){
+      if (!isa<FieldDecl>(CurE->getMemberDecl())) {
         SemaRef.Diag(ELoc, diag::err_omp_expected_access_to_data_field)
-          << CurE->getSourceRange();
+            << CurE->getSourceRange();
         break;
       }
 
@@ -8563,63 +8564,67 @@ static Expr* CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
       // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, C/C++, p.3]
       //  A bit-field cannot appear in a map clause.
       //
-      if (FD->isBitField()){
+      if (FD->isBitField()) {
         SemaRef.Diag(ELoc, diag::err_omp_bit_fields_forbidden_in_map_clause)
-          << CurE->getSourceRange();
+            << CurE->getSourceRange();
         break;
       }
 
       // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, C++, p.1]
-      //  If the type of a list item is a reference to a type T then the type will be considered to be T for all purposes of this clause.
+      //  If the type of a list item is a reference to a type T then the type
+      //  will be considered to be T for all purposes of this clause.
       QualType CurType = BaseE->getType();
       if (CurType->isReferenceType())
         CurType = CurType->getPointeeType();
 
       // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, C/C++, p.2]
-      //  A list item cannot be a variable that is a member of a structure with a union type.
+      //  A list item cannot be a variable that is a member of a structure with
+      //  a union type.
       //
       if (auto *RT = CurType->getAs<RecordType>())
         if (RT->isUnionType()) {
           SemaRef.Diag(ELoc, diag::err_omp_union_type_not_allowed)
-            << CurE->getSourceRange();
+              << CurE->getSourceRange();
           break;
         }
 
       continue;
     }
 
-    if (auto *CurE = dyn_cast<ArraySubscriptExpr>(E)){
+    if (auto *CurE = dyn_cast<ArraySubscriptExpr>(E)) {
       E = CurE->getBase()->IgnoreParenImpCasts();
 
       if (!E->getType()->isAnyPointerType() && !E->getType()->isArrayType()) {
-        SemaRef.Diag(ELoc, diag::err_omp_expected_base_var_name) << 0
-          << CurE->getSourceRange();
+        SemaRef.Diag(ELoc, diag::err_omp_expected_base_var_name)
+            << 0 << CurE->getSourceRange();
         break;
       }
       continue;
     }
 
-    if (auto *CurE = dyn_cast<OMPArraySectionExpr>(E)){
+    if (auto *CurE = dyn_cast<OMPArraySectionExpr>(E)) {
       // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.7]
-      //  If a list item is an element of a structure, only the rightmost symbol of the variable reference can be an array section.
+      //  If a list item is an element of a structure, only the rightmost symbol
+      //  of the variable reference can be an array section.
       //
-      if (!AllowArraySection){
+      if (!AllowArraySection) {
         SemaRef.Diag(ELoc, diag::err_omp_array_section_in_rightmost_expression)
-          << CurE->getSourceRange();
+            << CurE->getSourceRange();
         break;
       }
 
       E = CurE->getBase()->IgnoreParenImpCasts();
 
       // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, C++, p.1]
-      //  If the type of a list item is a reference to a type T then the type will be considered to be T for all purposes of this clause.
+      //  If the type of a list item is a reference to a type T then the type
+      //  will be considered to be T for all purposes of this clause.
       QualType CurType = E->getType();
       if (CurType->isReferenceType())
         CurType = CurType->getPointeeType();
 
       if (!CurType->isAnyPointerType() && !CurType->isArrayType()) {
-        SemaRef.Diag(ELoc, diag::err_omp_expected_base_var_name) << 0
-          << CurE->getSourceRange();
+        SemaRef.Diag(ELoc, diag::err_omp_expected_base_var_name)
+            << 0 << CurE->getSourceRange();
         break;
       }
 
@@ -8627,38 +8632,44 @@ static Expr* CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
     }
 
     // If nothing else worked, this is not a valid map clause expression.
-    SemaRef.Diag(ELoc, diag::err_omp_expected_named_var_member_or_array_expression)
-      << ERange;
+    SemaRef.Diag(ELoc,
+                 diag::err_omp_expected_named_var_member_or_array_expression)
+        << ERange;
     break;
   }
 
   return RelevantExpr;
 }
 
-// Return true if expression E associated with value VD has conflicts with other map information.
-static bool CheckMapConflicts(Sema &SemaRef, DSAStackTy *DSAS, ValueDecl *VD, Expr *E, bool CurrentRegionOnly) {
+// Return true if expression E associated with value VD has conflicts with other
+// map information.
+static bool CheckMapConflicts(Sema &SemaRef, DSAStackTy *DSAS, ValueDecl *VD,
+                              Expr *E, bool CurrentRegionOnly) {
   assert(VD && E);
 
   // Types used to organize the components of a valid map clause.
-  typedef std::pair<Expr*, ValueDecl*> MapExpressionComponent;
+  typedef std::pair<Expr *, ValueDecl *> MapExpressionComponent;
   typedef SmallVector<MapExpressionComponent, 4> MapExpressionComponents;
 
   // Helper to extract the components in the map clause expression E and store
   // them into MEC. This assumes that E is a valid map clause expression, i.e.
   // it has already passed the single clause checks.
-  auto ExtractMapExpressionComponents = [](Expr *TE, MapExpressionComponents &MEC) {
-    while (true){
+  auto ExtractMapExpressionComponents = [](Expr *TE,
+                                           MapExpressionComponents &MEC) {
+    while (true) {
       TE = TE->IgnoreParenImpCasts();
 
-      if (auto *CurE = dyn_cast<DeclRefExpr>(TE)){
-        MEC.push_back(MapExpressionComponent(CurE, cast<VarDecl>(CurE->getDecl())));
+      if (auto *CurE = dyn_cast<DeclRefExpr>(TE)) {
+        MEC.push_back(
+            MapExpressionComponent(CurE, cast<VarDecl>(CurE->getDecl())));
         break;
       }
 
-      if (auto *CurE = dyn_cast<MemberExpr>(TE)){
+      if (auto *CurE = dyn_cast<MemberExpr>(TE)) {
         auto *BaseE = CurE->getBase()->IgnoreParenImpCasts();
 
-        MEC.push_back(MapExpressionComponent(CurE, cast<FieldDecl>(CurE->getMemberDecl())));
+        MEC.push_back(MapExpressionComponent(
+            CurE, cast<FieldDecl>(CurE->getMemberDecl())));
         if (isa<CXXThisExpr>(BaseE))
           break;
 
@@ -8666,19 +8677,20 @@ static bool CheckMapConflicts(Sema &SemaRef, DSAStackTy *DSAS, ValueDecl *VD, Ex
         continue;
       }
 
-      if (auto *CurE = dyn_cast<ArraySubscriptExpr>(TE)){
+      if (auto *CurE = dyn_cast<ArraySubscriptExpr>(TE)) {
         MEC.push_back(MapExpressionComponent(CurE, nullptr));
         TE = CurE->getBase()->IgnoreParenImpCasts();
         continue;
       }
 
-      if (auto *CurE = dyn_cast<OMPArraySectionExpr>(TE)){
+      if (auto *CurE = dyn_cast<OMPArraySectionExpr>(TE)) {
         MEC.push_back(MapExpressionComponent(CurE, nullptr));
         TE = CurE->getBase()->IgnoreParenImpCasts();
         continue;
       }
 
-      llvm_unreachable("Expecting only valid map clause expressions at this point!");
+      llvm_unreachable(
+          "Expecting only valid map clause expressions at this point!");
     }
   };
 
@@ -8693,120 +8705,156 @@ static bool CheckMapConflicts(Sema &SemaRef, DSAStackTy *DSAS, ValueDecl *VD, Ex
   ExtractMapExpressionComponents(E, CurComponents);
 
   assert(!CurComponents.empty() && "Map clause expression with no components!");
-  assert(CurComponents.back().second == VD && "Map clause expression with unexpected base!");
+  assert(CurComponents.back().second == VD &&
+         "Map clause expression with unexpected base!");
 
   // Variables to help detecting enclosing problems in data environment nests.
   bool IsEnclosedByDataEnvironmentExpr = false;
   Expr *EnclosingExpr = nullptr;
 
-  bool FoundError = DSAS->checkMapInfoForVar(VD, CurrentRegionOnly, [&](Expr *RE) -> bool {
-    MapExpressionComponents StackComponents;
-    ExtractMapExpressionComponents(RE, StackComponents);
-    assert(!StackComponents.empty() && "Map clause expression with no components!");
-    assert(StackComponents.back().second == VD && "Map clause expression with unexpected base!");
+  bool FoundError =
+      DSAS->checkMapInfoForVar(VD, CurrentRegionOnly, [&](Expr *RE) -> bool {
+        MapExpressionComponents StackComponents;
+        ExtractMapExpressionComponents(RE, StackComponents);
+        assert(!StackComponents.empty() &&
+               "Map clause expression with no components!");
+        assert(StackComponents.back().second == VD &&
+               "Map clause expression with unexpected base!");
 
-    // Expressions must start from the same base. Here we detect at which point both expressions diverge from each other and see if we can detect if the memory referred to both expressions is contiguous and do not overlap.
-    auto CI = CurComponents.rbegin();
-    auto CE = CurComponents.rend();
-    auto SI = StackComponents.rbegin();
-    auto SE = StackComponents.rend();
-    for (; CI != CE && SI != SE; ++CI, ++SI) {
+        // Expressions must start from the same base. Here we detect at which
+        // point both expressions diverge from each other and see if we can
+        // detect if the memory referred to both expressions is contiguous and
+        // do not overlap.
+        auto CI = CurComponents.rbegin();
+        auto CE = CurComponents.rend();
+        auto SI = StackComponents.rbegin();
+        auto SE = StackComponents.rend();
+        for (; CI != CE && SI != SE; ++CI, ++SI) {
 
-      // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.3]
-      //  At most one list item can be an array item derived from a given variable in map clauses of the same construct.
-      if ( CurrentRegionOnly && (isa<ArraySubscriptExpr>(CI->first) || isa<OMPArraySectionExpr>(CI->first)) && (isa<ArraySubscriptExpr>(SI->first) || isa<OMPArraySectionExpr>(SI->first))){
-        SemaRef.Diag(CI->first->getExprLoc(), diag::err_omp_multiple_array_items_in_map_clause) << CI->first->getSourceRange();;
-        SemaRef.Diag(SI->first->getExprLoc(), diag::note_used_here)
-            << SI->first->getSourceRange();
-        return true;
-      }
+          // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.3]
+          //  At most one list item can be an array item derived from a given
+          //  variable in map clauses of the same construct.
+          if (CurrentRegionOnly && (isa<ArraySubscriptExpr>(CI->first) ||
+                                    isa<OMPArraySectionExpr>(CI->first)) &&
+              (isa<ArraySubscriptExpr>(SI->first) ||
+               isa<OMPArraySectionExpr>(SI->first))) {
+            SemaRef.Diag(CI->first->getExprLoc(),
+                         diag::err_omp_multiple_array_items_in_map_clause)
+                << CI->first->getSourceRange();
+            ;
+            SemaRef.Diag(SI->first->getExprLoc(), diag::note_used_here)
+                << SI->first->getSourceRange();
+            return true;
+          }
 
-      // Do both expressions have the same kind?
-      if (CI->first->getStmtClass() != SI->first->getStmtClass())
-        break;
+          // Do both expressions have the same kind?
+          if (CI->first->getStmtClass() != SI->first->getStmtClass())
+            break;
 
-      // Are we dealing with different variables/fields?
-      if (CI->second != SI->second)
-        break;
-    }
+          // Are we dealing with different variables/fields?
+          if (CI->second != SI->second)
+            break;
+        }
 
-    // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.4]
-    //  List items of map clauses in the same construct must not share original storage.
-    //
-    // If the expressions are exactly the same or one is a subset of the other, it means they are sharing storage.
-    if ( CI == CE && SI == SE ) {
-      if (CurrentRegionOnly) {
-        SemaRef.Diag(ELoc, diag::err_omp_map_shared_storage) << ERange;
-        SemaRef.Diag(RE->getExprLoc(), diag::note_used_here)
-            << RE->getSourceRange();
-        return true;
-      } else {
-        // If we find the same expression in the enclosing data environment,
-        // that is legal.
-        IsEnclosedByDataEnvironmentExpr = true;
+        // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.4]
+        //  List items of map clauses in the same construct must not share
+        //  original storage.
+        //
+        // If the expressions are exactly the same or one is a subset of the
+        // other, it means they are sharing storage.
+        if (CI == CE && SI == SE) {
+          if (CurrentRegionOnly) {
+            SemaRef.Diag(ELoc, diag::err_omp_map_shared_storage) << ERange;
+            SemaRef.Diag(RE->getExprLoc(), diag::note_used_here)
+                << RE->getSourceRange();
+            return true;
+          } else {
+            // If we find the same expression in the enclosing data environment,
+            // that is legal.
+            IsEnclosedByDataEnvironmentExpr = true;
+            return false;
+          }
+        }
+
+        QualType DerivedType = std::prev(CI)->first->getType();
+        SourceLocation DerivedLoc = std::prev(CI)->first->getExprLoc();
+
+        // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, C++, p.1]
+        //  If the type of a list item is a reference to a type T then the type
+        //  will be considered to be T for all purposes of this clause.
+        if (DerivedType->isReferenceType())
+          DerivedType = DerivedType->getPointeeType();
+
+        // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, C/C++, p.1]
+        //  A variable for which the type is pointer and an array section
+        //  derived from that variable must not appear as list items of map
+        //  clauses of the same construct.
+        //
+        // Also, cover one of the cases in:
+        // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.5]
+        //  If any part of the original storage of a list item has corresponding
+        //  storage in the device data environment, all of the original storage
+        //  must have corresponding storage in the device data environment.
+        //
+        if (DerivedType->isAnyPointerType()) {
+          if (CI == CE || SI == SE) {
+            SemaRef.Diag(
+                DerivedLoc,
+                diag::err_omp_pointer_mapped_along_with_derived_section)
+                << DerivedLoc;
+          } else {
+            assert(CI != CE && SI != SE);
+            SemaRef.Diag(DerivedLoc, diag::err_omp_same_pointer_derreferenced)
+                << DerivedLoc;
+          }
+          SemaRef.Diag(RE->getExprLoc(), diag::note_used_here)
+              << RE->getSourceRange();
+          return true;
+        }
+
+        // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.4]
+        //  List items of map clauses in the same construct must not share
+        //  original storage.
+        //
+        // An expression is a subset of the other.
+        if (CurrentRegionOnly && (CI == CE || SI == SE)) {
+          SemaRef.Diag(ELoc, diag::err_omp_map_shared_storage) << ERange;
+          SemaRef.Diag(RE->getExprLoc(), diag::note_used_here)
+              << RE->getSourceRange();
+          return true;
+        }
+
+        // The current expression uses the same base as other expression in the
+        // data environment but does not contain it completelly.
+        if (!CurrentRegionOnly && SI != SE)
+          EnclosingExpr = RE;
+
+        // The current expression is a subset of the expression in the data
+        // environment.
+        IsEnclosedByDataEnvironmentExpr |=
+            (!CurrentRegionOnly && CI != CE && SI == SE);
+
         return false;
-      }
-    }
-
-    QualType DerivedType = std::prev(CI)->first->getType();
-    SourceLocation DerivedLoc = std::prev(CI)->first->getExprLoc();
-
-    // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, C++, p.1]
-    //  If the type of a list item is a reference to a type T then the type will be considered to be T for all purposes of this clause.
-    if (DerivedType->isReferenceType())
-      DerivedType = DerivedType->getPointeeType();
-
-    // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, C/C++, p.1]
-    //  A variable for which the type is pointer and an array section derived from that variable must not appear as list items of map clauses of the same construct.
-    //
-    // Also, cover one of the cases in:
-    // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.5]
-    //  If any part of the original storage of a list item has corresponding storage in the device data environment, all of the original storage must have corresponding storage in the device data environment.
-    //
-    if (DerivedType->isAnyPointerType()) {
-      if (CI == CE || SI == SE) {
-        SemaRef.Diag(DerivedLoc, diag::err_omp_pointer_mapped_along_with_derived_section) << DerivedLoc;
-      } else {
-        assert(CI != CE && SI != SE);
-        SemaRef.Diag(DerivedLoc, diag::err_omp_same_pointer_derreferenced) << DerivedLoc;
-      }
-      SemaRef.Diag(RE->getExprLoc(), diag::note_used_here)
-          << RE->getSourceRange();
-      return true;
-    }
-
-    // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.4]
-    //  List items of map clauses in the same construct must not share original storage.
-    //
-    // An expression is a subset of the other.
-    if ( CurrentRegionOnly && (CI == CE || SI == SE )) {
-      SemaRef.Diag(ELoc, diag::err_omp_map_shared_storage) << ERange;
-      SemaRef.Diag(RE->getExprLoc(), diag::note_used_here)
-          << RE->getSourceRange();
-      return true;
-    }
-
-    // The current expression uses the same base as other expression in the
-    // data environment but does not contain it completelly.
-    if (!CurrentRegionOnly && SI != SE)
-      EnclosingExpr = RE;
-
-    // The current expression is a subset of the expression in the data environment.
-    IsEnclosedByDataEnvironmentExpr |= (!CurrentRegionOnly && CI != CE && SI == SE);
-
-    return false;
-  });
+      });
 
   if (CurrentRegionOnly)
     return FoundError;
 
   // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.5]
-  //  If any part of the original storage of a list item has corresponding storage in the device data environment, all of the original storage must have corresponding storage in the device data environment.
+  //  If any part of the original storage of a list item has corresponding
+  //  storage in the device data environment, all of the original storage must
+  //  have corresponding storage in the device data environment.
   // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.6]
-  //  If a list item is an element of a structure, and a different element of the structure has a corresponding list item in the device data environment prior to a task encountering the construct associated with the map clause, then the list item must also have a correspnding list item in the device data environment prior to the task encountering the construct.
+  //  If a list item is an element of a structure, and a different element of
+  //  the structure has a corresponding list item in the device data environment
+  //  prior to a task encountering the construct associated with the map clause,
+  //  then the list item must also have a correspnding list item in the device
+  //  data environment prior to the task encountering the construct.
   //
-  if ( EnclosingExpr && !IsEnclosedByDataEnvironmentExpr) {
-    SemaRef.Diag(ELoc, diag::err_omp_original_storage_is_shared_and_does_not_contain) << ERange;
+  if (EnclosingExpr && !IsEnclosedByDataEnvironmentExpr) {
+    SemaRef.Diag(ELoc,
+                 diag::err_omp_original_storage_is_shared_and_does_not_contain)
+        << ERange;
     SemaRef.Diag(EnclosingExpr->getExprLoc(), diag::note_used_here)
         << EnclosingExpr->getSourceRange();
     return true;
@@ -8847,7 +8895,7 @@ Sema::ActOnOpenMPMapClause(OpenMPMapClauseKind MapTypeModifier,
 
     if (!RE->IgnoreParenImpCasts()->isLValue()) {
       Diag(ELoc, diag::err_omp_expected_named_var_member_or_array_expression)
-        << RE->getSourceRange();
+          << RE->getSourceRange();
       continue;
     }
 
@@ -8883,20 +8931,26 @@ Sema::ActOnOpenMPMapClause(OpenMPMapClauseKind MapTypeModifier,
     }
 
     // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.9]
-    //  A list item cannot appear in both a map clause and a data-sharing attribute clause on the same construct.
+    //  A list item cannot appear in both a map clause and a data-sharing
+    //  attribute clause on the same construct.
     //
     // TODO: Implement this check - it cannot currently be tested because of
     // missing implementation of the other data sharing clauses in target
     // directives.
 
-    // Check conflicts with other map clause expressions. We check the conflicts with the current construct separately from the enclosing data environment, because the restrictions are different.
-    if (CheckMapConflicts(*this, DSAStack, D, SimpleExpr, /*CurrentRegionOnly=*/true))
+    // Check conflicts with other map clause expressions. We check the conflicts
+    // with the current construct separately from the enclosing data
+    // environment, because the restrictions are different.
+    if (CheckMapConflicts(*this, DSAStack, D, SimpleExpr,
+                          /*CurrentRegionOnly=*/true))
       break;
-    if (CheckMapConflicts(*this, DSAStack, D, SimpleExpr, /*CurrentRegionOnly=*/false))
+    if (CheckMapConflicts(*this, DSAStack, D, SimpleExpr,
+                          /*CurrentRegionOnly=*/false))
       break;
 
     // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, C++, p.1]
-    //  If the type of a list item is a reference to a type T then the type will be considered to be T for all purposes of this clause.
+    //  If the type of a list item is a reference to a type T then the type will
+    //  be considered to be T for all purposes of this clause.
     QualType Type = D->getType();
     if (Type->isReferenceType())
       Type = Type->getPointeeType();
