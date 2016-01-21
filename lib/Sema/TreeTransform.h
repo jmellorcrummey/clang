@@ -7115,7 +7115,7 @@ StmtResult TreeTransform<Derived>::TransformOMPExecutableDirective(
   StmtResult AssociatedStmt;
   if (D->hasAssociatedStmt() && D->getAssociatedStmt()) {
     getDerived().getSema().ActOnOpenMPRegionStart(D->getDirectiveKind(),
-                                                  /*CurScope=*/nullptr, TClauses);
+                                                  /*CurScope=*/nullptr);
     StmtResult Body;
     {
       Sema::CompoundScopeRAII CompoundScope(getSema());

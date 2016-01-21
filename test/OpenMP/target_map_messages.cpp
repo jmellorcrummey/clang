@@ -176,8 +176,6 @@ void SAclient(int arg) {
   }
 }
 
-#if 1
-
 void foo() {
 }
 
@@ -389,4 +387,4 @@ int main(int argc, char **argv) {
 
   return tmain<int, 3>(argc)+tmain<from, 4>(argc); // expected-note {{in instantiation of function template specialization 'tmain<int, 3>' requested here}} expected-note {{in instantiation of function template specialization 'tmain<int, 4>' requested here}}
 }
-#endif
+

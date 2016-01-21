@@ -110,13 +110,12 @@ private:
     bool CancelRegion;
     unsigned AssociatedLoops;
     SourceLocation InnerTeamsRegionLoc;
-    ArrayRef<OMPClause *> Clauses;
     SharingMapTy(OpenMPDirectiveKind DKind, DeclarationNameInfo Name,
                  Scope *CurScope, SourceLocation Loc)
         : SharingMap(), AlignedMap(), LCVMap(), DefaultAttr(DSA_unspecified),
           Directive(DKind), DirectiveName(std::move(Name)), CurScope(CurScope),
           ConstructLoc(Loc), OrderedRegion(), NowaitRegion(false),
-          CancelRegion(false), AssociatedLoops(1), InnerTeamsRegionLoc(), Clauses() {}
+          CancelRegion(false), AssociatedLoops(1), InnerTeamsRegionLoc() {}
     SharingMapTy()
         : SharingMap(), AlignedMap(), LCVMap(), DefaultAttr(DSA_unspecified),
           Directive(OMPD_unknown), DirectiveName(), CurScope(nullptr),
@@ -243,10 +242,8 @@ public:
       return Stack[Stack.size() - 2].Directive;
     return OMPD_unknown;
   }
-  /// \brief Return the directive associated with the provided scope. If the
-  /// directive exists set \a Clauses to point to the clauses of the region
-  /// associated with the provided scope.
-  OpenMPDirectiveKind getDirectiveForScope(const Scope *S, ArrayRef<OMPClause *> &Clauses) const;
+  /// \brief Return the directive associated with the provided scope.
+  OpenMPDirectiveKind getDirectiveForScope(const Scope *S) const;
 
   /// \brief Set default data sharing attribute to none.
   void setDefaultDSANone(SourceLocation Loc) {
@@ -370,17 +367,6 @@ public:
     if (Stack.size() > 1) {
       Stack.back().MappedDecls[VD].push_back(E);
     }
-  }
-
-  // Set the current clauses associated with the region.
-  void setClauses(ArrayRef<OMPClause *> Clauses) {
-    Stack.back().Clauses = Clauses;
-  }
-
-  // Return the current clauses associated with the region. If no clauses are
-  // associated with the region, an invalid reference is returned.
-  ArrayRef<OMPClause *> getClauses() const {
-    return Stack.back().Clauses;
   }
 };
 bool isParallelOrTaskRegion(OpenMPDirectiveKind DKind) {
@@ -777,12 +763,10 @@ bool DSAStackTy::hasDirective(NamedDirectivesPredicate DPred, bool FromParent) {
   return false;
 }
 
-OpenMPDirectiveKind DSAStackTy::getDirectiveForScope(const Scope *S, ArrayRef<OMPClause *> &Clauses) const {
+OpenMPDirectiveKind DSAStackTy::getDirectiveForScope(const Scope *S) const {
   for (auto I = Stack.rbegin(), EE = Stack.rend(); I != EE; ++I)
-    if (I->CurScope == S) {
-      Clauses  = I->Clauses;
+    if (I->CurScope == S)
       return I->Directive;
-    }
   return OMPD_unknown;
 }
 
@@ -799,11 +783,8 @@ bool Sema::IsOpenMPCapturedByRef(VarDecl *VD,
   auto &Ctx = getASTContext();
   bool IsByRef = true;
 
-  // Find the directive that is associated with the provided scope. Also,
-  // retrieve the clauses associated with that scope, if any, because they may
-  // influence the way data is captured in this region.
-  ArrayRef<OMPClause *> Clauses;
-  auto DKind = DSAStack->getDirectiveForScope(RSI->TheScope, Clauses);
+  // Find the directive that is associated with the provided scope.
+  auto DKind = DSAStack->getDirectiveForScope(RSI->TheScope);
   auto Ty = VD->getType();
 
   if (isOpenMPTargetDirective(DKind)) {
@@ -861,81 +842,13 @@ bool Sema::IsOpenMPCapturedByRef(VarDecl *VD,
     //    array section, the runtime library may pass the NULL value to the
     //    device instead of the value passed to it by the compiler.
 
-    if (Ty->isReferenceType())
-      Ty = Ty->castAs<ReferenceType>()->getPointeeType();
-
-    // FIXME: Right now, only some of the maps are implemented. Properly mapping
-    // values requires having the private, and firstprivate clauses SEMA
+    // FIXME: Right now, only implicit maps are implemented. Properly mapping
+    // values requires having the map, private, and firstprivate clauses SEMA
     // and parsing in place, which we don't yet.
 
-    // Flag to trace whether a conclusion about the kind of capture was already
-    // reached.
-    bool Done = false;
-
-    // Locate map clauses and see if the variable being captured is referred to
-    // in any of those clauses.
-    {
-      bool IsVariableUsedInMapClause = false;
-      bool IsVariableUsingArrayNotation = false;
-
-      if (!Done && !Clauses.empty()) {
-        for (const auto *C : Clauses) {
-          if (const auto *MC  = dyn_cast<OMPMapClause>(C)) {
-            for (const auto *E : MC->getVarRefs()) {
-
-              // Obtain the declaration of the variable associated with the
-              // expressions in the map clause. If the expression as an array
-              // expression associated, we are interested in the base.
-
-              bool OriginatesInArrayExpression = true;
-              if (const auto *OAE = dyn_cast<OMPArraySectionExpr>(E))
-                E = OAE->getBase()->IgnoreParenImpCasts();
-              else if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(E))
-                E = ASE->getBase()->IgnoreParenImpCasts();
-              else
-                OriginatesInArrayExpression = false;
-
-              // The base expression is expected to be a reference to a variable
-              // or a field in a record.
-              const Decl *CurD = nullptr;
-              if (const auto *DRE = dyn_cast<DeclRefExpr>(E))
-                CurD = DRE->getDecl();
-              else if (const auto *ME = dyn_cast<MemberExpr>(E))
-                CurD = ME->getMemberDecl();
-              else
-                llvm_unreachable("Unexpected expression in map clause!");
-
-              assert(CurD);
-
-              // Did we find a matching declaration? If so stop looking and
-              // save the information on whether it has some sort of array
-              // expression associated.
-              IsVariableUsedInMapClause = (VD == CurD);
-
-              if (IsVariableUsedInMapClause) {
-                IsVariableUsingArrayNotation = OriginatesInArrayExpression;
-                break;
-              }
-            }
-          }
-
-          if(IsVariableUsedInMapClause)
-            break;
-        }
-      }
-
-      // If variable is identified in a map clause it is always captured by
-      // reference except if it is a pointer with an array section/expression
-      // associated.
-      if (IsVariableUsedInMapClause) {
-        IsByRef = !(Ty->isPointerType() && IsVariableUsingArrayNotation);
-        Done = true;
-      }
-    }
-
-    // By default, all the data that has a scalar type is mapped by copy.
-    if (!Done)
-      IsByRef = !Ty->isScalarType();
+    if (Ty->isReferenceType())
+      Ty = Ty->castAs<ReferenceType>()->getPointeeType();
+    IsByRef = !Ty->isScalarType();
   }
 
   // When passing data by value, we need to make sure it fits the uintptr size
@@ -1482,13 +1395,7 @@ public:
 };
 } // namespace
 
-void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope, ArrayRef<OMPClause *> Clauses) {
-  // Save the clauses in the data sharing attributes stack because they may
-  // contain information to drive how data is captured in a given OpenMP region.
-  // E.g. the contents of the map clause are required to decide whether a
-  // variable is mapped by copy or by reference.
-  DSAStack->setClauses(Clauses);
-
+void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
   switch (DKind) {
   case OMPD_parallel: {
     QualType KmpInt32Ty = Context.getIntTypeForBitwidth(32, 1);
@@ -8574,14 +8481,6 @@ static bool CheckTypeMappable(SourceLocation SL, SourceRange SR, Sema &SemaRef,
   return true;
 }
 
-// Check if there are non-conflicting map ranges for the provided declaration
-// \a VD, and the expression it appears in. If there is a conflict return the
-// conflicting map info.
-//static DSAStackTy::MapInfo CheckVarMapRanges(const ValueDecl *VD, const Expr *E) {
-//
-//  return DSAStackTy::MapInfo();
-//}
-
 // Return the expression of the base of the map clause or null if it cannot
 // be determined and do all the necessary checks to see if the expression is
 // valid as a standalone map clause expression.
@@ -8705,7 +8604,7 @@ static Expr* CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
       //  If a list item is an element of a structure, only the rightmost symbol of the variable reference can be an array section.
       //
       if (!AllowArraySection){
-        SemaRef.Diag(ELoc, diag::err_omp_array_section_ony_allowed_in_rightmost_expression)
+        SemaRef.Diag(ELoc, diag::err_omp_array_section_in_rightmost_expression)
           << CurE->getSourceRange();
         break;
       }
@@ -8816,7 +8715,7 @@ static bool CheckMapConflicts(Sema &SemaRef, DSAStackTy *DSAS, ValueDecl *VD, Ex
       // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.3]
       //  At most one list item can be an array item derived from a given variable in map clauses of the same construct.
       if ( CurrentRegionOnly && (isa<ArraySubscriptExpr>(CI->first) || isa<OMPArraySectionExpr>(CI->first)) && (isa<ArraySubscriptExpr>(SI->first) || isa<OMPArraySectionExpr>(SI->first))){
-        SemaRef.Diag(CI->first->getExprLoc(), diag::err_omp_multiple_array_items_associated_with_same_variable_not_allowed_in_map_clause) << CI->first->getSourceRange();;
+        SemaRef.Diag(CI->first->getExprLoc(), diag::err_omp_multiple_array_items_in_map_clause) << CI->first->getSourceRange();;
         SemaRef.Diag(SI->first->getExprLoc(), diag::note_used_here)
             << SI->first->getSourceRange();
         return true;
@@ -8866,10 +8765,10 @@ static bool CheckMapConflicts(Sema &SemaRef, DSAStackTy *DSAS, ValueDecl *VD, Ex
     //
     if (DerivedType->isAnyPointerType()) {
       if (CI == CE || SI == SE) {
-        SemaRef.Diag(DerivedLoc, diag::err_omp_pointer_cannot_be_mapped_along_with_a_section_derived_from_itself) << DerivedLoc;
+        SemaRef.Diag(DerivedLoc, diag::err_omp_pointer_mapped_along_with_derived_section) << DerivedLoc;
       } else {
         assert(CI != CE && SI != SE);
-        SemaRef.Diag(DerivedLoc, diag::err_omp_same_pointer_derreferenced_in_multiple_ways_in_map_clause) << DerivedLoc;
+        SemaRef.Diag(DerivedLoc, diag::err_omp_same_pointer_derreferenced) << DerivedLoc;
       }
       SemaRef.Diag(RE->getExprLoc(), diag::note_used_here)
           << RE->getSourceRange();
@@ -8907,7 +8806,7 @@ static bool CheckMapConflicts(Sema &SemaRef, DSAStackTy *DSAS, ValueDecl *VD, Ex
   //  If a list item is an element of a structure, and a different element of the structure has a corresponding list item in the device data environment prior to a task encountering the construct associated with the map clause, then the list item must also have a correspnding list item in the device data environment prior to the task encountering the construct.
   //
   if ( EnclosingExpr && !IsEnclosedByDataEnvironmentExpr) {
-    SemaRef.Diag(ELoc, diag::err_omp_original_storage_is_shared_in_data_environment_but_do_not_fully_contain_mapped_expression) << ERange;
+    SemaRef.Diag(ELoc, diag::err_omp_original_storage_is_shared_and_does_not_contain) << ERange;
     SemaRef.Diag(EnclosingExpr->getExprLoc(), diag::note_used_here)
         << EnclosingExpr->getSourceRange();
     return true;
@@ -8923,8 +8822,6 @@ Sema::ActOnOpenMPMapClause(OpenMPMapClauseKind MapTypeModifier,
                            ArrayRef<Expr *> VarList, SourceLocation StartLoc,
                            SourceLocation LParenLoc, SourceLocation EndLoc) {
   SmallVector<Expr *, 4> Vars;
-
-  llvm::errs() << "Getting into the map clause.\n";
 
   for (auto &RE : VarList) {
     assert(RE && "Null expr in omp map");
@@ -8969,7 +8866,6 @@ Sema::ActOnOpenMPMapClause(OpenMPMapClauseKind MapTypeModifier,
       assert(isa<CXXThisExpr>(ME->getBase()) && "Unexpected expression!");
       D = ME->getMemberDecl();
     }
-
     assert(D && "Null decl on map clause.");
 
     auto *VD = dyn_cast<VarDecl>(D);
@@ -8990,9 +8886,10 @@ Sema::ActOnOpenMPMapClause(OpenMPMapClauseKind MapTypeModifier,
     //  A list item cannot appear in both a map clause and a data-sharing attribute clause on the same construct.
     //
     // TODO: Implement this check - it cannot currently be tested because of
-    // missing implementation of the other data sharing clauses.
+    // missing implementation of the other data sharing clauses in target
+    // directives.
 
-    // Check conflicts with other map clause expressions. We check the conflicts with the current construct separatelly from the enclosing data environment, because the restrictions are different.
+    // Check conflicts with other map clause expressions. We check the conflicts with the current construct separately from the enclosing data environment, because the restrictions are different.
     if (CheckMapConflicts(*this, DSAStack, D, SimpleExpr, /*CurrentRegionOnly=*/true))
       break;
     if (CheckMapConflicts(*this, DSAStack, D, SimpleExpr, /*CurrentRegionOnly=*/false))

@@ -7699,45 +7699,28 @@ def err_omp_reduction_incomplete_type : Error<
   "a reduction list item with incomplete type %0">;
 def err_omp_unexpected_clause_value : Error<
   "expected %0 in OpenMP clause '%1'">;
-  
 def err_omp_expected_var_name : Error<
   "expected variable name">;
-  
 def err_omp_expected_var_name_or_array_item : Error<
   "expected variable name, array element or array section">;
-//  
-//def err_omp_expected_var_name_in_array_expression : Error<
-//  "expected variable name associated with array expression">;
-//def err_omp_expected_var_name_in_member_expression : Error<
-//  "expected variable name associated with member expression">;
-  
 def err_omp_expected_named_var_member_or_array_expression: Error<
   "expected expression containing only member accesses and/or array sections based on named variables">;
-
 def err_omp_bit_fields_forbidden_in_map_clause : Error<
   "bit fields cannot be used to specify storage in a map clause">;
-  
-def err_omp_array_section_ony_allowed_in_rightmost_expression : Error<
+def err_omp_array_section_in_rightmost_expression : Error<
   "array section can only be associated with the rightmost variable in a map clause expression">;
-  
 def err_omp_union_type_not_allowed : Error<
   "mapped storage cannot be derived from a union">;
-  
 def err_omp_expected_access_to_data_field : Error<
   "expected access to data field">;
-  
-def err_omp_multiple_array_items_associated_with_same_variable_not_allowed_in_map_clause : Error<
+def err_omp_multiple_array_items_in_map_clause : Error<
   "multiple array elements associated with the same variable are not allowed in map clauses of the same construct">;
-  
-def err_omp_pointer_cannot_be_mapped_along_with_a_section_derived_from_itself : Error<
+def err_omp_pointer_mapped_along_with_derived_section : Error<
   "pointer cannot be mapped along with a section derived from itself">;
-  
-def err_omp_original_storage_is_shared_in_data_environment_but_do_not_fully_contain_mapped_expression : Error<
+def err_omp_original_storage_is_shared_and_does_not_contain : Error<
   "original storage of expression in data environment is shared but data environment do not fully contain mapped expression storage">;
-  
-def err_omp_same_pointer_derreferenced_in_multiple_ways_in_map_clause : Error<
+def err_omp_same_pointer_derreferenced : Error<
   "same pointer derreferenced in multiple different ways in map clause expressions">;
-  
 def note_omp_task_predetermined_firstprivate_here : Note<
   "predetermined as a firstprivate in a task construct here">;
 def err_omp_threadprivate_incomplete_type : Error<

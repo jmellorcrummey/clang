@@ -7831,12 +7831,7 @@ public:
                                      ArrayRef<Expr *> VarList);
 
   /// \brief Initialization of captured region for OpenMP region.
-  ///
-  /// \param DKind Kind of the directive assoviated with the current OpenMP
-  ///        region. Statement associated with the current OpenMP region.
-  /// \param CurScope Scope associated with the current OpenMP region.
-  /// \param Clauses List of clauses for the current OpenMP region.
-  void ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope, ArrayRef<OMPClause *> Clauses);
+  void ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope);
   /// \brief End of OpenMP region.
   ///
   /// \param S Statement associated with the current OpenMP region.

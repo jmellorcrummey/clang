@@ -61,27 +61,6 @@ int main(int argc, char **argv) {
   #pragma omp target
   for (int n = 0; n < 100; ++n) {}
 
-  #pragma omp target
-  #pragma omp target // expected-error {{
-  {}
-
-  #pragma omp target
-  {
-    #pragma omp target // expected-error {{
-    {}
-  }
-
-  #pragma omp target
-  {
-    [&]() {
-      #pragma omp target // expected-error {{
-      {}
-    }();
-
-    #pragma omp target // expected-error {{
-    {}
-  }
-
   return 0;
 }
 
