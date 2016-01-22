@@ -1088,9 +1088,8 @@ OMPClause *Parser::ParseOpenMPVarListClause(OpenMPDirectiveKind DKind,
   // Parse ')'.
   T.consumeClose();
   if ((Kind == OMPC_depend && DepKind != OMPC_DEPEND_unknown && Vars.empty()) ||
-      (Kind != OMPC_depend && Vars.empty()) || (MustHaveTail && !TailExpr) ||
-      (Kind == OMPC_map && MapType == OMPC_MAP_unknown) ||
-      InvalidReductionId) {
+      (Kind != OMPC_depend && Kind != OMPC_map && Vars.empty()) ||
+      (MustHaveTail && !TailExpr) || InvalidReductionId) {
     return nullptr;
   }
 

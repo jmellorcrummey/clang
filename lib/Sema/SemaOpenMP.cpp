@@ -5714,6 +5714,14 @@ StmtResult Sema::ActOnOpenMPTargetDataDirective(ArrayRef<OMPClause *> Clauses,
 
   assert(isa<CapturedStmt>(AStmt) && "Captured statement expected");
 
+  // OpenMP [2.10.1, Restrictions, p. 97]
+  // At least one map clause must appear on the directive.
+  if (!HasMapClause(Clauses)) {
+    Diag(StartLoc, diag::err_omp_no_map_for_directive) <<
+        getOpenMPDirectiveName(OMPD_target_data);
+    return StmtError();
+  }
+
   getCurFunction()->setHasBranchProtectedScope();
 
   return OMPTargetDataDirective::Create(Context, StartLoc, EndLoc, Clauses,
@@ -9093,8 +9101,7 @@ Sema::ActOnOpenMPMapClause(OpenMPMapClauseKind MapTypeModifier,
           << (IsMapTypeImplicit ? 1 : 0)
           << getOpenMPSimpleClauseTypeName(OMPC_map, MapType)
           << getOpenMPDirectiveName(DKind);
-      // Proceed to add the variable in a map clause anyway, to prevent
-      // further spurious messages
+      continue;
     }
 
     // target exit_data
@@ -9109,16 +9116,15 @@ Sema::ActOnOpenMPMapClause(OpenMPMapClauseKind MapTypeModifier,
           << (IsMapTypeImplicit ? 1 : 0)
           << getOpenMPSimpleClauseTypeName(OMPC_map, MapType)
           << getOpenMPDirectiveName(DKind);
-      // Proceed to add the variable in a map clause anyway, to prevent
-      // further spurious messages
+      continue;
     }
 
     Vars.push_back(RE);
     DSAStack->addExprToVarMapInfo(D, RE);
   }
-  if (Vars.empty())
-    return nullptr;
 
+  // We need to produce a map clause even if we don't have variables so that
+  // other diagnostics related with non-existing map clauses are accurate.
   return OMPMapClause::Create(Context, StartLoc, LParenLoc, EndLoc, Vars,
                               MapTypeModifier, MapType, IsMapTypeImplicit,
                               MapLoc);
