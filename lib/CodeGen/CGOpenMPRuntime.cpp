@@ -3817,6 +3817,301 @@ void CGOpenMPRuntime::emitTargetOutlinedFunction(
   return;
 }
 
+namespace {
+// \brief Utility to extract information from the map clauses associated with a
+// given construct and provide a convenient interface to obtain the information
+// and generate code for that information.
+class OpenMPMapClauseHandler {
+public:
+  /// \brief Values for bit flags used to specify the mapping type for
+  /// offloading.
+  enum OpenMPOffloadMappingFlags {
+    /// \brief Only allocate memory on the device,
+    OMP_MAP_ALLOC = 0x00,
+    /// \brief Allocate memory on the device and move data from host to device.
+    OMP_MAP_TO = 0x01,
+    /// \brief Allocate memory on the device and move data from device to host.
+    OMP_MAP_FROM = 0x02,
+    /// \brief Always perform the requested mapping action on the element, even
+    /// if it was already mapped before.
+    OMP_MAP_ALWAYS = 0x04,
+    /// \brief Decrement the reference count associated with the element without
+    /// executing any other action.
+    OMP_MAP_RELEASE = 0x08,
+    /// \brief Delete the element from the device environment, ignoring the
+    /// current reference count associated with the element.
+    OMP_MAP_DELETE = 0x18,
+    /// \brief The element passed to the device is a pointer.
+    OMP_MAP_PTR = 0x20,
+    /// \brief Signal the element as extra, i.e. is not argument to the target
+    /// region kernel.
+    OMP_MAP_EXTRA = 0x40,
+    /// \brief Pass the element to the device by value.
+    OMP_MAP_BYCOPY = 0x80,
+  };
+
+  typedef SmallVector<llvm::Value, 16> MapValuesArrayTy;
+  typedef SmallVector<unsigned, 16> MapFlagsArrayTy;
+
+private:
+  /// \brief Directive from where the map clauses were extracted.
+  const OMPExecutableDirective &Directive;
+
+  /// \brief Function the directive is being generated for.
+  CodeGenFunction &CGF;
+
+  struct DeclarationMapInfoEntry {
+    /// \brief Array of components in the map expression.
+    typedef std::pair<const Expr *, const ValueDecl *> ComponentTy;
+    typedef llvm::SmallVector<ComponentTy, 4> ComponentsTy;
+    ComponentsTy Components;
+
+    /// \brief Expression that originated this information.
+    const Expr *OriginalExpr;
+
+    // Map type and modifier associated with this expression.
+    OpenMPMapClauseKind MapType;
+    OpenMPMapClauseKind MapTypeModifier;
+
+    /// \brief Build and initialize this map information record with information
+    /// retrieved from the provided map clause expression.
+    DeclarationMapInfoEntry(const Expr *MCE, OpenMPMapClauseKind MapType, OpenMPMapClauseKind MapTypeModifier) : OriginalExpr(MCE), MapType(MapType), MapTypeModifier(MapTypeModifier) {
+      assert(MCE && "Invalid expression??");
+      while (true) {
+        MCE = MCE->IgnoreParenImpCasts();
+
+        if (auto *CurE = dyn_cast<DeclRefExpr>(MCE)) {
+          Components.push_back(
+              ComponentTy(CurE, cast<VarDecl>(CurE->getDecl())));
+          break;
+        }
+
+        if (auto *CurE = dyn_cast<MemberExpr>(MCE)) {
+          auto *BaseE = CurE->getBase()->IgnoreParenImpCasts();
+
+          Components.push_back(ComponentTy(
+              CurE, cast<FieldDecl>(CurE->getMemberDecl())));
+          if (isa<CXXThisExpr>(BaseE))
+            break;
+
+          MCE = BaseE;
+          continue;
+        }
+
+        if (auto *CurE = dyn_cast<ArraySubscriptExpr>(MCE)) {
+          Components.push_back(ComponentTy(CurE, nullptr));
+          MCE = CurE->getBase()->IgnoreParenImpCasts();
+          continue;
+        }
+
+        if (auto *CurE = dyn_cast<OMPArraySectionExpr>(MCE)) {
+          Components.push_back(ComponentTy(CurE, nullptr));
+          MCE = CurE->getBase()->IgnoreParenImpCasts();
+          continue;
+        }
+
+        llvm_unreachable(
+            "Invalid map clause expression!");
+      }
+    }
+
+    /// \brief Return declaration associated with this map information. If it is
+    /// a field it means is associated with a field of 'this'.
+    const ValueDecl * getAssociatedDecl() const {
+      assert(!Components.empty() && "No expressions to extract declaration from??");
+      const ValueDecl *D = Components.back().second;
+      assert(D && "Declaration must exist!");
+      return D;
+    }
+  };
+
+  /// \brief Map between a declaration and its associated map information
+  /// entries. If the map info relates to 'this' we map it to null.
+  typedef SmallVector<DeclarationMapInfoEntry *, 4> DeclarationMapInfoEntriesTy;
+  llvm::DenseMap<const ValueDecl *, DeclarationMapInfoEntriesTy> DeclarationMapInfoMap;
+
+public:
+  OpenMPMapClauseHandler(const OMPExecutableDirective &Dir, CodeGenFunction &CGF) : Directive(Dir), CGF(CGF) {
+
+    // Scan and extract information from the map clauses one by one.
+    for (auto *MC : Directive.getClausesOfKind<OMPMapClause>()) {
+      for (auto *RE : MC->getVarRefs()) {
+        auto *MI = new DeclarationMapInfoEntry(RE, MC->getMapType(), MC->getMapTypeModifier());
+        const auto *D = MI->getAssociatedDecl();
+        if (isa<FieldDecl>(D))
+          DeclarationMapInfoMap[nullptr].push_back(MI);
+        else
+          DeclarationMapInfoMap[D].push_back(MI);
+      }
+    }
+  }
+
+  ~OpenMPMapClauseHandler() {
+    // Clear the entries.
+    for (auto &MapEntries : DeclarationMapInfoMap)
+      for (auto *MapEntry : MapEntries.second)
+        delete(MapEntry);
+    CGF.CurFn->dump();
+  }
+
+  /// \brief Generate all the base pointers, section pointers, sizes and map types for the extracted map information.
+  void generateAllInfo(MapValuesArrayTy &BasePointers, MapValuesArrayTy &Pointers, MapValuesArrayTy &Sizes, MapFlagsArrayTy &Types) const {
+    for (auto &MapEntries : DeclarationMapInfoMap) {
+      DeclarationMapInfoEntriesTy &MIE = MapEntries.second;
+
+      // The following summarizes what has to be generated for each map and the
+      // types bellow. The generated information is expressed in this order:
+      // base pointer, section pointer, size, flags
+      // (to add to the ones that come from the map type and modifier).
+      //
+      // double d;
+      // int i[100];
+      // float *p;
+      //
+      // struct S1 {
+      //   int i;
+      //   float f[50];
+      // }
+      // struct S2 {
+      //   int i;
+      //   float f[50];
+      //   S1 s;
+      //   double *p;
+      //   struct S2 *ps;
+      // }
+      // S2 s;
+      // S2 *ps;
+      //
+      // map(d)
+      // &d, &d, sizeof(double), noflags
+      //
+      // map(i)
+      // &i, &i, 100*sizeof(int), noflags
+      //
+      // map(i[1:23])
+      // &i(=&i[0]), &i[1], 23*sizeof(int), noflags
+      //
+      // map(p)
+      // &p, &p, sizeof(float*), noflags
+      //
+      // map(p[1:24])
+      // p, &p[1], 24*sizeof(float), noflags
+      //
+      // map(s)
+      // &s, &s, sizeof(S2), noflags
+      //
+      // map(s.i)
+      // &s, &(s.i), sizeof(int), noflags
+      //
+      // map(s.s.f)
+      // &s, &(s.i.f), 50*sizeof(int), noflags
+      //
+      // map(s.p)
+      // &s, &(s.p), sizeof(double*), noflags
+      //
+      // map(s.p[:22])
+      // &s, &(s.p), sizeof(double*), noflags
+      // &(s.p), &(s.p[0]), 22*sizeof(double), ptr_flag + extra_flag
+      //
+      // map(s.ps)
+      // &s, &(s.ps), sizeof(S2*), noflags
+      //
+      // map(s.ps->s.i)
+      // &s, &(s.ps), sizeof(S2*), noflags
+      // &(s.ps), &(s.ps->s.i), sizeof(int), ptr_flag + extra_flag
+      //
+      // map(s.ps->ps)
+      // &s, &(s.ps), sizeof(S2*), noflags
+      // &(s.ps), &(s.ps->ps), sizeof(S2*), ptr_flag + extra_flag
+      //
+      // map(s.ps->ps->ps)
+      // &s, &(s.ps), sizeof(S2*), noflags
+      // &(s.ps), &(s.ps->ps), sizeof(S2*), ptr_flag + extra_flag
+      // &(s.ps->ps), &(s.ps->ps->ps), sizeof(S2*), ptr_flag + extra_flag
+      //
+      // map(s.ps->ps->s.f[:22])
+      // &s, &(s.ps), sizeof(S2*), noflags
+      // &(s.ps), &(s.ps->ps), sizeof(S2*), ptr_flag + extra_flag
+      // &(s.ps->ps), &(s.ps->ps->s.f[0]), 22*sizeof(float), ptr_flag + extra_flag
+      //
+      // map(ps)
+      // &ps, &ps, sizeof(S2*), noflags
+      //
+      // map(ps->i)
+      // ps, &(ps->i), sizeof(int), noflags
+      //
+      // map(ps->s.f)
+      // ps, &(ps->s.f[0]), 50*sizeof(float), noflags
+      //
+      // map(ps->p)
+      // ps, &(ps->p), sizeof(double*), noflags
+      //
+      // map(ps->p[:22])
+      // ps, &(ps->p), sizeof(double*), noflags
+      // &(ps->p), &(ps->p[0]), 22*sizeof(double), ptr_flag + extra_flag
+      //
+      // map(ps->ps)
+      // ps, &(ps->ps), sizeof(S2*), noflags
+      //
+      // map(ps->ps->s.i)
+      // ps, &(ps->ps), sizeof(S2*), noflags
+      // &(ps->ps), &(ps->ps->s.i), sizeof(int), ptr_flag + extra_flag
+      //
+      // map(ps->ps->ps)
+      // ps, &(ps->ps), sizeof(S2*), noflags
+      // &(ps->ps), &(ps->ps->ps), sizeof(S2*), ptr_flag + extra_flag
+      //
+      // map(ps->ps->ps->ps)
+      // ps, &(ps->ps), sizeof(S2*), noflags
+      // &(ps->ps), &(ps->ps->ps), sizeof(S2*), ptr_flag + extra_flag
+      // &(ps->ps->ps), &(ps->ps->ps->ps), sizeof(S2*), ptr_flag + extra_flag
+      //
+      // map(ps->ps->ps->s.f[:22])
+      // ps, &(ps->ps), sizeof(S2*), noflags
+      // &(ps->ps), &(ps->ps->ps), sizeof(S2*), ptr_flag + extra_flag
+      // &(ps->ps->ps), &(ps->ps->ps->s.f[0]), 22*sizeof(float), ptr_flag + extra_flag
+
+
+      for (auto &InfoForExpr : MIE) {
+        auto CI = InfoForExpr->Components.begin();
+        auto CE = InfoForExpr->Components.end();
+
+        llvm::Value *BP = nullptr;
+
+        if (auto *ME = dyn_cast<MemberExpr>(CI->first)) {
+          // The base is the 'this' pointer. We just need to get the address.
+          BP = CGF.EmitScalarExpr(ME->getBase());
+        } else {
+          // The base is the reference to the variable.
+          BP = CGF.EmitScalarExpr(cast<DeclRefExpr>(CI->first));
+        }
+
+        for (; CI != CE; ++CI) {
+          auto *D = CI->second;
+
+          // If the variable is a pointer, generate the information up to the
+          // current component.
+          if (D && D->getType()->isAnyPointerType()){
+
+          }
+          CGF.EmitOMPArraySectionExpr()
+
+        }
+      }
+    }
+
+    return;
+  }
+
+  /// \brief Generate the base pointer, section pointer, size and map types associated to a given capture. Note that a capture may have several associated maps, the extra maps information is used to fill the pointers, sizes and types arrays passed by reference.
+  void generateInfoForCapture(const CapturedStmt::Capture *Cap, llvm::Value *&BasePointer, llvm::Value *&Pointer, llvm::Value *&Size, unsigned Type,
+      MapValuesArrayTy &ExtraBasePointers, MapValuesArrayTy &ExtraPointers, MapValuesArrayTy &ExtraSizes, MapFlagsArrayTy &ExtraTypes) {
+    return;
+  }
+
+};
+}
+
 void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
                                      const OMPExecutableDirective &D,
                                      llvm::Value *OutlinedFn,
@@ -3825,18 +4120,6 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
                                      ArrayRef<llvm::Value *> CapturedVars) {
   if (!CGF.HaveInsertPoint())
     return;
-  /// \brief Values for bit flags used to specify the mapping type for
-  /// offloading.
-  enum OpenMPOffloadMappingFlags {
-    /// \brief Allocate memory on the device and move data from host to device.
-    OMP_MAP_TO = 0x01,
-    /// \brief Allocate memory on the device and move data from device to host.
-    OMP_MAP_FROM = 0x02,
-    /// \brief The element passed to the device is a pointer.
-    OMP_MAP_PTR = 0x20,
-    /// \brief Pass the element to the device by value.
-    OMP_MAP_BYCOPY = 0x80,
-  };
 
   enum OpenMPOffloadingReservedDeviceIDs {
     /// \brief Device ID if the device was not defined, runtime should get it
@@ -3856,9 +4139,11 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
 
   bool hasVLACaptures = false;
 
+  // Get map clause information.
+  OpenMPMapClauseHandler MCHandler(D, CGF);
+
   const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
   auto RI = CS.getCapturedRecordDecl()->field_begin();
-  // auto II = CS.capture_init_begin();
   auto CV = CapturedVars.begin();
   for (CapturedStmt::const_capture_iterator CI = CS.capture_begin(),
                                             CE = CS.capture_end();
@@ -3875,16 +4160,16 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
       BasePointer = Pointer = *CV;
       Size = getTypeSize(CGF, RI->getType());
       // Copy to the device as an argument. No need to retrieve it.
-      MapType = OMP_MAP_BYCOPY;
+      MapType = OpenMPMapClauseHandler::OMP_MAP_BYCOPY;
       hasVLACaptures = true;
     } else if (CI->capturesThis()) {
       BasePointer = Pointer = *CV;
       const PointerType *PtrTy = cast<PointerType>(RI->getType().getTypePtr());
       Size = getTypeSize(CGF, PtrTy->getPointeeType());
       // Default map type.
-      MapType = OMP_MAP_TO | OMP_MAP_FROM;
+      MapType = OpenMPMapClauseHandler::OMP_MAP_TO | OpenMPMapClauseHandler::OMP_MAP_FROM;
     } else if (CI->capturesVariableByCopy()) {
-      MapType = OMP_MAP_BYCOPY;
+      MapType = OpenMPMapClauseHandler::OMP_MAP_BYCOPY;
       if (!RI->getType()->isAnyPointerType()) {
         // If the field is not a pointer, we need to save the actual value and
         // load it as a void pointer.
@@ -3906,7 +4191,7 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
         BasePointer = Pointer =
             CGF.EmitLoadOfLValue(DstLV, SourceLocation()).getScalarVal();
       } else {
-        MapType |= OMP_MAP_PTR;
+        MapType |= OpenMPMapClauseHandler::OMP_MAP_PTR;
         BasePointer = Pointer = *CV;
       }
       Size = getTypeSize(CGF, RI->getType());
@@ -3921,10 +4206,10 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
       // The default map type for a scalar/complex type is 'to' because by
       // default the value doesn't have to be retrieved. For an aggregate type,
       // the default is 'tofrom'.
-      MapType = ElementType->isAggregateType() ? (OMP_MAP_TO | OMP_MAP_FROM)
-                                               : OMP_MAP_TO;
+      MapType = ElementType->isAggregateType() ? (OpenMPMapClauseHandler::OMP_MAP_TO | OpenMPMapClauseHandler::OMP_MAP_FROM)
+                                               : OpenMPMapClauseHandler::OMP_MAP_TO;
       if (ElementType->isAnyPointerType())
-        MapType |= OMP_MAP_PTR;
+        MapType |= OpenMPMapClauseHandler::OMP_MAP_PTR;
     }
 
     BasePointers.push_back(BasePointer);
