@@ -3850,7 +3850,7 @@ public:
     OMP_MAP_BYCOPY = 0x80,
   };
 
-  typedef SmallVector<llvm::Value, 16> MapValuesArrayTy;
+  typedef SmallVector<llvm::Value *, 16> MapValuesArrayTy;
   typedef SmallVector<unsigned, 16> MapFlagsArrayTy;
 
 private:
@@ -3930,6 +3930,317 @@ private:
   typedef SmallVector<DeclarationMapInfoEntry *, 4> DeclarationMapInfoEntriesTy;
   llvm::DenseMap<const ValueDecl *, DeclarationMapInfoEntriesTy> DeclarationMapInfoMap;
 
+  /// \brief Generate the address of the element referred to by the expression \a E. If \a IsFirstElement is trus it return the address of the first element, otherwise it returns the address of the last one. This assures that the right information is passed along to the emission of array an expressions.
+  llvm::Value *getAddressOfElement(const Expr *E, bool IsFirstElement) const {
+    if (auto *OAE = dyn_cast<OMPArraySectionExpr>(E)) {
+      CGF.EmitOMPArraySectionExpr(OAE, IsFirstElement);
+    }
+    return CGF.EmitLValue(E).getPointer();
+  }
+
+  /// \brief Generate the size associated with the referred to by the expression \a E. Return by reference the addresses to the lower and upper bound associated with the expression.
+  llvm::Value *getSizeOfElement(const Expr *E, llvm::Value *&LB, llvm::Value *&UB) const {
+    LB = getAddressOfElement(E, /*IsFirstElement=*/true);
+    // This is an inclusive upper bound.
+    UB = getAddressOfElement(E, /*IsFirstElement=*/false);
+
+    //TODO: It is very common for the size to be a difference of two pointers derived from the same base. We can optimize for those cases to increase the odds of obtaining a constant size, and avoid the filling of the sizes array by creating a constant array of sizes.
+    auto ConstantSize = [&]() -> llvm::Value* {
+      // We are trying to detect these special cases:
+      // LB = %ptr
+      // UB = %ptr
+      // Size = SizeOfElem(%ptr);
+      //
+      // LB = %ptr
+      // UB = GEP(%ptr, 0, ..., 0, 123)
+      // Size = (123 + 1) * SizeOfElem(%ptr)
+      //
+      // or
+      // LB = GEP(%ptr, 0, ..., 0, 119)
+      // UB = GEP(%ptr, 0, ..., 0, 123)
+      // Size = (123 - 119 + 1) * SizeOfElem(%ptr)
+
+      // If the bounds are the same, it means we only have one element.
+      if (UB == LB)
+        return getTypeSize(CGF, E->getType());
+
+      // Upper bound must be a GEP instruction with constant indices.
+      auto *UBGEP = dyn_cast<llvm::GetElementPtrInst>(UB);
+      if (!UBGEP)
+        return nullptr;
+      if (!UBGEP->hasAllConstantIndices())
+        return nullptr;
+      auto *UBGEPPtr = UBGEP->getPointerOperand();
+
+      llvm::Value *LBElem = nullptr;
+      llvm::Value *UBElem = nullptr;
+
+      // We can only compute a constant size if the GEP of the upper bound as all zero indexes except the last one. The last index is the number of elements.
+      {
+        auto I = UBGEP->idx_begin(), E = std::prev(UBGEP->idx_end());
+        for (; I != E; ++ I){
+          // This is not the last one and it is not a zero constant, just fail.
+          if (!cast<llvm::Constant>(I)->isZeroValue())
+            return nullptr;
+        }
+        UBElem = CGF.Builder.CreateIntCast(*E, CGF.IntPtrTy, /*isSigned=*/true);
+      }
+
+      if (UBGEPPtr == LB) {
+        // If the pointer operand of the upper bound GEP is the lower bound this is like havin an all zeros lower bound GEP.
+        LBElem = llvm::Constant::getNullValue(CGF.IntPtrTy);
+      } else if (auto *LBGEP = dyn_cast<llvm::GetElementPtrInst>(LB)) {
+        // If the lower bound is also a GEP with the same base, we need to check if all indices are zero except the last one and that the number of indices is the same as in the upper bound GEP.
+        if (LBGEP->getPointerOperand() != UBGEPPtr)
+          return nullptr;
+        if (!LBGEP->hasAllConstantIndices())
+          return nullptr;
+        if (LBGEP->getNumOperands() != UBGEP->getNumOperands())
+          return nullptr;
+        auto I = LBGEP->idx_begin(), E = std::prev(LBGEP->idx_end());
+        for (; I != E; ++ I){
+          // This is not the last one and it is not a zero constant, just fail.
+          if (!cast<llvm::Constant>(I)->isZeroValue())
+            return nullptr;
+        }
+        LBElem = CGF.Builder.CreateIntCast(*E, CGF.IntPtrTy, /*isSigned=*/true);
+      } else
+        return nullptr;
+
+      assert(UBElem && LBElem && "Invalid number of elements!");
+
+      // Get size of element from the relevant expression.
+      auto *ElemSize = CGF.Builder.CreateIntCast(getTypeSize(CGF, E->getType()), CGF.IntPtrTy, /*isSigned=*/false);
+
+      // The resulting size is (UBElem - LBElem + 1) * ElemSize;
+      auto *Size = CGF.Builder.CreateNUWSub(UBElem, LBElem);
+      Size = CGF.Builder.CreateNUWAdd(Size, llvm::ConstantInt::get(CGF.IntPtrTy, 1));
+      Size = CGF.Builder.CreateNUWMul(Size, ElemSize);
+      return CGF.Builder.CreateIntCast(Size, CGF.SizeTy, /*issigned=*/false);
+    };
+
+    // Try to obtain a constant size.
+    auto *Size = ConstantSize();
+    if (Size)
+      return Size;
+
+    // We were unable to get a constant size, therefore derive the size from the addresses with appropriate pointer arithmetic.
+
+    // Get the non-inclusive upper bound to compute the size.
+    UB = CGF.Builder.CreateConstGEP1_32(UB, 1);
+
+    // Size = (uintptr_t)UB - (uintptr_t)LB;
+    Size = CGF.Builder.CreateNUWSub(CGF.Builder.CreatePtrToInt(UB, CGF.IntPtrTy), CGF.Builder.CreatePtrToInt(LB, CGF.IntPtrTy));
+    // We expect the size to have a size_t type, which may not be the same as uintptr_t for the current target.
+    return CGF.Builder.CreateIntCast(Size, CGF.SizeTy, /*isSigned=*/false);
+  }
+
+  /// \brief Return the corresponding bits for a given map clause modifier. Add a flag marking the map as a pointer if requested.
+  unsigned getMapTypeBits(const DeclarationMapInfoEntry *Entry, bool AddPtrFlag) const {
+    unsigned Bits = 0u;
+    switch (Entry->MapType) {
+    case OMPC_MAP_alloc:
+      Bits = OMP_MAP_ALLOC;
+      break;
+    case OMPC_MAP_to:
+      Bits = OMP_MAP_TO;
+      break;
+    case OMPC_MAP_from:
+      Bits = OMP_MAP_FROM;
+      break;
+    case OMPC_MAP_tofrom:
+      Bits = OMP_MAP_TO | OMP_MAP_FROM;
+      break;
+    case OMPC_MAP_delete:
+      Bits = OMP_MAP_DELETE;
+      break;
+    case OMPC_MAP_release:
+      Bits = OMP_MAP_RELEASE;
+      break;
+    default:
+      llvm_unreachable("Unexpected map type!");
+      break;
+    }
+    if (AddPtrFlag)
+      Bits |= OMP_MAP_PTR;
+    if (Entry->MapTypeModifier == OMPC_MAP_always)
+      Bits |= OMP_MAP_ALWAYS;
+    return Bits;
+  }
+
+  /// \brief Generate the base pointers, section pointers, sizes and map type bits for a give set of expressions \a MIE associated with a declaration.
+  void generateInfoForEntries(const DeclarationMapInfoEntriesTy &MIE, MapValuesArrayTy &BasePointers, MapValuesArrayTy &Pointers, MapValuesArrayTy &Sizes, MapFlagsArrayTy &Types) const {
+    // The following summarizes what has to be generated for each map and the
+    // types bellow. The generated information is expressed in this order:
+    // base pointer, section pointer, size, flags
+    // (to add to the ones that come from the map type and modifier).
+    //
+    // double d;
+    // int i[100];
+    // float *p;
+    //
+    // struct S1 {
+    //   int i;
+    //   float f[50];
+    // }
+    // struct S2 {
+    //   int i;
+    //   float f[50];
+    //   S1 s;
+    //   double *p;
+    //   struct S2 *ps;
+    // }
+    // S2 s;
+    // S2 *ps;
+    //
+    // map(d)
+    // &d, &d, sizeof(double), noflags
+    //
+    // map(i)
+    // &i, &i, 100*sizeof(int), noflags
+    //
+    // map(i[1:23])
+    // &i(=&i[0]), &i[1], 23*sizeof(int), noflags
+    //
+    // map(p)
+    // &p, &p, sizeof(float*), noflags
+    //
+    // map(p[1:24])
+    // p, &p[1], 24*sizeof(float), noflags
+    //
+    // map(s)
+    // &s, &s, sizeof(S2), noflags
+    //
+    // map(s.i)
+    // &s, &(s.i), sizeof(int), noflags
+    //
+    // map(s.s.f)
+    // &s, &(s.i.f), 50*sizeof(int), noflags
+    //
+    // map(s.p)
+    // &s, &(s.p), sizeof(double*), noflags
+    //
+    // map(s.p[:22], s.a s.b)
+    // &s, &(s.p), sizeof(double*), noflags
+    // &(s.p), &(s.p[0]), 22*sizeof(double), ptr_flag + extra_flag
+    //
+    // map(s.ps)
+    // &s, &(s.ps), sizeof(S2*), noflags
+    //
+    // map(s.ps->s.i)
+    // &s, &(s.ps), sizeof(S2*), noflags
+    // &(s.ps), &(s.ps->s.i), sizeof(int), ptr_flag + extra_flag
+    //
+    // map(s.ps->ps)
+    // &s, &(s.ps), sizeof(S2*), noflags
+    // &(s.ps), &(s.ps->ps), sizeof(S2*), ptr_flag + extra_flag
+    //
+    // map(s.ps->ps->ps)
+    // &s, &(s.ps), sizeof(S2*), noflags
+    // &(s.ps), &(s.ps->ps), sizeof(S2*), ptr_flag + extra_flag
+    // &(s.ps->ps), &(s.ps->ps->ps), sizeof(S2*), ptr_flag + extra_flag
+    //
+    // map(s.ps->ps->s.f[:22])
+    // &s, &(s.ps), sizeof(S2*), noflags
+    // &(s.ps), &(s.ps->ps), sizeof(S2*), ptr_flag + extra_flag
+    // &(s.ps->ps), &(s.ps->ps->s.f[0]), 22*sizeof(float), ptr_flag + extra_flag
+    //
+    // map(ps)
+    // &ps, &ps, sizeof(S2*), noflags
+    //
+    // map(ps->i)
+    // ps, &(ps->i), sizeof(int), noflags
+    //
+    // map(ps->s.f)
+    // ps, &(ps->s.f[0]), 50*sizeof(float), noflags
+    //
+    // map(ps->p)
+    // ps, &(ps->p), sizeof(double*), noflags
+    //
+    // map(ps->p[:22])
+    // ps, &(ps->p), sizeof(double*), noflags
+    // &(ps->p), &(ps->p[0]), 22*sizeof(double), ptr_flag + extra_flag
+    //
+    // map(ps->ps)
+    // ps, &(ps->ps), sizeof(S2*), noflags
+    //
+    // map(ps->ps->s.i)
+    // ps, &(ps->ps), sizeof(S2*), noflags
+    // &(ps->ps), &(ps->ps->s.i), sizeof(int), ptr_flag + extra_flag
+    //
+    // map(ps->ps->ps)
+    // ps, &(ps->ps), sizeof(S2*), noflags
+    // &(ps->ps), &(ps->ps->ps), sizeof(S2*), ptr_flag + extra_flag
+    //
+    // map(ps->ps->ps->ps)
+    // ps, &(ps->ps), sizeof(S2*), noflags
+    // &(ps->ps), &(ps->ps->ps), sizeof(S2*), ptr_flag + extra_flag
+    // &(ps->ps->ps), &(ps->ps->ps->ps), sizeof(S2*), ptr_flag + extra_flag
+    //
+    // map(ps->ps->ps->s.f[:22])
+    // ps, &(ps->ps), sizeof(S2*), noflags
+    // &(ps->ps), &(ps->ps->ps), sizeof(S2*), ptr_flag + extra_flag
+    // &(ps->ps->ps), &(ps->ps->ps->s.f[0]), 22*sizeof(float), ptr_flag + extra_flag
+
+    // For each expression in the map clauses...
+    for (auto *InfoForExpr : MIE) {
+      auto CI = InfoForExpr->Components.begin();
+      auto CE = InfoForExpr->Components.end();
+      bool IsExpressionFirstInfo = true;
+      llvm::Value *BP = nullptr;
+
+      if (auto *ME = dyn_cast<MemberExpr>(CI->first)) {
+        // The base is the 'this' pointer. The content of the pointer is going
+        // to be the base of the field being mapped.
+        BP = CGF.EmitLValue(ME->getBase()).getPointer();
+      } else {
+        // The base is the reference to the variable.
+        // BP = &Var.
+        BP = CGF.EmitLValue(cast<DeclRefExpr>(CI->first)).getPointer();
+
+        // If the variable is a pointer and is being dereferenced (i.e. is not the last component), the base has to be pointer itself, not his reference.
+        if (CI->second->getType()->isAnyPointerType() && std::next(CI) != CE) {
+          auto PtrAddr = CGF.MakeNaturalAlignAddrLValue(BP, CI->second->getType());
+          BP = CGF.EmitLoadOfLValue(PtrAddr,SourceLocation()).getScalarVal();
+        }
+      }
+
+      for (; CI != CE; ++CI) {
+        auto *D = CI->second;
+        auto CNext = std::next(CI);
+
+        // We need to generate the addresses and sizes if this is the last component, or if the component is a pointer. In this case, the pointer becomes the base address for the following components.
+        if (CNext == CE || (D && D->getType()->isAnyPointerType())){
+
+          if (CNext != CE) {
+            // Given that this is not the last component, we expect the pointer to be associated with an array expression or member expression. So, we can move forward.
+            ++CI;
+            assert((isa<MemberExpr>(CI->first) || isa<ArraySubscriptExpr>(CI->first) || isa<OMPArraySectionExpr>(CI->first)) && "Unexpected expression");
+          }
+
+          // Save the base we are currently using.
+          BasePointers.push_back(BP);
+
+          llvm::Value *LB;
+          llvm::Value *UB;
+          llvm::Value *Size = getSizeOfElement(CI->first, LB, UB);
+
+          Pointers.push_back(LB);
+          Sizes.push_back(Size);
+          Types.push_back(getMapTypeBits(InfoForExpr, !IsExpressionFirstInfo));
+
+          // The pointer becomes the base for the next element.
+          if (CNext != CE)
+            BP = LB;
+
+          IsExpressionFirstInfo = false;
+          continue;
+        }
+      }
+    }
+    return;
+  }
+
 public:
   OpenMPMapClauseHandler(const OMPExecutableDirective &Dir, CodeGenFunction &CGF) : Directive(Dir), CGF(CGF) {
 
@@ -3951,164 +4262,43 @@ public:
     for (auto &MapEntries : DeclarationMapInfoMap)
       for (auto *MapEntry : MapEntries.second)
         delete(MapEntry);
-    CGF.CurFn->dump();
   }
 
   /// \brief Generate all the base pointers, section pointers, sizes and map types for the extracted map information.
   void generateAllInfo(MapValuesArrayTy &BasePointers, MapValuesArrayTy &Pointers, MapValuesArrayTy &Sizes, MapFlagsArrayTy &Types) const {
+    BasePointers.clear();
+    Pointers.clear();
+    Sizes.clear();
+    Types.clear();
+
+    // For each declaration identified in the map clause...
     for (auto &MapEntries : DeclarationMapInfoMap) {
-      DeclarationMapInfoEntriesTy &MIE = MapEntries.second;
-
-      // The following summarizes what has to be generated for each map and the
-      // types bellow. The generated information is expressed in this order:
-      // base pointer, section pointer, size, flags
-      // (to add to the ones that come from the map type and modifier).
-      //
-      // double d;
-      // int i[100];
-      // float *p;
-      //
-      // struct S1 {
-      //   int i;
-      //   float f[50];
-      // }
-      // struct S2 {
-      //   int i;
-      //   float f[50];
-      //   S1 s;
-      //   double *p;
-      //   struct S2 *ps;
-      // }
-      // S2 s;
-      // S2 *ps;
-      //
-      // map(d)
-      // &d, &d, sizeof(double), noflags
-      //
-      // map(i)
-      // &i, &i, 100*sizeof(int), noflags
-      //
-      // map(i[1:23])
-      // &i(=&i[0]), &i[1], 23*sizeof(int), noflags
-      //
-      // map(p)
-      // &p, &p, sizeof(float*), noflags
-      //
-      // map(p[1:24])
-      // p, &p[1], 24*sizeof(float), noflags
-      //
-      // map(s)
-      // &s, &s, sizeof(S2), noflags
-      //
-      // map(s.i)
-      // &s, &(s.i), sizeof(int), noflags
-      //
-      // map(s.s.f)
-      // &s, &(s.i.f), 50*sizeof(int), noflags
-      //
-      // map(s.p)
-      // &s, &(s.p), sizeof(double*), noflags
-      //
-      // map(s.p[:22])
-      // &s, &(s.p), sizeof(double*), noflags
-      // &(s.p), &(s.p[0]), 22*sizeof(double), ptr_flag + extra_flag
-      //
-      // map(s.ps)
-      // &s, &(s.ps), sizeof(S2*), noflags
-      //
-      // map(s.ps->s.i)
-      // &s, &(s.ps), sizeof(S2*), noflags
-      // &(s.ps), &(s.ps->s.i), sizeof(int), ptr_flag + extra_flag
-      //
-      // map(s.ps->ps)
-      // &s, &(s.ps), sizeof(S2*), noflags
-      // &(s.ps), &(s.ps->ps), sizeof(S2*), ptr_flag + extra_flag
-      //
-      // map(s.ps->ps->ps)
-      // &s, &(s.ps), sizeof(S2*), noflags
-      // &(s.ps), &(s.ps->ps), sizeof(S2*), ptr_flag + extra_flag
-      // &(s.ps->ps), &(s.ps->ps->ps), sizeof(S2*), ptr_flag + extra_flag
-      //
-      // map(s.ps->ps->s.f[:22])
-      // &s, &(s.ps), sizeof(S2*), noflags
-      // &(s.ps), &(s.ps->ps), sizeof(S2*), ptr_flag + extra_flag
-      // &(s.ps->ps), &(s.ps->ps->s.f[0]), 22*sizeof(float), ptr_flag + extra_flag
-      //
-      // map(ps)
-      // &ps, &ps, sizeof(S2*), noflags
-      //
-      // map(ps->i)
-      // ps, &(ps->i), sizeof(int), noflags
-      //
-      // map(ps->s.f)
-      // ps, &(ps->s.f[0]), 50*sizeof(float), noflags
-      //
-      // map(ps->p)
-      // ps, &(ps->p), sizeof(double*), noflags
-      //
-      // map(ps->p[:22])
-      // ps, &(ps->p), sizeof(double*), noflags
-      // &(ps->p), &(ps->p[0]), 22*sizeof(double), ptr_flag + extra_flag
-      //
-      // map(ps->ps)
-      // ps, &(ps->ps), sizeof(S2*), noflags
-      //
-      // map(ps->ps->s.i)
-      // ps, &(ps->ps), sizeof(S2*), noflags
-      // &(ps->ps), &(ps->ps->s.i), sizeof(int), ptr_flag + extra_flag
-      //
-      // map(ps->ps->ps)
-      // ps, &(ps->ps), sizeof(S2*), noflags
-      // &(ps->ps), &(ps->ps->ps), sizeof(S2*), ptr_flag + extra_flag
-      //
-      // map(ps->ps->ps->ps)
-      // ps, &(ps->ps), sizeof(S2*), noflags
-      // &(ps->ps), &(ps->ps->ps), sizeof(S2*), ptr_flag + extra_flag
-      // &(ps->ps->ps), &(ps->ps->ps->ps), sizeof(S2*), ptr_flag + extra_flag
-      //
-      // map(ps->ps->ps->s.f[:22])
-      // ps, &(ps->ps), sizeof(S2*), noflags
-      // &(ps->ps), &(ps->ps->ps), sizeof(S2*), ptr_flag + extra_flag
-      // &(ps->ps->ps), &(ps->ps->ps->s.f[0]), 22*sizeof(float), ptr_flag + extra_flag
-
-
-      for (auto &InfoForExpr : MIE) {
-        auto CI = InfoForExpr->Components.begin();
-        auto CE = InfoForExpr->Components.end();
-
-        llvm::Value *BP = nullptr;
-
-        if (auto *ME = dyn_cast<MemberExpr>(CI->first)) {
-          // The base is the 'this' pointer. We just need to get the address.
-          BP = CGF.EmitScalarExpr(ME->getBase());
-        } else {
-          // The base is the reference to the variable.
-          BP = CGF.EmitScalarExpr(cast<DeclRefExpr>(CI->first));
-        }
-
-        for (; CI != CE; ++CI) {
-          auto *D = CI->second;
-
-          // If the variable is a pointer, generate the information up to the
-          // current component.
-          if (D && D->getType()->isAnyPointerType()){
-
-          }
-          CGF.EmitOMPArraySectionExpr()
-
-        }
-      }
+      const DeclarationMapInfoEntriesTy &MIE = MapEntries.second;
+      generateInfoForEntries(MIE, BasePointers, Pointers, Sizes, Types);
     }
-
     return;
   }
 
-  /// \brief Generate the base pointer, section pointer, size and map types associated to a given capture. Note that a capture may have several associated maps, the extra maps information is used to fill the pointers, sizes and types arrays passed by reference.
-  void generateInfoForCapture(const CapturedStmt::Capture *Cap, llvm::Value *&BasePointer, llvm::Value *&Pointer, llvm::Value *&Size, unsigned Type,
-      MapValuesArrayTy &ExtraBasePointers, MapValuesArrayTy &ExtraPointers, MapValuesArrayTy &ExtraSizes, MapFlagsArrayTy &ExtraTypes) {
+  /// \brief Generate the base pointers, section pointers, sizes and map types associated to a given capture.
+  void generateInfoForCapture(const CapturedStmt::Capture *Cap, MapValuesArrayTy &BasePointers, MapValuesArrayTy &Pointers, MapValuesArrayTy &Sizes, MapFlagsArrayTy &Types) const {
+    assert(!Cap->capturesVariableArrayType() && "Not expecting to generate map info for a variable array type!");
+
+    BasePointers.clear();
+    Pointers.clear();
+    Sizes.clear();
+    Types.clear();
+
+    const ValueDecl *VD = Cap->capturesThis() ? nullptr : Cap->getCapturedVar();
+    auto I = DeclarationMapInfoMap.find(VD);
+    if (I == DeclarationMapInfoMap.end())
+      return;
+
+    const DeclarationMapInfoEntriesTy &MIE = I->second;
+    assert(!MIE.empty() && "Not expecting declaration with empty information!");
+    generateInfoForEntries(MIE, BasePointers, Pointers, Sizes, Types);
+
     return;
   }
-
 };
 }
 
@@ -4131,13 +4321,19 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
 
   auto &Ctx = CGF.getContext();
 
-  // Fill up the arrays with the all the captured variables.
-  SmallVector<llvm::Value *, 16> BasePointers;
-  SmallVector<llvm::Value *, 16> Pointers;
-  SmallVector<llvm::Value *, 16> Sizes;
-  SmallVector<unsigned, 16> MapTypes;
+  // Fill up the arrays with all the captured variables.
+  OpenMPMapClauseHandler::MapValuesArrayTy KernelArgs;
+  OpenMPMapClauseHandler::MapValuesArrayTy BasePointers;
+  OpenMPMapClauseHandler::MapValuesArrayTy Pointers;
+  OpenMPMapClauseHandler::MapValuesArrayTy Sizes;
+  OpenMPMapClauseHandler::MapFlagsArrayTy MapTypes;
 
-  bool hasVLACaptures = false;
+  OpenMPMapClauseHandler::MapValuesArrayTy CurBasePointers;
+  OpenMPMapClauseHandler::MapValuesArrayTy CurPointers;
+  OpenMPMapClauseHandler::MapValuesArrayTy CurSizes;
+  OpenMPMapClauseHandler::MapFlagsArrayTy CurMapTypes;
+
+  bool hasRuntimeEvaluationCaptureSize = false;
 
   // Get map clause information.
   OpenMPMapClauseHandler MCHandler(D, CGF);
@@ -4150,73 +4346,97 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
        CI != CE; ++CI, ++RI, ++CV) {
     StringRef Name;
     QualType Ty;
-    llvm::Value *BasePointer;
-    llvm::Value *Pointer;
-    llvm::Value *Size;
-    unsigned MapType;
 
-    // VLA sizes are passed to the outlined region by copy.
+    CurBasePointers.clear();
+    CurPointers.clear();
+    CurSizes.clear();
+    CurMapTypes.clear();
+
+    // VLA sizes are passed to the outlined region by copy and do not have map information associated.
     if (CI->capturesVariableArrayType()) {
-      BasePointer = Pointer = *CV;
-      Size = getTypeSize(CGF, RI->getType());
+      CurBasePointers.push_back(*CV);
+      CurPointers.push_back(*CV);
+      CurSizes.push_back(getTypeSize(CGF, RI->getType()));
       // Copy to the device as an argument. No need to retrieve it.
-      MapType = OpenMPMapClauseHandler::OMP_MAP_BYCOPY;
-      hasVLACaptures = true;
-    } else if (CI->capturesThis()) {
-      BasePointer = Pointer = *CV;
-      const PointerType *PtrTy = cast<PointerType>(RI->getType().getTypePtr());
-      Size = getTypeSize(CGF, PtrTy->getPointeeType());
-      // Default map type.
-      MapType = OpenMPMapClauseHandler::OMP_MAP_TO | OpenMPMapClauseHandler::OMP_MAP_FROM;
-    } else if (CI->capturesVariableByCopy()) {
-      MapType = OpenMPMapClauseHandler::OMP_MAP_BYCOPY;
-      if (!RI->getType()->isAnyPointerType()) {
-        // If the field is not a pointer, we need to save the actual value and
-        // load it as a void pointer.
-        auto DstAddr = CGF.CreateMemTemp(
-            Ctx.getUIntPtrType(),
-            Twine(CI->getCapturedVar()->getName()) + ".casted");
-        LValue DstLV = CGF.MakeAddrLValue(DstAddr, Ctx.getUIntPtrType());
-
-        auto *SrcAddrVal = CGF.EmitScalarConversion(
-            DstAddr.getPointer(), Ctx.getPointerType(Ctx.getUIntPtrType()),
-            Ctx.getPointerType(RI->getType()), SourceLocation());
-        LValue SrcLV =
-            CGF.MakeNaturalAlignAddrLValue(SrcAddrVal, RI->getType());
-
-        // Store the value using the source type pointer.
-        CGF.EmitStoreThroughLValue(RValue::get(*CV), SrcLV);
-
-        // Load the value using the destination type pointer.
-        BasePointer = Pointer =
-            CGF.EmitLoadOfLValue(DstLV, SourceLocation()).getScalarVal();
-      } else {
-        MapType |= OpenMPMapClauseHandler::OMP_MAP_PTR;
-        BasePointer = Pointer = *CV;
-      }
-      Size = getTypeSize(CGF, RI->getType());
+      CurMapTypes.push_back(OpenMPMapClauseHandler::OMP_MAP_BYCOPY);
+      hasRuntimeEvaluationCaptureSize = true;
     } else {
-      assert(CI->capturesVariable() && "Expected captured reference.");
-      BasePointer = Pointer = *CV;
+      // If we have any information in the map clause, we use it, otherwise we just do a default mapping.
+      MCHandler.generateInfoForCapture(CI,CurBasePointers, CurPointers, CurSizes, CurMapTypes);
 
-      const ReferenceType *PtrTy =
-          cast<ReferenceType>(RI->getType().getTypePtr());
-      QualType ElementType = PtrTy->getPointeeType();
-      Size = getTypeSize(CGF, ElementType);
-      // The default map type for a scalar/complex type is 'to' because by
-      // default the value doesn't have to be retrieved. For an aggregate type,
-      // the default is 'tofrom'.
-      MapType = ElementType->isAggregateType() ? (OpenMPMapClauseHandler::OMP_MAP_TO | OpenMPMapClauseHandler::OMP_MAP_FROM)
-                                               : OpenMPMapClauseHandler::OMP_MAP_TO;
-      if (ElementType->isAnyPointerType())
-        MapType |= OpenMPMapClauseHandler::OMP_MAP_PTR;
+      if (CurBasePointers.empty()) {
+        // Do the default mapping.
+        if (CI->capturesThis()) {
+          CurBasePointers.push_back(*CV);
+          CurPointers.push_back(*CV);
+          const PointerType *PtrTy = cast<PointerType>(RI->getType().getTypePtr());
+          CurSizes.push_back(getTypeSize(CGF, PtrTy->getPointeeType()));
+          // Default map type.
+          CurMapTypes.push_back(OpenMPMapClauseHandler::OMP_MAP_TO | OpenMPMapClauseHandler::OMP_MAP_FROM);
+        } else if (CI->capturesVariableByCopy()) {
+          CurMapTypes.push_back(OpenMPMapClauseHandler::OMP_MAP_BYCOPY);
+          if (!RI->getType()->isAnyPointerType()) {
+            // If the field is not a pointer, we need to save the actual value and
+            // load it as a void pointer.
+            auto DstAddr = CGF.CreateMemTemp(
+                Ctx.getUIntPtrType(),
+                Twine(CI->getCapturedVar()->getName()) + ".casted");
+            LValue DstLV = CGF.MakeAddrLValue(DstAddr, Ctx.getUIntPtrType());
+
+            auto *SrcAddrVal = CGF.EmitScalarConversion(
+                DstAddr.getPointer(), Ctx.getPointerType(Ctx.getUIntPtrType()),
+                Ctx.getPointerType(RI->getType()), SourceLocation());
+            LValue SrcLV =
+                CGF.MakeNaturalAlignAddrLValue(SrcAddrVal, RI->getType());
+
+            // Store the value using the source type pointer.
+            CGF.EmitStoreThroughLValue(RValue::get(*CV), SrcLV);
+
+            // Load the value using the destination type pointer.
+            CurBasePointers.push_back(CGF.EmitLoadOfLValue(DstLV, SourceLocation()).getScalarVal());
+            CurPointers.push_back(CurBasePointers.back());
+          } else {
+            CurBasePointers.push_back(*CV);
+            CurPointers.push_back(*CV);
+          }
+          CurSizes.push_back(getTypeSize(CGF, RI->getType()));
+        } else {
+          assert(CI->capturesVariable() && "Expected captured reference.");
+          CurBasePointers.push_back(*CV);
+          CurPointers.push_back(*CV);
+
+          const ReferenceType *PtrTy =
+              cast<ReferenceType>(RI->getType().getTypePtr());
+          QualType ElementType = PtrTy->getPointeeType();
+          CurSizes.push_back(getTypeSize(CGF, ElementType));
+          // The default map type for a scalar/complex type is 'to' because by
+          // default the value doesn't have to be retrieved. For an aggregate type,
+          // the default is 'tofrom'.
+          CurMapTypes.push_back(ElementType->isAggregateType() ? (OpenMPMapClauseHandler::OMP_MAP_TO | OpenMPMapClauseHandler::OMP_MAP_FROM)
+                                                   : OpenMPMapClauseHandler::OMP_MAP_TO);
+        }
+      }
     }
+    // We expect to have at least an element of information for this capture.
+    assert(!CurBasePointers.empty() && "Non-existing map pointer for capture!");
+    assert(CurBasePointers.size() == CurPointers.size() && CurBasePointers.size() == CurSizes.size() && CurBasePointers.size() == CurMapTypes.size() && "Inconsistent map information sizes!");
 
-    BasePointers.push_back(BasePointer);
-    Pointers.push_back(Pointer);
-    Sizes.push_back(Size);
-    MapTypes.push_back(MapType);
+    // The kernel args are always the first elements of the base pointers associated with a capture.
+    KernelArgs.push_back(CurBasePointers.front());
+    // We need to append the results of this capture to what we already have.
+    BasePointers.append(CurBasePointers.begin(),CurBasePointers.end());
+    Pointers.append(CurPointers.begin(),CurPointers.end());
+    Sizes.append(CurSizes.begin(),CurSizes.end());
+    MapTypes.append(CurMapTypes.begin(),CurMapTypes.end());
   }
+
+  // Detect if we have any capture size requiring runtime evaluation of the size so that a constant array could be eventually used. If hasRuntimeEvaluationCaptureSize is set, we already know the answer.
+  if (!hasRuntimeEvaluationCaptureSize)
+    for (auto *S : CurSizes)
+      if (!isa<llvm::Constant>(S)) {
+        hasRuntimeEvaluationCaptureSize = true;
+        break;
+      }
 
   // Keep track on whether the host function has to be executed.
   auto OffloadErrorQType =
@@ -4229,8 +4449,8 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
 
   // Fill up the pointer arrays and transfer execution to the device.
   auto &&ThenGen = [this, &Ctx, &BasePointers, &Pointers, &Sizes, &MapTypes,
-                    hasVLACaptures, Device, OutlinedFnID, OffloadError,
-                    OffloadErrorQType](CodeGenFunction &CGF) {
+                    hasRuntimeEvaluationCaptureSize, Device, OutlinedFnID,
+                    OffloadError, OffloadErrorQType](CodeGenFunction &CGF) {
     unsigned PointerNumVal = BasePointers.size();
     llvm::Value *PointerNum = CGF.Builder.getInt32(PointerNumVal);
     llvm::Value *BasePointersArray;
@@ -4252,7 +4472,7 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
       // If we don't have any VLA types, we can use a constant array for the map
       // sizes, otherwise we need to fill up the arrays as we do for the
       // pointers.
-      if (hasVLACaptures) {
+      if (hasRuntimeEvaluationCaptureSize) {
         QualType SizeArrayType = Ctx.getConstantArrayType(
             Ctx.getSizeType(), PointerNumAP, ArrayType::Normal,
             /*IndexTypeQuals=*/0);
@@ -4316,7 +4536,7 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
         Address PAddr(P, Ctx.getTypeAlignInChars(Ctx.VoidPtrTy));
         CGF.Builder.CreateStore(PVal, PAddr);
 
-        if (hasVLACaptures) {
+        if (hasRuntimeEvaluationCaptureSize) {
           llvm::Value *S = CGF.Builder.CreateConstInBoundsGEP2_32(
               llvm::ArrayType::get(CGM.SizeTy, PointerNumVal), SizesArray,
               /*Idx0=*/0,
@@ -4411,7 +4631,7 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
   CGF.Builder.CreateCondBr(Failed, OffloadFailedBlock, OffloadContBlock);
 
   CGF.EmitBlock(OffloadFailedBlock);
-  CGF.Builder.CreateCall(OutlinedFn, BasePointers);
+  CGF.Builder.CreateCall(OutlinedFn, KernelArgs);
   CGF.EmitBranch(OffloadContBlock);
 
   CGF.EmitBlock(OffloadContBlock, /*IsFinished=*/true);
