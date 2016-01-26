@@ -1389,6 +1389,7 @@ public:
     CFITCK_NVCall,
     CFITCK_DerivedCast,
     CFITCK_UnrelatedCast,
+    CFITCK_ICall,
   };
 
   /// \brief Derived is the presumed address of an object of type T after a
@@ -2205,6 +2206,8 @@ public:
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S,
                            ArrayRef<const Attr *> Attrs = None);
 
+  /// Returns calculated size of the specified type.
+  llvm::Value *getTypeSize(QualType Ty);
   LValue InitCapturedStruct(const CapturedStmt &S);
   llvm::Function *EmitCapturedStmt(const CapturedStmt &S, CapturedRegionKind K);
   llvm::Function *GenerateCapturedStmtFunction(const CapturedStmt &S);
@@ -2340,6 +2343,7 @@ public:
   void EmitOMPTargetDataDirective(const OMPTargetDataDirective &S);
   void EmitOMPTargetEnterDataDirective(const OMPTargetEnterDataDirective &S);
   void EmitOMPTargetExitDataDirective(const OMPTargetExitDataDirective &S);
+  void EmitOMPTargetParallelDirective(const OMPTargetParallelDirective &S);
   void EmitOMPTeamsDirective(const OMPTeamsDirective &S);
   void
   EmitOMPCancellationPointDirective(const OMPCancellationPointDirective &S);
@@ -2711,6 +2715,8 @@ public:
   RValue EmitCUDAKernelCallExpr(const CUDAKernelCallExpr *E,
                                 ReturnValueSlot ReturnValue);
 
+  RValue EmitCUDADevicePrintfCallExpr(const CallExpr *E,
+                                      ReturnValueSlot ReturnValue);
 
   RValue EmitBuiltinExpr(const FunctionDecl *FD,
                          unsigned BuiltinID, const CallExpr *E,
@@ -3016,8 +3022,9 @@ public:
 
   /// \brief Emit a slow path cross-DSO CFI check which calls __cfi_slowpath
   /// if Cond if false.
-  void EmitCfiSlowPathCheck(llvm::Value *Cond, llvm::ConstantInt *TypeId,
-                            llvm::Value *Ptr);
+  void EmitCfiSlowPathCheck(SanitizerMask Kind, llvm::Value *Cond,
+                            llvm::ConstantInt *TypeId, llvm::Value *Ptr,
+                            ArrayRef<llvm::Constant *> StaticArgs);
 
   /// \brief Create a basic block that will call the trap intrinsic, and emit a
   /// conditional branch to it, for the -ftrapv checks.
@@ -3026,6 +3033,9 @@ public:
   /// \brief Emit a call to trap or debugtrap and attach function attribute
   /// "trap-func-name" if specified.
   llvm::CallInst *EmitTrapCall(llvm::Intrinsic::ID IntrID);
+
+  /// \brief Emit a cross-DSO CFI failure handling function.
+  void EmitCfiCheckFail();
 
   /// \brief Create a check for a function parameter that may potentially be
   /// declared as non-null.

@@ -6423,8 +6423,11 @@ def warn_kern_is_method : Extension<
 def warn_kern_is_inline : Warning<
   "ignored 'inline' attribute on kernel function %0">,
   InGroup<CudaCompat>;
+def err_variadic_device_fn : Error<
+  "CUDA device code does not support variadic functions">;
 def err_va_arg_in_device : Error<
   "CUDA device code does not support va_arg">;
+def err_alias_not_supported_on_nvptx : Error<"CUDA does not support aliases">;
 
 def warn_non_pod_vararg_with_format_string : Warning<
   "cannot pass %select{non-POD|non-trivial}0 object of type %1 to variadic "
@@ -7677,6 +7680,16 @@ def err_atomic_init_constant : Error<
 def err_opencl_implicit_vector_conversion : Error<
   "implicit conversions between vector types (%0 and %1) are not permitted">;
 
+// OpenCL v2.0 s6.13.6 -- Builtin Pipe Functions
+def err_opencl_builtin_pipe_first_arg : Error<
+  "first argument to %0 must be a pipe type">;
+def err_opencl_builtin_pipe_arg_num : Error<
+    "invalid number of arguments to function: %0">;
+def err_opencl_builtin_pipe_invalid_arg : Error<
+  "invalid argument type to function %0 (expecting %1)">;
+def err_opencl_builtin_pipe_invalid_access_modifier : Error<
+  "invalid pipe access modifier (expecting %0)">;
+
 // OpenCL Section 6.8.g
 def err_opencl_unknown_type_specifier : Error<
   "OpenCL does not support the '%0' %select{type qualifier|storage class specifier}1">;
@@ -7834,8 +7847,6 @@ def warn_omp_loop_64_bit_var : Warning<
   InGroup<OpenMPLoopForm>;
 def err_omp_unknown_reduction_identifier : Error<
   "incorrect reduction identifier, expected one of '+', '-', '*', '&', '|', '^', '&&', '||', 'min' or 'max'">;
-def err_omp_reduction_type_array : Error<
-  "a reduction list item with array type %0">;
 def err_omp_reduction_ref_type_arg : Error<
   "argument of OpenMP clause 'reduction' must reference the same object in all threads">;
 def err_omp_clause_not_arithmetic_type_arg : Error<
