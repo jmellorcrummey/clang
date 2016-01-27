@@ -1019,133 +1019,133 @@ void implicit_maps_template_type_capture (int a){
 // RxUN: %clang_cc1 -DCK19 -verify -fopenmp -omptargets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -emit-llvm %s -o - | FileCheck %s  --check-prefix CK19 --check-prefix CK19-32
 // RxUN: %clang_cc1 -DCK19 -fopenmp -omptargets=i386-pc-linux-gnu -x c++ -std=c++11 -triple i386-unknown-unknown -emit-pch -o %t %s
 // RxUN: %clang_cc1 -fopenmp -omptargets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -std=c++11 -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s  --check-prefix CK19 --check-prefix CK19-32
-#ifndef CK19
+#ifdef CK19
 
 // CK19-LABEL: explicit_maps_single
 void explicit_maps_single (int ii){
 
   // Map of a scalar.
   int a = ii;
-//  #pragma omp target map(alloc:a)
-//  {
-//    ++a;
-//  }
+  #pragma omp target map(alloc:a)
+  {
+    ++a;
+  }
 
-//  // Map of an array.
+  // Map of an array.
   int arra[100];
-//  #pragma omp target map(to:arra)
-//  {
-//    arra[50]++;
-//  }
+  #pragma omp target map(to:arra)
+  {
+    arra[50]++;
+  }
 
   #pragma omp target map(from:arra[20:60])
   {
     arra[50]++;
   }
-//
-//  #pragma omp target map(tofrom:arra[:60])
-//  {
-//    arra[50]++;
-//  }
-//
-//  #pragma omp target map(alloc:arra[:])
-//  {
-//    arra[50]++;
-//  }
-//
-//  #pragma omp target map(to:arra[15])
-//  {
-//    arra[15]++;
-//  }
-//
-//  #pragma omp target map(tofrom:arra[ii:ii+23])
-//  {
-//    arra[50]++;
-//  }
-//
-//  #pragma omp target map(alloc:arra[:ii])
-//  {
-//    arra[50]++;
-//  }
-//
-//  #pragma omp target map(tofrom:arra[ii])
-//  {
-//    arra[15]++;
-//  }
-//
-//  // Map of a pointer.
-//  int *pa;
-//  #pragma omp target map(from:pa)
-//  {
-//    pa[50]++;
-//  }
-//
-//  #pragma omp target map(tofrom:pa[20:60])
-//  {
-//    pa[50]++;
-//  }
-//
-//  #pragma omp target map(alloc:pa[:60])
-//  {
-//    pa[50]++;
-//  }
-//
-//  #pragma omp target map(to:pa[15])
-//  {
-//    pa[15]++;
-//  }
-//
-//  #pragma omp target map(alloc:pa[ii-23:ii])
-//  {
-//    pa[50]++;
-//  }
-//
-//  #pragma omp target map(to:pa[:ii])
-//  {
-//    pa[50]++;
-//  }
-//
-//  #pragma omp target map(from:pa[ii+12])
-//  {
-//    pa[15]++;
-//  }
-//
-//  // Map of a variable-size array.
-//  int va[ii];
-//  #pragma omp target map(to:va)
-//  {
-//   va[50]++;
-//  }
-//
-//  #pragma omp target map(from:va[20:60])
-//  {
-//   va[50]++;
-//  }
-//
-//  #pragma omp target map(tofrom:va[:60])
-//  {
-//   va[50]++;
-//  }
-//
-//  #pragma omp target map(alloc:va[:])
-//  {
-//   va[50]++;
-//  }
-//
-//  #pragma omp target map(to:va[15])
-//  {
-//   va[15]++;
-//  }
-//
-//  #pragma omp target map(tofrom:va[ii:ii+23])
-//  {
-//   va[50]++;
-//  }
-//
-//  #pragma omp target map(tofrom:va[ii])
-//  {
-//   va[15]++;
-//  }
+
+  #pragma omp target map(tofrom:arra[:60])
+  {
+    arra[50]++;
+  }
+
+  #pragma omp target map(alloc:arra[:])
+  {
+    arra[50]++;
+  }
+
+  #pragma omp target map(to:arra[15])
+  {
+    arra[15]++;
+  }
+
+  #pragma omp target map(tofrom:arra[ii:ii+23])
+  {
+    arra[50]++;
+  }
+
+  #pragma omp target map(alloc:arra[:ii])
+  {
+    arra[50]++;
+  }
+
+  #pragma omp target map(tofrom:arra[ii])
+  {
+    arra[15]++;
+  }
+
+  // Map of a pointer.
+  int *pa;
+  #pragma omp target map(from:pa)
+  {
+    pa[50]++;
+  }
+
+  #pragma omp target map(tofrom:pa[20:60])
+  {
+    pa[50]++;
+  }
+
+  #pragma omp target map(alloc:pa[:60])
+  {
+    pa[50]++;
+  }
+
+  #pragma omp target map(to:pa[15])
+  {
+    pa[15]++;
+  }
+
+  #pragma omp target map(alloc:pa[ii-23:ii])
+  {
+    pa[50]++;
+  }
+
+  #pragma omp target map(to:pa[:ii])
+  {
+    pa[50]++;
+  }
+
+  #pragma omp target map(from:pa[ii+12])
+  {
+    pa[15]++;
+  }
+
+  // Map of a variable-size array.
+  int va[ii];
+  #pragma omp target map(to:va)
+  {
+   va[50]++;
+  }
+
+  #pragma omp target map(from:va[20:60])
+  {
+   va[50]++;
+  }
+
+  #pragma omp target map(tofrom:va[:60])
+  {
+   va[50]++;
+  }
+
+  #pragma omp target map(alloc:va[:])
+  {
+   va[50]++;
+  }
+
+  #pragma omp target map(to:va[15])
+  {
+   va[15]++;
+  }
+
+  #pragma omp target map(tofrom:va[ii:ii+23])
+  {
+   va[50]++;
+  }
+
+  #pragma omp target map(tofrom:va[ii])
+  {
+   va[15]++;
+  }
 }
 #endif
 
@@ -1168,7 +1168,7 @@ void explicit_maps_references_and_function_args (int a, float b, int (&c)[10], f
 }
 #endif
 
-#ifdef CK21
+#ifndef CK21
 
 template <int X, typename T>
 struct CC {

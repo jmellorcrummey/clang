@@ -3907,109 +3907,153 @@ private:
   typedef SmallVector<DeclarationMapInfoEntry *, 4> DeclarationMapInfoEntriesTy;
   llvm::DenseMap<const ValueDecl *, DeclarationMapInfoEntriesTy> DeclarationMapInfoMap;
 
-  /// \brief Generate the address of the element referred to by the expression \a E. If \a IsFirstElement is trus it return the address of the first element, otherwise it returns the address of the last one. This assures that the right information is passed along to the emission of array an expressions.
-  llvm::Value *getAddressOfElement(const Expr *E, bool IsFirstElement) const {
-    if (auto *OAE = dyn_cast<OMPArraySectionExpr>(E)) {
-      CGF.EmitOMPArraySectionExpr(OAE, IsFirstElement);
-    }
-    return CGF.EmitLValue(E).getPointer();
-  }
+//  /// \brief Generate the address of the element referred to by the expression \a E. If \a IsFirstElement is trus it return the address of the first element, otherwise it returns the address of the last one. This assures that the right information is passed along to the emission of array an expressions.
+//  llvm::Value *getAddressOfElement(const Expr *E, bool IsFirstElement) const {
+//    if (auto *OAE = dyn_cast<OMPArraySectionExpr>(E)) {
+//      CGF.EmitOMPArraySectionExpr(OAE, IsFirstElement);
+//    }
+//    return CGF.EmitLValue(E).getPointer();
+//  }
+//
+//  /// \brief Generate the size associated with the referred to by the expression \a E. Return by reference the addresses to the lower and upper bound associated with the expression.
+//  llvm::Value *getSizeOfElement(const Expr *E, llvm::Value *&LB, llvm::Value *&UB) const {
+//    LB = getAddressOfElement(E, /*IsFirstElement=*/true);
+//    // This is an inclusive upper bound.
+//    UB = getAddressOfElement(E, /*IsFirstElement=*/false);
+//
+//    //TODO: It is very common for the size to be a difference of two pointers derived from the same base. We can optimize for those cases to increase the odds of obtaining a constant size, and avoid the filling of the sizes array by creating a constant array of sizes.
+//    auto ConstantSize = [&]() -> llvm::Value* {
+//      // We are trying to detect these special cases:
+//      // LB = %ptr
+//      // UB = %ptr
+//      // Size = SizeOfElem(%ptr);
+//      //
+//      // LB = %ptr
+//      // UB = GEP(%ptr, 0, ..., 0, 123)
+//      // Size = (123 + 1) * SizeOfElem(%ptr)
+//      //
+//      // or
+//      // LB = GEP(%ptr, 0, ..., 0, 119)
+//      // UB = GEP(%ptr, 0, ..., 0, 123)
+//      // Size = (123 - 119 + 1) * SizeOfElem(%ptr)
+//
+//      // If the bounds are the same, it means we only have one element.
+//      if (UB == LB)
+//        return CGF.getTypeSize(E->getType());
+//
+//      // Upper bound must be a GEP instruction with constant indices.
+//      auto *UBGEP = dyn_cast<llvm::GetElementPtrInst>(UB);
+//      if (!UBGEP)
+//        return nullptr;
+//      if (!UBGEP->hasAllConstantIndices())
+//        return nullptr;
+//      auto *UBGEPPtr = UBGEP->getPointerOperand();
+//
+//      llvm::Value *LBElem = nullptr;
+//      llvm::Value *UBElem = nullptr;
+//
+//      // We can only compute a constant size if the GEP of the upper bound as all zero indexes except the last one. The last index is the number of elements.
+//      {
+//        auto I = UBGEP->idx_begin(), E = std::prev(UBGEP->idx_end());
+//        for (; I != E; ++ I){
+//          // This is not the last one and it is not a zero constant, just fail.
+//          if (!cast<llvm::Constant>(I)->isZeroValue())
+//            return nullptr;
+//        }
+//        UBElem = CGF.Builder.CreateIntCast(*E, CGF.IntPtrTy, /*isSigned=*/true);
+//      }
+//
+//      if (UBGEPPtr == LB) {
+//        // If the pointer operand of the upper bound GEP is the lower bound this is like havin an all zeros lower bound GEP.
+//        LBElem = llvm::Constant::getNullValue(CGF.IntPtrTy);
+//      } else if (auto *LBGEP = dyn_cast<llvm::GetElementPtrInst>(LB)) {
+//        // If the lower bound is also a GEP with the same base, we need to check if all indices are zero except the last one and that the number of indices is the same as in the upper bound GEP.
+//        if (LBGEP->getPointerOperand() != UBGEPPtr)
+//          return nullptr;
+//        if (!LBGEP->hasAllConstantIndices())
+//          return nullptr;
+//        if (LBGEP->getNumOperands() != UBGEP->getNumOperands())
+//          return nullptr;
+//        auto I = LBGEP->idx_begin(), E = std::prev(LBGEP->idx_end());
+//        for (; I != E; ++ I){
+//          // This is not the last one and it is not a zero constant, just fail.
+//          if (!cast<llvm::Constant>(I)->isZeroValue())
+//            return nullptr;
+//        }
+//        LBElem = CGF.Builder.CreateIntCast(*E, CGF.IntPtrTy, /*isSigned=*/true);
+//      } else
+//        return nullptr;
+//
+//      assert(UBElem && LBElem && "Invalid number of elements!");
+//
+//      // Get size of element from the relevant expression.
+//      auto *ElemSize = CGF.Builder.CreateIntCast(CGF.getTypeSize(E->getType()), CGF.IntPtrTy, /*isSigned=*/false);
+//
+//      // The resulting size is (UBElem - LBElem + 1) * ElemSize;
+//      auto *Size = CGF.Builder.CreateNUWSub(UBElem, LBElem);
+//      Size = CGF.Builder.CreateNUWAdd(Size, llvm::ConstantInt::get(CGF.IntPtrTy, 1));
+//      Size = CGF.Builder.CreateNUWMul(Size, ElemSize);
+//      return CGF.Builder.CreateIntCast(Size, CGF.SizeTy, /*issigned=*/false);
+//    };
+//
+//    // Try to obtain a constant size.
+//    auto *Size = ConstantSize();
+//    if (Size)
+//      return Size;
+//
+//    // We were unable to get a constant size, therefore derive the size from the addresses with appropriate pointer arithmetic.
+//
+//    // Get the non-inclusive upper bound to compute the size.
+//    UB = CGF.Builder.CreateConstGEP1_32(UB, 1);
+//
+//    // Size = (uintptr_t)UB - (uintptr_t)LB;
+//    Size = CGF.Builder.CreateNUWSub(CGF.Builder.CreatePtrToInt(UB, CGF.IntPtrTy), CGF.Builder.CreatePtrToInt(LB, CGF.IntPtrTy));
+//    // We expect the size to have a size_t type, which may not be the same as uintptr_t for the current target.
+//    return CGF.Builder.CreateIntCast(Size, CGF.SizeTy, /*isSigned=*/false);
+//  }
 
-  /// \brief Generate the size associated with the referred to by the expression \a E. Return by reference the addresses to the lower and upper bound associated with the expression.
-  llvm::Value *getSizeOfElement(const Expr *E, llvm::Value *&LB, llvm::Value *&UB) const {
-    LB = getAddressOfElement(E, /*IsFirstElement=*/true);
-    // This is an inclusive upper bound.
-    UB = getAddressOfElement(E, /*IsFirstElement=*/false);
 
-    //TODO: It is very common for the size to be a difference of two pointers derived from the same base. We can optimize for those cases to increase the odds of obtaining a constant size, and avoid the filling of the sizes array by creating a constant array of sizes.
-    auto ConstantSize = [&]() -> llvm::Value* {
-      // We are trying to detect these special cases:
-      // LB = %ptr
-      // UB = %ptr
-      // Size = SizeOfElem(%ptr);
-      //
-      // LB = %ptr
-      // UB = GEP(%ptr, 0, ..., 0, 123)
-      // Size = (123 + 1) * SizeOfElem(%ptr)
-      //
-      // or
-      // LB = GEP(%ptr, 0, ..., 0, 119)
-      // UB = GEP(%ptr, 0, ..., 0, 123)
-      // Size = (123 - 119 + 1) * SizeOfElem(%ptr)
+  llvm::Value *getExprTypeSize(const Expr *E) const {
+    auto ExprTy = E->getType().getCanonicalType();
 
-      // If the bounds are the same, it means we only have one element.
-      if (UB == LB)
-        return CGF.getTypeSize(E->getType());
+    // Reference types are ignored for mapping purposes.
+    if (auto *RefTy = ExprTy->getAs<ReferenceType>())
+      ExprTy = RefTy->getPointeeType().getCanonicalType();
 
-      // Upper bound must be a GEP instruction with constant indices.
-      auto *UBGEP = dyn_cast<llvm::GetElementPtrInst>(UB);
-      if (!UBGEP)
-        return nullptr;
-      if (!UBGEP->hasAllConstantIndices())
-        return nullptr;
-      auto *UBGEPPtr = UBGEP->getPointerOperand();
+    // Given that an array section is considered a built in type, we need to
+    // do the calculation based on the length of the section instead of relying
+    // on CGF.getTypeSize(E->getType()).
+    if (const auto *OAE = dyn_cast<OMPArraySectionExpr>(E)) {
 
-      llvm::Value *LBElem = nullptr;
-      llvm::Value *UBElem = nullptr;
+      auto BaseTy = OAE->getBase()->getType().getCanonicalType();
+      // Reference types are ignored for mapping purposes.
+      if (auto *RefTy = BaseTy->getAs<ReferenceType>())
+        BaseTy = RefTy->getPointeeType().getCanonicalType();
 
-      // We can only compute a constant size if the GEP of the upper bound as all zero indexes except the last one. The last index is the number of elements.
-      {
-        auto I = UBGEP->idx_begin(), E = std::prev(UBGEP->idx_end());
-        for (; I != E; ++ I){
-          // This is not the last one and it is not a zero constant, just fail.
-          if (!cast<llvm::Constant>(I)->isZeroValue())
-            return nullptr;
-        }
-        UBElem = CGF.Builder.CreateIntCast(*E, CGF.IntPtrTy, /*isSigned=*/true);
+      // If there is no length associated with the expression, that means we
+      // are using the whole length of the base.
+      if (!OAE->getLength())
+        return CGF.getTypeSize(BaseTy);
+
+      llvm::Value *ElemSize;
+      if (auto *PTy = BaseTy->getAs<PointerType>()) {
+        ElemSize = CGF.getTypeSize(PTy->getPointeeType().getCanonicalType());
+      } else {
+        auto *ATy = cast<ArrayType>(BaseTy.getTypePtr());
+        assert(ATy && "Expecting array type if not a pointer type.");
+        ElemSize = CGF.getTypeSize(ATy->getElementType().getCanonicalType());
       }
 
-      if (UBGEPPtr == LB) {
-        // If the pointer operand of the upper bound GEP is the lower bound this is like havin an all zeros lower bound GEP.
-        LBElem = llvm::Constant::getNullValue(CGF.IntPtrTy);
-      } else if (auto *LBGEP = dyn_cast<llvm::GetElementPtrInst>(LB)) {
-        // If the lower bound is also a GEP with the same base, we need to check if all indices are zero except the last one and that the number of indices is the same as in the upper bound GEP.
-        if (LBGEP->getPointerOperand() != UBGEPPtr)
-          return nullptr;
-        if (!LBGEP->hasAllConstantIndices())
-          return nullptr;
-        if (LBGEP->getNumOperands() != UBGEP->getNumOperands())
-          return nullptr;
-        auto I = LBGEP->idx_begin(), E = std::prev(LBGEP->idx_end());
-        for (; I != E; ++ I){
-          // This is not the last one and it is not a zero constant, just fail.
-          if (!cast<llvm::Constant>(I)->isZeroValue())
-            return nullptr;
-        }
-        LBElem = CGF.Builder.CreateIntCast(*E, CGF.IntPtrTy, /*isSigned=*/true);
-      } else
-        return nullptr;
+      auto *LengthVal = CGF.EmitScalarExpr(OAE->getLength());
+      LengthVal = CGF.Builder.CreateIntCast(LengthVal,CGF.SizeTy,/*isSigned=*/false);
+      return CGF.Builder.CreateNUWMul(LengthVal, ElemSize);
+    }
+    return CGF.getTypeSize(ExprTy);
+  }
 
-      assert(UBElem && LBElem && "Invalid number of elements!");
-
-      // Get size of element from the relevant expression.
-      auto *ElemSize = CGF.Builder.CreateIntCast(CGF.getTypeSize(E->getType()), CGF.IntPtrTy, /*isSigned=*/false);
-
-      // The resulting size is (UBElem - LBElem + 1) * ElemSize;
-      auto *Size = CGF.Builder.CreateNUWSub(UBElem, LBElem);
-      Size = CGF.Builder.CreateNUWAdd(Size, llvm::ConstantInt::get(CGF.IntPtrTy, 1));
-      Size = CGF.Builder.CreateNUWMul(Size, ElemSize);
-      return CGF.Builder.CreateIntCast(Size, CGF.SizeTy, /*issigned=*/false);
-    };
-
-    // Try to obtain a constant size.
-    auto *Size = ConstantSize();
-    if (Size)
-      return Size;
-
-    // We were unable to get a constant size, therefore derive the size from the addresses with appropriate pointer arithmetic.
-
-    // Get the non-inclusive upper bound to compute the size.
-    UB = CGF.Builder.CreateConstGEP1_32(UB, 1);
-
-    // Size = (uintptr_t)UB - (uintptr_t)LB;
-    Size = CGF.Builder.CreateNUWSub(CGF.Builder.CreatePtrToInt(UB, CGF.IntPtrTy), CGF.Builder.CreatePtrToInt(LB, CGF.IntPtrTy));
-    // We expect the size to have a size_t type, which may not be the same as uintptr_t for the current target.
-    return CGF.Builder.CreateIntCast(Size, CGF.SizeTy, /*isSigned=*/false);
+  /// \brief Generate the address of the lower bound of the section defined by expression \a E.
+  llvm::Value * getLowerBoundOfElement(const Expr *E) const {
+    return CGF.EmitLValue(E).getPointer();
   }
 
   /// \brief Return the corresponding bits for a given map clause modifier. Add a flag marking the map as a pointer if requested.
@@ -4169,7 +4213,7 @@ private:
       if (auto *ME = dyn_cast<MemberExpr>(CI->first)) {
         // The base is the 'this' pointer. The content of the pointer is going
         // to be the base of the field being mapped.
-        BP = CGF.EmitLValue(ME->getBase()).getPointer();
+        BP = CGF.EmitScalarExpr(ME->getBase());
       } else {
         // The base is the reference to the variable.
         // BP = &Var.
@@ -4198,9 +4242,8 @@ private:
           // Save the base we are currently using.
           BasePointers.push_back(BP);
 
-          llvm::Value *LB;
-          llvm::Value *UB;
-          llvm::Value *Size = getSizeOfElement(CI->first, LB, UB);
+          auto *LB = getLowerBoundOfElement(CI->first);
+          auto *Size = getExprTypeSize(CI->first);
 
           Pointers.push_back(LB);
           Sizes.push_back(Size);
@@ -4310,9 +4353,7 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
   OpenMPMapClauseHandler::MapValuesArrayTy CurSizes;
   OpenMPMapClauseHandler::MapFlagsArrayTy CurMapTypes;
 
-  bool hasRuntimeEvaluationCaptureSize = false;
-
-  // Get map clause information.
+    // Get map clause information.
   OpenMPMapClauseHandler MCHandler(D, CGF);
 
   const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
@@ -4336,7 +4377,6 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
       CurSizes.push_back(CGF.getTypeSize(RI->getType()));
       // Copy to the device as an argument. No need to retrieve it.
       CurMapTypes.push_back(OpenMPMapClauseHandler::OMP_MAP_BYCOPY);
-      hasRuntimeEvaluationCaptureSize = true;
     } else {
       // If we have any information in the map clause, we use it, otherwise we just do a default mapping.
       MCHandler.generateInfoForCapture(CI,CurBasePointers, CurPointers, CurSizes, CurMapTypes);
@@ -4407,7 +4447,8 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
     MapTypes.append(CurMapTypes.begin(),CurMapTypes.end());
   }
 
-  // Detect if we have any capture size requiring runtime evaluation of the size so that a constant array could be eventually used. If hasRuntimeEvaluationCaptureSize is set, we already know the answer.
+  // Detect if we have any capture size requiring runtime evaluation of the size so that a constant array could be eventually used.
+  bool hasRuntimeEvaluationCaptureSize = false;
   if (!hasRuntimeEvaluationCaptureSize)
     for (auto *S : CurSizes)
       if (!isa<llvm::Constant>(S)) {
