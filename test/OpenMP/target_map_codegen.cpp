@@ -1026,22 +1026,22 @@ void explicit_maps_single (int ii){
 
   // Map of a scalar.
   int a = ii;
-  #pragma omp target map(alloc:a)
-  {
-    ++a;
-  }
-//
+//  #pragma omp target map(alloc:a)
+//  {
+//    ++a;
+//  }
+
 //  // Map of an array.
-//  int arra[100];
+  int arra[100];
 //  #pragma omp target map(to:arra)
 //  {
 //    arra[50]++;
 //  }
-//
-//  #pragma omp target map(from:arra[20:60])
-//  {
-//    arra[50]++;
-//  }
+
+  #pragma omp target map(from:arra[20:60])
+  {
+    arra[50]++;
+  }
 //
 //  #pragma omp target map(tofrom:arra[:60])
 //  {
