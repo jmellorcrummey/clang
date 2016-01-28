@@ -3907,112 +3907,6 @@ private:
   typedef SmallVector<DeclarationMapInfoEntry *, 4> DeclarationMapInfoEntriesTy;
   llvm::DenseMap<const ValueDecl *, DeclarationMapInfoEntriesTy> DeclarationMapInfoMap;
 
-//  /// \brief Generate the address of the element referred to by the expression \a E. If \a IsFirstElement is trus it return the address of the first element, otherwise it returns the address of the last one. This assures that the right information is passed along to the emission of array an expressions.
-//  llvm::Value *getAddressOfElement(const Expr *E, bool IsFirstElement) const {
-//    if (auto *OAE = dyn_cast<OMPArraySectionExpr>(E)) {
-//      CGF.EmitOMPArraySectionExpr(OAE, IsFirstElement);
-//    }
-//    return CGF.EmitLValue(E).getPointer();
-//  }
-//
-//  /// \brief Generate the size associated with the referred to by the expression \a E. Return by reference the addresses to the lower and upper bound associated with the expression.
-//  llvm::Value *getSizeOfElement(const Expr *E, llvm::Value *&LB, llvm::Value *&UB) const {
-//    LB = getAddressOfElement(E, /*IsFirstElement=*/true);
-//    // This is an inclusive upper bound.
-//    UB = getAddressOfElement(E, /*IsFirstElement=*/false);
-//
-//    //TODO: It is very common for the size to be a difference of two pointers derived from the same base. We can optimize for those cases to increase the odds of obtaining a constant size, and avoid the filling of the sizes array by creating a constant array of sizes.
-//    auto ConstantSize = [&]() -> llvm::Value* {
-//      // We are trying to detect these special cases:
-//      // LB = %ptr
-//      // UB = %ptr
-//      // Size = SizeOfElem(%ptr);
-//      //
-//      // LB = %ptr
-//      // UB = GEP(%ptr, 0, ..., 0, 123)
-//      // Size = (123 + 1) * SizeOfElem(%ptr)
-//      //
-//      // or
-//      // LB = GEP(%ptr, 0, ..., 0, 119)
-//      // UB = GEP(%ptr, 0, ..., 0, 123)
-//      // Size = (123 - 119 + 1) * SizeOfElem(%ptr)
-//
-//      // If the bounds are the same, it means we only have one element.
-//      if (UB == LB)
-//        return CGF.getTypeSize(E->getType());
-//
-//      // Upper bound must be a GEP instruction with constant indices.
-//      auto *UBGEP = dyn_cast<llvm::GetElementPtrInst>(UB);
-//      if (!UBGEP)
-//        return nullptr;
-//      if (!UBGEP->hasAllConstantIndices())
-//        return nullptr;
-//      auto *UBGEPPtr = UBGEP->getPointerOperand();
-//
-//      llvm::Value *LBElem = nullptr;
-//      llvm::Value *UBElem = nullptr;
-//
-//      // We can only compute a constant size if the GEP of the upper bound as all zero indexes except the last one. The last index is the number of elements.
-//      {
-//        auto I = UBGEP->idx_begin(), E = std::prev(UBGEP->idx_end());
-//        for (; I != E; ++ I){
-//          // This is not the last one and it is not a zero constant, just fail.
-//          if (!cast<llvm::Constant>(I)->isZeroValue())
-//            return nullptr;
-//        }
-//        UBElem = CGF.Builder.CreateIntCast(*E, CGF.IntPtrTy, /*isSigned=*/true);
-//      }
-//
-//      if (UBGEPPtr == LB) {
-//        // If the pointer operand of the upper bound GEP is the lower bound this is like havin an all zeros lower bound GEP.
-//        LBElem = llvm::Constant::getNullValue(CGF.IntPtrTy);
-//      } else if (auto *LBGEP = dyn_cast<llvm::GetElementPtrInst>(LB)) {
-//        // If the lower bound is also a GEP with the same base, we need to check if all indices are zero except the last one and that the number of indices is the same as in the upper bound GEP.
-//        if (LBGEP->getPointerOperand() != UBGEPPtr)
-//          return nullptr;
-//        if (!LBGEP->hasAllConstantIndices())
-//          return nullptr;
-//        if (LBGEP->getNumOperands() != UBGEP->getNumOperands())
-//          return nullptr;
-//        auto I = LBGEP->idx_begin(), E = std::prev(LBGEP->idx_end());
-//        for (; I != E; ++ I){
-//          // This is not the last one and it is not a zero constant, just fail.
-//          if (!cast<llvm::Constant>(I)->isZeroValue())
-//            return nullptr;
-//        }
-//        LBElem = CGF.Builder.CreateIntCast(*E, CGF.IntPtrTy, /*isSigned=*/true);
-//      } else
-//        return nullptr;
-//
-//      assert(UBElem && LBElem && "Invalid number of elements!");
-//
-//      // Get size of element from the relevant expression.
-//      auto *ElemSize = CGF.Builder.CreateIntCast(CGF.getTypeSize(E->getType()), CGF.IntPtrTy, /*isSigned=*/false);
-//
-//      // The resulting size is (UBElem - LBElem + 1) * ElemSize;
-//      auto *Size = CGF.Builder.CreateNUWSub(UBElem, LBElem);
-//      Size = CGF.Builder.CreateNUWAdd(Size, llvm::ConstantInt::get(CGF.IntPtrTy, 1));
-//      Size = CGF.Builder.CreateNUWMul(Size, ElemSize);
-//      return CGF.Builder.CreateIntCast(Size, CGF.SizeTy, /*issigned=*/false);
-//    };
-//
-//    // Try to obtain a constant size.
-//    auto *Size = ConstantSize();
-//    if (Size)
-//      return Size;
-//
-//    // We were unable to get a constant size, therefore derive the size from the addresses with appropriate pointer arithmetic.
-//
-//    // Get the non-inclusive upper bound to compute the size.
-//    UB = CGF.Builder.CreateConstGEP1_32(UB, 1);
-//
-//    // Size = (uintptr_t)UB - (uintptr_t)LB;
-//    Size = CGF.Builder.CreateNUWSub(CGF.Builder.CreatePtrToInt(UB, CGF.IntPtrTy), CGF.Builder.CreatePtrToInt(LB, CGF.IntPtrTy));
-//    // We expect the size to have a size_t type, which may not be the same as uintptr_t for the current target.
-//    return CGF.Builder.CreateIntCast(Size, CGF.SizeTy, /*isSigned=*/false);
-//  }
-
-
   llvm::Value *getExprTypeSize(const Expr *E) const {
     auto ExprTy = E->getType().getCanonicalType();
 
@@ -4056,8 +3950,8 @@ private:
     return CGF.EmitLValue(E).getPointer();
   }
 
-  /// \brief Return the corresponding bits for a given map clause modifier. Add a flag marking the map as a pointer if requested.
-  unsigned getMapTypeBits(const DeclarationMapInfoEntry *Entry, bool AddPtrFlag) const {
+  /// \brief Return the corresponding bits for a given map clause modifier. Add a flag marking the map as a pointer if requested. Add a flag marking the map as extra, meaning is not an argument of the kernel.
+  unsigned getMapTypeBits(const DeclarationMapInfoEntry *Entry, bool AddPtrFlag, bool AddExtraFlag) const {
     unsigned Bits = 0u;
     switch (Entry->MapType) {
     case OMPC_MAP_alloc:
@@ -4084,6 +3978,8 @@ private:
     }
     if (AddPtrFlag)
       Bits |= OMP_MAP_PTR;
+    if (AddExtraFlag)
+      Bits |= OMP_MAP_EXTRA;
     if (Entry->MapTypeModifier == OMPC_MAP_always)
       Bits |= OMP_MAP_ALWAYS;
     return Bits;
@@ -4203,57 +4099,63 @@ private:
     // &(ps->ps), &(ps->ps->ps), sizeof(S2*), ptr_flag + extra_flag
     // &(ps->ps->ps), &(ps->ps->ps->s.f[0]), 22*sizeof(float), ptr_flag + extra_flag
 
+
+    bool IsEntriesFirstInfo = true;
+
     // For each expression in the map clauses...
     for (auto *InfoForExpr : MIE) {
       auto CI = InfoForExpr->Components.rbegin();
       auto CE = InfoForExpr->Components.rend();
+      auto I = CI;
+
       bool IsExpressionFirstInfo = true;
       llvm::Value *BP = nullptr;
 
-      if (auto *ME = dyn_cast<MemberExpr>(CI->first)) {
+      if (auto *ME = dyn_cast<MemberExpr>(I->first)) {
         // The base is the 'this' pointer. The content of the pointer is going
         // to be the base of the field being mapped.
         BP = CGF.EmitScalarExpr(ME->getBase());
       } else {
         // The base is the reference to the variable.
         // BP = &Var.
-        BP = CGF.EmitLValue(cast<DeclRefExpr>(CI->first)).getPointer();
+        BP = CGF.EmitLValue(cast<DeclRefExpr>(I->first)).getPointer();
 
         // If the variable is a pointer and is being dereferenced (i.e. is not the last component), the base has to be pointer itself, not his reference.
-        if (CI->second->getType()->isAnyPointerType() && std::next(CI) != CE) {
-          auto PtrAddr = CGF.MakeNaturalAlignAddrLValue(BP, CI->second->getType());
+        if (I->second->getType()->isAnyPointerType() && std::next(I) != CE) {
+          auto PtrAddr = CGF.MakeNaturalAlignAddrLValue(BP, I->second->getType());
           BP = CGF.EmitLoadOfLValue(PtrAddr,SourceLocation()).getScalarVal();
+
+          // We do not need to generate individual map information for the pointer, it can be associated with the combined storage.
+          ++I;
         }
       }
 
-      for (; CI != CE; ++CI) {
-        auto *D = CI->second;
-        auto CNext = std::next(CI);
+      for (; I != CE; ++I) {
+        auto Next = std::next(I);
 
         // We need to generate the addresses and sizes if this is the last component, or if the component is a pointer. In this case, the pointer becomes the base address for the following components.
-        if (CNext == CE || (D && D->getType()->isAnyPointerType())){
+        if (Next == CE || I->first->getType()->isAnyPointerType()){
 
-          if (CNext != CE) {
-            // Given that this is not the last component, we expect the pointer to be associated with an array expression or member expression. So, we can move forward.
-            ++CI;
-            assert((isa<MemberExpr>(CI->first) || isa<ArraySubscriptExpr>(CI->first) || isa<OMPArraySectionExpr>(CI->first)) && "Unexpected expression");
-          }
+          // If this is not the last component, we expect the pointer to be associated with an array expression or member expression.
+          assert((Next == CE || isa<MemberExpr>(Next->first) || isa<ArraySubscriptExpr>(Next->first) || isa<OMPArraySectionExpr>(Next->first)) && "Unexpected expression");
 
           // Save the base we are currently using.
           BasePointers.push_back(BP);
 
-          auto *LB = getLowerBoundOfElement(CI->first);
-          auto *Size = getExprTypeSize(CI->first);
+          auto *LB = getLowerBoundOfElement(I->first);
+          auto *Size = getExprTypeSize(I->first);
 
           Pointers.push_back(LB);
           Sizes.push_back(Size);
-          Types.push_back(getMapTypeBits(InfoForExpr, !IsExpressionFirstInfo));
+          // We need to add a pointer flag for each map that comes from the the same expression except for the first one. We need to add the extra flag for each map that relates with the current capture, except for the first one (there is a set of entries for each capture).
+          Types.push_back(getMapTypeBits(InfoForExpr, !IsExpressionFirstInfo, !IsEntriesFirstInfo));
 
           // The pointer becomes the base for the next element.
-          if (CNext != CE)
+          if (Next != CE)
             BP = LB;
 
           IsExpressionFirstInfo = false;
+          IsEntriesFirstInfo = false;
           continue;
         }
       }

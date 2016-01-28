@@ -1168,7 +1168,7 @@ void explicit_maps_references_and_function_args (int a, float b, int (&c)[10], f
 }
 #endif
 
-#ifndef CK21
+#ifdef CK21
 
 template <int X, typename T>
 struct CC {
@@ -1197,7 +1197,199 @@ int explicit_maps_template_args_and_members(int a){
 }
 #endif
 
-// all globals
+#ifdef CK22
 
-// inside lambdas
+int a;
+int &b = a;
+int c[100];
+int *d;
+
+struct ST {
+  float fa;
+};
+
+ST sa ;
+ST &sb = sa;
+ST sc[100];
+ST *sd;
+
+template<typename T>
+struct STT {
+  T fa;
+};
+
+STT<int> sta ;
+STT<int> &stb = sta;
+STT<int> stc[100];
+STT<int> *std;
+
+// CK22-LABEL: explicit_maps_globals
+int explicit_maps_globals(void){
+
+#pragma omp target map(a)
+  { a+=1; }
+#pragma omp target map(b)
+  { b+=1; }
+#pragma omp target map(c)
+  { c[3]+=1; }
+#pragma omp target map(d)
+  { d[3]+=1; }
+#pragma omp target map(c[1:4])
+  { c[3]+=1; }
+#pragma omp target map(d[2:5])
+  { d[3]+=1; }
+
+#pragma omp target map(sa)
+  { sa.fa+=1; }
+#pragma omp target map(sb)
+  { sb.fa+=1; }
+#pragma omp target map(sc)
+  { sc[3].fa+=1; }
+#pragma omp target map(sd)
+  { sd[3].fa+=1; }
+#pragma omp target map(sc[1:4])
+  { sc[3].fa+=1; }
+#pragma omp target map(sd[2:5])
+  { sd[3].fa+=1; }
+
+#pragma omp target map(sta)
+  { sta.fa+=1; }
+#pragma omp target map(stb)
+  { stb.fa+=1; }
+#pragma omp target map(stc)
+  { stc[3].fa+=1; }
+#pragma omp target map(std)
+  { std[3].fa+=1; }
+#pragma omp target map(stc[1:4])
+  { stc[3].fa+=1; }
+#pragma omp target map(std[2:5])
+  { std[3].fa+=1; }
+
+  return 0;
+}
+#endif
+
+#ifdef CK23
+// CK23-LABEL: explicit_maps_inside_captured
+int explicit_maps_inside_captured(int a){
+  float b;
+  float c[100];
+  float *d;
+
+  [&](void){
+    #pragma omp target map(a)
+      { a+=1; }
+    #pragma omp target map(b)
+      { b+=1; }
+    #pragma omp target map(c)
+      { c[3]+=1; }
+    #pragma omp target map(d)
+      { d[3]+=1; }
+    #pragma omp target map(c[2:4])
+      { c[3]+=1; }
+    #pragma omp target map(d[2:4])
+      { d[3]+=1; }
+  }();
+  return b;
+}
+#endif
+
+#ifndef CK24
+// CK24-LABEL: explicit_maps_struct_fields
+
+struct SA{
+  int a;
+  struct SA *p;
+  int b[10];
+};
+struct SB{
+  int a;
+  struct SA s;
+  struct SA sa[10];
+  struct SA *sp[10];
+  struct SA *p;
+};
+struct SC{
+  int a;
+  struct SB s;
+  struct SB *p;
+  int b[10];
+};
+
+unsigned SizeSA = sizeof(SA);
+unsigned SizeSB = sizeof(SB);
+unsigned SizeSC = sizeof(SC);
+
+int explicit_maps_struct_fields(int a){
+  SC s;
+  SC *p;
+
+#pragma omp target map(s.a)
+  { s.a++; }
+#pragma omp target map(s.s.s)
+  { s.a++; }
+#pragma omp target map(s.s.s.a)
+  { s.a++; }
+
+#pragma omp target map(s.b[:5])
+  { s.a++; }
+#pragma omp target map(s.p[:5])
+  { s.a++; }
+
+#pragma omp target map(s.s.sa[3].a)
+  { s.a++; }
+#pragma omp target map(s.s.sp[3]->a)
+  { s.a++; }
+
+#pragma omp target map(s.p->a)
+  { s.a++; }
+#pragma omp target map(s.s.p->a)
+  { s.a++; }
+
+#pragma omp target map(s.s.s.b[:2])
+  { s.a++; }
+#pragma omp target map(s.s.p->b[:2])
+  { s.a++; }
+
+#pragma omp target map(s.p->p->p->a)
+  { s.a++; }
+
+//
+// Same thing but starting from a pointer.
+//
+
+#pragma omp target map(p->a)
+  { p->a++; }
+#pragma omp target map(p->s.s)
+  { p->a++; }
+#pragma omp target map(p->s.s.a)
+  { p->a++; }
+
+#pragma omp target map(p->b[:5])
+  { p->a++; }
+#pragma omp target map(p->p[:5])
+  { p->a++; }
+
+#pragma omp target map(p->s.sa[3].a)
+  { p->a++; }
+#pragma omp target map(p->s.sp[3]->a)
+  { p->a++; }
+
+#pragma omp target map(p->p->a)
+  { p->a++; }
+#pragma omp target map(p->s.p->a)
+  { p->a++; }
+
+#pragma omp target map(p->s.s.b[:2])
+  { p->a++; }
+#pragma omp target map(p->s.p->b[:2])
+  { p->a++; }
+
+#pragma omp target map(p->p->p->p->a)
+  { p->a++; }
+
+  return s.a;
+}
+#endif
+
 #endif
