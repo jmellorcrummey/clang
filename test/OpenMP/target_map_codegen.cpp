@@ -1294,7 +1294,7 @@ int explicit_maps_inside_captured(int a){
 }
 #endif
 
-#ifndef CK24
+#ifdef CK24
 // CK24-LABEL: explicit_maps_struct_fields
 
 struct SA{
