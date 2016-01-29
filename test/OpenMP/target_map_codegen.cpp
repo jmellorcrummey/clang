@@ -1013,19 +1013,98 @@ void implicit_maps_template_type_capture (int a){
 
 #endif
 ///==========================================================================///
-// RxUN: %clang_cc1 -DCK19 -verify -fopenmp -omptargets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -emit-llvm %s -o - | FileCheck %s --check-prefix CK19 --check-prefix CK19-64
-// RxUN: %clang_cc1 -DCK19 -fopenmp -omptargets=powerpc64le-ibm-linux-gnu -x c++ -std=c++11 -triple powerpc64le-unknown-unknown -emit-pch -o %t %s
-// RxUN: %clang_cc1 -fopenmp -omptargets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -std=c++11 -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s  --check-prefix CK19 --check-prefix CK19-64
+// RUN: %clang_cc1 -DCK19 -verify -fopenmp -omptargets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -emit-llvm %s -o - | FileCheck %s --check-prefix CK19 --check-prefix CK19-64
+// RUN: %clang_cc1 -DCK19 -fopenmp -omptargets=powerpc64le-ibm-linux-gnu -x c++ -std=c++11 -triple powerpc64le-unknown-unknown -emit-pch -o %t %s
+// RUN: %clang_cc1 -fopenmp -omptargets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -std=c++11 -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s  --check-prefix CK19 --check-prefix CK19-64
 // RxUN: %clang_cc1 -DCK19 -verify -fopenmp -omptargets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -emit-llvm %s -o - | FileCheck %s  --check-prefix CK19 --check-prefix CK19-32
 // RxUN: %clang_cc1 -DCK19 -fopenmp -omptargets=i386-pc-linux-gnu -x c++ -std=c++11 -triple i386-unknown-unknown -emit-pch -o %t %s
 // RxUN: %clang_cc1 -fopenmp -omptargets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -std=c++11 -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s  --check-prefix CK19 --check-prefix CK19-32
 #ifdef CK19
+
+// CK19: [[SIZE00:@.+]] = private {{.*}}constant [1 x i64] [i64 4]
+// CK19: [[MTYPE00:@.+]] = private {{.*}}constant [1 x i32] zeroinitializer
+
+// CK19: [[SIZE01:@.+]] = private {{.*}}constant [1 x i64] [i64 400]
+// CK19: [[MTYPE01:@.+]] = private {{.*}}constant [1 x i32] [i32 1]
+
+// CK19: [[SIZE02:@.+]] = private {{.*}}constant [1 x i64] [i64 240]
+// CK19: [[MTYPE02:@.+]] = private {{.*}}constant [1 x i32] [i32 2]
+
+// CK19: [[SIZE03:@.+]] = private {{.*}}constant [1 x i64] [i64 240]
+// CK19: [[MTYPE03:@.+]] = private {{.*}}constant [1 x i32] [i32 3]
+
+// CK19: [[SIZE04:@.+]] = private {{.*}}constant [1 x i64] [i64 400]
+// CK19: [[MTYPE04:@.+]] = private {{.*}}constant [1 x i32] zeroinitializer
+
+// CK19: [[SIZE05:@.+]] = private {{.*}}constant [1 x i64] [i64 4]
+// CK19: [[MTYPE05:@.+]] = private {{.*}}constant [1 x i32] [i32 1]
+
+// CK19: [[MTYPE06:@.+]] = private {{.*}}constant [1 x i32] [i32 3]
+
+// CK19: [[MTYPE07:@.+]] = private {{.*}}constant [1 x i32] zeroinitializer
+
+// CK19: [[SIZE08:@.+]] = private {{.*}}constant [1 x i64] [i64 4]
+// CK19: [[MTYPE08:@.+]] = private {{.*}}constant [1 x i32] [i32 3]
+
+// CK19: [[SIZE09:@.+]] = private {{.*}}constant [1 x i64] [i64 8]
+// CK19: [[MTYPE09:@.+]] = private {{.*}}constant [1 x i32] [i32 2]
+
+// CK19: [[SIZE10:@.+]] = private {{.*}}constant [1 x i64] [i64 240]
+// CK19: [[MTYPE10:@.+]] = private {{.*}}constant [1 x i32] [i32 3]
+
+// CK19: [[SIZE11:@.+]] = private {{.*}}constant [1 x i64] [i64 240]
+// CK19: [[MTYPE11:@.+]] = private {{.*}}constant [1 x i32] zeroinitializer
+
+// CK19: [[SIZE12:@.+]] = private {{.*}}constant [1 x i64] [i64 4]
+// CK19: [[MTYPE12:@.+]] = private {{.*}}constant [1 x i32] [i32 1]
+
+// CK19: [[MTYPE13:@.+]] = private {{.*}}constant [1 x i32] zeroinitializer
+
+// CK19: [[MTYPE14:@.+]] = private {{.*}}constant [1 x i32] [i32 1]
+
+// CK19: [[SIZE15:@.+]] = private {{.*}}constant [1 x i64] [i64 4]
+// CK19: [[MTYPE15:@.+]] = private {{.*}}constant [1 x i32] [i32 2]
+
+// CK19: [[MTYPE16:@.+]] = private {{.*}}constant [2 x i32] [i32 128, i32 1]
+
+// CK19: [[SIZE17:@.+]] = private {{.*}}constant [2 x i64] [i64 8, i64 240]
+// CK19: [[MTYPE17:@.+]] = private {{.*}}constant [2 x i32] [i32 128, i32 2]
+
+// CK19: [[SIZE18:@.+]] = private {{.*}}constant [2 x i64] [i64 8, i64 240]
+// CK19: [[MTYPE18:@.+]] = private {{.*}}constant [2 x i32] [i32 128, i32 3]
+
+// CK19: [[MTYPE19:@.+]] = private {{.*}}constant [2 x i32] [i32 128, i32 0]
+
+// CK19: [[SIZE20:@.+]] = private {{.*}}constant [2 x i64] [i64 8, i64 4]
+// CK19: [[MTYPE20:@.+]] = private {{.*}}constant [2 x i32] [i32 128, i32 1]
+
+// CK19: [[MTYPE21:@.+]] = private {{.*}}constant [2 x i32] [i32 128, i32 3]
+
+// CK19: [[SIZE22:@.+]] = private {{.*}}constant [2 x i64] [i64 8, i64 4]
+// CK19: [[MTYPE22:@.+]] = private {{.*}}constant [2 x i32] [i32 128, i32 3]
+
+// CK19: [[SIZE23:@.+]] = private {{.*}}constant [1 x i64] [i64 4]
+// CK19: [[MTYPE23:@.+]] = private {{.*}}constant [1 x i32] [i32 7]
 
 // CK19-LABEL: explicit_maps_single
 void explicit_maps_single (int ii){
 
   // Map of a scalar.
   int a = ii;
+
+  // Region 00
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[SIZE00]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE00]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: [[CBPVAL0]] = bitcast i32* [[VAR0:%.+]] to i8*
+  // CK19-DAG: [[CPVAL0]] = bitcast i32* [[VAR0]] to i8*
+
+  // CK19: call void [[CALL00:@.+]](i32* {{[^,]+}})
   #pragma omp target map(alloc:a)
   {
     ++a;
@@ -1033,41 +1112,161 @@ void explicit_maps_single (int ii){
 
   // Map of an array.
   int arra[100];
+
+  // Region 01
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[SIZE01]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE01]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: [[CBPVAL0]] = bitcast [100 x i32]* [[VAR0:%.+]] to i8*
+  // CK19-DAG: [[CPVAL0]] = bitcast [100 x i32]* [[VAR0]] to i8*
+
+  // CK19: call void [[CALL01:@.+]]([100 x i32]* {{[^,]+}})
   #pragma omp target map(to:arra)
   {
     arra[50]++;
   }
 
+  // Region 02
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[SIZE02]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE02]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: [[CBPVAL0]] = bitcast [100 x i32]* [[VAR0:%.+]] to i8*
+  // CK19-DAG: [[CPVAL0]] = bitcast i32* [[SEC0:%.+]] to i8*
+  // CK19-DAG: [[SEC0]] = getelementptr {{.*}}[100 x i32]* [[VAR0]], i{{.+}} 0, i{{.+}} 20
+
+  // CK19: call void [[CALL02:@.+]]([100 x i32]* {{[^,]+}})
   #pragma omp target map(from:arra[20:60])
   {
     arra[50]++;
   }
 
+  // Region 03
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[SIZE03]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE03]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: [[CBPVAL0]] = bitcast [100 x i32]* [[VAR0:%.+]] to i8*
+  // CK19-DAG: [[CPVAL0]] = bitcast i32* [[SEC0:%.+]] to i8*
+  // CK19-DAG: [[SEC0]] = getelementptr {{.*}}[100 x i32]* [[VAR0]], i{{.+}} 0, i{{.+}} 0
+
+  // CK19: call void [[CALL03:@.+]]([100 x i32]* {{[^,]+}})
   #pragma omp target map(tofrom:arra[:60])
   {
     arra[50]++;
   }
 
+  // Region 04
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[SIZE04]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE04]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: [[CBPVAL0]] = bitcast [100 x i32]* [[VAR0:%.+]] to i8*
+  // CK19-DAG: [[CPVAL0]] = bitcast i32* [[SEC0:%.+]] to i8*
+  // CK19-DAG: [[SEC0]] = getelementptr {{.*}}[100 x i32]* [[VAR0]], i{{.+}} 0, i{{.+}} 0
+
+  // CK19: call void [[CALL04:@.+]]([100 x i32]* {{[^,]+}})
   #pragma omp target map(alloc:arra[:])
   {
     arra[50]++;
   }
 
+  // Region 05
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[SIZE05]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE05]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: [[CBPVAL0]] = bitcast [100 x i32]* [[VAR0:%.+]] to i8*
+  // CK19-DAG: [[CPVAL0]] = bitcast i32* [[SEC0:%.+]] to i8*
+  // CK19-DAG: [[SEC0]] = getelementptr {{.*}}[100 x i32]* [[VAR0]], i{{.+}} 0, i{{.+}} 15
+
+  // CK19: call void [[CALL05:@.+]]([100 x i32]* {{[^,]+}})
   #pragma omp target map(to:arra[15])
   {
     arra[15]++;
   }
 
+  // Region 06
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], i64* [[GEPS:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE06]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+  // CK19-DAG: [[GEPS]] = getelementptr inbounds {{.+}}[[S:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[S0:%.+]] = getelementptr inbounds {{.+}}[[S]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: store i{{.+}} [[CSVAL0:%[^,]+]], i{{.+}}* [[S0]]
+  // CK19-DAG: [[CBPVAL0]] = bitcast [100 x i32]* [[VAR0:%.+]] to i8*
+  // CK19-DAG: [[CPVAL0]] = bitcast i32* [[SEC0:%.+]] to i8*
+  // CK19-DAG: [[CSVAL0]] = mul nuw i{{.+}} %{{.*}}, 4
+  // CK19-DAG: [[SEC0]] = getelementptr {{.*}}[100 x i32]* [[VAR0]], i{{.+}} 0, i{{.+}} %{{.*}}
+
+  // CK19: call void [[CALL06:@.+]]([100 x i32]* {{[^,]+}})
   #pragma omp target map(tofrom:arra[ii:ii+23])
   {
     arra[50]++;
   }
 
+  // Region 07
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], i64* [[GEPS:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE07]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+  // CK19-DAG: [[GEPS]] = getelementptr inbounds {{.+}}[[S:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[S0:%.+]] = getelementptr inbounds {{.+}}[[S]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: store i{{.+}} [[CSVAL0:%[^,]+]], i{{.+}}* [[S0]]
+  // CK19-DAG: [[CBPVAL0]] = bitcast [100 x i32]* [[VAR0:%.+]] to i8*
+  // CK19-DAG: [[CPVAL0]] = bitcast i32* [[SEC0:%.+]] to i8*
+  // CK19-DAG: [[CSVAL0]] = mul nuw i{{.+}} %{{.*}}, 4
+  // CK19-DAG: [[SEC0]] = getelementptr {{.*}}[100 x i32]* [[VAR0]], i{{.+}} 0, i{{.+}} 0
+
+  // CK19: call void [[CALL07:@.+]]([100 x i32]* {{[^,]+}})
   #pragma omp target map(alloc:arra[:ii])
   {
     arra[50]++;
   }
 
+  // Region 08
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[SIZE08]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE08]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: [[CBPVAL0]] = bitcast [100 x i32]* [[VAR0:%.+]] to i8*
+  // CK19-DAG: [[CPVAL0]] = bitcast i32* [[SEC0:%.+]] to i8*
+  // CK19-DAG: [[SEC0]] = getelementptr {{.*}}[100 x i32]* [[VAR0]], i{{.+}} 0, i{{.+}} %{{.*}}
+
+  // CK19: call void [[CALL08:@.+]]([100 x i32]* {{[^,]+}})
   #pragma omp target map(tofrom:arra[ii])
   {
     arra[15]++;
@@ -1075,36 +1274,154 @@ void explicit_maps_single (int ii){
 
   // Map of a pointer.
   int *pa;
+
+  // Region 09
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[SIZE09]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE09]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: [[CBPVAL0]] = bitcast i32** [[VAR0:%.+]] to i8*
+  // CK19-DAG: [[CPVAL0]] = bitcast i32** [[VAR0]] to i8*
+
+  // CK19: call void [[CALL09:@.+]](i32** {{[^,]+}})
   #pragma omp target map(from:pa)
   {
     pa[50]++;
   }
 
+  // Region 10
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[SIZE10]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE10]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: [[CBPVAL0]] = bitcast i32* [[RVAR0:%.+]] to i8*
+  // CK19-DAG: [[CPVAL0]] = bitcast i32* [[SEC0:%.+]] to i8*
+  // CK19-DAG: [[RVAR0]] = load i32*, i32** [[VAR0:%[^,]+]]
+  // CK19-DAG: [[SEC0]] = getelementptr {{.*}}i32* [[RVAR00:%.+]], i{{.+}} 20
+  // CK19-DAG: [[RVAR00]] = load i32*, i32** [[VAR0]]
+
+  // CK19: call void [[CALL10:@.+]](i32* {{[^,]+}})
   #pragma omp target map(tofrom:pa[20:60])
   {
     pa[50]++;
   }
 
+  // Region 11
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[SIZE11]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE11]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: [[CBPVAL0]] = bitcast i32* [[RVAR0:%.+]] to i8*
+  // CK19-DAG: [[CPVAL0]] = bitcast i32* [[SEC0:%.+]] to i8*
+  // CK19-DAG: [[RVAR0]] = load i32*, i32** [[VAR0:%[^,]+]]
+  // CK19-DAG: [[SEC0]] = getelementptr {{.*}}i32* [[RVAR00:%.+]], i{{.+}} 0
+  // CK19-DAG: [[RVAR00]] = load i32*, i32** [[VAR0]]
+
+  // CK19: call void [[CALL11:@.+]](i32* {{[^,]+}})
   #pragma omp target map(alloc:pa[:60])
   {
     pa[50]++;
   }
 
+  // Region 12
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[SIZE12]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE12]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: [[CBPVAL0]] = bitcast i32* [[RVAR0:%.+]] to i8*
+  // CK19-DAG: [[CPVAL0]] = bitcast i32* [[SEC0:%.+]] to i8*
+  // CK19-DAG: [[RVAR0]] = load i32*, i32** [[VAR0:%[^,]+]]
+  // CK19-DAG: [[SEC0]] = getelementptr {{.*}}i32* [[RVAR00:%.+]], i{{.+}} 15
+  // CK19-DAG: [[RVAR00]] = load i32*, i32** [[VAR0]]
+
+  // CK19: call void [[CALL12:@.+]](i32* {{[^,]+}})
   #pragma omp target map(to:pa[15])
   {
     pa[15]++;
   }
 
+  // Region 13
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], i64* [[GEPS:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE13]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+  // CK19-DAG: [[GEPS]] = getelementptr inbounds {{.+}}[[S:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[S0:%.+]] = getelementptr inbounds {{.+}}[[S]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: store i{{.+}} [[CSVAL0:%[^,]+]], i{{.+}}* [[S0]]
+  // CK19-DAG: [[CBPVAL0]] = bitcast i32* [[RVAR0:%.+]] to i8*
+  // CK19-DAG: [[CPVAL0]] = bitcast i32* [[SEC0:%.+]] to i8*
+  // CK19-DAG: [[CSVAL0]] = mul nuw i{{.+}} %{{.*}}, 4
+  // CK19-DAG: [[RVAR0]] = load i32*, i32** [[VAR0:%[^,]+]]
+  // CK19-DAG: [[SEC0]] = getelementptr {{.*}}i32* [[RVAR00:%.+]], i{{.+}} %{{.*}}
+  // CK19-DAG: [[RVAR00]] = load i32*, i32** [[VAR0]]
+
+  // CK19: call void [[CALL13:@.+]](i32* {{[^,]+}})
   #pragma omp target map(alloc:pa[ii-23:ii])
   {
     pa[50]++;
   }
 
+  // Region 14
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], i64* [[GEPS:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE14]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+  // CK19-DAG: [[GEPS]] = getelementptr inbounds {{.+}}[[S:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[S0:%.+]] = getelementptr inbounds {{.+}}[[S]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: store i{{.+}} [[CSVAL0:%[^,]+]], i{{.+}}* [[S0]]
+  // CK19-DAG: [[CBPVAL0]] = bitcast i32* [[RVAR0:%.+]] to i8*
+  // CK19-DAG: [[CPVAL0]] = bitcast i32* [[SEC0:%.+]] to i8*
+  // CK19-DAG: [[CSVAL0]] = mul nuw i{{.+}} %{{.*}}, 4
+  // CK19-DAG: [[RVAR0]] = load i32*, i32** [[VAR0:%[^,]+]]
+  // CK19-DAG: [[SEC0]] = getelementptr {{.*}}i32* [[RVAR00:%.+]], i{{.+}} 0
+  // CK19-DAG: [[RVAR00]] = load i32*, i32** [[VAR0]]
+
+  // CK19: call void [[CALL14:@.+]](i32* {{[^,]+}})
   #pragma omp target map(to:pa[:ii])
   {
     pa[50]++;
   }
 
+  // Region 15
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[SIZE15]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE15]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: [[CBPVAL0]] = bitcast i32* [[RVAR0:%.+]] to i8*
+  // CK19-DAG: [[CPVAL0]] = bitcast i32* [[SEC0:%.+]] to i8*
+  // CK19-DAG: [[RVAR0]] = load i32*, i32** [[VAR0:%[^,]+]]
+  // CK19-DAG: [[SEC0]] = getelementptr {{.*}}i32* [[RVAR00:%.+]], i{{.+}} %{{.*}}
+  // CK19-DAG: [[RVAR00]] = load i32*, i32** [[VAR0]]
+
+  // CK19: call void [[CALL15:@.+]](i32* {{[^,]+}})
   #pragma omp target map(from:pa[ii+12])
   {
     pa[15]++;
@@ -1112,41 +1429,251 @@ void explicit_maps_single (int ii){
 
   // Map of a variable-size array.
   int va[ii];
+
+  // Region 16
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 2, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], i64* [[GEPS:%.+]], {{.+}}getelementptr {{.+}}[2 x i{{.+}}]* [[MTYPE16]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+  // CK19-DAG: [[GEPS]] = getelementptr inbounds {{.+}}[[S:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[S0:%.+]] = getelementptr inbounds {{.+}}[[S]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: store i{{.+}} 8, i{{.+}}* [[S0]]
+  // CK19-DAG: [[CBPVAL0]] = inttoptr i64 %{{.+}} to i8*
+  // CK19-DAG: [[CPVAL0]] = inttoptr i64 %{{.+}}to i8*
+
+  // CK19-DAG: [[BP1:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 1
+  // CK19-DAG: [[P1:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 1
+  // CK19-DAG: [[S1:%.+]] = getelementptr inbounds {{.+}}[[S]], i{{.+}} 0, i{{.+}} 1
+  // CK19-DAG: store i8* [[CBPVAL1:%[^,]+]], i8** [[BP1]]
+  // CK19-DAG: store i8* [[CPVAL1:%[^,]+]], i8** [[P1]]
+  // CK19-DAG: store i{{.+}} [[CSVAL1:%[^,]+]], i{{.+}}* [[S1]]
+  // CK19-DAG: [[CBPVAL1]] = bitcast i32* [[VAR1:%.+]] to i8*
+  // CK19-DAG: [[CPVAL1]] = bitcast i32* [[VAR1]] to i8*
+  // CK19-DAG: [[CSVAL1]] = mul nuw i{{.+}} %{{.*}}, 4
+
+  // CK19: call void [[CALL16:@.+]](i{{.+}} {{[^,]+}}, i32* {{[^,]+}})
   #pragma omp target map(to:va)
   {
    va[50]++;
   }
 
+  // Region 17
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 2, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[2 x i{{.+}}]* [[SIZE17]], {{.+}}getelementptr {{.+}}[2 x i{{.+}}]* [[MTYPE17]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: [[CBPVAL0]] = inttoptr i64 %{{.+}} to i8*
+  // CK19-DAG: [[CPVAL0]] = inttoptr i64 %{{.+}}to i8*
+
+  // CK19-DAG: [[BP1:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 1
+  // CK19-DAG: [[P1:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 1
+  // CK19-DAG: store i8* [[CBPVAL1:%[^,]+]], i8** [[BP1]]
+  // CK19-DAG: store i8* [[CPVAL1:%[^,]+]], i8** [[P1]]
+  // CK19-DAG: [[CBPVAL1]] = bitcast i32* [[VAR1:%.+]] to i8*
+  // CK19-DAG: [[CPVAL1]] = bitcast i32* [[SEC1:%.+]] to i8*
+  // CK19-DAG: [[SEC1]] = getelementptr {{.*}}i32* [[VAR1]], i{{.+}} 20
+
+  // CK19: call void [[CALL17:@.+]](i{{.+}} {{[^,]+}}, i32* {{[^,]+}})
   #pragma omp target map(from:va[20:60])
   {
    va[50]++;
   }
 
+  // Region 18
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 2, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[2 x i{{.+}}]* [[SIZE18]], {{.+}}getelementptr {{.+}}[2 x i{{.+}}]* [[MTYPE18]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: [[CBPVAL0]] = inttoptr i64 %{{.+}} to i8*
+  // CK19-DAG: [[CPVAL0]] = inttoptr i64 %{{.+}}to i8*
+
+  // CK19-DAG: [[BP1:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 1
+  // CK19-DAG: [[P1:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 1
+  // CK19-DAG: store i8* [[CBPVAL1:%[^,]+]], i8** [[BP1]]
+  // CK19-DAG: store i8* [[CPVAL1:%[^,]+]], i8** [[P1]]
+  // CK19-DAG: [[CBPVAL1]] = bitcast i32* [[VAR1:%.+]] to i8*
+  // CK19-DAG: [[CPVAL1]] = bitcast i32* [[SEC1:%.+]] to i8*
+  // CK19-DAG: [[SEC1]] = getelementptr {{.*}}i32* [[VAR1]], i{{.+}} 0
+
+  // CK19: call void [[CALL18:@.+]](i{{.+}} {{[^,]+}}, i32* {{[^,]+}})
   #pragma omp target map(tofrom:va[:60])
   {
    va[50]++;
   }
 
+  // Region 19
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 2, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], i64* [[GEPS:%.+]], {{.+}}getelementptr {{.+}}[2 x i{{.+}}]* [[MTYPE19]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+  // CK19-DAG: [[GEPS]] = getelementptr inbounds {{.+}}[[S:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[S0:%.+]] = getelementptr inbounds {{.+}}[[S]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: store i{{.+}} 8, i{{.+}}* [[S0]]
+  // CK19-DAG: [[CBPVAL0]] = inttoptr i64 %{{.+}} to i8*
+  // CK19-DAG: [[CPVAL0]] = inttoptr i64 %{{.+}}to i8*
+
+  // CK19-DAG: [[BP1:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 1
+  // CK19-DAG: [[P1:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 1
+  // CK19-DAG: [[S1:%.+]] = getelementptr inbounds {{.+}}[[S]], i{{.+}} 0, i{{.+}} 1
+  // CK19-DAG: store i8* [[CBPVAL1:%[^,]+]], i8** [[BP1]]
+  // CK19-DAG: store i8* [[CPVAL1:%[^,]+]], i8** [[P1]]
+  // CK19-DAG: store i{{.+}} [[CSVAL1:%[^,]+]], i{{.+}}* [[S1]]
+  // CK19-DAG: [[CBPVAL1]] = bitcast i32* [[VAR1:%.+]] to i8*
+  // CK19-DAG: [[CPVAL1]] = bitcast i32* [[SEC1:%.+]] to i8*
+  // CK19-DAG: [[CSVAL1]] = mul nuw i{{.+}} %{{.*}}, 4
+  // CK19-DAG: [[SEC1]] = getelementptr {{.*}}i32* [[VAR1]], i{{.+}} 0
+
+  // CK19: call void [[CALL19:@.+]](i{{.+}} {{[^,]+}}, i32* {{[^,]+}})
   #pragma omp target map(alloc:va[:])
   {
    va[50]++;
   }
 
+  // Region 20
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 2, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[2 x i{{.+}}]* [[SIZE20]], {{.+}}getelementptr {{.+}}[2 x i{{.+}}]* [[MTYPE20]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: [[CBPVAL0]] = inttoptr i64 %{{.+}} to i8*
+  // CK19-DAG: [[CPVAL0]] = inttoptr i64 %{{.+}}to i8*
+
+  // CK19-DAG: [[BP1:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 1
+  // CK19-DAG: [[P1:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 1
+  // CK19-DAG: store i8* [[CBPVAL1:%[^,]+]], i8** [[BP1]]
+  // CK19-DAG: store i8* [[CPVAL1:%[^,]+]], i8** [[P1]]
+  // CK19-DAG: [[CBPVAL1]] = bitcast i32* [[VAR1:%.+]] to i8*
+  // CK19-DAG: [[CPVAL1]] = bitcast i32* [[SEC1:%.+]] to i8*
+  // CK19-DAG: [[SEC1]] = getelementptr {{.*}}i32* [[VAR1]], i{{.+}} 15
+
+  // CK19: call void [[CALL20:@.+]](i{{.+}} {{[^,]+}}, i32* {{[^,]+}})
   #pragma omp target map(to:va[15])
   {
    va[15]++;
   }
 
+  // Region 21
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 2, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], i64* [[GEPS:%.+]], {{.+}}getelementptr {{.+}}[2 x i{{.+}}]* [[MTYPE21]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+  // CK19-DAG: [[GEPS]] = getelementptr inbounds {{.+}}[[S:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[S0:%.+]] = getelementptr inbounds {{.+}}[[S]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: store i{{.+}} 8, i{{.+}}* [[S0]]
+  // CK19-DAG: [[CBPVAL0]] = inttoptr i64 %{{.+}} to i8*
+  // CK19-DAG: [[CPVAL0]] = inttoptr i64 %{{.+}}to i8*
+
+  // CK19-DAG: [[BP1:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 1
+  // CK19-DAG: [[P1:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 1
+  // CK19-DAG: [[S1:%.+]] = getelementptr inbounds {{.+}}[[S]], i{{.+}} 0, i{{.+}} 1
+  // CK19-DAG: store i8* [[CBPVAL1:%[^,]+]], i8** [[BP1]]
+  // CK19-DAG: store i8* [[CPVAL1:%[^,]+]], i8** [[P1]]
+  // CK19-DAG: store i{{.+}} [[CSVAL1:%[^,]+]], i{{.+}}* [[S1]]
+  // CK19-DAG: [[CBPVAL1]] = bitcast i32* [[VAR1:%.+]] to i8*
+  // CK19-DAG: [[CPVAL1]] = bitcast i32* [[SEC1:%.+]] to i8*
+  // CK19-DAG: [[CSVAL1]] = mul nuw i{{.+}} %{{.*}}, 4
+  // CK19-DAG: [[SEC1]] = getelementptr {{.*}}i32* [[VAR1]], i{{.+}} %{{.+}}
+
+  // CK19: call void [[CALL21:@.+]](i{{.+}} {{[^,]+}}, i32* {{[^,]+}})
   #pragma omp target map(tofrom:va[ii:ii+23])
   {
    va[50]++;
   }
 
+  // Region 22
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 2, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[2 x i{{.+}}]* [[SIZE22]], {{.+}}getelementptr {{.+}}[2 x i{{.+}}]* [[MTYPE22]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: [[CBPVAL0]] = inttoptr i64 %{{.+}} to i8*
+  // CK19-DAG: [[CPVAL0]] = inttoptr i64 %{{.+}}to i8*
+
+  // CK19-DAG: [[BP1:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 1
+  // CK19-DAG: [[P1:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 1
+  // CK19-DAG: store i8* [[CBPVAL1:%[^,]+]], i8** [[BP1]]
+  // CK19-DAG: store i8* [[CPVAL1:%[^,]+]], i8** [[P1]]
+  // CK19-DAG: [[CBPVAL1]] = bitcast i32* [[VAR1:%.+]] to i8*
+  // CK19-DAG: [[CPVAL1]] = bitcast i32* [[SEC1:%.+]] to i8*
+  // CK19-DAG: [[SEC1]] = getelementptr {{.*}}i32* [[VAR1]], i{{.+}} %{{.+}}
+
+  // CK19: call void [[CALL22:@.+]](i{{.+}} {{[^,]+}}, i32* {{[^,]+}})
   #pragma omp target map(tofrom:va[ii])
   {
    va[15]++;
   }
+
+  // Always.
+  // Region 23
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[SIZE23]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE23]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: [[CBPVAL0]] = bitcast i32* [[VAR0:%.+]] to i8*
+  // CK19-DAG: [[CPVAL0]] = bitcast i32* [[VAR0]] to i8*
+
+  // CK19: call void [[CALL23:@.+]](i32* {{[^,]+}})
+  #pragma omp target map(always, tofrom: a)
+  {
+   a++;
+  }
 }
+
+// CK19: define {{.+}}[[CALL00]]
+// CK19: define {{.+}}[[CALL01]]
+// CK19: define {{.+}}[[CALL02]]
+// CK19: define {{.+}}[[CALL03]]
+// CK19: define {{.+}}[[CALL04]]
+// CK19: define {{.+}}[[CALL05]]
+// CK19: define {{.+}}[[CALL06]]
+// CK19: define {{.+}}[[CALL07]]
+// CK19: define {{.+}}[[CALL08]]
+// CK19: define {{.+}}[[CALL09]]
+// CK19: define {{.+}}[[CALL10]]
+// CK19: define {{.+}}[[CALL11]]
+// CK19: define {{.+}}[[CALL12]]
+// CK19: define {{.+}}[[CALL13]]
+// CK19: define {{.+}}[[CALL14]]
+// CK19: define {{.+}}[[CALL15]]
+// CK19: define {{.+}}[[CALL16]]
+// CK19: define {{.+}}[[CALL17]]
+// CK19: define {{.+}}[[CALL18]]
+// CK19: define {{.+}}[[CALL19]]
+// CK19: define {{.+}}[[CALL20]]
+// CK19: define {{.+}}[[CALL21]]
+// CK19: define {{.+}}[[CALL22]]
+// CK19: define {{.+}}[[CALL23]]
+
 #endif
 
 #ifdef CK20
@@ -1158,11 +1685,20 @@ void explicit_maps_references_and_function_args (int a, float b, int (&c)[10], f
   int (&cc)[10] = c;
   float *&dd = d;
 
-  #pragma omp target map(to:aa,cc[:5]) map(from:b,d[2:3])
+  #pragma omp target map(to:aa)
   {
     aa += 1;
+  }
+  #pragma omp target map(to:cc[:5])
+  {
     cc[3] += 1;
+  }
+  #pragma omp target map(from:b)
+  {
     b += 1.0f;
+  }
+  #pragma omp target map(from:d[2:3])
+  {
     d[2] += 1.0f;
   }
 }
@@ -1179,12 +1715,31 @@ struct CC {
     float la[X];
     T *lb;
 
-    #pragma omp target map(A, lb[:X]) map(from:B[X:X+2],la,arg)
+    #pragma omp target map(A)
     {
-      A += arg;
-      B[2] += 1.0f;
-      la[3] += 1.0f;
+      A += 1;
+    }
+    #pragma omp target map(lb[:X])
+    {
       lb[4] += 1;
+    }
+    #pragma omp target map(from:B[X:X+2])
+    {
+      B[2] += 1.0f;
+    }
+    #pragma omp target map(from:la)
+    {
+      la[3] += 1.0f;
+    }
+    #pragma omp target map(from:arg)
+    {
+      arg +=1;
+    }
+    // Make sure the extra flag is passed to the second map.
+    #pragma omp target map(A, B[2])
+    {
+      A += 1;
+      B[0] += 1;
     }
     return A;
   }

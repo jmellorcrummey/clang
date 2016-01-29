@@ -2934,6 +2934,12 @@ LValue CodeGenFunction::EmitOMPArraySectionExpr(const OMPArraySectionExpr *E,
   else
     Base = EmitLValue(E->getBase());
   QualType BaseTy = Base.getType();
+  // If the base is a pointer, we actually need to compute the offset in the
+  // pointee.
+  if (BaseTy->isAnyPointerType()) {
+    auto RBase = EmitLoadOfLValue(Base, E->getExprLoc());
+    Base = MakeNaturalAlignAddrLValue(RBase.getScalarVal(),BaseTy->getAs<PointerType>()->getPointeeType());
+  }
   llvm::Value *Idx = nullptr;
   QualType ResultExprTy;
   if (auto *AT = getContext().getAsArrayType(BaseTy))

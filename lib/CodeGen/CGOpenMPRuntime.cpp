@@ -4352,12 +4352,11 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
 
   // Detect if we have any capture size requiring runtime evaluation of the size so that a constant array could be eventually used.
   bool hasRuntimeEvaluationCaptureSize = false;
-  if (!hasRuntimeEvaluationCaptureSize)
-    for (auto *S : CurSizes)
-      if (!isa<llvm::Constant>(S)) {
-        hasRuntimeEvaluationCaptureSize = true;
-        break;
-      }
+  for (auto *S : Sizes)
+    if (!isa<llvm::Constant>(S)) {
+      hasRuntimeEvaluationCaptureSize = true;
+      break;
+    }
 
   // Keep track on whether the host function has to be executed.
   auto OffloadErrorQType =
