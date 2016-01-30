@@ -3818,7 +3818,7 @@ public:
     OMP_MAP_RELEASE = 0x08,
     /// \brief Delete the element from the device environment, ignoring the
     /// current reference count associated with the element.
-    OMP_MAP_DELETE = 0x18,
+    OMP_MAP_DELETE = 0x10,
     /// \brief The element passed to the device is a pointer.
     OMP_MAP_PTR = 0x20,
     /// \brief Signal the element as extra, i.e. is not argument to the target
