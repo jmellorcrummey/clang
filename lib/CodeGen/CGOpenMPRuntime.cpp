@@ -3844,16 +3844,13 @@ private:
     typedef llvm::SmallVector<ComponentTy, 4> ComponentsTy;
     ComponentsTy Components;
 
-    /// \brief Expression that originated this information.
-    const Expr *OriginalExpr;
-
     // Map type and modifier associated with this expression.
     OpenMPMapClauseKind MapType;
     OpenMPMapClauseKind MapTypeModifier;
 
     /// \brief Build and initialize this map information record with information
     /// retrieved from the provided map clause expression.
-    DeclarationMapInfoEntry(const Expr *MCE, OpenMPMapClauseKind MapType, OpenMPMapClauseKind MapTypeModifier) : OriginalExpr(MCE), MapType(MapType), MapTypeModifier(MapTypeModifier) {
+    DeclarationMapInfoEntry(const Expr *MCE, OpenMPMapClauseKind MapType, OpenMPMapClauseKind MapTypeModifier) : MapType(MapType), MapTypeModifier(MapTypeModifier) {
       assert(MCE && "Invalid expression??");
       while (true) {
         MCE = MCE->IgnoreParenImpCasts();
@@ -3894,7 +3891,7 @@ private:
     }
 
     /// \brief Return declaration associated with this map information. If it is
-    /// a field it means is associated with a field of 'this'.
+    /// a field it means the base is 'this'.
     const ValueDecl * getAssociatedDecl() const {
       assert(!Components.empty() && "No expressions to extract declaration from??");
       const ValueDecl *D = Components.back().second;
@@ -3915,7 +3912,7 @@ private:
     if (auto *RefTy = ExprTy->getAs<ReferenceType>())
       ExprTy = RefTy->getPointeeType().getCanonicalType();
 
-    // Given that an array section is considered a built in type, we need to
+    // Given that an array section is considered a built-in type, we need to
     // do the calculation based on the length of the section instead of relying
     // on CGF.getTypeSize(E->getType()).
     if (const auto *OAE = dyn_cast<OMPArraySectionExpr>(E)) {
@@ -3986,7 +3983,7 @@ private:
     return Bits;
   }
 
-  /// \brief Generate the base pointers, section pointers, sizes and map type bits for a give set of expressions \a MIE associated with a declaration.
+  /// \brief Generate the base pointers, section pointers, sizes and map type bits for a given set of expressions \a MIE associated with a declaration.
   void generateInfoForEntries(const DeclarationMapInfoEntriesTy &MIE, MapValuesArrayTy &BasePointers, MapValuesArrayTy &Pointers, MapValuesArrayTy &Sizes, MapFlagsArrayTy &Types) const {
     // The following summarizes what has to be generated for each map and the
     // types bellow. The generated information is expressed in this order:
@@ -4121,7 +4118,7 @@ private:
         // BP = &Var.
         BP = CGF.EmitLValue(cast<DeclRefExpr>(I->first)).getPointer();
 
-        // If the variable is a pointer and is being dereferenced (i.e. is not the last component), the base has to be pointer itself, not his reference.
+        // If the variable is a pointer and is being dereferenced (i.e. is not the last component), the base has to be the pointer itself, not his reference.
         if (I->second->getType()->isAnyPointerType() && std::next(I) != CE) {
           auto PtrAddr = CGF.MakeNaturalAlignAddrLValue(BP, I->second->getType());
           BP = CGF.EmitLoadOfLValue(PtrAddr,SourceLocation()).getScalarVal();
