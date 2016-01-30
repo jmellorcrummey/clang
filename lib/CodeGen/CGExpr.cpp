@@ -2938,7 +2938,8 @@ LValue CodeGenFunction::EmitOMPArraySectionExpr(const OMPArraySectionExpr *E,
   // pointee.
   if (BaseTy->isAnyPointerType()) {
     auto RBase = EmitLoadOfLValue(Base, E->getExprLoc());
-    Base = MakeNaturalAlignAddrLValue(RBase.getScalarVal(),BaseTy->getAs<PointerType>()->getPointeeType());
+    Base = MakeNaturalAlignAddrLValue(
+        RBase.getScalarVal(), BaseTy->getAs<PointerType>()->getPointeeType());
   }
   llvm::Value *Idx = nullptr;
   QualType ResultExprTy;

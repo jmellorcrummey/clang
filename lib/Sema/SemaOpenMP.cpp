@@ -799,16 +799,16 @@ void Sema::InitDataSharingAttributesStack() {
 #define DSAStack static_cast<DSAStackTy *>(VarDataSharingAttributesStack)
 
 namespace {
-  // Types used to organize the components of a valid map clause.
-  typedef std::pair<Expr *, ValueDecl *> MapExpressionComponent;
-  typedef SmallVector<MapExpressionComponent, 4> MapExpressionComponents;
+// Types used to organize the components of a valid map clause.
+typedef std::pair<Expr *, ValueDecl *> MapExpressionComponent;
+typedef SmallVector<MapExpressionComponent, 4> MapExpressionComponents;
 }
 
 // Helper to extract the components in the map clause expression \a E and store
 // them into \a MEC. This assumes that \a E is a valid map clause expression,
 // i.e. it has already passed the single clause checks.
 static void ExtractMapExpressionComponents(Expr *TE,
-                                         MapExpressionComponents &MEC) {
+                                           MapExpressionComponents &MEC) {
   while (true) {
     TE = TE->IgnoreParenImpCasts();
 
@@ -821,8 +821,8 @@ static void ExtractMapExpressionComponents(Expr *TE,
     if (auto *CurE = dyn_cast<MemberExpr>(TE)) {
       auto *BaseE = CurE->getBase()->IgnoreParenImpCasts();
 
-      MEC.push_back(MapExpressionComponent(
-          CurE, cast<FieldDecl>(CurE->getMemberDecl())));
+      MEC.push_back(
+          MapExpressionComponent(CurE, cast<FieldDecl>(CurE->getMemberDecl())));
       if (isa<CXXThisExpr>(BaseE))
         break;
 
@@ -927,31 +927,34 @@ bool Sema::IsOpenMPCapturedByRef(ValueDecl *D,
     bool IsVariableUsedInMapClause = false;
     bool IsVariableAssociatedWithSection = false;
 
-    DSAStack->checkMapInfoForVar(D, /*CurrentRegionOnly=*/true, [&](Expr *MapExpr){
-      MapExpressionComponents MapExprComponents;
-      ExtractMapExpressionComponents(MapExpr, MapExprComponents);
+    DSAStack->checkMapInfoForVar(
+        D, /*CurrentRegionOnly=*/true, [&](Expr *MapExpr) {
+          MapExpressionComponents MapExprComponents;
+          ExtractMapExpressionComponents(MapExpr, MapExprComponents);
 
-      auto EI = MapExprComponents.rbegin();
-      auto EE = MapExprComponents.rend();
+          auto EI = MapExprComponents.rbegin();
+          auto EE = MapExprComponents.rend();
 
-      assert(EI != EE && "Invalid map expression!");
+          assert(EI != EE && "Invalid map expression!");
 
-      if (isa<DeclRefExpr>(EI->first))
-        IsVariableUsedInMapClause |= EI->second == D;
+          if (isa<DeclRefExpr>(EI->first))
+            IsVariableUsedInMapClause |= EI->second == D;
 
-      ++EI;
-      if (EI == EE)
-        return false;
+          ++EI;
+          if (EI == EE)
+            return false;
 
-      if (isa<ArraySubscriptExpr>(EI->first) || isa<OMPArraySectionExpr>(EI->first) || isa<MemberExpr>(EI->first)) {
-        IsVariableAssociatedWithSection = true;
-        // There is nothing more we need to know about this variable.
-        return true;
-      }
+          if (isa<ArraySubscriptExpr>(EI->first) ||
+              isa<OMPArraySectionExpr>(EI->first) ||
+              isa<MemberExpr>(EI->first)) {
+            IsVariableAssociatedWithSection = true;
+            // There is nothing more we need to know about this variable.
+            return true;
+          }
 
-      // Keep looking for more map info.
-      return false;
-    });
+          // Keep looking for more map info.
+          return false;
+        });
 
     if (IsVariableUsedInMapClause) {
       // If variable is identified in a map clause it is always captured by
