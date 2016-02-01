@@ -553,6 +553,7 @@ public:
   explicit CGOpenMPRuntime(CodeGenModule &CGM);
   virtual ~CGOpenMPRuntime() {}
   virtual void clear();
+  static CGOpenMPRuntime* create(CodeGenModule &CGM);
 
   /// \brief Emits outlined function for the specified OpenMP parallel directive
   /// \a D. This outlined function has type void(*)(kmp_int32 *ThreadID,

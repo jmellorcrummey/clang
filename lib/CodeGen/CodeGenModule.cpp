@@ -201,7 +201,7 @@ void CodeGenModule::createOpenCLRuntime() {
 }
 
 void CodeGenModule::createOpenMPRuntime() {
-  OpenMPRuntime = new CGOpenMPRuntime(*this);
+  OpenMPRuntime = CGOpenMPRuntime::create(*this);
 }
 
 void CodeGenModule::createCUDARuntime() {
