@@ -10223,6 +10223,38 @@ Sema::FinalizeDeclaration(Decl *ThisDecl) {
     }
   }
 
+  // Perform check for initializers of device-side global variables.
+  // CUDA allows empty constructors as initializers (see E.2.3.1, CUDA
+  // 7.5). CUDA also allows constant initializers for __constant__ and
+  // __device__ variables.
+  if (getLangOpts().CUDA && getLangOpts().CUDAIsDevice) {
+    const Expr *Init = VD->getInit();
+    const bool IsGlobal = VD->hasGlobalStorage() && !VD->isStaticLocal();
+    if (Init && IsGlobal &&
+        (VD->hasAttr<CUDADeviceAttr>() || VD->hasAttr<CUDAConstantAttr>() ||
+         VD->hasAttr<CUDASharedAttr>())) {
+      bool AllowedInit = false;
+      if (const CXXConstructExpr *CE = dyn_cast<CXXConstructExpr>(Init))
+        AllowedInit =
+            isEmptyCudaConstructor(VD->getLocation(), CE->getConstructor());
+      // We'll allow constant initializers even if it's a non-empty
+      // constructor according to CUDA rules. This deviates from NVCC,
+      // but allows us to handle things like constexpr constructors.
+      if (!AllowedInit &&
+          (VD->hasAttr<CUDADeviceAttr>() || VD->hasAttr<CUDAConstantAttr>()))
+        AllowedInit = VD->getInit()->isConstantInitializer(
+            Context, VD->getType()->isReferenceType());
+
+      if (!AllowedInit) {
+        Diag(VD->getLocation(), VD->hasAttr<CUDASharedAttr>()
+                                    ? diag::err_shared_var_init
+                                    : diag::err_dynamic_var_init)
+            << Init->getSourceRange();
+        VD->setInvalidDecl();
+      }
+    }
+  }
+
   // Grab the dllimport or dllexport attribute off of the VarDecl.
   const InheritableAttr *DLLAttr = getDLLAttr(VD);
 
@@ -11099,22 +11131,26 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
   if (FD) {
     FD->setBody(Body);
 
-    if (getLangOpts().CPlusPlus14 && !FD->isInvalidDecl() && Body &&
-        !FD->isDependentContext() && FD->getReturnType()->isUndeducedType()) {
-      // If the function has a deduced result type but contains no 'return'
-      // statements, the result type as written must be exactly 'auto', and
-      // the deduced result type is 'void'.
-      if (!FD->getReturnType()->getAs<AutoType>()) {
-        Diag(dcl->getLocation(), diag::err_auto_fn_no_return_but_not_auto)
-            << FD->getReturnType();
-        FD->setInvalidDecl();
-      } else {
-        // Substitute 'void' for the 'auto' in the type.
-        TypeLoc ResultType = getReturnTypeLoc(FD);
-        Context.adjustDeducedFunctionResultType(
-            FD, SubstAutoType(ResultType.getType(), Context.VoidTy));
+    if (getLangOpts().CPlusPlus14) {
+      if (!FD->isInvalidDecl() && Body && !FD->isDependentContext() &&
+          FD->getReturnType()->isUndeducedType()) {
+        // If the function has a deduced result type but contains no 'return'
+        // statements, the result type as written must be exactly 'auto', and
+        // the deduced result type is 'void'.
+        if (!FD->getReturnType()->getAs<AutoType>()) {
+          Diag(dcl->getLocation(), diag::err_auto_fn_no_return_but_not_auto)
+              << FD->getReturnType();
+          FD->setInvalidDecl();
+        } else {
+          // Substitute 'void' for the 'auto' in the type.
+          TypeLoc ResultType = getReturnTypeLoc(FD);
+          Context.adjustDeducedFunctionResultType(
+              FD, SubstAutoType(ResultType.getType(), Context.VoidTy));
+        }
       }
     } else if (getLangOpts().CPlusPlus11 && isLambdaCallOperator(FD)) {
+      // In C++11, we don't use 'auto' deduction rules for lambda call
+      // operators because we don't support return type deduction.
       auto *LSI = getCurLambda();
       if (LSI->HasImplicitReturnType) {
         deduceClosureReturnType(*LSI);
