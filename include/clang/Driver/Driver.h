@@ -243,7 +243,8 @@ private:
   /// to, e.g., to pass extra results from host to device side and vice-versa.
   void PostProcessOffloadingInputsAndResults(
       Compilation &C, const JobAction *JA, const ToolChain *TC,
-      InputInfoList &Inputs, InputInfo &Result,
+      InputInfoList &Inputs, InputInfo Result,
+      std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults,
       OffloadingHostResultsTy &OffloadingHostResults) const;
 
   /// TranslateInputArgs - Create a new derived argument list from the input
@@ -431,7 +432,7 @@ public:
                                bool AtTopLevel, bool MultipleArchs,
                                const char *LinkingOutput,
                                std::map<std::pair<const Action *, std::string>,
-                                        InputInfo> &CachedResults) const;
+                                        InputInfo> &CachedResults, OffloadingHostResultsTy &OffloadingHostResults) const;
 
   /// Returns the default name for linked images (e.g., "a.out").
   const char *getDefaultImageName() const;
@@ -498,7 +499,7 @@ private:
       const char *BoundArch, bool AtTopLevel, bool MultipleArchs,
       const char *LinkingOutput,
       std::map<std::pair<const Action *, std::string>, InputInfo>
-          &CachedResults) const;
+          &CachedResults, OffloadingHostResultsTy &OffloadingHostResults) const;
 
 public:
   /// GetReleaseVersion - Parse (([0-9]+)(.([0-9]+)(.([0-9]+)?))?)? and

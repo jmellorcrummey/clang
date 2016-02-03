@@ -402,7 +402,8 @@ InputInfo Driver::CreateBundledOffloadingResult(
 
 void Driver::PostProcessOffloadingInputsAndResults(
     Compilation &C, const JobAction *JA, const ToolChain *TC,
-    InputInfoList &Inputs, InputInfo &Result,
+    InputInfoList &Inputs, InputInfo Result,
+    std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults,
     OffloadingHostResultsTy &OffloadingHostResults) const {
 
   // If this driver run requires OpenMP offloading we need to make sure
@@ -416,11 +417,11 @@ void Driver::PostProcessOffloadingInputsAndResults(
       InputInfoList TgtLinkResults(OrderedOffloadingToolchains.size());
       for (unsigned i = 0; i < OrderedOffloadingToolchains.size(); ++i) {
         const ToolChain *TgtTC = OrderedOffloadingToolchains[i];
-        BuildJobsForAction(C, JA, TgtTC,
+        TgtLinkResults[i] = BuildJobsForAction(C, JA, TgtTC,
                            CreateOffloadingPseudoArchName(C, TgtTC),
                            /*AtTopLevel=*/false,
                            /*MultipleArchs=*/true, /*LinkingOutput=*/nullptr,
-                           TgtLinkResults[i]/*, OffloadingHostResults*/);
+                           CachedResults, OffloadingHostResults);
       }
       Inputs.append(TgtLinkResults.begin(), TgtLinkResults.end());
       return;
@@ -1981,7 +1982,7 @@ void Driver::BuildJobs(Compilation &C) const {
                        /*BoundArch*/ nullptr,
                        /*AtTopLevel*/ true,
                        /*MultipleArchs*/ ArchNames.size() > 1,
-                       /*LinkingOutput*/ LinkingOutput, CachedResults);
+                       /*LinkingOutput*/ LinkingOutput, CachedResults, OffloadingHostResults);
   }
 
   // If the user passed -Qunused-arguments or there were errors, don't warn
@@ -2122,7 +2123,7 @@ static const Tool *selectToolForJob(Compilation &C, bool SaveTemps,
 InputInfo Driver::BuildJobsForAction(
     Compilation &C, const Action *A, const ToolChain *TC, const char *BoundArch,
     bool AtTopLevel, bool MultipleArchs, const char *LinkingOutput,
-    std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults)
+    std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults, OffloadingHostResultsTy &OffloadingHostResults)
     const {
   // The bound arch is not necessarily represented in the toolchain's triple --
   // for example, armv7 and armv7s both map to the same triple -- so we need
@@ -2139,7 +2140,7 @@ InputInfo Driver::BuildJobsForAction(
   }
   InputInfo Result =
       BuildJobsForActionNoCache(C, A, TC, BoundArch, AtTopLevel, MultipleArchs,
-                                LinkingOutput, CachedResults);
+                                LinkingOutput, CachedResults, OffloadingHostResults);
   CachedResults[ActionTC] = Result;
   return Result;
 }
@@ -2147,7 +2148,7 @@ InputInfo Driver::BuildJobsForAction(
 InputInfo Driver::BuildJobsForActionNoCache(
     Compilation &C, const Action *A, const ToolChain *TC, const char *BoundArch,
     bool AtTopLevel, bool MultipleArchs, const char *LinkingOutput,
-    std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults)
+    std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults, OffloadingHostResultsTy &OffloadingHostResults)
     const {
   llvm::PrettyStackTraceString CrashInfo("Building compilation jobs");
 
@@ -2157,7 +2158,7 @@ InputInfo Driver::BuildJobsForActionNoCache(
     for (const Action *DA : CHA->getDeviceActions()) {
       CudaDeviceInputInfos.push_back(BuildJobsForAction(
           C, DA, TC, nullptr, AtTopLevel,
-          /*MultipleArchs*/ false, LinkingOutput, CachedResults));
+          /*MultipleArchs*/ false, LinkingOutput, CachedResults, OffloadingHostResults));
     }
     // Override current action with a real host compile action and continue
     // processing it.
@@ -2169,12 +2170,11 @@ InputInfo Driver::BuildJobsForActionNoCache(
     // The input of the unbundling job has to be a single input non-source file,
     // so we do not consider it having multiple architectures. We just use the
     // naming that a regular host input file would have.
-    BuildJobsForAction(C, *OUA->begin(), TC, BoundArch, AtTopLevel,
-                       /*MultipleArchs=*/false, LinkingOutput, Result,
+    auto Result = BuildJobsForAction(C, *OUA->begin(), TC, BoundArch, AtTopLevel,
+                       /*MultipleArchs=*/false, LinkingOutput,CachedResults,
                        OffloadingHostResults);
-    Result = CreateUnbundledOffloadingResult(C, OUA, TC, Result,
+    return CreateUnbundledOffloadingResult(C, OUA, TC, Result,
                                              OffloadingHostResults);
-    return;
   }
 
   if (const OffloadBundlingJobAction *OBA =
@@ -2186,14 +2186,13 @@ InputInfo Driver::BuildJobsForActionNoCache(
       // The input job of the bundling action is meant for multiple targets and
       // is not a top level job - the bundling job is the top level for the
       // current output.
-      BuildJobsForAction(C, *OBA->begin(), CurTC,
+      Results[i] = BuildJobsForAction(C, *OBA->begin(), CurTC,
                          CreateOffloadingPseudoArchName(C, CurTC),
                          /*AtTopLevel=*/false,
-                         /*MultipleArchs=*/true, LinkingOutput, Results[i],
-                         OffloadingHostResults);
+                         /*MultipleArchs=*/true, LinkingOutput,
+                         CachedResults, OffloadingHostResults);
     }
-    Result = CreateBundledOffloadingResult(C, OBA, TC, Results);
-    return;
+    return CreateBundledOffloadingResult(C, OBA, TC, Results);
   }
 
   if (const InputAction *IA = dyn_cast<InputAction>(A)) {
@@ -2220,7 +2219,7 @@ InputInfo Driver::BuildJobsForActionNoCache(
       TC = &C.getDefaultToolChain();
 
     return BuildJobsForAction(C, *BAA->begin(), TC, ArchName, AtTopLevel,
-                              MultipleArchs, LinkingOutput, CachedResults);
+                              MultipleArchs, LinkingOutput, CachedResults, OffloadingHostResults);
   }
 
   if (const CudaDeviceAction *CDA = dyn_cast<CudaDeviceAction>(A)) {
@@ -2229,7 +2228,7 @@ InputInfo Driver::BuildJobsForActionNoCache(
     InputInfo II = BuildJobsForAction(
         C, *CDA->begin(), C.getCudaDeviceToolChain(), CDA->getGpuArchName(),
         CDA->isAtTopLevel(), /*MultipleArchs*/ true, LinkingOutput,
-        CachedResults);
+        CachedResults, OffloadingHostResults);
     // Currently II's Action is *CDA->begin().  Set it to CDA instead, so that
     // one can retrieve II's GPU arch.
     II.setAction(A);
@@ -2251,7 +2250,7 @@ InputInfo Driver::BuildJobsForActionNoCache(
     for (const Action *DA : CollapsedCHA->getDeviceActions()) {
       CudaDeviceInputInfos.push_back(BuildJobsForAction(
           C, DA, TC, "", AtTopLevel,
-          /*MultipleArchs*/ false, LinkingOutput, CachedResults));
+          /*MultipleArchs*/ false, LinkingOutput, CachedResults, OffloadingHostResults));
     }
   }
 
@@ -2265,7 +2264,7 @@ InputInfo Driver::BuildJobsForActionNoCache(
         AtTopLevel && (isa<DsymutilJobAction>(A) || isa<VerifyJobAction>(A));
     InputInfos.push_back(BuildJobsForAction(C, Input, TC, BoundArch,
                                             SubJobAtTopLevel, MultipleArchs,
-                                            LinkingOutput, CachedResults));
+                                            LinkingOutput, CachedResults, OffloadingHostResults));
   }
 
   // Always use the first input as the base input.
@@ -2281,20 +2280,20 @@ InputInfo Driver::BuildJobsForActionNoCache(
     InputInfos.append(CudaDeviceInputInfos.begin(), CudaDeviceInputInfos.end());
 
   // Determine the place to write output to, if any.
+  InputInfo Result;
   Result =
       CreateActionResult(C, A, BaseInput, BoundArch, AtTopLevel, MultipleArchs);
 
   // Post-process inputs and results to suit the needs of the offloading
   // implementations.
   PostProcessOffloadingInputsAndResults(C, JA, TC, InputInfos, Result,
-                                        OffloadingHostResults);
+                                        CachedResults, OffloadingHostResults);
 
   if (CCCPrintBindings && !CCGenDiagnostics)
     DumpJobBindings(&T->getToolChain(), T->getName(), InputInfos, Result);
   else
     T->ConstructJob(C, *JA, Result, InputInfos,
                     C.getArgsForToolChain(TC, BoundArch), LinkingOutput);
-  }
   return Result;
 }
 
