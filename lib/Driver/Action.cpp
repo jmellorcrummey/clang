@@ -97,8 +97,7 @@ CudaHostAction::CudaHostAction(Action *Input, const ActionList &DeviceActions)
 
 void JobAction::anchor() {}
 
-JobAction::JobAction(ActionClass Kind, Action *Input)
-    : Action(Kind, Input) {}
+JobAction::JobAction(ActionClass Kind, Action *Input) : Action(Kind, Input) {}
 
 JobAction::JobAction(ActionClass Kind, Action *Input, types::ID Type)
     : Action(Kind, Input, Type) {}
@@ -109,7 +108,7 @@ JobAction::JobAction(ActionClass Kind, const ActionList &Inputs, types::ID Type)
 
 void OffloadBundlingJobAction::anchor() {}
 
-OffloadBundlingJobAction::OffloadBundlingJobAction(Action * Input)
+OffloadBundlingJobAction::OffloadBundlingJobAction(Action *Input)
     : JobAction(OffloadBundlingJobClass, Input) {}
 
 void OffloadUnbundlingJobAction::anchor() {}

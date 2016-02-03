@@ -228,15 +228,15 @@ private:
   /// OffloadingHostResults for that action use them instead. If offloading
   /// is not supported, just return the provided input info.
   InputInfo CreateUnbundledOffloadingResult(
-      Compilation &C, const Action *CurAction,
-      const ToolChain *TC, InputInfo Result,
-      OffloadingHostResultsTy &OffloadingHostResults) const;
+      Compilation &C, const Action *CurAction, const ToolChain *TC,
+      InputInfo Result, OffloadingHostResultsTy &OffloadingHostResults) const;
 
   /// CreateBundledOffloadingResult - Create a bundle of all provided results
   /// and return the InputInfo of the bundled file.
-  InputInfo CreateBundledOffloadingResult(
-      Compilation &C, const Action *CurAction,
-      const ToolChain *TC, InputInfoList Results) const;
+  InputInfo CreateBundledOffloadingResult(Compilation &C,
+                                          const Action *CurAction,
+                                          const ToolChain *TC,
+                                          InputInfoList Results) const;
 
   /// PostProcessOffloadingInputsAndResults - Update the input and output
   /// information to suit the needs of the offloading implementation. This used
@@ -244,7 +244,8 @@ private:
   void PostProcessOffloadingInputsAndResults(
       Compilation &C, const JobAction *JA, const ToolChain *TC,
       InputInfoList &Inputs, InputInfo Result,
-      std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults,
+      std::map<std::pair<const Action *, std::string>, InputInfo>
+          &CachedResults,
       OffloadingHostResultsTy &OffloadingHostResults) const;
 
   /// TranslateInputArgs - Create a new derived argument list from the input
@@ -427,12 +428,13 @@ public:
   /// BuildJobsForAction - Construct the jobs to perform for the action \p A and
   /// return an InputInfo for the result of running \p A.  Will only construct
   /// jobs for a given (Action, ToolChain, BoundArch) tuple once.
-  InputInfo BuildJobsForAction(Compilation &C, const Action *A,
-                               const ToolChain *TC, const char *BoundArch,
-                               bool AtTopLevel, bool MultipleArchs,
-                               const char *LinkingOutput,
-                               std::map<std::pair<const Action *, std::string>,
-                                        InputInfo> &CachedResults, OffloadingHostResultsTy &OffloadingHostResults) const;
+  InputInfo
+  BuildJobsForAction(Compilation &C, const Action *A, const ToolChain *TC,
+                     const char *BoundArch, bool AtTopLevel, bool MultipleArchs,
+                     const char *LinkingOutput,
+                     std::map<std::pair<const Action *, std::string>, InputInfo>
+                         &CachedResults,
+                     OffloadingHostResultsTy &OffloadingHostResults) const;
 
   /// Returns the default name for linked images (e.g., "a.out").
   const char *getDefaultImageName() const;
@@ -499,7 +501,8 @@ private:
       const char *BoundArch, bool AtTopLevel, bool MultipleArchs,
       const char *LinkingOutput,
       std::map<std::pair<const Action *, std::string>, InputInfo>
-          &CachedResults, OffloadingHostResultsTy &OffloadingHostResults) const;
+          &CachedResults,
+      OffloadingHostResultsTy &OffloadingHostResults) const;
 
 public:
   /// GetReleaseVersion - Parse (([0-9]+)(.([0-9]+)(.([0-9]+)?))?)? and
