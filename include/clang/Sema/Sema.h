@@ -7971,6 +7971,12 @@ public:
                                                 Stmt *AStmt,
                                                 SourceLocation StartLoc,
                                                 SourceLocation EndLoc);
+  /// \brief Called on well-formed '\#pragma omp target parallel for' after
+  /// parsing of the  associated statement.
+  StmtResult ActOnOpenMPTargetParallelForDirective(
+      ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
+      SourceLocation EndLoc,
+      llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA);
   /// \brief Called on well-formed '\#pragma omp teams' after parsing of the
   /// associated statement.
   StmtResult ActOnOpenMPTeamsDirective(ArrayRef<OMPClause *> Clauses,
@@ -8833,6 +8839,10 @@ public:
                                                CXXMethodDecl *MemberDecl,
                                                bool ConstRHS,
                                                bool Diagnose);
+
+  /// \return true if \p CD can be considered empty according to CUDA
+  /// (E.2.3.1 in CUDA 7.5 Programming guide).
+  bool isEmptyCudaConstructor(SourceLocation Loc, CXXConstructorDecl *CD);
 
   /// \name Code completion
   //@{
