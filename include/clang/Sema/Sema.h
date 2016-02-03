@@ -20,6 +20,7 @@
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprObjC.h"
 #include "clang/AST/ExternalASTSource.h"
+#include "clang/AST/LocInfoType.h"
 #include "clang/AST/MangleNumberingContext.h"
 #include "clang/AST/NSAPI.h"
 #include "clang/AST/PrettyPrinter.h"
@@ -35,7 +36,6 @@
 #include "clang/Sema/DeclSpec.h"
 #include "clang/Sema/ExternalSemaSource.h"
 #include "clang/Sema/IdentifierResolver.h"
-#include "clang/Sema/LocInfoType.h"
 #include "clang/Sema/ObjCMethodList.h"
 #include "clang/Sema/Ownership.h"
 #include "clang/Sema/Scope.h"
@@ -7749,6 +7749,10 @@ public:
   /// declaration.
   void AddLaunchBoundsAttr(SourceRange AttrRange, Decl *D, Expr *MaxThreads,
                            Expr *MinBlocks, unsigned SpellingListIndex);
+
+  /// AddModeAttr - Adds a mode attribute to a particular declaration.
+  void AddModeAttr(SourceRange AttrRange, Decl *D, IdentifierInfo *Name,
+                   unsigned SpellingListIndex, bool InInstantiation = false);
 
   //===--------------------------------------------------------------------===//
   // C++ Coroutines TS
