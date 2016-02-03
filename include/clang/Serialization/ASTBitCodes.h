@@ -987,13 +987,16 @@ namespace clang {
 
       /// \brief The internal '__make_integer_seq' template.
       PREDEF_DECL_MAKE_INTEGER_SEQ_ID = 13,
+
+      /// \brief The internal '__NSConstantString' type.
+      PREDEF_DECL_CF_CONSTANT_STRING_ID = 14,
     };
 
     /// \brief The number of declaration IDs that are predefined.
     ///
     /// For more information about predefined declarations, see the
     /// \c PredefinedDeclIDs type and the PREDEF_DECL_*_ID constants.
-    const unsigned int NUM_PREDEF_DECL_IDS = 14;
+    const unsigned int NUM_PREDEF_DECL_IDS = 15;
 
     /// \brief Record code for a list of local redeclarations of a declaration.
     const unsigned int LOCAL_REDECLARATIONS = 50;
@@ -1448,6 +1451,7 @@ namespace clang {
       STMT_OMP_TARGET_ENTER_DATA_DIRECTIVE,
       STMT_OMP_TARGET_EXIT_DATA_DIRECTIVE,
       STMT_OMP_TARGET_PARALLEL_DIRECTIVE,
+      STMT_OMP_TARGET_PARALLEL_FOR_DIRECTIVE,
       STMT_OMP_TEAMS_DIRECTIVE,
       STMT_OMP_TASKGROUP_DIRECTIVE,
       STMT_OMP_CANCELLATION_POINT_DIRECTIVE,
