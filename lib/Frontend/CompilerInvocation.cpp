@@ -1827,7 +1827,7 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   // device or host.
   if (Opts.OpenMP && !Opts.OpenMPIsDevice) {
     llvm::Triple T(TargetOpts.Triple);
-    switch(T.getArch()) {
+    switch (T.getArch()) {
     default:
       break;
     // Add unsupported host targets here:
