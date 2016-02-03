@@ -256,15 +256,24 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
   case Stmt::OMPTargetDataDirectiveClass:
     EmitOMPTargetDataDirective(cast<OMPTargetDataDirective>(*S));
     break;
+  case Stmt::OMPTargetEnterDataDirectiveClass:
+    EmitOMPTargetEnterDataDirective(cast<OMPTargetEnterDataDirective>(*S));
+    break;
+  case Stmt::OMPTargetExitDataDirectiveClass:
+    EmitOMPTargetExitDataDirective(cast<OMPTargetExitDataDirective>(*S));
+    break;
+  case Stmt::OMPTargetParallelDirectiveClass:
+    EmitOMPTargetParallelDirective(cast<OMPTargetParallelDirective>(*S));
+    break;
   case Stmt::OMPTaskLoopDirectiveClass:
     EmitOMPTaskLoopDirective(cast<OMPTaskLoopDirective>(*S));
     break;
   case Stmt::OMPTaskLoopSimdDirectiveClass:
     EmitOMPTaskLoopSimdDirective(cast<OMPTaskLoopSimdDirective>(*S));
     break;
-case Stmt::OMPDistributeDirectiveClass:
+  case Stmt::OMPDistributeDirectiveClass:
     EmitOMPDistributeDirective(cast<OMPDistributeDirective>(*S));
-	break;
+    break;
   }
 }
 

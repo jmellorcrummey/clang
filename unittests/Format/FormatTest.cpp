@@ -962,6 +962,14 @@ TEST_F(FormatTest, UnderstandsSingleLineComments) {
                    "// at start\n"
                    "otherLine();"));
   EXPECT_EQ("lineWith(); // comment\n"
+            "/*\n"
+            " * at start */\n"
+            "otherLine();",
+            format("lineWith();   // comment\n"
+                   "/*\n"
+                   " * at start */\n"
+                   "otherLine();"));
+  EXPECT_EQ("lineWith(); // comment\n"
             "            // at start\n"
             "otherLine();",
             format("lineWith();   // comment\n"
@@ -1022,6 +1030,15 @@ TEST_F(FormatTest, UnderstandsSingleLineComments) {
                    "  lineWith(); // comment\n"
                    "  // at start\n"
                    "}"));
+  EXPECT_EQ("int xy; // a\n"
+            "int z;  // b",
+            format("int xy;    // a\n"
+                   "int z;    //b"));
+  EXPECT_EQ("int xy; // a\n"
+            "int z; // bb",
+            format("int xy;    // a\n"
+                   "int z;    //bb",
+                   getLLVMStyleWithColumns(12)));
 
   verifyFormat("#define A                                                  \\\n"
                "  int i; /* iiiiiiiiiiiiiiiiiiiii */                       \\\n"
@@ -3607,6 +3624,7 @@ TEST_F(FormatTest, ConstructorInitializers) {
 
   FormatStyle OnePerLine = getLLVMStyle();
   OnePerLine.ConstructorInitializerAllOnOneLineOrOnePerLine = true;
+  OnePerLine.AllowAllParametersOfDeclarationOnNextLine = false;
   verifyFormat("SomeClass::Constructor()\n"
                "    : aaaaaaaaaaaaa(aaaaaaaaaaaaaa),\n"
                "      aaaaaaaaaaaaa(aaaaaaaaaaaaaa),\n"
@@ -3633,6 +3651,13 @@ TEST_F(FormatTest, ConstructorInitializers) {
                "    : aaaaa(aaaaaaaaaaaaaaaaaaaaaa, aaaaaaaaaaaaaaaaaaaaaa,\n"
                "            aaaaaaaaaaaaaaaaaaaaaa) {}",
                OnePerLine);
+  OnePerLine.BinPackParameters = false;
+  verifyFormat(
+      "Constructor()\n"
+      "    : aaaaaaaaaaaaaaaaaaaaaaaa(\n"
+      "          aaaaaaaaaaa().aaa(),\n"
+      "          aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) {}",
+      OnePerLine);
   OnePerLine.ColumnLimit = 60;
   verifyFormat("Constructor()\n"
                "    : aaaaaaaaaaaaaaaaaaaa(a),\n"
@@ -4054,6 +4079,23 @@ TEST_F(FormatTest, FormatsDeclarationsOnePerLine) {
                "       int aaaaaaaaaaaaaaaaaaaa,\n"
                "       int aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) {}",
                NoBinPacking);
+
+  NoBinPacking.AllowAllParametersOfDeclarationOnNextLine = false;
+  verifyFormat("void aaaaaaaaaaaaaaaaaa(aaaaaaaaaaaaaaaaaaaaaaaaaaaa,\n"
+               "                        vector<int> bbbbbbbbbbbbbbb);",
+               NoBinPacking);
+  // FIXME: This behavior difference is probably not wanted. However, currently
+  // we cannot distinguish BreakBeforeParameter being set because of the wrapped
+  // template arguments from BreakBeforeParameter being set because of the
+  // one-per-line formatting.
+  verifyFormat(
+      "void fffffffffff(aaaaaaaaaaaaaaaaaaaaaaaaaaa<aaaaaaaaaaaaaaaaaaaaaaa,\n"
+      "                                             aaaaaaaaaa> aaaaaaaaaa);",
+      NoBinPacking);
+  verifyFormat(
+      "void fffffffffff(\n"
+      "    aaaaaaaaaaaaaaaaaaaaaaaaaaa<aaaaaaaaaaaaaaaaaaaaaaa, aaaaaaaaaa>\n"
+      "        aaaaaaaaaa);");
 }
 
 TEST_F(FormatTest, FormatsOneParameterPerLineIfNecessary) {
@@ -5450,6 +5492,7 @@ TEST_F(FormatTest, UnderstandsOverloadedOperators) {
   verifyFormat("bool operator!=();");
   verifyFormat("int operator+();");
   verifyFormat("int operator++();");
+  verifyFormat("bool operator,();");
   verifyFormat("bool operator();");
   verifyFormat("bool operator()();");
   verifyFormat("bool operator[]();");
@@ -5465,6 +5508,8 @@ TEST_F(FormatTest, UnderstandsOverloadedOperators) {
   verifyFormat("void operator delete[](void *ptr);");
   verifyFormat("template <typename AAAAAAA, typename BBBBBBB>\n"
                "AAAAAAA operator/(const AAAAAAA &a, BBBBBBB &b);");
+  verifyFormat("aaaaaaaaaaaaaaaaaaaaaa operator,(\n"
+               "    aaaaaaaaaaaaaaaaaaaaa &aaaaaaaaaaaaaaaaaaaaaaaaaa) const;");
 
   verifyFormat(
       "ostream &operator<<(ostream &OutputStream,\n"
@@ -5589,6 +5634,7 @@ TEST_F(FormatTest, UnderstandsUsesOfStarAndAmp) {
   verifyFormat("[](const decltype(*a) &value) {}");
   verifyFormat("decltype(a * b) F();");
   verifyFormat("#define MACRO() [](A *a) { return 1; }");
+  verifyFormat("Constructor() : member([](A *a, B *b) {}) {}");
   verifyIndependentOfContext("typedef void (*f)(int *a);");
   verifyIndependentOfContext("int i{a * b};");
   verifyIndependentOfContext("aaa && aaa->f();");
@@ -6096,8 +6142,12 @@ TEST_F(FormatTest, FormatsArrays) {
       "aaaaaaaaaaa aaaaaaaaaaaaaaa = aaaaaaaaaaaaaaaaaaaaaaaaaa->aaaaaaaaa[0]\n"
       "                                  .aaaaaaa[0]\n"
       "                                  .aaaaaaaaaaaaaaaaaaaaaa();");
+  verifyFormat("a[::b::c];");
 
   verifyNoCrash("a[,Y?)]", getLLVMStyleWithColumns(10));
+
+  FormatStyle NoColumnLimit = getLLVMStyleWithColumns(0);
+  verifyFormat("aaaaa[bbbbbb].cccccc()", NoColumnLimit);
 }
 
 TEST_F(FormatTest, LineStartsWithSpecialCharacter) {
@@ -7726,7 +7776,12 @@ TEST_F(FormatTest, ObjCArrayLiterals) {
       "  aaaa == bbbbbbbbbbb ? @\"aaaaaaaaaaaa\" : @\"aaaaaaaaaaaaaa\",\n"
       "  @\"aaaaaaaaaaaaaaaaa\",\n"
       "  @\"aaaaaaaaaaaaaaaaa\",\n"
-      "  @\"aaaaaaaaaaaaaaaaa\"\n"
+      "  @\"aaaaaaaaaaaaaaaaa\",\n"
+      "];");
+  verifyFormat(
+      "NSArray *some_variable = @[\n"
+      "  aaaa == bbbbbbbbbbb ? @\"aaaaaaaaaaaa\" : @\"aaaaaaaaaaaaaa\",\n"
+      "  @\"aaaaaaaaaaaaaaaa\", @\"aaaaaaaaaaaaaaaa\", @\"aaaaaaaaaaaaaaaa\"\n"
       "];");
   verifyFormat("NSArray *some_variable = @[\n"
                "  @\"aaaaaaaaaaaaaaaaa\",\n"
@@ -7734,12 +7789,6 @@ TEST_F(FormatTest, ObjCArrayLiterals) {
                "  @\"aaaaaaaaaaaaaaaaa\",\n"
                "  @\"aaaaaaaaaaaaaaaaa\",\n"
                "];");
-  verifyGoogleFormat("NSArray *some_variable = @[\n"
-                     "  @\"aaaaaaaaaaaaaaaaa\",\n"
-                     "  @\"aaaaaaaaaaaaaaaaa\",\n"
-                     "  @\"aaaaaaaaaaaaaaaaa\",\n"
-                     "  @\"aaaaaaaaaaaaaaaaa\"\n"
-                     "];");
   verifyFormat("NSArray *array = @[\n"
                "  @\"a\",\n"
                "  @\"a\",\n" // Trailing comma -> one per line.
@@ -7909,6 +7958,10 @@ TEST_F(FormatTest, BreaksStringLiterals) {
             format("ffff({\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "
                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"});",
                    getGoogleStyle()));
+
+  FormatStyle Style = getLLVMStyleWithColumns(12);
+  Style.BreakStringLiterals = false;
+  EXPECT_EQ("\"some text other\";", format("\"some text other\";", Style));
 
   FormatStyle AlignLeft = getLLVMStyleWithColumns(12);
   AlignLeft.AlignEscapedNewlinesLeft = true;
@@ -9775,8 +9828,10 @@ TEST_F(FormatTest, ParsesConfigurationBools) {
   CHECK_PARSE_BOOL(AlwaysBreakTemplateDeclarations);
   CHECK_PARSE_BOOL(BinPackArguments);
   CHECK_PARSE_BOOL(BinPackParameters);
+  CHECK_PARSE_BOOL(BreakAfterJavaFieldAnnotations);
   CHECK_PARSE_BOOL(BreakBeforeTernaryOperators);
   CHECK_PARSE_BOOL(BreakConstructorInitializersBeforeComma);
+  CHECK_PARSE_BOOL(BreakStringLiterals);
   CHECK_PARSE_BOOL(ConstructorInitializerAllOnOneLineOrOnePerLine);
   CHECK_PARSE_BOOL(DerivePointerAlignment);
   CHECK_PARSE_BOOL_FIELD(DerivePointerAlignment, "DerivePointerBinding");
@@ -10269,6 +10324,15 @@ TEST_F(FormatTest, ConstructorInitializerIndentWidth) {
       "SomeClass::Constructor()\n"
       ": aaaaaaaaaaaaa(aaaaaaaaaaaaaa), aaaaaaaaaaaaa(aaaaaaaaaaaaaa),\n"
       "  aaaaaaaaaaaaa(aaaaaaaaaaaaaa) {}",
+      Style);
+  Style.AlignAfterOpenBracket = FormatStyle::BAS_AlwaysBreak;
+  verifyFormat(
+      "SomeLongTemplateVariableName<\n"
+      "    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa>",
+      Style);
+  verifyFormat(
+      "bool smaller = 1 < bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb(\n"
+      "                       aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa);",
       Style);
 }
 

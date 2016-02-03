@@ -1,4 +1,4 @@
-//===--- 
+//===--- CompilerInvocation.cpp -------------------------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -416,15 +416,15 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
   if (Arg *A = Args.getLastArg(OPT_debug_info_kind_EQ)) {
     unsigned Val =
         llvm::StringSwitch<unsigned>(A->getValue())
-            .Case("line-tables-only", CodeGenOptions::DebugLineTablesOnly)
-            .Case("limited", CodeGenOptions::LimitedDebugInfo)
-            .Case("standalone", CodeGenOptions::FullDebugInfo)
+            .Case("line-tables-only", codegenoptions::DebugLineTablesOnly)
+            .Case("limited", codegenoptions::LimitedDebugInfo)
+            .Case("standalone", codegenoptions::FullDebugInfo)
             .Default(~0U);
     if (Val == ~0U)
       Diags.Report(diag::err_drv_invalid_value) << A->getAsString(Args)
                                                 << A->getValue();
     else
-      Opts.setDebugInfo(static_cast<CodeGenOptions::DebugInfoKind>(Val));
+      Opts.setDebugInfo(static_cast<codegenoptions::DebugInfoKind>(Val));
   }
   if (Arg *A = Args.getLastArg(OPT_debugger_tuning_EQ)) {
     unsigned Val = llvm::StringSwitch<unsigned>(A->getValue())
@@ -623,6 +623,7 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
   Opts.SanitizeMemoryUseAfterDtor =
       Args.hasArg(OPT_fsanitize_memory_use_after_dtor);
   Opts.SanitizeCfiCrossDso = Args.hasArg(OPT_fsanitize_cfi_cross_dso);
+  Opts.SanitizeStats = Args.hasArg(OPT_fsanitize_stats);
   Opts.SSPBufferSize =
       getLastArgIntValue(Args, OPT_stack_protector_buffer_size, 8, Diags);
   Opts.StackRealignment = Args.hasArg(OPT_mstackrealign);
@@ -697,6 +698,7 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
   }
 
   Opts.DependentLibraries = Args.getAllArgValues(OPT_dependent_lib);
+  Opts.LinkerOptions = Args.getAllArgValues(OPT_linker_option);
   bool NeedLocTracking = false;
 
   if (Arg *A = Args.getLastArg(OPT_Rpass_EQ)) {
@@ -725,8 +727,8 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
 
   // If the user requested a flag that requires source locations available in
   // the backend, make sure that the backend tracks source location information.
-  if (NeedLocTracking && Opts.getDebugInfo() == CodeGenOptions::NoDebugInfo)
-    Opts.setDebugInfo(CodeGenOptions::LocTrackingOnly);
+  if (NeedLocTracking && Opts.getDebugInfo() == codegenoptions::NoDebugInfo)
+    Opts.setDebugInfo(codegenoptions::LocTrackingOnly);
 
   Opts.RewriteMapFiles = Args.getAllArgValues(OPT_frewrite_map_file);
 
@@ -1519,6 +1521,9 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   if (Args.hasArg(OPT_fcuda_target_overloads))
     Opts.CUDATargetOverloads = 1;
 
+  if (Args.hasArg(OPT_fcuda_allow_variadic_functions))
+    Opts.CUDAAllowVariadicFunctions = 1;
+
   if (Opts.ObjC1) {
     if (Arg *arg = Args.getLastArg(OPT_fobjc_runtime_EQ)) {
       StringRef value = arg->getValue();
@@ -1664,7 +1669,7 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   Opts.SjLjExceptions = Args.hasArg(OPT_fsjlj_exceptions);
   Opts.TraditionalCPP = Args.hasArg(OPT_traditional_cpp);
 
-  Opts.RTTI = !Args.hasArg(OPT_fno_rtti);
+  Opts.RTTI = Opts.CPlusPlus && !Args.hasArg(OPT_fno_rtti);
   Opts.RTTIData = Opts.RTTI && !Args.hasArg(OPT_fno_rtti_data);
   Opts.Blocks = Args.hasArg(OPT_fblocks);
   Opts.BlocksRuntimeOptional = Args.hasArg(OPT_fblocks_runtime_optional);
@@ -2202,8 +2207,11 @@ std::string CompilerInvocation::getModuleHash() const {
     code = hash_combine(code, I->first, I->second);
   }
 
-  // Extend the signature with the sysroot.
-  code = hash_combine(code, hsOpts.Sysroot, hsOpts.UseBuiltinIncludes,
+  // Extend the signature with the sysroot and other header search options.
+  code = hash_combine(code, hsOpts.Sysroot,
+                      hsOpts.ModuleFormat,
+                      hsOpts.UseDebugInfo,
+                      hsOpts.UseBuiltinIncludes,
                       hsOpts.UseStandardSystemIncludes,
                       hsOpts.UseStandardCXXIncludes,
                       hsOpts.UseLibcxx);

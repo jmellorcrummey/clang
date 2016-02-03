@@ -909,6 +909,26 @@ void OMPClausePrinter::VisitOMPMapClause(OMPMapClause *Node) {
     OS << ")";
   }
 }
+
+void OMPClausePrinter::VisitOMPDistScheduleClause(OMPDistScheduleClause *Node) {
+  OS << "dist_schedule(" << getOpenMPSimpleClauseTypeName(
+                           OMPC_dist_schedule, Node->getDistScheduleKind());
+  if (Node->getChunkSize()) {
+    OS << ", ";
+    Node->getChunkSize()->printPretty(OS, nullptr, Policy);
+  }
+  OS << ")";
+}
+
+void OMPClausePrinter::VisitOMPDefaultmapClause(OMPDefaultmapClause *Node) {
+  OS << "defaultmap(";
+  OS << getOpenMPSimpleClauseTypeName(OMPC_defaultmap,
+                                      Node->getDefaultmapModifier());
+  OS << ": ";
+  OS << getOpenMPSimpleClauseTypeName(OMPC_defaultmap,
+    Node->getDefaultmapKind());
+  OS << ")";
+}
 }
 
 //===----------------------------------------------------------------------===//
@@ -1051,6 +1071,24 @@ void StmtPrinter::VisitOMPTargetDataDirective(OMPTargetDataDirective *Node) {
   PrintOMPExecutableDirective(Node);
 }
 
+void StmtPrinter::VisitOMPTargetEnterDataDirective(
+    OMPTargetEnterDataDirective *Node) {
+  Indent() << "#pragma omp target enter data ";
+  PrintOMPExecutableDirective(Node);
+}
+
+void StmtPrinter::VisitOMPTargetExitDataDirective(
+    OMPTargetExitDataDirective *Node) {
+  Indent() << "#pragma omp target exit data ";
+  PrintOMPExecutableDirective(Node);
+}
+
+void StmtPrinter::VisitOMPTargetParallelDirective(
+    OMPTargetParallelDirective *Node) {
+  Indent() << "#pragma omp target parallel ";
+  PrintOMPExecutableDirective(Node);
+}
+
 void StmtPrinter::VisitOMPTeamsDirective(OMPTeamsDirective *Node) {
   Indent() << "#pragma omp teams ";
   PrintOMPExecutableDirective(Node);
@@ -1165,6 +1203,7 @@ void StmtPrinter::VisitCharacterLiteral(CharacterLiteral *Node) {
   switch (Node->getKind()) {
   case CharacterLiteral::Ascii: break; // no prefix.
   case CharacterLiteral::Wide:  OS << 'L'; break;
+  case CharacterLiteral::UTF8:  OS << "u8"; break;
   case CharacterLiteral::UTF16: OS << 'u'; break;
   case CharacterLiteral::UTF32: OS << 'U'; break;
   }
@@ -2423,7 +2462,7 @@ void StmtPrinter::VisitOpaqueValueExpr(OpaqueValueExpr *Node) {
 
 void StmtPrinter::VisitTypoExpr(TypoExpr *Node) {
   // TODO: Print something reasonable for a TypoExpr, if necessary.
-  assert(false && "Cannot print TypoExpr nodes");
+  llvm_unreachable("Cannot print TypoExpr nodes");
 }
 
 void StmtPrinter::VisitAsTypeExpr(AsTypeExpr *Node) {
