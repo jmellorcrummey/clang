@@ -3778,8 +3778,8 @@ void CGOpenMPRuntime::emitTargetOutlinedFunction(
   {
     llvm::raw_svector_ostream OS(EntryFnName);
     OS << "__omp_offloading" << llvm::format("_%x", DeviceID)
-        << llvm::format("_%x_", FileID) << ParentName << "_l" << Line << "_c"
-        << Column;
+       << llvm::format("_%x_", FileID) << ParentName << "_l" << Line << "_c"
+       << Column;
   }
 
   CodeGenFunction CGF(CGM, true);
