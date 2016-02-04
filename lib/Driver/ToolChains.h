@@ -824,7 +824,7 @@ public:
                 const char *BoundArch) const override;
   llvm::opt::DerivedArgList *
   TranslateOffloadArgs(const llvm::opt::DerivedArgList &Args,
-      const char *BoundArch) const override;
+                       const char *BoundArch) const override;
   bool RequiresHostToolChainForOffloadingAction(const Action *A) const override;
   void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
                              llvm::opt::ArgStringList &CC1Args) const override;

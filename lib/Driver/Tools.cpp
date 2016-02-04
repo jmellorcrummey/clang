@@ -10977,7 +10977,8 @@ void NVPTX::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   // OpenMP uses nvlink to link cubin files. The result will be embedded in the
   // host binary by the host linker.
-  assert(TC.getOffloadingKind() != ToolChain::OK_OpenMP_Host && "CUDA toolchain not expected for an OpenMP host device.");
+  assert(TC.getOffloadingKind() != ToolChain::OK_OpenMP_Host &&
+         "CUDA toolchain not expected for an OpenMP host device.");
   if (TC.getOffloadingKind() == ToolChain::OK_OpenMP_Device) {
 
     if (Output.isFilename()) {
@@ -10996,7 +10997,7 @@ void NVPTX::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     std::vector<std::string> gpu_archs =
         Args.getAllArgValues(options::OPT_march_EQ);
     assert(gpu_archs.size() == 1 && "Exactly one GPU Arch required for ptxas.");
-    const std::string& gpu_arch = gpu_archs[0];
+    const std::string &gpu_arch = gpu_archs[0];
 
     CmdArgs.push_back("-arch");
     CmdArgs.push_back(Args.MakeArgString(gpu_arch));
@@ -11019,7 +11020,7 @@ void NVPTX::Linker::ConstructJob(Compilation &C, const JobAction &JA,
           II.getType() == types::TY_LTO_BC ||
           II.getType() == types::TY_LLVM_BC) {
         C.getDriver().Diag(diag::err_drv_no_linker_llvm_support)
-          << getToolChain().getTripleString();
+            << getToolChain().getTripleString();
         continue;
       }
 
@@ -11030,18 +11031,20 @@ void NVPTX::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
       StringRef Name = llvm::sys::path::filename(II.getFilename());
       std::pair<StringRef, StringRef> Split = Name.rsplit('.');
-      std::string TmpName = C.getDriver().GetTemporaryPath(Split.first,"cubin");
+      std::string TmpName =
+          C.getDriver().GetTemporaryPath(Split.first, "cubin");
 
-      const char *CubinF = C.addTempFile(C.getArgs().MakeArgString(TmpName.c_str()));
+      const char *CubinF =
+          C.addTempFile(C.getArgs().MakeArgString(TmpName.c_str()));
 
-      const char *CopyExec =
-          Args.MakeArgString(getToolChain().GetProgramPath(
-              C.getDriver().IsCLMode() ? "copy" : "cp" ));
+      const char *CopyExec = Args.MakeArgString(getToolChain().GetProgramPath(
+          C.getDriver().IsCLMode() ? "copy" : "cp"));
 
       ArgStringList CopyCmdArgs;
       CopyCmdArgs.push_back(II.getFilename());
       CopyCmdArgs.push_back(CubinF);
-      C.addCommand(llvm::make_unique<Command>(JA, *this, CopyExec, CopyCmdArgs, Inputs));
+      C.addCommand(
+          llvm::make_unique<Command>(JA, *this, CopyExec, CopyCmdArgs, Inputs));
 
       CmdArgs.push_back(CubinF);
     }
@@ -11052,7 +11055,7 @@ void NVPTX::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     addDirectoryList(Args, CmdArgs, "-L", "LIBRARY_PATH");
 
     const char *Exec =
-      Args.MakeArgString(getToolChain().GetProgramPath("nvlink"));
+        Args.MakeArgString(getToolChain().GetProgramPath("nvlink"));
     C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, Inputs));
     return;
   }

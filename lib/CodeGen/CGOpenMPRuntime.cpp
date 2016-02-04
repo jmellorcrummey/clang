@@ -2184,13 +2184,14 @@ CGOpenMPRuntime::createOffloadingBinaryDescriptorRegistration() {
   return RegFn;
 }
 
-void CGOpenMPRuntime::createOffloadEntry(llvm::Constant *ID, llvm::Constant *Addr,
-                                         uint64_t Size) {
+void CGOpenMPRuntime::createOffloadEntry(llvm::Constant *ID,
+                                         llvm::Constant *Addr, uint64_t Size) {
   StringRef Name = Addr->getName();
 
   // FIXME: This is a hack to not generate entries for nvptx, we need to have
   // this rely on specialized implementation of the runtime library.
-  if (CGM.getTarget().getTriple().getArch() == llvm::Triple::nvptx64 || CGM.getTarget().getTriple().getArch() == llvm::Triple::nvptx) {
+  if (CGM.getTarget().getTriple().getArch() == llvm::Triple::nvptx64 ||
+      CGM.getTarget().getTriple().getArch() == llvm::Triple::nvptx) {
     auto *F = dyn_cast<llvm::Function>(Addr);
     if (!F)
       return;
@@ -3777,8 +3778,8 @@ void CGOpenMPRuntime::emitTargetOutlinedFunction(
   {
     llvm::raw_svector_ostream OS(EntryFnName);
     OS << "__omp_offloading"; /* << llvm::format("_%x", DeviceID)
-       << llvm::format("_%x_", FileID) << ParentName << "_l" << Line << "_c"
-       << Column;*/
+        << llvm::format("_%x_", FileID) << ParentName << "_l" << Line << "_c"
+        << Column;*/
   }
 
   CodeGenFunction CGF(CGM, true);

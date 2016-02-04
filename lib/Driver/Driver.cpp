@@ -2091,8 +2091,8 @@ static const Tool *selectToolForJob(Compilation &C, bool SaveTemps,
   // unless OPT_save_temps is enabled and the compiler is capable of emitting
   // LLVM IR as an intermediate output. The OpenMP offloading implementation
   // also requires the Compile and Backend jobs to be separate.
-  if (isa<BackendJobAction>(JA) && !RequiresOpenMPOffloading(TC) && !
-      !TC->RequiresHostToolChainForOffloadingAction(*Inputs->begin())) {
+  if (isa<BackendJobAction>(JA) && !RequiresOpenMPOffloading(TC) &&
+      !!TC->RequiresHostToolChainForOffloadingAction(*Inputs->begin())) {
     // Check if the compiler supports emitting LLVM IR.
     assert(Inputs->size() == 1);
     // Compile job may be wrapped in CudaHostAction, extract it if

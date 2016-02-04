@@ -444,7 +444,8 @@ private:
 
   /// \brief Creates offloading entry for the provided entry ID \a ID,
   /// address \a Addr and size \a Size.
-  void createOffloadEntry(llvm::Constant *ID, llvm::Constant *Addr, uint64_t Size);
+  void createOffloadEntry(llvm::Constant *ID, llvm::Constant *Addr,
+                          uint64_t Size);
 
   /// \brief Creates all the offload entries in the current compilation unit
   /// along with the associated metadata.
