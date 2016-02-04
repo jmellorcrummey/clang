@@ -208,6 +208,14 @@ public:
     return nullptr;
   }
 
+  /// RequiresHostToolChainForOffloadingAction - Return true if the action \a A
+  /// should be fulfilled by the host tool chain in case this is an offloading
+  /// toolchain. Returns false by default, meaning the current toolchain can
+  /// handle the provided action.
+  virtual bool RequiresHostToolChainForOffloadingAction(const Action *A) const {
+    return false;
+  }
+
   /// Choose a tool to use to handle the action \p JA.
   ///
   /// This can be overridden when a particular ToolChain needs to use

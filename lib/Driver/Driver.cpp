@@ -758,7 +758,7 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
                    HostOffloadingKind);
 
   // Get the toolchains for the offloading targets if any. We need to read the
-  // offloading toolchains only if we have a compatible runtime library, ant
+  // offloading toolchains only if we have a compatible runtime library, and
   // that would be either libomp or libiomp.
   OrderedOffloadingToolchains.clear();
 
@@ -2043,19 +2043,23 @@ static const Tool *selectToolForJob(Compilation &C, bool SaveTemps,
                                     const ToolChain *TC, const JobAction *JA,
                                     const ActionList *&Inputs,
                                     const CudaHostAction *&CollapsedCHA) {
+  if (TC->RequiresHostToolChainForOffloadingAction(JA))
+    TC = &C.getDefaultToolChain();
   const Tool *ToolForJob = nullptr;
   CollapsedCHA = nullptr;
 
   // See if we should look for a compiler with an integrated assembler. We match
   // bottom up, so what we are actually looking for is an assembler job with a
-  // compiler input.
+  // compiler input. If the toolchain requires some other toolchain to do the
+  // job for the input action, it cannot be combined.
 
   if (TC->useIntegratedAs() && !SaveTemps &&
       !C.getArgs().hasArg(options::OPT_via_file_asm) &&
       !C.getArgs().hasArg(options::OPT__SLASH_FA) &&
       !C.getArgs().hasArg(options::OPT__SLASH_Fa) &&
       isa<AssembleJobAction>(JA) && Inputs->size() == 1 &&
-      isa<BackendJobAction>(*Inputs->begin())) {
+      isa<BackendJobAction>(*Inputs->begin()) &&
+      !TC->RequiresHostToolChainForOffloadingAction(*Inputs->begin())) {
     // A BackendJob is always preceded by a CompileJob, and without
     // -save-temps they will always get combined together, so instead of
     // checking the backend tool, check if the tool for the CompileJob
@@ -2087,7 +2091,8 @@ static const Tool *selectToolForJob(Compilation &C, bool SaveTemps,
   // unless OPT_save_temps is enabled and the compiler is capable of emitting
   // LLVM IR as an intermediate output. The OpenMP offloading implementation
   // also requires the Compile and Backend jobs to be separate.
-  if (isa<BackendJobAction>(JA) && !RequiresOpenMPOffloading(TC)) {
+  if (isa<BackendJobAction>(JA) && !RequiresOpenMPOffloading(TC) && !
+      !TC->RequiresHostToolChainForOffloadingAction(*Inputs->begin())) {
     // Check if the compiler supports emitting LLVM IR.
     assert(Inputs->size() == 1);
     // Compile job may be wrapped in CudaHostAction, extract it if
@@ -2114,6 +2119,7 @@ static const Tool *selectToolForJob(Compilation &C, bool SaveTemps,
   // exactly one input, since this is the only use case we care about
   // (irrelevant since we don't support combine yet).
   if (Inputs->size() == 1 && isa<PreprocessJobAction>(*Inputs->begin()) &&
+      !TC->RequiresHostToolChainForOffloadingAction(*Inputs->begin()) &&
       !C.getArgs().hasArg(options::OPT_no_integrated_cpp) &&
       !C.getArgs().hasArg(options::OPT_traditional_cpp) && !SaveTemps &&
       !C.getArgs().hasArg(options::OPT_rewrite_objc) &&

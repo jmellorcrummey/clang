@@ -10936,6 +10936,10 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-O0");
   }
 
+  // Pass -v to ptxas if it was passed to the driver.
+  if (Args.hasArg(options::OPT_v))
+    CmdArgs.push_back("-v");
+
   // Don't bother passing -g to ptxas: It's enabled by default at -O0, and
   // not supported at other optimization levels.
 
@@ -10948,6 +10952,10 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
 
   for (const auto& A : Args.getAllArgValues(options::OPT_Xcuda_ptxas))
     CmdArgs.push_back(Args.MakeArgString(A));
+
+  // In OpenMP we need to generate relocatable code.
+  if (getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Device)
+    CmdArgs.push_back("-c");
 
   const char *Exec = Args.MakeArgString(TC.GetProgramPath("ptxas"));
   C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, Inputs));
@@ -10966,6 +10974,89 @@ void NVPTX::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   assert(TC.getTriple().isNVPTX() && "Wrong platform");
 
   ArgStringList CmdArgs;
+
+  // OpenMP uses nvlink to link cubin files. The result will be embedded in the
+  // host binary by the host linker.
+  assert(TC.getOffloadingKind() != ToolChain::OK_OpenMP_Host && "CUDA toolchain not expected for an OpenMP host device.");
+  if (TC.getOffloadingKind() == ToolChain::OK_OpenMP_Device) {
+
+    if (Output.isFilename()) {
+      CmdArgs.push_back("-o");
+      CmdArgs.push_back(Output.getFilename());
+    } else {
+      assert(Output.isNothing() && "Invalid output.");
+    }
+
+    if (Args.hasArg(options::OPT_g_Flag))
+      CmdArgs.push_back("-g");
+
+    if (Args.hasArg(options::OPT_v))
+      CmdArgs.push_back("-v");
+
+    std::vector<std::string> gpu_archs =
+        Args.getAllArgValues(options::OPT_march_EQ);
+    assert(gpu_archs.size() == 1 && "Exactly one GPU Arch required for ptxas.");
+    const std::string& gpu_arch = gpu_archs[0];
+
+    CmdArgs.push_back("-arch");
+    CmdArgs.push_back(Args.MakeArgString(gpu_arch));
+
+    // add linking against library implementing OpenMP calls on NVPTX target
+    CmdArgs.push_back("-lomptarget-nvptx");
+
+    // nvlink relies on the extension used by the input files
+    // to decide what to do. Given that ptxas produces cubin files
+    // we need to copy the input files to a new file with the right
+    // extension.
+    // FIXME: this can be efficiently done by specifying a new
+    // output type for the assembly action, however this would expose
+    // the target details to the driver and maybe we do not want to do
+    // that
+    for (const auto &II : Inputs) {
+
+      if (II.getType() == types::TY_LLVM_IR ||
+          II.getType() == types::TY_LTO_IR ||
+          II.getType() == types::TY_LTO_BC ||
+          II.getType() == types::TY_LLVM_BC) {
+        C.getDriver().Diag(diag::err_drv_no_linker_llvm_support)
+          << getToolChain().getTripleString();
+        continue;
+      }
+
+      // Currently, we only pass the input files to the linker, we do not pass
+      // any libraries that may be valid only for the host.
+      if (!II.isFilename())
+        continue;
+
+      StringRef Name = llvm::sys::path::filename(II.getFilename());
+      std::pair<StringRef, StringRef> Split = Name.rsplit('.');
+      std::string TmpName = C.getDriver().GetTemporaryPath(Split.first,"cubin");
+
+      const char *CubinF = C.addTempFile(C.getArgs().MakeArgString(TmpName.c_str()));
+
+      const char *CopyExec =
+          Args.MakeArgString(getToolChain().GetProgramPath(
+              C.getDriver().IsCLMode() ? "copy" : "cp" ));
+
+      ArgStringList CopyCmdArgs;
+      CopyCmdArgs.push_back(II.getFilename());
+      CopyCmdArgs.push_back(CubinF);
+      C.addCommand(llvm::make_unique<Command>(JA, *this, CopyExec, CopyCmdArgs, Inputs));
+
+      CmdArgs.push_back(CubinF);
+    }
+
+    AddOpenMPLinkerScript(getToolChain(), C, Output, Inputs, Args, CmdArgs);
+
+    // add paths specified in LIBRARY_PATH environment variable as -L options
+    addDirectoryList(Args, CmdArgs, "-L", "LIBRARY_PATH");
+
+    const char *Exec =
+      Args.MakeArgString(getToolChain().GetProgramPath("nvlink"));
+    C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, Inputs));
+    return;
+  }
+
   CmdArgs.push_back("--cuda");
   CmdArgs.push_back(TC.getTriple().isArch64Bit() ? "-64" : "-32");
   CmdArgs.push_back(Args.MakeArgString("--create"));
