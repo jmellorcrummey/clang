@@ -2233,7 +2233,7 @@ void CGOpenMPRuntime::createOffloadEntry(llvm::Constant *ID,
       TgtOffloadEntryType, AddrPtr, StrPtr,
       llvm::ConstantInt::get(CGM.SizeTy, Size), nullptr);
   llvm::GlobalVariable *Entry = new llvm::GlobalVariable(
-      M, TgtOffloadEntryType, true, llvm::GlobalValue::InternalLinkage,
+      M, TgtOffloadEntryType, true, llvm::GlobalValue::ExternalLinkage,
       EntryInit, ".omp_offloading.entry");
 
   // The entry has to be created in the section the linker expects it to be.
@@ -3777,9 +3777,9 @@ void CGOpenMPRuntime::emitTargetOutlinedFunction(
   SmallString<64> EntryFnName;
   {
     llvm::raw_svector_ostream OS(EntryFnName);
-    OS << "__omp_offloading"; /* << llvm::format("_%x", DeviceID)
+    OS << "__omp_offloading" << llvm::format("_%x", DeviceID)
         << llvm::format("_%x_", FileID) << ParentName << "_l" << Line << "_c"
-        << Column;*/
+        << Column;
   }
 
   CodeGenFunction CGF(CGM, true);
