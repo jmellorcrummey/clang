@@ -3908,6 +3908,7 @@ public:
     LongDoubleWidth = 64;
     LongDoubleFormat = &llvm::APFloat::IEEEdouble;
     UserLabelPrefix = "";
+    WIntType = UnsignedInt;
   }
 
   CallingConvCheckResult checkCallingConvention(CallingConv CC) const override {
@@ -5127,7 +5128,6 @@ class WindowsARMTargetInfo : public WindowsTargetInfo<ARMleTargetInfo> {
 public:
   WindowsARMTargetInfo(const llvm::Triple &Triple)
     : WindowsTargetInfo<ARMleTargetInfo>(Triple), Triple(Triple) {
-    TLSSupported = false;
     WCharType = UnsignedShort;
     SizeType = UnsignedInt;
     UserLabelPrefix = "";
