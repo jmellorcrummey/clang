@@ -321,21 +321,6 @@ void CGOpenMPRuntime::clear() {
   InternalVars.clear();
 }
 
-CGOpenMPRuntime *CGOpenMPRuntime::create(CodeGenModule &CGM) {
-  // Select a specialized codegen implementation for the requested target if
-  // we have one. Otherwise use the default.
-  switch (CGM.getTarget().getTriple().getArch()) {
-  default:
-    return new CGOpenMPRuntime(CGM);
-  case llvm::Triple::nvptx:
-  case llvm::Triple::nvptx64:
-    assert(CGM.getLangOpts().OpenMPIsDevice &&
-           "OpenMP NVPTX is only prepared to deal with device code.");
-    return createCGOpenMPRuntimeNVPTX(CGM);
-  }
-  return nullptr;
-}
-
 // Layout information for ident_t.
 static CharUnits getIdentAlign(CodeGenModule &CGM) {
   return CGM.getPointerAlign();
