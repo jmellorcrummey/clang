@@ -12,19 +12,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "CGOpenMPRuntime.h"
+#include "CGOpenMPRuntimeNVPTX.h"
 
-namespace clang {
-namespace CodeGen {
+using namespace clang;
+using namespace CodeGen;
 
-class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
-public:
-  explicit CGOpenMPRuntimeNVPTX(CodeGenModule &CGM) : CGOpenMPRuntime(CGM) {}
-};
-
-CGOpenMPRuntime *
-CGOpenMPRuntime::createCGOpenMPRuntimeNVPTX(CodeGenModule &CGM) {
-  return new CGOpenMPRuntimeNVPTX(CGM);
-}
-} // CodeGen namespace.
-} // clang namespace.
+CGOpenMPRuntimeNVPTX::CGOpenMPRuntimeNVPTX(CodeGenModule &CGM)
+    : CGOpenMPRuntime(CGM) {}

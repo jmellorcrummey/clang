@@ -1852,8 +1852,8 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
     // Add unsupported host targets here:
     case llvm::Triple::nvptx:
     case llvm::Triple::nvptx64:
-      Diags.Report(clang::diag::err_drv_omp_host_or_device_target_not_supported)
-          << TargetOpts.Triple << Opts.OpenMPIsDevice;
+      Diags.Report(clang::diag::err_drv_omp_host_target_not_supported)
+          << TargetOpts.Triple;
       break;
     }
   }
