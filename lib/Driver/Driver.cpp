@@ -2043,8 +2043,6 @@ static const Tool *selectToolForJob(Compilation &C, bool SaveTemps,
                                     const ToolChain *TC, const JobAction *JA,
                                     const ActionList *&Inputs,
                                     const CudaHostAction *&CollapsedCHA) {
-  if (TC->RequiresHostToolChainForOffloadingAction(JA))
-    TC = &C.getDefaultToolChain();
   const Tool *ToolForJob = nullptr;
   CollapsedCHA = nullptr;
 
@@ -2251,6 +2249,10 @@ InputInfo Driver::BuildJobsForActionNoCache(
 
   const JobAction *JA = cast<JobAction>(A);
   const CudaHostAction *CollapsedCHA = nullptr;
+
+  if (TC->RequiresHostToolChainForOffloadingAction(JA))
+    TC = &C.getDefaultToolChain();
+
   const Tool *T =
       selectToolForJob(C, isSaveTempsEnabled(), TC, JA, Inputs, CollapsedCHA);
   if (!T)
