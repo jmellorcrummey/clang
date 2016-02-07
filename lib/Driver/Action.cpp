@@ -23,6 +23,10 @@ const char *Action::getClassName(ActionClass AC) {
   case BindArchClass: return "bind-arch";
   case CudaDeviceClass: return "cuda-device";
   case CudaHostClass: return "cuda-host";
+  case OffloadBundlingJobClass:
+    return "clang-offload-bundler";
+  case OffloadUnbundlingJobClass:
+    return "clang-offload-unbundler";
   case PreprocessJobClass: return "preprocessor";
   case PrecompileJobClass: return "precompiler";
   case AnalyzeJobClass: return "analyzer";
@@ -93,12 +97,24 @@ CudaHostAction::CudaHostAction(Action *Input, const ActionList &DeviceActions)
 
 void JobAction::anchor() {}
 
+JobAction::JobAction(ActionClass Kind, Action *Input) : Action(Kind, Input) {}
+
 JobAction::JobAction(ActionClass Kind, Action *Input, types::ID Type)
     : Action(Kind, Input, Type) {}
 
 JobAction::JobAction(ActionClass Kind, const ActionList &Inputs, types::ID Type)
   : Action(Kind, Inputs, Type) {
 }
+
+void OffloadBundlingJobAction::anchor() {}
+
+OffloadBundlingJobAction::OffloadBundlingJobAction(Action *Input)
+    : JobAction(OffloadBundlingJobClass, Input) {}
+
+void OffloadUnbundlingJobAction::anchor() {}
+
+OffloadUnbundlingJobAction::OffloadUnbundlingJobAction(Action *Input)
+    : JobAction(OffloadUnbundlingJobClass, Input) {}
 
 void PreprocessJobAction::anchor() {}
 

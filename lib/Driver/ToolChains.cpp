@@ -2444,6 +2444,45 @@ bool Generic_GCC::addLibStdCXXIncludePaths(
   return true;
 }
 
+llvm::opt::DerivedArgList *
+Generic_GCC::TranslateOffloadArgs(const llvm::opt::DerivedArgList &Args,
+                                  const char *BoundArch) const {
+  // Make sure we always generate a shared library for an OpenMP offloading
+  // target regardless the commands the user passed to the host.
+
+  if (getOffloadingKind() != OK_OpenMP_Device)
+    return nullptr;
+
+  DerivedArgList *DAL = new DerivedArgList(Args.getBaseArgs());
+  const OptTable &Opts = getDriver().getOpts();
+
+  // Request the shared library.
+  DAL->AddFlagArg(0, Opts.getOption(options::OPT_shared));
+  DAL->AddFlagArg(0, Opts.getOption(options::OPT_fPIC));
+
+  // Filter all the arguments we don't care passing to the offloading toolchain
+  // as they can mess up with the creation of a shared library.
+  for (auto *A : Args) {
+    switch ((options::ID)A->getOption().getID()) {
+    default:
+      DAL->append(A);
+      break;
+    case options::OPT_shared:
+    case options::OPT_static:
+    case options::OPT_fPIC:
+    case options::OPT_fno_PIC:
+    case options::OPT_fpic:
+    case options::OPT_fno_pic:
+    case options::OPT_fPIE:
+    case options::OPT_fno_PIE:
+    case options::OPT_fpie:
+    case options::OPT_fno_pie:
+      break;
+    }
+  }
+
+  return DAL;
+}
 
 void Generic_ELF::addClangTargetOptions(const ArgList &DriverArgs,
                                         ArgStringList &CC1Args) const {
@@ -4223,14 +4262,24 @@ CudaToolChain::CudaToolChain(const Driver &D, const llvm::Triple &Triple,
 void
 CudaToolChain::addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
                                      llvm::opt::ArgStringList &CC1Args) const {
+
   Linux::addClangTargetOptions(DriverArgs, CC1Args);
-  CC1Args.push_back("-fcuda-is-device");
+  std::string LibDeviceFile;
 
-  if (DriverArgs.hasArg(options::OPT_nocudalib))
-    return;
+  assert(getOffloadingKind() != OK_OpenMP_Host &&
+         "CUDA toolchain not expected for host device.");
+  if (getOffloadingKind() == OK_OpenMP_Device) {
+    // FIXME: Get the GPU version from the offloading options.
+    LibDeviceFile = CudaInstallation.getLibDeviceFile("sm_35");
+  } else {
+    CC1Args.push_back("-fcuda-is-device");
 
-  std::string LibDeviceFile = CudaInstallation.getLibDeviceFile(
-      DriverArgs.getLastArgValue(options::OPT_march_EQ));
+    if (DriverArgs.hasArg(options::OPT_nocudalib))
+      return;
+
+    LibDeviceFile = CudaInstallation.getLibDeviceFile(
+        DriverArgs.getLastArgValue(options::OPT_march_EQ));
+  }
   if (!LibDeviceFile.empty()) {
     CC1Args.push_back("-mlink-cuda-bitcode");
     CC1Args.push_back(DriverArgs.MakeArgString(LibDeviceFile));
@@ -4246,8 +4295,22 @@ CudaToolChain::addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
 llvm::opt::DerivedArgList *
 CudaToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
                              const char *BoundArch) const {
+
   DerivedArgList *DAL = new DerivedArgList(Args.getBaseArgs());
   const OptTable &Opts = getDriver().getOpts();
+
+  // If this is an OpenMP device we do not need to translate anything. Also, we
+  // do not expect a CUDA device to be the host. We only need to append the gpu
+  // name.
+  assert(getOffloadingKind() != OK_OpenMP_Host &&
+         "CUDA device not expected to be using a host toolchain.");
+  if (getOffloadingKind() == OK_OpenMP_Device) {
+    for (Arg *A : Args)
+      DAL->append(A);
+    // FIXME: get the right arch from the offloading arguments.
+    DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_march_EQ), "sm_35");
+    return DAL;
+  }
 
   for (Arg *A : Args) {
     if (A->getOption().matches(options::OPT_Xarch__)) {
@@ -4286,6 +4349,20 @@ CudaToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
   if (BoundArch)
     DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_march_EQ), BoundArch);
   return DAL;
+}
+
+llvm::opt::DerivedArgList *
+CudaToolChain::TranslateOffloadArgs(const llvm::opt::DerivedArgList &Args,
+                                    const char *BoundArch) const {
+  // CUDA devices do not need offloading arguments translation.
+  return nullptr;
+}
+
+bool CudaToolChain::RequiresHostToolChainForOffloadingAction(
+    const Action *A) const {
+  // If this is an OpenMP device we should use the host toolchain for
+  // preprocesing, given that it defines the right macros for the system.
+  return getOffloadingKind() == OK_OpenMP_Device && isa<PreprocessJobAction>(A);
 }
 
 Tool *CudaToolChain::buildAssembler() const {

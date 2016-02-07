@@ -67,7 +67,8 @@ static ToolChain::RTTIMode CalculateRTTIMode(const ArgList &Args,
 ToolChain::ToolChain(const Driver &D, const llvm::Triple &T,
                      const ArgList &Args)
     : D(D), Triple(T), Args(Args), CachedRTTIArg(GetRTTIArgument(Args)),
-      CachedRTTIMode(CalculateRTTIMode(Args, Triple, CachedRTTIArg)) {
+      CachedRTTIMode(CalculateRTTIMode(Args, Triple, CachedRTTIArg)),
+      CachedOffloadingKind(OK_None) {
   if (Arg *A = Args.getLastArg(options::OPT_mthread_model))
     if (!isThreadModelSupported(A->getValue()))
       D.Diag(diag::err_drv_invalid_thread_model_for_target)
@@ -184,6 +185,12 @@ ToolChain::getTargetAndModeFromProgramName(StringRef PN) {
   return std::make_pair(Target, ModeFlag);
 }
 
+void ToolChain::setOffloadingKind(OffloadingKind OK) {
+  assert(CachedOffloadingKind == OK_None &&
+         "Offloading kind not expected to change once it is set.");
+  CachedOffloadingKind = OK;
+}
+
 StringRef ToolChain::getDefaultUniversalArchName() const {
   // In universal driver terms, the arch name accepted by -arch isn't exactly
   // the same as the ones that appear in the triple. Roughly speaking, this is
@@ -237,6 +244,12 @@ Tool *ToolChain::getLink() const {
   return Link.get();
 }
 
+Tool *ToolChain::getOffloadBundler() const {
+  if (!OffloadBundler)
+    OffloadBundler.reset(new tools::OffloadBundler(*this));
+  return OffloadBundler.get();
+}
+
 Tool *ToolChain::getTool(Action::ActionClass AC) const {
   switch (AC) {
   case Action::AssembleJobClass:
@@ -262,6 +275,10 @@ Tool *ToolChain::getTool(Action::ActionClass AC) const {
   case Action::VerifyPCHJobClass:
   case Action::BackendJobClass:
     return getClang();
+
+  case Action::OffloadBundlingJobClass:
+  case Action::OffloadUnbundlingJobClass:
+    return getOffloadBundler();
   }
 
   llvm_unreachable("Invalid tool kind.");

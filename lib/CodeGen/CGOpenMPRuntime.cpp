@@ -2176,15 +2176,39 @@ CGOpenMPRuntime::createOffloadingBinaryDescriptorRegistration() {
   return RegFn;
 }
 
-void CGOpenMPRuntime::createOffloadEntry(llvm::Constant *Addr, StringRef Name,
-                                         uint64_t Size) {
+void CGOpenMPRuntime::createOffloadEntry(llvm::Constant *ID,
+                                         llvm::Constant *Addr, uint64_t Size) {
+  StringRef Name = Addr->getName();
+
+  // FIXME: This is a hack to not generate entries for nvptx, we need to have
+  // this rely on specialized implementation of the runtime library.
+  if (CGM.getTarget().getTriple().getArch() == llvm::Triple::nvptx64 ||
+      CGM.getTarget().getTriple().getArch() == llvm::Triple::nvptx) {
+    auto *F = dyn_cast<llvm::Function>(Addr);
+    if (!F)
+      return;
+    llvm::Module *M = F->getParent();
+    llvm::LLVMContext &Ctx = M->getContext();
+
+    // Get "nvvm.annotations" metadata node
+    llvm::NamedMDNode *MD = M->getOrInsertNamedMetadata("nvvm.annotations");
+
+    llvm::Metadata *MDVals[] = {
+        llvm::ConstantAsMetadata::get(F), llvm::MDString::get(Ctx, "kernel"),
+        llvm::ConstantAsMetadata::get(
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx), 1))};
+    // Append metadata to nvvm.annotations
+    MD->addOperand(llvm::MDNode::get(Ctx, MDVals));
+    return;
+  }
+
   auto *TgtOffloadEntryType = cast<llvm::StructType>(
       CGM.getTypes().ConvertTypeForMem(getTgtOffloadEntryQTy()));
   llvm::LLVMContext &C = CGM.getModule().getContext();
   llvm::Module &M = CGM.getModule();
 
   // Make sure the address has the right type.
-  llvm::Constant *AddrPtr = llvm::ConstantExpr::getBitCast(Addr, CGM.VoidPtrTy);
+  llvm::Constant *AddrPtr = llvm::ConstantExpr::getBitCast(ID, CGM.VoidPtrTy);
 
   // Create constant string with the name.
   llvm::Constant *StrPtrInit = llvm::ConstantDataArray::getString(C, Name);
@@ -2283,7 +2307,7 @@ void CGOpenMPRuntime::createOffloadEntriesAndInfoMetadata() {
                 E)) {
       assert(CE->getID() && CE->getAddress() &&
              "Entry ID and Addr are invalid!");
-      createOffloadEntry(CE->getID(), CE->getAddress()->getName(), /*Size=*/0);
+      createOffloadEntry(CE->getID(), CE->getAddress(), /*Size=*/0);
     } else
       llvm_unreachable("Unsupported entry kind.");
   }
@@ -3748,8 +3772,8 @@ void CGOpenMPRuntime::emitTargetOutlinedFunction(
   SmallString<64> EntryFnName;
   {
     llvm::raw_svector_ostream OS(EntryFnName);
-    OS << ".omp_offloading" << llvm::format(".%x", DeviceID)
-       << llvm::format(".%x.", FileID) << ParentName << ".l" << Line << ".c"
+    OS << "__omp_offloading" << llvm::format("_%x", DeviceID)
+       << llvm::format("_%x_", FileID) << ParentName << "_l" << Line << "_c"
        << Column;
   }
 

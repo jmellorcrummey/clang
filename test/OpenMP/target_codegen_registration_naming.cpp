@@ -24,7 +24,7 @@
 
 // CHECK: define {{.*}}i32 @[[NNAME:.+]](i32 {{.*}}%{{.+}})
 int nested(int a){
-  // CHECK: call void @.omp_offloading.[[FILEID:[0-9a-f]+\.[0-9a-f]+]].[[NNAME]].l[[T1L:[0-9]+]].c[[T1C:[0-9]+]](
+  // CHECK: call void @__omp_offloading_[[FILEID:[0-9a-f]+_[0-9a-f]+]]_[[NNAME]]_l[[T1L:[0-9]+]]_c[[T1C:[0-9]+]](
   #pragma omp target
     ++a;
 
@@ -42,17 +42,17 @@ int nested(int a){
   return a;
 }
 
-// CHECK: define {{.*}}void @.omp_offloading.[[FILEID]].[[NNAME]].l[[T1L]].c[[T1C]](
-// TCHECK: define {{.*}}void @.omp_offloading.[[FILEID:[0-9a-f]+\.[0-9a-f]+]].[[NNAME:.+]].l[[T1L:[0-9]+]].c[[T1C:[0-9]+]](
+// CHECK: define {{.*}}void @__omp_offloading_[[FILEID]]_[[NNAME]]_l[[T1L]]_c[[T1C]](
+// TCHECK: define {{.*}}void @__omp_offloading_[[FILEID:[0-9a-f]+_[0-9a-f]+]]_[[NNAME:.+]]_l[[T1L:[0-9]+]]_c[[T1C:[0-9]+]](
 
 // CHECK: define {{.*}}void @"[[LNAME]]"(
 // CHECK: call void {{.*}}@__kmpc_fork_call{{.+}}[[PNAME:@.+]] to
 
 // CHECK: define {{.*}}void [[PNAME]](
-// CHECK: call void @.omp_offloading.[[FILEID]].[[NNAME]].l[[T2L:[0-9]+]].c[[T2C:[0-9]+]](
+// CHECK: call void @__omp_offloading_[[FILEID]]_[[NNAME]]_l[[T2L:[0-9]+]]_c[[T2C:[0-9]+]](
 
-// CHECK: define {{.*}}void @.omp_offloading.[[FILEID]].[[NNAME]].l[[T2L]].c[[T2C]](
-// TCHECK: define {{.*}}void @.omp_offloading.[[FILEID]].[[NNAME:.+]].l[[T2L:[0-9]+]].c[[T2C:[0-9]+]](
+// CHECK: define {{.*}}void @__omp_offloading_[[FILEID]]_[[NNAME]]_l[[T2L]]_c[[T2C]](
+// TCHECK: define {{.*}}void @__omp_offloading_[[FILEID]]_[[NNAME:.+]]_l[[T2L:[0-9]+]]_c[[T2C:[0-9]+]](
 
 
 // Check metadata is properly generated:

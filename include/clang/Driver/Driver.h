@@ -13,6 +13,8 @@
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/LLVM.h"
 #include "clang/Driver/Phases.h"
+#include "clang/Driver/Tool.h"
+#include "clang/Driver/ToolChain.h"
 #include "clang/Driver/Types.h"
 #include "clang/Driver/Util.h"
 #include "llvm/ADT/StringMap.h"
@@ -47,11 +49,10 @@ namespace driver {
   class Action;
   class Command;
   class Compilation;
-  class InputInfo;
+  class InputAction;
   class JobList;
   class JobAction;
   class SanitizerArgs;
-  class ToolChain;
 
 /// Describes the kind of LTO mode selected via -f(no-)?lto(=.*)? options.
 enum LTOKind {
@@ -202,7 +203,51 @@ private:
   /// stored in it, and will clean them up when torn down.
   mutable llvm::StringMap<ToolChain *> ToolChains;
 
+  /// \brief Cache of all the ToolChains in use by the driver.
+  ///
+  /// This maps from the string representation of a triple that refers to an
+  /// offloading target to a ToolChain created targeting that triple. The driver
+  /// owns all the ToolChain objects stored in it, and will clean them up when
+  /// torn down. We use a different cache for offloading as it is possible to
+  /// have offloading toolchains with the same triple the host has, and the
+  /// implementation has to differentiate the two in order to adjust the
+  /// commands for offloading.
+  mutable llvm::StringMap<ToolChain *> OffloadToolChains;
+
+  /// \brief Array of the toolchains of offloading targets in the order they
+  /// were requested by the user.
+  SmallVector<const ToolChain *, 4> OrderedOffloadingToolchains;
+
+  /// \brief Type for the cache of the results for the offloading host emitted
+  /// so far. The host results can be required by the device tools.
+  typedef llvm::DenseMap<const Action *, InputInfoList> OffloadingHostResultsTy;
+
 private:
+  /// CreateUnbundledOffloadingResult - Create a command to unbundle the input
+  /// and use the resulting input info. If there are inputs already cached in
+  /// OffloadingHostResults for that action use them instead. If offloading
+  /// is not supported, just return the provided input info.
+  InputInfo CreateUnbundledOffloadingResult(
+      Compilation &C, const Action *CurAction, const ToolChain *TC,
+      InputInfo Result, OffloadingHostResultsTy &OffloadingHostResults) const;
+
+  /// CreateBundledOffloadingResult - Create a bundle of all provided results
+  /// and return the InputInfo of the bundled file.
+  InputInfo CreateBundledOffloadingResult(Compilation &C,
+                                          const Action *CurAction,
+                                          const ToolChain *TC,
+                                          InputInfoList Results) const;
+
+  /// PostProcessOffloadingInputsAndResults - Update the input and output
+  /// information to suit the needs of the offloading implementation. This used
+  /// to, e.g., to pass extra results from host to device side and vice-versa.
+  void PostProcessOffloadingInputsAndResults(
+      Compilation &C, const JobAction *JA, const ToolChain *TC,
+      InputInfoList &Inputs, InputInfo Result,
+      std::map<std::pair<const Action *, std::string>, InputInfo>
+          &CachedResults,
+      OffloadingHostResultsTy &OffloadingHostResults) const;
+
   /// TranslateInputArgs - Create a new derived argument list from the input
   /// arguments, after applying the standard argument translations.
   llvm::opt::DerivedArgList *
@@ -383,12 +428,13 @@ public:
   /// BuildJobsForAction - Construct the jobs to perform for the action \p A and
   /// return an InputInfo for the result of running \p A.  Will only construct
   /// jobs for a given (Action, ToolChain, BoundArch) tuple once.
-  InputInfo BuildJobsForAction(Compilation &C, const Action *A,
-                               const ToolChain *TC, const char *BoundArch,
-                               bool AtTopLevel, bool MultipleArchs,
-                               const char *LinkingOutput,
-                               std::map<std::pair<const Action *, std::string>,
-                                        InputInfo> &CachedResults) const;
+  InputInfo
+  BuildJobsForAction(Compilation &C, const Action *A, const ToolChain *TC,
+                     const char *BoundArch, bool AtTopLevel, bool MultipleArchs,
+                     const char *LinkingOutput,
+                     std::map<std::pair<const Action *, std::string>, InputInfo>
+                         &CachedResults,
+                     OffloadingHostResultsTy &OffloadingHostResults) const;
 
   /// Returns the default name for linked images (e.g., "a.out").
   const char *getDefaultImageName() const;
@@ -435,9 +481,11 @@ private:
   /// \brief Retrieves a ToolChain for a particular \p Target triple.
   ///
   /// Will cache ToolChains for the life of the driver object, and create them
-  /// on-demand.
-  const ToolChain &getToolChain(const llvm::opt::ArgList &Args,
-                                const llvm::Triple &Target) const;
+  /// on-demand. \a OffloadingKind specifies if the toolchain being created
+  /// refers to any kind of offloading (e.g. OpenMP).
+  const ToolChain &getToolChain(
+      const llvm::opt::ArgList &Args, const llvm::Triple &Target,
+      ToolChain::OffloadingKind OffloadingKind = ToolChain::OK_None) const;
 
   /// @}
 
@@ -453,7 +501,8 @@ private:
       const char *BoundArch, bool AtTopLevel, bool MultipleArchs,
       const char *LinkingOutput,
       std::map<std::pair<const Action *, std::string>, InputInfo>
-          &CachedResults) const;
+          &CachedResults,
+      OffloadingHostResultsTy &OffloadingHostResults) const;
 
 public:
   /// GetReleaseVersion - Parse (([0-9]+)(.([0-9]+)(.([0-9]+)?))?)? and
