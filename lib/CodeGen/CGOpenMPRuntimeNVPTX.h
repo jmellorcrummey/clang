@@ -544,7 +544,7 @@ private:
   // Get number of workers after subtracting the master warp
   llvm::Value *GetNumWorkers(CodeGenFunction &CGF) {
     CGBuilderTy &Bld = CGF.Builder;
-    return Bld.CreateSub(GetMasterThreadID(CGF), Bld.getInt32(1),
+    return Bld.CreateAdd(GetMasterThreadID(CGF), Bld.getInt32(0),
                          "num_workers");
   }
 
