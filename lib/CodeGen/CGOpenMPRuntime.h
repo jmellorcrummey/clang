@@ -47,7 +47,7 @@ class CodeGenModule;
 typedef llvm::function_ref<void(CodeGenFunction &)> RegionCodeGenTy;
 
 class CGOpenMPRuntime {
-private:
+protected:
   enum OpenMPRTLFunction {
     /// \brief Call to void __kmpc_fork_call(ident_t *loc, kmp_int32 argc,
     /// kmpc_micro microtask, ...);
@@ -170,8 +170,23 @@ private:
     OMPRTL__tgt_register_lib,
     // Call to void __tgt_unregister_lib(__tgt_bin_desc *desc);
     OMPRTL__tgt_unregister_lib,
+
+    //
+    // GPU target calls
+    //
+    /// \brief Call to void __kmpc_kernel_init(kmp_int32 omp_handle,
+    /// kmp_int32 thread_limit);
+    OMPRTL__kmpc_kernel_init,
+    /// \brief Call to void __kmpc_kernel_prepare_parallel(
+    /// kmp_int32 num_threads, kmp_int32 num_lanes);
+    OMPRTL__kmpc_kernel_prepare_parallel,
+    /// \brief Call to kmp_int32 __kmpc_kernel_parallel(kmp_int32 num_lanes);
+    OMPRTL__kmpc_kernel_parallel,
+    /// \brief Call to void __kmpc_kernel_end_parallel();
+    OMPRTL__kmpc_kernel_end_parallel,
   };
 
+private:
   /// \brief Values for bit flags used in the ident_t to describe the fields.
   /// All enumeric elements are named and described in accordance with the code
   /// from http://llvm.org/svn/llvm-project/openmp/trunk/runtime/src/kmp.h
@@ -193,7 +208,11 @@ private:
     /// \brief Implicit barrier in 'single' directive.
     OMP_IDENT_BARRIER_IMPL_SINGLE = 0x140
   };
+
+protected:
   CodeGenModule &CGM;
+
+private:
   /// \brief Default const ident_t object used for initialization of all other
   /// ident_t objects.
   llvm::Constant *DefaultOpenMPPSource;
@@ -436,8 +455,11 @@ private:
     typedef OffloadEntriesTargetRegionPerDevice OffloadEntriesTargetRegionTy;
     OffloadEntriesTargetRegionTy OffloadEntriesTargetRegion;
   };
+
+protected:
   OffloadEntriesInfoManagerTy OffloadEntriesInfoManager;
 
+private:
   /// \brief Creates and registers offloading binary descriptor for the current
   /// compilation unit. The function that does the registration is returned.
   llvm::Function *createOffloadingBinaryDescriptorRegistration();
@@ -485,11 +507,13 @@ private:
   /// \brief Returns pointer to kmpc_micro type.
   llvm::Type *getKmpc_MicroPointerTy();
 
+protected:
   /// \brief Returns specified OpenMP runtime function.
   /// \param Function OpenMP runtime function.
   /// \return Specified function.
   llvm::Constant *createRuntimeFunction(OpenMPRTLFunction Function);
 
+private:
   /// \brief Returns __kmpc_for_static_init_* runtime function for the specified
   /// size \a IVSize and sign \a IVSigned.
   llvm::Constant *createForStaticInitFunction(unsigned IVSize, bool IVSigned);
@@ -920,6 +944,21 @@ public:
   virtual void emitCancelCall(CodeGenFunction &CGF, SourceLocation Loc,
                               const Expr *IfCond,
                               OpenMPDirectiveKind CancelRegion);
+
+  /// \brief Create a unique name for the proxy/entry function for the target
+  /// region.
+  /// \param D Directive to emit.
+  /// \param ParentName Name of the function that encloses the target region.
+  /// \param DeviceID Device identifier.
+  /// \param FileID Source file identifier.
+  /// \param Line Source line number of target region.
+  /// \param Column Source column number of target region.
+  /// \param EntryFnName Name of the entry function.
+  virtual void getUniqueTargetEntryName(const OMPExecutableDirective &D,
+                                        StringRef ParentName,
+                                        unsigned &DeviceID, unsigned &FileID,
+                                        unsigned &Line, unsigned &Column,
+                                        SmallString<256> &EntryFnName);
 
   /// \brief Emit outilined function for 'target' directive.
   /// \param D Directive to emit.

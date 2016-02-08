@@ -955,6 +955,39 @@ CGOpenMPRuntime::createRuntimeFunction(OpenMPRTLFunction Function) {
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_unregister_lib");
     break;
   }
+  case OMPRTL__kmpc_kernel_init: {
+    // Build void __kmpc_kernel_init(kmp_int32 omp_handle,
+    // kmp_int32 thread_limit);
+    llvm::Type *TypeParams[] = {CGM.Int32Ty, CGM.Int32Ty};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_init");
+    break;
+  }
+  case OMPRTL__kmpc_kernel_prepare_parallel: {
+    /// Build void __kmpc_kernel_prepare_parallel(
+    /// kmp_int32 num_threads, kmp_int32 num_lanes);
+    llvm::Type *TypeParams[] = {CGM.Int32Ty, CGM.Int32Ty};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.Int32Ty, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_prepare_parallel");
+    break;
+  }
+  case OMPRTL__kmpc_kernel_parallel: {
+    /// Build void __kmpc_kernel_parallel(kmp_int32 num_lanes);
+    llvm::Type *TypeParams[] = {CGM.Int32Ty};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_parallel");
+    break;
+  }
+  case OMPRTL__kmpc_kernel_end_parallel: {
+    /// Build void __kmpc_kernel_end_parallel();
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, {}, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_end_parallel");
+    break;
+  }
   }
   return RTLFn;
 }
@@ -2216,7 +2249,7 @@ void CGOpenMPRuntime::createOffloadEntry(llvm::Constant *ID,
   llvm::GlobalVariable *Str =
       new llvm::GlobalVariable(M, StrPtrInit->getType(), /*isConstant=*/true,
                                llvm::GlobalValue::InternalLinkage, StrPtrInit,
-                               ".omp_offloading.entry_name");
+                               "__omp_offloading_entry_name");
   Str->setUnnamedAddr(true);
   llvm::Constant *StrPtr = llvm::ConstantExpr::getBitCast(Str, CGM.Int8PtrTy);
 
@@ -2226,10 +2259,10 @@ void CGOpenMPRuntime::createOffloadEntry(llvm::Constant *ID,
       llvm::ConstantInt::get(CGM.SizeTy, Size), nullptr);
   llvm::GlobalVariable *Entry = new llvm::GlobalVariable(
       M, TgtOffloadEntryType, true, llvm::GlobalValue::ExternalLinkage,
-      EntryInit, ".omp_offloading.entry");
+      EntryInit, "__omp_offloading_entry");
 
   // The entry has to be created in the section the linker expects it to be.
-  Entry->setSection(".omp_offloading.entries");
+  Entry->setSection("__omp_offloading_entries");
   // We can't have any padding between symbols, so we need to have 1-byte
   // alignment.
   Entry->setAlignment(1);
@@ -3738,6 +3771,32 @@ static void getTargetEntryUniqueInfo(ASTContext &C, SourceLocation Loc,
   return;
 }
 
+void CGOpenMPRuntime::getUniqueTargetEntryName(const OMPExecutableDirective &D,
+                                               StringRef ParentName,
+                                               unsigned &DeviceID,
+                                               unsigned &FileID, unsigned &Line,
+                                               unsigned &Column,
+                                               SmallString<256> &EntryFnName) {
+  // The name of the entry function is something like:
+  //
+  // .omp_offloading.DD_FFFF.PP.lBB.cCC
+  //
+  // where DD_FFFF is an ID unique to the file (device and file IDs), PP is the
+  // mangled name of the function that encloses the target region, BB is the
+  // line number of the target region, and CC is the column number of the target
+  // region.
+
+  getTargetEntryUniqueInfo(CGM.getContext(), D.getLocStart(), DeviceID, FileID,
+                           Line, Column);
+
+  {
+    llvm::raw_svector_ostream OS(EntryFnName);
+    OS << "__omp_offloading" << llvm::format("_%x", DeviceID)
+       << llvm::format("_%x_", FileID) << ParentName << "_l" << Line << "_c"
+       << Column;
+  }
+}
+
 void CGOpenMPRuntime::emitTargetOutlinedFunction(
     const OMPExecutableDirective &D, StringRef ParentName,
     llvm::Function *&OutlinedFn, llvm::Constant *&OutlinedFnID,
@@ -3752,30 +3811,13 @@ void CGOpenMPRuntime::emitTargetOutlinedFunction(
     CGF.EmitStmt(CS.getCapturedStmt());
   };
 
-  // Create a unique name for the proxy/entry function that using the source
-  // location information of the current target region. The name will be
-  // something like:
-  //
-  // .omp_offloading.DD_FFFF.PP.lBB.cCC
-  //
-  // where DD_FFFF is an ID unique to the file (device and file IDs), PP is the
-  // mangled name of the function that encloses the target region, BB is the
-  // line number of the target region, and CC is the column number of the target
-  // region.
-
   unsigned DeviceID;
   unsigned FileID;
   unsigned Line;
   unsigned Column;
-  getTargetEntryUniqueInfo(CGM.getContext(), D.getLocStart(), DeviceID, FileID,
-                           Line, Column);
-  SmallString<64> EntryFnName;
-  {
-    llvm::raw_svector_ostream OS(EntryFnName);
-    OS << "__omp_offloading" << llvm::format("_%x", DeviceID)
-       << llvm::format("_%x_", FileID) << ParentName << "_l" << Line << "_c"
-       << Column;
-  }
+  SmallString<256> EntryFnName;
+  getUniqueTargetEntryName(D, ParentName, DeviceID, FileID, Line, Column,
+                           EntryFnName);
 
   CodeGenFunction CGF(CGM, true);
   CGOpenMPTargetRegionInfo CGInfo(CS, CodeGen, EntryFnName);
