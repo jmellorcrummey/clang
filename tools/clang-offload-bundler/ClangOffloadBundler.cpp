@@ -54,7 +54,8 @@ static cl::opt<std::string>
                        "  bc  - llvm-bc\n"
                        "  s   - assembler\n"
                        "  o   - object\n"
-                       "  gch - precompiled-header"),
+                       "  gch - precompiled-header\n"
+                       "  ast - clang AST file"),
               cl::cat(ClangOffloadBundlerCategory));
 static cl::opt<bool>
     Unbundle("unbundle",
@@ -529,6 +530,7 @@ int main(int argc, const char **argv) {
                .Case("s", new TextFileHandler(/*Comment=*/"#"))
                .Case("o", new BinaryFileHandler())
                .Case("gch", new BinaryFileHandler())
+               .Case("ast", new BinaryFileHandler())
                .Default(nullptr));
 
   if (!FH.get()) {
