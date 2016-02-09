@@ -284,7 +284,7 @@ private:
       // Execute this outlined function.
       CGF.EmitBlock(ExecuteFNBB);
       llvm::SmallVector<llvm::Value *, 20> FnArgs;
-      // First two arguments are not used and don't need to be retrieved.
+      // First two arguments are not used on the device.
       Address ZeroAddr =
           CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
                                /*Name*/ ".zero.addr");
@@ -292,21 +292,14 @@ private:
       FnArgs.push_back(ZeroAddr.getPointer());
       FnArgs.push_back(
           llvm::Constant::getNullValue(CGM.Int32Ty->getPointerTo()));
+
+      // Cast the shared memory structure work_args and pass it as the third
+      // argument, i.e., the capture structure.
       auto Fn = cast<llvm::Function>(W);
-      auto begin = std::next(std::next(Fn->arg_begin()));
-      unsigned idx = 0;
-      // Load outlined function arguments from memory.
-      for (llvm::Function::const_arg_iterator ai = begin, ae = Fn->arg_end();
-           ai != ae; ++ai) {
-        auto StoredArg = Bld.CreateConstInBoundsGEP2_32(
-            WorkArgs->getValueType(), WorkArgs, 0, idx++);
-        llvm::Value *StoredVal =
-            Bld.CreateAlignedLoad(StoredArg, WorkArgs->getAlignment());
-        if (ai->getType() != StoredVal->getType()) {
-          StoredVal = Bld.CreateBitOrPointerCast(StoredVal, ai->getType());
-        }
-        FnArgs.push_back(StoredVal);
-      }
+      auto CaptureArg = std::next(std::next(Fn->arg_begin()));
+      auto Capture = Bld.CreateAddrSpaceCast(WorkArgs, CaptureArg->getType());
+      FnArgs.push_back(Capture);
+
       // Insert call to work function.
       CGF.EmitCallOrInvoke(Fn, FnArgs);
       // Go to end of parallel region.
@@ -427,6 +420,30 @@ private:
     CGF.EmitBlock(EST.ExitBB);
   }
 
+  llvm::Value *
+  emitParallelOutlinedFunction(const OMPExecutableDirective &D,
+                               const VarDecl *ThreadIDVar,
+                               OpenMPDirectiveKind InnermostKind,
+                               const RegionCodeGenTy &CodeGen) override {
+    assert(ThreadIDVar->getType()->isPointerType() &&
+           "thread id variable must be of type kmp_int32 *");
+    const CapturedStmt *CS = cast<CapturedStmt>(D.getAssociatedStmt());
+    CodeGenFunction CGF(CGM, true);
+    bool HasCancel = false;
+    if (auto *OPD = dyn_cast<OMPParallelDirective>(&D))
+      HasCancel = OPD->hasCancel();
+    else if (auto *OPSD = dyn_cast<OMPParallelSectionsDirective>(&D))
+      HasCancel = OPSD->hasCancel();
+    else if (auto *OPFD = dyn_cast<OMPParallelForDirective>(&D))
+      HasCancel = OPFD->hasCancel();
+    CGOpenMPOutlinedRegionInfo CGInfo(*CS, ThreadIDVar, CodeGen, InnermostKind,
+                                      HasCancel);
+    CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
+    // The outlined function takes as arguments the global_tid, bound_tid,
+    // and a capture structure created from the captured variables.
+    return CGF.GenerateCapturedStmtFunction(*CS);
+  }
+
   void emitParallelCall(CodeGenFunction &CGF, SourceLocation Loc,
                         llvm::Value *OutlinedFn,
                         ArrayRef<llvm::Value *> CapturedVars,
@@ -451,6 +468,8 @@ private:
       assert(CapturedVars.size() < 20 &&
              "FIXME: Parallel region has more than 20 captured vars.");
 
+      // Iterate through the variables in CapturedVars and write them to
+      // the work_args structure that will be read by the workers.
       int idx = 0;
       for (auto Var : CapturedVars) {
         auto Arg = CGF.Builder.CreateConstInBoundsGEP2_32(
