@@ -577,6 +577,16 @@ struct UnknownPragmaHandler : public PragmaHandler {
     Callbacks->MoveToLine(PragmaTok.getLocation());
     Callbacks->OS.write(Prefix, strlen(Prefix));
 
+    if (ShouldExpandTokens) {
+      // The first token does not have expanded macros. Expand them, if
+      // required.
+      Token *Toks = new Token[1];
+      Toks[0] = PragmaTok;
+      PP.EnterTokenStream(Toks, /*NumToks=*/1,
+                          /*DisableMacroExpansion=*/false,
+                          /*OwnsTokens=*/true);
+      PP.Lex(PragmaTok);
+    }
     Token PrevToken;
     Token PrevPrevToken;
     PrevToken.startToken();
