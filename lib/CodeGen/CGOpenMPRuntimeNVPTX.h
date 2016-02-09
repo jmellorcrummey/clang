@@ -180,7 +180,7 @@ private:
                                         llvm::GlobalValue::InternalLinkage,
                                         WorkerFnName, &CGM.getModule());
       CGM.SetInternalFunctionAttributes(/*D=*/nullptr, WorkerFn, *CGFI);
-      WorkerFn->setLinkage(llvm::GlobalValue::PrivateLinkage);
+      WorkerFn->setLinkage(llvm::GlobalValue::InternalLinkage);
       WorkerFn->addFnAttr(llvm::Attribute::NoInline);
     }
   };
