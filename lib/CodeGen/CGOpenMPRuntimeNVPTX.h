@@ -51,8 +51,8 @@ private:
 
 public:
   explicit CGOpenMPRuntimeNVPTX(CodeGenModule &CGM)
-      : CGOpenMPRuntime(CGM), ActiveWorkers(nullptr), ThreadLimit(nullptr),
-        WorkID(nullptr), WorkArgs(nullptr) {
+      : CGOpenMPRuntime(CGM), ActiveWorkers(nullptr), WorkID(nullptr),
+      WorkArgs(nullptr) {
     if (!CGM.getLangOpts().OpenMPIsDevice)
       llvm_unreachable("OpenMP NVPTX can only handle device code.");
   }
@@ -124,9 +124,6 @@ private:
 
   // Master-worker control state.
   llvm::GlobalVariable *ActiveWorkers;
-  // TODO: fix!  Multiple kernels, and even the same kernel may run
-  // concurrently.
-  llvm::GlobalVariable *ThreadLimit;
   llvm::GlobalVariable *WorkID;
   llvm::GlobalVariable *WorkArgs;
 
@@ -202,13 +199,6 @@ private:
           llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
       ActiveWorkers->setAlignment(DL.getPrefTypeAlignment(CGM.Int32Ty));
     }
-
-    // Add global for thread_limit that is kept updated by the CUDA offloading
-    // RTL.  Value of 0 causes runtime to use default.
-    ThreadLimit = new llvm::GlobalVariable(
-        CGM.getModule(), CGM.Int32Ty, false, llvm::GlobalValue::ExternalLinkage,
-        llvm::Constant::getNullValue(CGM.Int32Ty), Twine("__omp_thread_limit"));
-    ThreadLimit->setAlignment(DL.getPrefTypeAlignment(CGM.Int32Ty));
 
     // Work function ID.
     if (!WorkID) {
@@ -414,7 +404,7 @@ private:
     // Initialize the state of the OpenMP runtime library on the GPU.
     llvm::Value *Args[] = {
         Bld.getInt32(/*OmpHandle=*/0),
-        Bld.CreateAlignedLoad(ThreadLimit, ThreadLimit->getAlignment())};
+        Bld.CreateCall(GetCudaThreadID(), {}, "thread_limit")};
     CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL__kmpc_kernel_init), Args);
   }
 
