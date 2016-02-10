@@ -75,8 +75,7 @@ CGOpenMPRuntime::CGOpenMPRuntime(CodeGenModule &CGM)
   loadOffloadInfoMetadata();
 }
 
-void CGOpenMPRuntime::release() {
-}
+void CGOpenMPRuntime::release() {}
 
 void CGOpenMPRuntime::clear() {
   InternalVars.clear();
