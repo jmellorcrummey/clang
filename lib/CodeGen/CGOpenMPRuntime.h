@@ -578,6 +578,7 @@ private:
 public:
   explicit CGOpenMPRuntime(CodeGenModule &CGM);
   virtual ~CGOpenMPRuntime() {}
+  virtual void release();
   virtual void clear();
 
   /// \brief Emits outlined function for the specified OpenMP parallel directive

@@ -52,9 +52,66 @@ private:
 public:
   explicit CGOpenMPRuntimeNVPTX(CodeGenModule &CGM)
       : CGOpenMPRuntime(CGM), ActiveWorkers(nullptr), WorkID(nullptr),
-      WorkArgs(nullptr) {
+      WorkArgs(nullptr), MaxWorkArgs(0) {
     if (!CGM.getLangOpts().OpenMPIsDevice)
       llvm_unreachable("OpenMP NVPTX can only handle device code.");
+
+    // Called once per module during initialization.
+    initializeEnvironment();
+  }
+
+  // Called once per module, after target processing.
+  void release() override {
+    finalizeEnvironment();
+  }
+
+  void initializeEnvironment() {
+    //
+    // Initialize master-worker control state in shared memory.
+    //
+
+    auto DL = CGM.getDataLayout();
+    // Number of requested OMP threads in parallel region.
+    ActiveWorkers = new llvm::GlobalVariable(
+        CGM.getModule(), CGM.Int32Ty, false, llvm::GlobalValue::CommonLinkage,
+        llvm::Constant::getNullValue(CGM.Int32Ty), "__omp_num_threads", 0,
+        llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+    ActiveWorkers->setAlignment(DL.getPrefTypeAlignment(CGM.Int32Ty));
+
+    // Work function ID.
+    WorkID = new llvm::GlobalVariable(
+        CGM.getModule(), CGM.Int64Ty, false, llvm::GlobalValue::CommonLinkage,
+        llvm::Constant::getNullValue(CGM.Int64Ty), "__tgt_work_id", 0,
+        llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+    WorkID->setAlignment(DL.getPrefTypeAlignment(CGM.Int64Ty));
+
+    // Arguments to work function.
+    // This variable will be replaced once the actual size is determined,
+    // after parsing all target regions.
+    llvm::ArrayType *ArgsTy = llvm::ArrayType::get(CGM.IntPtrTy, 1);
+    WorkArgs = new llvm::GlobalVariable(
+        CGM.getModule(), ArgsTy, false, llvm::GlobalValue::CommonLinkage,
+        llvm::Constant::getNullValue(ArgsTy), Twine("__scratch_work_args"), 0,
+        llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+    WorkArgs->setAlignment(DL.getPrefTypeAlignment(CGM.IntPtrTy));
+  }
+
+  void finalizeEnvironment() {
+    // Update the size of the work_args structure based on the maximum number
+    // of captured variables seen in this compiltation unit so far.
+    auto DL = CGM.getDataLayout();
+    llvm::ArrayType *ArgsTy = llvm::ArrayType::get(CGM.IntPtrTy, MaxWorkArgs);
+    llvm::GlobalVariable *FinalWorkArgs = new llvm::GlobalVariable(
+        CGM.getModule(), ArgsTy, false, llvm::GlobalValue::CommonLinkage,
+        llvm::Constant::getNullValue(ArgsTy), Twine("__tgt_work_args"), 0,
+        llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+    FinalWorkArgs->setAlignment(DL.getPrefTypeAlignment(CGM.IntPtrTy));
+
+    while (!WorkArgs->use_empty()) {
+      auto &U = *WorkArgs->use_begin();
+      U.set(FinalWorkArgs);
+    }
+    WorkArgs->removeFromParent();
   }
 
   /// \brief Emit outlined function for 'target' directive on the NVPTX
@@ -126,7 +183,11 @@ private:
   llvm::GlobalVariable *ActiveWorkers;
   llvm::GlobalVariable *WorkID;
   llvm::GlobalVariable *WorkArgs;
+  // Maximum number of captured variables sent to any work function in
+  // this compilation unit.
+  size_t MaxWorkArgs;
 
+  // Pointers to outlined function work for workers.
   llvm::SmallVector<llvm::Function *, 16> Work;
 
   class EntryFunctionState {
@@ -170,8 +231,6 @@ private:
       auto &Ctx = CGM.getContext();
 
       // Create an worker function with no arguments.
-      // TODO: Pass entry arguments to worker and reuse instead of passing via
-      // shared memory.
       FunctionType::ExtInfo EI;
       CGFI = &CGM.getTypes().arrangeFreeFunctionDeclaration(
           Ctx.VoidTy, {}, EI, /*isVariadic=*/false);
@@ -186,41 +245,12 @@ private:
   };
 
   void enterTarget() {
-    auto DL = CGM.getDataLayout();
-
-    // Initialize master-worker control state in shared memory.  It should be
-    // shared across all target regions.
-
-    // Number of requested OMP threads in parallel region.
-    if (!ActiveWorkers) {
-      ActiveWorkers = new llvm::GlobalVariable(
-          CGM.getModule(), CGM.Int32Ty, false, llvm::GlobalValue::CommonLinkage,
-          llvm::Constant::getNullValue(CGM.Int32Ty), "__omp_num_threads", 0,
-          llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
-      ActiveWorkers->setAlignment(DL.getPrefTypeAlignment(CGM.Int32Ty));
-    }
-
-    // Work function ID.
-    if (!WorkID) {
-      WorkID = new llvm::GlobalVariable(
-          CGM.getModule(), CGM.Int64Ty, false, llvm::GlobalValue::CommonLinkage,
-          llvm::Constant::getNullValue(CGM.Int64Ty), "__tgt_work_id", 0,
-          llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
-      WorkID->setAlignment(DL.getPrefTypeAlignment(CGM.Int64Ty));
-    }
-
-    // Arguments to work function.
-    if (!WorkArgs) {
-      llvm::ArrayType *ArgsTy = llvm::ArrayType::get(CGM.IntPtrTy, 20);
-      WorkArgs = new llvm::GlobalVariable(
-          CGM.getModule(), ArgsTy, false, llvm::GlobalValue::CommonLinkage,
-          llvm::Constant::getNullValue(ArgsTy), Twine("__tgt_work_args"), 0,
-          llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
-      WorkArgs->setAlignment(DL.getPrefTypeAlignment(CGM.IntPtrTy));
-    }
+    // Nothing here for the moment.
   }
 
-  void exitTarget() { Work.clear(); }
+  void exitTarget() {
+    Work.clear();
+  }
 
   void emitWorkerFunction(WorkerFunctionState &WST) {
     auto &Ctx = CGM.getContext();
@@ -296,8 +326,8 @@ private:
       // Cast the shared memory structure work_args and pass it as the third
       // argument, i.e., the capture structure.
       auto Fn = cast<llvm::Function>(W);
-      auto CaptureArg = std::next(std::next(Fn->arg_begin()));
-      auto Capture = Bld.CreateAddrSpaceCast(WorkArgs, CaptureArg->getType());
+      auto CaptureType = std::next(std::next(Fn->arg_begin()))->getType();
+      auto Capture = Bld.CreateAddrSpaceCast(WorkArgs, CaptureType);
       FnArgs.push_back(Capture);
 
       // Insert call to work function.
@@ -452,7 +482,12 @@ private:
       return;
     auto &&ThenGen = [this, OutlinedFn, CapturedVars](CodeGenFunction &CGF) {
       CGBuilderTy &Bld = CGF.Builder;
-      auto &Ctx = CGF.getContext();
+      auto DL = CGM.getDataLayout();
+
+      llvm::Function *Fn = cast<llvm::Function>(OutlinedFn);
+      // Force inline this outlined function at its call site.
+      Fn->addFnAttr(llvm::Attribute::AlwaysInline);
+      Fn->setLinkage(llvm::GlobalValue::InternalLinkage);
 
       // Prepare # of threads in parallel region based on number requested
       // by user and request for SIMD.
@@ -465,22 +500,26 @@ private:
       Bld.CreateAlignedStore(ParallelThreads, ActiveWorkers,
                              ActiveWorkers->getAlignment());
 
-      assert(CapturedVars.size() < 20 &&
-             "FIXME: Parallel region has more than 20 captured vars.");
-
       // Iterate through the variables in CapturedVars and write them to
       // the work_args structure that will be read by the workers.
+      llvm::Type *CaptureType = std::next(std::next(Fn->arg_begin()))->getType();
+      auto Buffer = CGF.CreateDefaultAlignTempAlloca(CaptureType);
+      // Cast shared work_args structure.
+      auto WorkArgsPtr = Bld.CreateAddrSpaceCast(WorkArgs, CaptureType);
+      Bld.CreateAlignedStore(WorkArgsPtr, Buffer.getPointer(),
+                             Buffer.getAlignment());
+      llvm::Value *Capture = Bld.CreateAlignedLoad(Buffer.getPointer(),
+                                                   Buffer.getAlignment());
+      // Now write captured variables.
       int idx = 0;
       for (auto Var : CapturedVars) {
-        auto Arg = CGF.Builder.CreateConstInBoundsGEP2_32(
-            WorkArgs->getValueType(), WorkArgs, 0, idx++);
-        Address ArgAddr(Arg, Ctx.getTypeAlignInChars(Ctx.VoidPtrTy));
-        if (Var->getType() != Arg->getType()) {
-          ArgAddr = Bld.CreateElementBitCast(ArgAddr, Var->getType());
-        }
-        Bld.CreateStore(Var, ArgAddr);
+        auto Arg = Bld.CreateConstInBoundsGEP2_32(
+            Capture->getType()->getArrayElementType(), Capture, 0, idx++);
+        Bld.CreateAlignedStore(Var, Arg,
+                               DL.getPrefTypeAlignment(Arg->getType()));
       }
 
+      // Signal parallel function to execute.
       auto ID =
           Bld.CreatePtrToInt(OutlinedFn, WorkID->getType()->getElementType());
       Bld.CreateAlignedStore(ID, WorkID, WorkID->getAlignment());
@@ -491,12 +530,9 @@ private:
       // Barrier at end of parallel region.
       SyncCTAThreads(CGF);
 
-      llvm::Function *Fn = cast<llvm::Function>(OutlinedFn);
-      // Force inline this outlined function at its call site.
-      Fn->setLinkage(llvm::GlobalValue::InternalLinkage);
-      Fn->addFnAttr(llvm::Attribute::AlwaysInline);
-
+      // Remember for post-processing in worker loop.
       Work.push_back(Fn);
+      MaxWorkArgs = std::max(MaxWorkArgs, CapturedVars.size());
     };
     //    auto &&ElseGen = [this, OutlinedFn, CapturedVars, RTLoc,
     //                      Loc](CodeGenFunction &CGF) {

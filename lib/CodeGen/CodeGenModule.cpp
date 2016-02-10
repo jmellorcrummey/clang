@@ -388,10 +388,12 @@ void CodeGenModule::Release() {
     if (llvm::Function *CudaDtorFunction = CUDARuntime->makeModuleDtorFunction())
       AddGlobalDtor(CudaDtorFunction);
   }
-  if (OpenMPRuntime)
+  if (OpenMPRuntime) {
     if (llvm::Function *OpenMPRegistrationFunction =
             OpenMPRuntime->emitRegistrationFunction())
       AddGlobalCtor(OpenMPRegistrationFunction, 0);
+    OpenMPRuntime->release();
+  }
   if (PGOReader) {
     getModule().setMaximumFunctionCount(PGOReader->getMaximumFunctionCount());
     if (PGOStats.hasDiagnostics())
