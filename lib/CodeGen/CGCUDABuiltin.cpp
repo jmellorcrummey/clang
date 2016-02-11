@@ -69,8 +69,10 @@ static llvm::Function *GetVprintfDeclaration(llvm::Module &M) {
 RValue
 CodeGenFunction::EmitCUDADevicePrintfCallExpr(const CallExpr *E,
                                               ReturnValueSlot ReturnValue) {
-  assert(getLangOpts().CUDA);
-  assert(getLangOpts().CUDAIsDevice);
+  assert(getLangOpts().CUDA ||
+         (getTarget().getTriple().getArch() == llvm::Triple::nvptx ||
+          getTarget().getTriple().getArch() == llvm::Triple::nvptx64));
+  assert(getLangOpts().CUDAIsDevice || getLangOpts().OpenMPIsDevice);
   assert(E->getBuiltinCallee() == Builtin::BIprintf);
   assert(E->getNumArgs() >= 1); // printf always has at least one arg.
 
