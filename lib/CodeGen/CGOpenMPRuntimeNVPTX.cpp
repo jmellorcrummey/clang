@@ -56,7 +56,7 @@ void CGOpenMPRuntimeNVPTX::initializeEnvironment() {
   // after parsing all target regions.
   llvm::ArrayType *ArgsTy = llvm::ArrayType::get(CGM.IntPtrTy, 1);
   WorkArgs = new llvm::GlobalVariable(
-      CGM.getModule(), ArgsTy, false, llvm::GlobalValue::CommonLinkage,
+      CGM.getModule(), ArgsTy, false, llvm::GlobalValue::InternalLinkage,
       llvm::Constant::getNullValue(ArgsTy), Twine("__scratch_work_args"), 0,
       llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
   WorkArgs->setAlignment(DL.getPrefTypeAlignment(CGM.IntPtrTy));
@@ -73,11 +73,21 @@ void CGOpenMPRuntimeNVPTX::finalizeEnvironment() {
       llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
   FinalWorkArgs->setAlignment(DL.getPrefTypeAlignment(CGM.IntPtrTy));
 
+  // Replace uses manually since the type has changed (size of array).
+  // The original reference will be optimized out.
   while (!WorkArgs->use_empty()) {
     auto &U = *WorkArgs->use_begin();
+    // Must handle Constants specially, we cannot call replaceUsesOfWith on a
+    // constant because they are uniqued.
+    if (auto *C = dyn_cast<llvm::Constant>(U.getUser())) {
+      if (!isa<llvm::GlobalValue>(C)) {
+        C->handleOperandChange(WorkArgs, FinalWorkArgs, &U);
+        continue;
+      }
+    }
+
     U.set(FinalWorkArgs);
   }
-  WorkArgs->removeFromParent();
 }
 
 void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
