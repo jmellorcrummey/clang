@@ -81,7 +81,7 @@ void CGOpenMPRuntimeNVPTX::finalizeEnvironment() {
     // constant because they are uniqued.
     if (auto *C = dyn_cast<llvm::Constant>(U.getUser())) {
       if (!isa<llvm::GlobalValue>(C)) {
-        C->handleOperandChange(WorkArgs, FinalWorkArgs, &U);
+        C->handleOperandChange(WorkArgs, FinalWorkArgs);
         continue;
       }
     }
