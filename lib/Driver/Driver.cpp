@@ -801,8 +801,7 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   if (TC.getTriple().isOSBinFormatMachO())
     BuildUniversalActions(*C, C->getDefaultToolChain(), Inputs);
   else
-    BuildActions(*C, C->getDefaultToolChain(), C->getArgs(), Inputs,
-                 C->getActions());
+    BuildActions(*C, C->getArgs(), Inputs, C->getActions());
 
   if (CCCPrintPhases) {
     PrintActions(*C);
@@ -916,7 +915,7 @@ void Driver::generateCompilationDiagnostics(Compilation &C,
   if (TC.getTriple().isOSBinFormatMachO())
     BuildUniversalActions(C, TC, Inputs);
   else
-    BuildActions(C, TC, C.getArgs(), Inputs, C.getActions());
+    BuildActions(C, C.getArgs(), Inputs, C.getActions());
 
   BuildJobs(C);
 
@@ -1327,7 +1326,7 @@ void Driver::BuildUniversalActions(Compilation &C, const ToolChain &TC,
     Archs.push_back(Args.MakeArgString(TC.getDefaultUniversalArchName()));
 
   ActionList SingleActions;
-  BuildActions(C, TC, Args, BAInputs, SingleActions);
+  BuildActions(C, Args, BAInputs, SingleActions);
 
   // Add in arch bindings for every top level action, as well as lipo and
   // dsymutil steps if needed.
@@ -1613,8 +1612,7 @@ static Action *buildCudaActions(Compilation &C, DerivedArgList &Args,
   assert(C.getCudaDeviceToolChain() &&
          "Missing toolchain for device-side compilation.");
   ActionList CudaDeviceActions;
-  C.getDriver().BuildActions(C, *C.getCudaDeviceToolChain(), Args,
-                             CudaDeviceInputs, CudaDeviceActions);
+  C.getDriver().BuildActions(C, Args, CudaDeviceInputs, CudaDeviceActions);
   assert(GpuArchList.size() == CudaDeviceActions.size() &&
          "Failed to create actions for all devices");
 
@@ -1678,9 +1676,8 @@ static Action *buildCudaActions(Compilation &C, DerivedArgList &Args,
                                       ActionList({FatbinAction}));
 }
 
-void Driver::BuildActions(Compilation &C, const ToolChain &TC,
-                          DerivedArgList &Args, const InputList &Inputs,
-                          ActionList &Actions) const {
+void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
+                          const InputList &Inputs, ActionList &Actions) const {
   llvm::PrettyStackTraceString CrashInfo("Building compilation actions");
 
   if (!SuppressMissingInputWarning && Inputs.empty()) {
@@ -1816,7 +1813,7 @@ void Driver::BuildActions(Compilation &C, const ToolChain &TC,
         continue;
 
       // Otherwise construct the appropriate action.
-      Current = ConstructPhaseAction(C, TC, Args, Phase, Current);
+      Current = ConstructPhaseAction(C, Args, Phase, Current);
 
       if (InputType == types::TY_CUDA && Phase == CudaInjectionPhase) {
         Current = buildCudaActions(C, Args, InputArg, Current, Actions);
@@ -1860,9 +1857,8 @@ void Driver::BuildActions(Compilation &C, const ToolChain &TC,
   Args.ClaimAllArgs(options::OPT_cuda_host_only);
 }
 
-Action *Driver::ConstructPhaseAction(Compilation &C, const ToolChain &TC,
-                                     const ArgList &Args, phases::ID Phase,
-                                     Action *Input) const {
+Action *Driver::ConstructPhaseAction(Compilation &C, const ArgList &Args,
+                                     phases::ID Phase, Action *Input) const {
   llvm::PrettyStackTraceString CrashInfo("Constructing phase actions");
   // Build the appropriate action.
   switch (Phase) {

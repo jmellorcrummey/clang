@@ -1139,6 +1139,7 @@ public:
     assert(CleanupArgs.size() == N);
     std::copy(CleanupArgs.begin(), CleanupArgs.end(), std::begin(Args));
   }
+
   void Emit(CodeGenFunction &CGF, Flags /*flags*/) override {
     if (!CGF.HaveInsertPoint())
       return;
@@ -1993,7 +1994,6 @@ void CGOpenMPRuntime::createOffloadEntry(llvm::Constant *ID,
   // We can't have any padding between symbols, so we need to have 1-byte
   // alignment.
   Entry->setAlignment(1);
-  return;
 }
 
 void CGOpenMPRuntime::createOffloadEntriesAndInfoMetadata() {
@@ -3375,7 +3375,7 @@ enum RTCancelKind {
   CancelSections = 3,
   CancelTaskgroup = 4
 };
-}
+} // anonymous namespace
 
 static RTCancelKind getCancellationKind(OpenMPDirectiveKind CancelRegion) {
   RTCancelKind CancelKind = CancelNoreq;
@@ -3495,7 +3495,6 @@ static void getTargetEntryUniqueInfo(ASTContext &C, SourceLocation Loc,
   FileID = ID.getFile();
   LineNum = PLoc.getLine();
   ColumnNum = PLoc.getColumn();
-  return;
 }
 
 void CGOpenMPRuntime::getUniqueTargetEntryName(const OMPExecutableDirective &D,
@@ -3580,7 +3579,6 @@ void CGOpenMPRuntime::emitTargetOutlinedFunction(
   // Register the information for the entry associated with this target region.
   OffloadEntriesInfoManager.registerTargetRegionEntryInfo(
       DeviceID, FileID, ParentName, Line, Column, OutlinedFn, OutlinedFnID);
-  return;
 }
 
 void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
@@ -3768,7 +3766,6 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
       MapTypesArray = MapTypesArrayGbl;
 
       for (unsigned i = 0; i < PointerNumVal; ++i) {
-
         llvm::Value *BPVal = BasePointers[i];
         if (BPVal->getType()->isPointerTy())
           BPVal = CGF.Builder.CreateBitCast(BPVal, CGM.VoidPtrTy);
@@ -3896,7 +3893,6 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
   CGF.EmitBranch(OffloadContBlock);
 
   CGF.EmitBlock(OffloadContBlock, /*IsFinished=*/true);
-  return;
 }
 
 void CGOpenMPRuntime::scanForTargetRegionsFunctions(const Stmt *S,
@@ -3949,8 +3945,6 @@ void CGOpenMPRuntime::scanForTargetRegionsFunctions(const Stmt *S,
   // Keep looking for target regions recursively.
   for (auto *II : S->children())
     scanForTargetRegionsFunctions(II, ParentName);
-
-  return;
 }
 
 bool CGOpenMPRuntime::emitTargetFunctions(GlobalDecl GD) {
