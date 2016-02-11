@@ -2136,7 +2136,10 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
   }
 
   case Builtin::BIprintf:
-    if (getLangOpts().CUDA && getLangOpts().CUDAIsDevice)
+    if ((getLangOpts().CUDA && getLangOpts().CUDAIsDevice) ||
+        (getLangOpts().OpenMPIsDevice &&
+         (getTarget().getTriple().getArch() == llvm::Triple::nvptx ||
+          getTarget().getTriple().getArch() == llvm::Triple::nvptx64)))
       return EmitCUDADevicePrintfCallExpr(E, ReturnValue);
   }
 

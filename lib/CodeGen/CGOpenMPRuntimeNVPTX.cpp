@@ -339,6 +339,47 @@ void CGOpenMPRuntimeNVPTX::emitEntryFooter(CodeGenFunction &CGF,
   CGF.EmitBlock(EST.ExitBB);
 }
 
+llvm::Constant *
+CGOpenMPRuntimeNVPTX::createRuntimeFunction(NVPTXOpenMPRTLFunction Function) {
+  llvm::Constant *RTLFn = nullptr;
+  switch (Function) {
+  case OMPRTL__kmpc_kernel_init: {
+    // Build void __kmpc_kernel_init(kmp_int32 omp_handle,
+    // kmp_int32 thread_limit);
+    llvm::Type *TypeParams[] = {CGM.Int32Ty, CGM.Int32Ty};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_init");
+    break;
+  }
+  case OMPRTL__kmpc_kernel_prepare_parallel: {
+    /// Build void __kmpc_kernel_prepare_parallel(
+    /// kmp_int32 num_threads, kmp_int32 num_lanes);
+    llvm::Type *TypeParams[] = {CGM.Int32Ty, CGM.Int32Ty};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.Int32Ty, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_prepare_parallel");
+    break;
+  }
+  case OMPRTL__kmpc_kernel_parallel: {
+    /// Build void __kmpc_kernel_parallel(kmp_int32 num_lanes);
+    llvm::Type *TypeParams[] = {CGM.Int32Ty};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_parallel");
+    break;
+  }
+  case OMPRTL__kmpc_kernel_end_parallel: {
+    /// Build void __kmpc_kernel_end_parallel();
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, {}, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_end_parallel");
+    break;
+  }
+  }
+  return RTLFn;
+}
+
 llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOutlinedFunction(
     const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
     OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen) {

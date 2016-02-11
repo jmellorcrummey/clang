@@ -171,20 +171,6 @@ protected:
     OMPRTL__tgt_register_lib,
     // Call to void __tgt_unregister_lib(__tgt_bin_desc *desc);
     OMPRTL__tgt_unregister_lib,
-
-    //
-    // GPU target calls
-    //
-    /// \brief Call to void __kmpc_kernel_init(kmp_int32 omp_handle,
-    /// kmp_int32 thread_limit);
-    OMPRTL__kmpc_kernel_init,
-    /// \brief Call to void __kmpc_kernel_prepare_parallel(
-    /// kmp_int32 num_threads, kmp_int32 num_lanes);
-    OMPRTL__kmpc_kernel_prepare_parallel,
-    /// \brief Call to kmp_int32 __kmpc_kernel_parallel(kmp_int32 num_lanes);
-    OMPRTL__kmpc_kernel_parallel,
-    /// \brief Call to void __kmpc_kernel_end_parallel();
-    OMPRTL__kmpc_kernel_end_parallel,
   };
 
 private:
@@ -508,7 +494,6 @@ private:
   /// \brief Returns pointer to kmpc_micro type.
   llvm::Type *getKmpc_MicroPointerTy();
 
-protected:
   /// \brief Returns specified OpenMP runtime function.
   /// \param Function OpenMP runtime function.
   /// \return Specified function.
