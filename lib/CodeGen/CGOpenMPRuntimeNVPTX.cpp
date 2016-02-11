@@ -79,7 +79,7 @@ void CGOpenMPRuntimeNVPTX::finalizeEnvironment() {
     auto &U = *WorkArgs->use_begin();
     // Must handle Constants specially, we cannot call replaceUsesOfWith on a
     // constant because they are uniqued.
-    if (auto *C = dyn_cast<llvm::Constant>(U.getUser())) {
+    if (llvm::Constant *C = dyn_cast<llvm::Constant>(U.getUser())) {
       if (!isa<llvm::GlobalValue>(C)) {
         C->handleOperandChange(WorkArgs, FinalWorkArgs);
         continue;
