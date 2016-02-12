@@ -219,27 +219,6 @@ private:
   /// \brief Signal termination of OMP execution.
   void emitEntryFooter(CodeGenFunction &CGF, EntryFunctionState &EST);
 
-  enum NVPTXOpenMPRTLFunction {
-    //
-    // GPU target calls
-    //
-    /// \brief Call to void __kmpc_kernel_init(kmp_int32 omp_handle,
-    /// kmp_int32 thread_limit);
-    OMPRTL__kmpc_kernel_init,
-    /// \brief Call to void __kmpc_kernel_prepare_parallel(
-    /// kmp_int32 num_threads, kmp_int32 num_lanes);
-    OMPRTL__kmpc_kernel_prepare_parallel,
-    /// \brief Call to kmp_int32 __kmpc_kernel_parallel(kmp_int32 num_lanes);
-    OMPRTL__kmpc_kernel_parallel,
-    /// \brief Call to void __kmpc_kernel_end_parallel();
-    OMPRTL__kmpc_kernel_end_parallel,
-  };
-
-  /// \brief Returns specified OpenMP runtime function.
-  /// \param Function OpenMP runtime function.
-  /// \return Specified function.
-  llvm::Constant *createRuntimeFunction(NVPTXOpenMPRTLFunction Function);
-
   /// \brief Emits code for parallel or serial call of the \a OutlinedFn with
   /// variables captured in a record which address is stored in \a
   /// CapturedStruct.
