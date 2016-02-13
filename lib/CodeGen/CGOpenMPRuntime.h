@@ -581,6 +581,12 @@ public:
   virtual void release();
   virtual void clear();
 
+  /// \brief Emits captured variables for the outlined function for the
+  /// specified OpenMP parallel directive \a D.
+  virtual void
+  emitCapturedVars(CodeGenFunction &CGF, const OMPExecutableDirective &S,
+                   llvm::SmallVector<llvm::Value *, 16> &CapturedVars);
+
   /// \brief Emits outlined function for the specified OpenMP parallel directive
   /// \a D. This outlined function has type void(*)(kmp_int32 *ThreadID,
   /// kmp_int32 BoundID, struct context_vars*).

@@ -1,4 +1,4 @@
-//===----- CGOpenMPRuntime.cpp - Interface to OpenMP Runtimes -------------===//
+//===---- CGOpenMPRuntimeNVPTX.cpp - Interface to OpenMP NVPTX Runtimes ---===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,7 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This provides a class for OpenMP runtime code generation.
+// This provides a class for OpenMP runtime code generation specialized to NVPTX
+// targets.
 //
 //===----------------------------------------------------------------------===//
 
@@ -339,6 +340,14 @@ void CGOpenMPRuntimeNVPTX::emitEntryFooter(CodeGenFunction &CGF,
   CGF.EmitBlock(EST.ExitBB);
 }
 
+void CGOpenMPRuntimeNVPTX::emitCapturedVars(
+    CodeGenFunction &CGF, const OMPExecutableDirective &S,
+    llvm::SmallVector<llvm::Value *, 16> &CapturedVars) {
+  auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
+  auto Var = CGF.GenerateCapturedStmtArgument(*CS);
+  CapturedVars.push_back(Var.getPointer());
+}
+
 llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOutlinedFunction(
     const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
     OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen) {
@@ -386,25 +395,20 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
     Bld.CreateAlignedStore(ParallelThreads, ActiveWorkers,
                            ActiveWorkers->getAlignment());
 
-    // Iterate through the variables in CapturedVars and write them to
-    // the work_args structure that will be read by the workers.
-    llvm::Type *CaptureType = std::next(std::next(Fn->arg_begin()))->getType();
-    auto Buffer = CGF.CreateDefaultAlignTempAlloca(CaptureType);
-    // Cast shared work_args structure.
-    auto WorkArgsPtr = Bld.CreateAddrSpaceCast(WorkArgs, CaptureType);
-    Bld.CreateAlignedStore(WorkArgsPtr, Buffer.getPointer(),
-                           Buffer.getAlignment());
-    llvm::Value *Capture =
-        Bld.CreateAlignedLoad(Buffer.getPointer(), Buffer.getAlignment());
-    // Now write captured variables.
-    int idx = 0;
-    for (auto Var : CapturedVars) {
-      auto Arg = Bld.CreateConstInBoundsGEP2_32(
-          Capture->getType()->getArrayElementType(), Capture, 0, idx++);
-      Bld.CreateAlignedStore(Var, Arg, DL.getPrefTypeAlignment(Arg->getType()));
+    // Copy variables in the capture buffer to the shared workargs structure for
+    // use by the workers.  The extraneous capture buffer will be optimized out
+    // by llvm.
+    auto Capture = CapturedVars.front();
+    auto CaptureType = Capture->getType()->getArrayElementType();
+    auto WorkArgsPtr = Bld.CreateAddrSpaceCast(WorkArgs, Capture->getType());
+    for (unsigned idx = 0; idx < CaptureType->getStructNumElements(); idx++) {
+      auto Src = Bld.CreateConstInBoundsGEP2_32(CaptureType, Capture, 0, idx);
+      auto Dst =
+          Bld.CreateConstInBoundsGEP2_32(CaptureType, WorkArgsPtr, 0, idx);
+      Bld.CreateDefaultAlignedStore(Bld.CreateDefaultAlignedLoad(Src), Dst);
     }
 
-    // Signal parallel function to execute.
+    // Indicate parallel function to execute.
     auto ID =
         Bld.CreatePtrToInt(OutlinedFn, WorkID->getType()->getElementType());
     Bld.CreateAlignedStore(ID, WorkID, WorkID->getAlignment());
@@ -417,7 +421,8 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
 
     // Remember for post-processing in worker loop.
     Work.push_back(Fn);
-    MaxWorkArgs = std::max(MaxWorkArgs, CapturedVars.size());
+    MaxWorkArgs =
+        std::max(MaxWorkArgs, (size_t)CaptureType->getStructNumElements());
   };
   //    auto &&ElseGen = [this, OutlinedFn, CapturedVars, RTLoc,
   //                      Loc](CodeGenFunction &CGF) {

@@ -219,6 +219,12 @@ private:
   /// \brief Signal termination of OMP execution.
   void emitEntryFooter(CodeGenFunction &CGF, EntryFunctionState &EST);
 
+  /// \brief Emits captured variables for the outlined function for the
+  /// specified OpenMP parallel directive \a D.
+  void
+  emitCapturedVars(CodeGenFunction &CGF, const OMPExecutableDirective &S,
+                   llvm::SmallVector<llvm::Value *, 16> &CapturedVars) override;
+
   /// \brief Emits code for parallel or serial call of the \a OutlinedFn with
   /// variables captured in a record which address is stored in \a
   /// CapturedStruct.
