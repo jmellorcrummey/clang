@@ -375,14 +375,13 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
     ArrayRef<llvm::Value *> CapturedVars, const Expr *IfCond) {
   if (!CGF.HaveInsertPoint())
     return;
-  auto &&ThenGen = [this, OutlinedFn, CapturedVars](CodeGenFunction &CGF) {
+  llvm::Function *Fn = cast<llvm::Function>(OutlinedFn);
+  // Force inline this outlined function at its call site.
+  Fn->addFnAttr(llvm::Attribute::AlwaysInline);
+  Fn->setLinkage(llvm::GlobalValue::InternalLinkage);
+  auto *RTLoc = emitUpdateLocation(CGF, Loc);
+  auto &&ThenGen = [this, Fn, CapturedVars](CodeGenFunction &CGF) {
     CGBuilderTy &Bld = CGF.Builder;
-    auto DL = CGM.getDataLayout();
-
-    llvm::Function *Fn = cast<llvm::Function>(OutlinedFn);
-    // Force inline this outlined function at its call site.
-    Fn->addFnAttr(llvm::Attribute::AlwaysInline);
-    Fn->setLinkage(llvm::GlobalValue::InternalLinkage);
 
     // Prepare # of threads in parallel region based on number requested
     // by user and request for SIMD.
@@ -409,8 +408,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
     }
 
     // Indicate parallel function to execute.
-    auto ID =
-        Bld.CreatePtrToInt(OutlinedFn, WorkID->getType()->getElementType());
+    auto ID = Bld.CreatePtrToInt(Fn, WorkID->getType()->getElementType());
     Bld.CreateAlignedStore(ID, WorkID, WorkID->getAlignment());
 
     // Activate workers.
@@ -424,37 +422,36 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
     MaxWorkArgs =
         std::max(MaxWorkArgs, (size_t)CaptureType->getStructNumElements());
   };
-  //    auto &&ElseGen = [this, OutlinedFn, CapturedVars, RTLoc,
-  //                      Loc](CodeGenFunction &CGF) {
-  //      auto ThreadID = getThreadID(CGF, Loc);
-  //      // Build calls:
-  //      // __kmpc_serialized_parallel(&Loc, GTid);
-  //      llvm::Value *Args[] = {RTLoc, ThreadID};
-  //      CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL__kmpc_serialized_parallel),
-  //                          Args);
-  //
-  //      // OutlinedFn(&GTid, &zero, CapturedStruct);
-  //      auto ThreadIDAddr = emitThreadIDAddress(CGF, Loc);
-  //      Address ZeroAddr =
-  //        CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
-  //                             /*Name*/ ".zero.addr");
-  //      CGF.InitTempAlloca(ZeroAddr, CGF.Builder.getInt32(/*C*/ 0));
-  //      llvm::SmallVector<llvm::Value *, 16> OutlinedFnArgs;
-  //      OutlinedFnArgs.push_back(ThreadIDAddr.getPointer());
-  //      OutlinedFnArgs.push_back(ZeroAddr.getPointer());
-  //      OutlinedFnArgs.append(CapturedVars.begin(), CapturedVars.end());
-  //      CGF.EmitCallOrInvoke(OutlinedFn, OutlinedFnArgs);
-  //
-  //      // __kmpc_end_serialized_parallel(&Loc, GTid);
-  //      llvm::Value *EndArgs[] = {emitUpdateLocation(CGF, Loc), ThreadID};
-  //      CGF.EmitRuntimeCall(
-  //          createRuntimeFunction(OMPRTL__kmpc_end_serialized_parallel),
-  //          EndArgs);
-  //    };
-  //    if (IfCond) {
-  //      emitOMPIfClause(CGF, IfCond, ThenGen, ElseGen);
-  //    } else {
-  CodeGenFunction::RunCleanupsScope Scope(CGF);
-  ThenGen(CGF);
-  //    }
+  auto &&ElseGen = [this, Fn, CapturedVars, RTLoc, Loc](CodeGenFunction &CGF) {
+    auto DL = CGM.getDataLayout();
+    auto ThreadID = getThreadID(CGF, Loc);
+    // Build calls:
+    // __kmpc_serialized_parallel(&Loc, GTid);
+    llvm::Value *Args[] = {RTLoc, ThreadID};
+    CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL__kmpc_serialized_parallel),
+                        Args);
+
+    // OutlinedFn(&GTid, &zero, CapturedStruct);
+    auto ThreadIDAddr = emitThreadIDAddress(CGF, Loc);
+    Address ZeroAddr =
+        CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
+                             /*Name*/ ".zero.addr");
+    CGF.InitTempAlloca(ZeroAddr, CGF.Builder.getInt32(/*C*/ 0));
+    llvm::SmallVector<llvm::Value *, 16> OutlinedFnArgs;
+    OutlinedFnArgs.push_back(ThreadIDAddr.getPointer());
+    OutlinedFnArgs.push_back(ZeroAddr.getPointer());
+    OutlinedFnArgs.append(CapturedVars.begin(), CapturedVars.end());
+    CGF.EmitCallOrInvoke(Fn, OutlinedFnArgs);
+
+    // __kmpc_end_serialized_parallel(&Loc, GTid);
+    llvm::Value *EndArgs[] = {emitUpdateLocation(CGF, Loc), ThreadID};
+    CGF.EmitRuntimeCall(
+        createRuntimeFunction(OMPRTL__kmpc_end_serialized_parallel), EndArgs);
+  };
+  if (IfCond) {
+    emitOMPIfClause(CGF, IfCond, ThenGen, ElseGen);
+  } else {
+    CodeGenFunction::RunCleanupsScope Scope(CGF);
+    ThenGen(CGF);
+  }
 }

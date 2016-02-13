@@ -1014,9 +1014,9 @@ llvm::Function *CGOpenMPRuntime::emitThreadPrivateVarDefinition(
 /// } else {
 ///   ElseGen();
 /// }
-static void emitOMPIfClause(CodeGenFunction &CGF, const Expr *Cond,
-                            const RegionCodeGenTy &ThenGen,
-                            const RegionCodeGenTy &ElseGen) {
+void CGOpenMPRuntime::emitOMPIfClause(CodeGenFunction &CGF, const Expr *Cond,
+                                      const RegionCodeGenTy &ThenGen,
+                                      const RegionCodeGenTy &ElseGen) {
   CodeGenFunction::LexicalScope ConditionScope(CGF, Cond->getSourceRange());
 
   // If the condition constant folds and can be elided, try to avoid emitting
