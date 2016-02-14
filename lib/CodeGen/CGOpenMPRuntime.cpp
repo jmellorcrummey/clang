@@ -3526,8 +3526,7 @@ void CGOpenMPRuntime::emitTargetOutlinedFunction(
   unsigned FileID;
   unsigned Line;
   SmallString<256> EntryFnName;
-  getUniqueTargetEntryName(D, ParentName, DeviceID, FileID, Line,
-                           EntryFnName);
+  getUniqueTargetEntryName(D, ParentName, DeviceID, FileID, Line, EntryFnName);
 
   CodeGenFunction CGF(CGM, true);
   CGOpenMPTargetRegionInfo CGInfo(CS, CodeGen, EntryFnName);

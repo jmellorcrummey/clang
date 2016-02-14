@@ -154,8 +154,9 @@ private:
     llvm::BasicBlock *ExitBB;
 
     EntryFunctionState(StringRef ParentName, StringRef EntryFnName,
-                       unsigned DeviceID, unsigned FileID, unsigned Line, llvm::Function *OutlinedFn,
-                       llvm::Constant *OutlinedFnID, const CapturedStmt &CS)
+                       unsigned DeviceID, unsigned FileID, unsigned Line,
+                       llvm::Function *OutlinedFn, llvm::Constant *OutlinedFnID,
+                       const CapturedStmt &CS)
         : ParentName(ParentName), EntryFnName(EntryFnName), DeviceID(DeviceID),
           FileID(FileID), Line(Line), OutlinedFn(OutlinedFn),
           OutlinedFnID(OutlinedFnID), CS(CS), ExitBB(nullptr){};

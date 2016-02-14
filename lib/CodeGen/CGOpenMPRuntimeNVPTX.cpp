@@ -108,11 +108,11 @@ void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
   unsigned DeviceID;
   unsigned FileID;
   unsigned Line;
-  getUniqueTargetEntryName(D, ParentName, DeviceID, FileID, Line,
-                           EntryFnName);
+  getUniqueTargetEntryName(D, ParentName, DeviceID, FileID, Line, EntryFnName);
 
   // Create the entry function and populate the worker loop
-  EntryFunctionState EST(ParentName, EntryFnName, DeviceID, FileID, Line, OutlinedFn, OutlinedFnID, CS);
+  EntryFunctionState EST(ParentName, EntryFnName, DeviceID, FileID, Line,
+                         OutlinedFn, OutlinedFnID, CS);
   SmallString<256> WorkerFnName = EntryFnName;
   WorkerFnName += "_worker";
   WorkerFunctionState WST(CGM, WorkerFnName, CS);
@@ -265,8 +265,8 @@ void CGOpenMPRuntimeNVPTX::emitEntryFunction(EntryFunctionState &EST,
   // Register the information for the entry associated with this target
   // region.
   OffloadEntriesInfoManager.registerTargetRegionEntryInfo(
-      EST.DeviceID, EST.FileID, EST.ParentName, EST.Line,
-      EST.OutlinedFn, EST.OutlinedFnID);
+      EST.DeviceID, EST.FileID, EST.ParentName, EST.Line, EST.OutlinedFn,
+      EST.OutlinedFnID);
 }
 
 // Setup CUDA threads for master-worker OpenMP scheme.
