@@ -936,12 +936,11 @@ public:
   /// \param DeviceID Device identifier.
   /// \param FileID Source file identifier.
   /// \param Line Source line number of target region.
-  /// \param Column Source column number of target region.
   /// \param EntryFnName Name of the entry function.
   virtual void getUniqueTargetEntryName(const OMPExecutableDirective &D,
                                         StringRef ParentName,
                                         unsigned &DeviceID, unsigned &FileID,
-                                        unsigned &Line, unsigned &Column,
+                                        unsigned &Line,
                                         SmallString<256> &EntryFnName);
 
   /// \brief Emit outilined function for 'target' directive.
