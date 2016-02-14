@@ -3500,13 +3500,12 @@ void CGOpenMPRuntime::getUniqueTargetEntryName(const OMPExecutableDirective &D,
   // line number of the target region.
 
   getTargetEntryUniqueInfo(CGM.getContext(), D.getLocStart(), DeviceID, FileID,
-                           Line, Column);
+                           Line);
 
   {
     llvm::raw_svector_ostream OS(EntryFnName);
     OS << "__omp_offloading" << llvm::format("_%x", DeviceID)
-       << llvm::format("_%x_", FileID) << ParentName << "_l" << Line << "_c"
-       << Column;
+       << llvm::format("_%x_", FileID) << ParentName << "_l" << Line;
   }
 }
 

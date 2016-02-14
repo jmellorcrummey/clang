@@ -108,13 +108,11 @@ void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
   unsigned DeviceID;
   unsigned FileID;
   unsigned Line;
-  unsigned Column;
-  getUniqueTargetEntryName(D, ParentName, DeviceID, FileID, Line, Column,
+  getUniqueTargetEntryName(D, ParentName, DeviceID, FileID, Line,
                            EntryFnName);
 
   // Create the entry function and populate the worker loop
-  EntryFunctionState EST(ParentName, EntryFnName, DeviceID, FileID, Line,
-                         Column, OutlinedFn, OutlinedFnID, CS);
+  EntryFunctionState EST(ParentName, EntryFnName, DeviceID, FileID, Line, OutlinedFn, OutlinedFnID, CS);
   SmallString<256> WorkerFnName = EntryFnName;
   WorkerFnName += "_worker";
   WorkerFunctionState WST(CGM, WorkerFnName, CS);
@@ -267,7 +265,7 @@ void CGOpenMPRuntimeNVPTX::emitEntryFunction(EntryFunctionState &EST,
   // Register the information for the entry associated with this target
   // region.
   OffloadEntriesInfoManager.registerTargetRegionEntryInfo(
-      EST.DeviceID, EST.FileID, EST.ParentName, EST.Line, EST.Column,
+      EST.DeviceID, EST.FileID, EST.ParentName, EST.Line,
       EST.OutlinedFn, EST.OutlinedFnID);
 }
 
