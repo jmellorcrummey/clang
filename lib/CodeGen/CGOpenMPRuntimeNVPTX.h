@@ -36,6 +36,12 @@ private:
         &CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_tid_x);
   }
 
+  /// \brief Get the id of the current block on the GPU.
+  llvm::Function *GetNVPTXBlockID() {
+    return llvm::Intrinsic::getDeclaration(
+        &CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_ctaid_x);
+  }
+
   // \brief Get the maximum number of threads in a block of the GPU.
   llvm::Function *GetNVPTXNumThreads() {
     return llvm::Intrinsic::getDeclaration(
@@ -80,6 +86,22 @@ private:
     CGBuilderTy &Bld = CGF.Builder;
     return Bld.CreateAdd(GetMasterThreadID(CGF), Bld.getInt32(0),
                          "num_workers");
+  }
+
+  /// \brief Get thread id in team.
+  /// FIXME: Requires an expensive remainder operation.
+  llvm::Value *GetTeamThreadId(CodeGenFunction &CGF) {
+    CGBuilderTy &Bld = CGF.Builder;
+    return Bld.CreateURem(Bld.CreateCall(GetNVPTXThreadID(), {}),
+                          GetMasterThreadID(CGF), "team_tid");
+  }
+
+  /// \brief Get global thread id.
+  llvm::Value *GetGlobalThreadId(CodeGenFunction &CGF) {
+    CGBuilderTy &Bld = CGF.Builder;
+    return Bld.CreateAdd(Bld.CreateMul(Bld.CreateCall(GetNVPTXBlockID(), {}),
+                                       GetNumWorkers(CGF)),
+                         GetTeamThreadId(CGF), "global_tid");
   }
 
   // \brief Synchronize all GPU threads in a block.
@@ -218,6 +240,10 @@ private:
 
   /// \brief Signal termination of OMP execution.
   void emitEntryFooter(CodeGenFunction &CGF, EntryFunctionState &EST);
+
+  /// \brief Gets thread id value for the current thread.
+  ///
+  llvm::Value *getThreadID(CodeGenFunction &CGF, SourceLocation Loc) override;
 
   /// \brief Emits captured variables for the outlined function for the
   /// specified OpenMP parallel directive \a D.

@@ -545,7 +545,7 @@ protected:
 
   /// \brief Gets thread id value for the current thread.
   ///
-  llvm::Value *getThreadID(CodeGenFunction &CGF, SourceLocation Loc);
+  virtual llvm::Value *getThreadID(CodeGenFunction &CGF, SourceLocation Loc);
 
 private:
   /// \brief Gets (if variable with the given name already exist) or creates

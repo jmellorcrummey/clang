@@ -340,6 +340,12 @@ void CGOpenMPRuntimeNVPTX::emitEntryFooter(CodeGenFunction &CGF,
   CGF.EmitBlock(EST.ExitBB);
 }
 
+llvm::Value *CGOpenMPRuntimeNVPTX::getThreadID(CodeGenFunction &CGF,
+                                               SourceLocation Loc) {
+  assert(CGF.CurFn && "No function in current CodeGenFunction.");
+  return GetGlobalThreadId(CGF);
+}
+
 void CGOpenMPRuntimeNVPTX::emitCapturedVars(
     CodeGenFunction &CGF, const OMPExecutableDirective &S,
     llvm::SmallVector<llvm::Value *, 16> &CapturedVars) {
