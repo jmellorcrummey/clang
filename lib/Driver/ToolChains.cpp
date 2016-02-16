@@ -1060,7 +1060,7 @@ DerivedArgList *Darwin::TranslateArgs(const DerivedArgList &Args,
   }
 
   if (!Args.getLastArg(options::OPT_stdlib_EQ) &&
-      GetDefaultCXXStdlibType() == ToolChain::CST_Libcxx)
+      GetCXXStdlibType(Args) == ToolChain::CST_Libcxx)
     DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_stdlib_EQ),
                       "libc++");
 
@@ -3164,6 +3164,22 @@ void FreeBSD::AddClangCXXStdlibIncludeArgs(const ArgList &DriverArgs,
                      getDriver().SysRoot + "/usr/include/c++/4.2");
     addSystemInclude(DriverArgs, CC1Args,
                      getDriver().SysRoot + "/usr/include/c++/4.2/backward");
+    break;
+  }
+}
+
+void FreeBSD::AddCXXStdlibLibArgs(const ArgList &Args,
+                                  ArgStringList &CmdArgs) const {
+  CXXStdlibType Type = GetCXXStdlibType(Args);
+  bool Profiling = Args.hasArg(options::OPT_pg);
+
+  switch (Type) {
+  case ToolChain::CST_Libcxx:
+    CmdArgs.push_back(Profiling ? "-lc++_p" : "-lc++");
+    break;
+
+  case ToolChain::CST_Libstdcxx:
+    CmdArgs.push_back(Profiling ? "-lstdc++_p" : "-lstdc++");
     break;
   }
 }
