@@ -2269,9 +2269,10 @@ ASTReader::ReadControlBlock(ModuleFile &F,
               (AllowConfigurationMismatch && Result == ConfigurationMismatch))
             Result = Success;
 
-          // If we've diagnosed a problem, we're done.
-          if (Result != Success &&
-              isDiagnosedResult(Result, ClientLoadCapabilities))
+          // If we can't load the module, exit early since we likely
+          // will rebuild the module anyway. The stream may be in the
+          // middle of a block.
+          if (Result != Success)
             return Result;
         } else if (Stream.SkipBlock()) {
           Error("malformed block record in AST file");
@@ -3482,7 +3483,7 @@ static bool SkipCursorToBlock(BitstreamCursor &Cursor, unsigned BlockID) {
   }
 }
 
-ASTReader::ASTReadResult ASTReader::ReadAST(const std::string &FileName,
+ASTReader::ASTReadResult ASTReader::ReadAST(StringRef FileName,
                                             ModuleKind Type,
                                             SourceLocation ImportLoc,
                                             unsigned ClientLoadCapabilities) {
@@ -4062,7 +4063,9 @@ void ASTReader::InitializeContext() {
     if (Module *Imported = getSubmodule(Import.ID)) {
       makeModuleVisible(Imported, Module::AllVisible,
                         /*ImportLoc=*/Import.ImportLoc);
-      PP.makeModuleVisible(Imported, Import.ImportLoc);
+      if (Import.ImportLoc.isValid())
+        PP.makeModuleVisible(Imported, Import.ImportLoc);
+      // FIXME: should we tell Sema to make the module visible too?
     }
   }
   ImportedModules.clear();

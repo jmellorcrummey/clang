@@ -170,7 +170,6 @@ private:
     const unsigned DeviceID;
     const unsigned FileID;
     const unsigned Line;
-    const unsigned Column;
     llvm::Function *OutlinedFn;
     llvm::Constant *OutlinedFnID;
     const CapturedStmt &CS;
@@ -178,10 +177,10 @@ private:
 
     EntryFunctionState(StringRef ParentName, StringRef EntryFnName,
                        unsigned DeviceID, unsigned FileID, unsigned Line,
-                       unsigned Column, llvm::Function *OutlinedFn,
-                       llvm::Constant *OutlinedFnID, const CapturedStmt &CS)
+                       llvm::Function *OutlinedFn, llvm::Constant *OutlinedFnID,
+                       const CapturedStmt &CS)
         : ParentName(ParentName), EntryFnName(EntryFnName), DeviceID(DeviceID),
-          FileID(FileID), Line(Line), Column(Column), OutlinedFn(OutlinedFn),
+          FileID(FileID), Line(Line), OutlinedFn(OutlinedFn),
           OutlinedFnID(OutlinedFnID), CS(CS), ExitBB(nullptr){};
   };
 

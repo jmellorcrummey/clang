@@ -422,30 +422,27 @@ private:
     /// \brief Initialize target region entry.
     void initializeTargetRegionEntryInfo(unsigned DeviceID, unsigned FileID,
                                          StringRef ParentName, unsigned LineNum,
-                                         unsigned ColNum, unsigned Order);
+                                         unsigned Order);
     /// \brief Register target region entry.
     void registerTargetRegionEntryInfo(unsigned DeviceID, unsigned FileID,
                                        StringRef ParentName, unsigned LineNum,
-                                       unsigned ColNum, llvm::Constant *Addr,
+                                       llvm::Constant *Addr,
                                        llvm::Constant *ID);
     /// \brief Return true if a target region entry with the provided
     /// information exists.
     bool hasTargetRegionEntryInfo(unsigned DeviceID, unsigned FileID,
-                                  StringRef ParentName, unsigned LineNum,
-                                  unsigned ColNum) const;
+                                  StringRef ParentName, unsigned LineNum) const;
     /// brief Applies action \a Action on all registered entries.
     typedef llvm::function_ref<void(unsigned, unsigned, StringRef, unsigned,
-                                    unsigned, OffloadEntryInfoTargetRegion &)>
+                                    OffloadEntryInfoTargetRegion &)>
         OffloadTargetRegionEntryInfoActTy;
     void actOnTargetRegionEntriesInfo(
         const OffloadTargetRegionEntryInfoActTy &Action);
 
   private:
     // Storage for target region entries kind. The storage is to be indexed by
-    // file ID, device ID, parent function name, lane number, and column number.
+    // file ID, device ID, parent function name and line number.
     typedef llvm::DenseMap<unsigned, OffloadEntryInfoTargetRegion>
-        OffloadEntriesTargetRegionPerColumn;
-    typedef llvm::DenseMap<unsigned, OffloadEntriesTargetRegionPerColumn>
         OffloadEntriesTargetRegionPerLine;
     typedef llvm::StringMap<OffloadEntriesTargetRegionPerLine>
         OffloadEntriesTargetRegionPerParentName;
@@ -973,12 +970,11 @@ public:
   /// \param DeviceID Device identifier.
   /// \param FileID Source file identifier.
   /// \param Line Source line number of target region.
-  /// \param Column Source column number of target region.
   /// \param EntryFnName Name of the entry function.
   virtual void getUniqueTargetEntryName(const OMPExecutableDirective &D,
                                         StringRef ParentName,
                                         unsigned &DeviceID, unsigned &FileID,
-                                        unsigned &Line, unsigned &Column,
+                                        unsigned &Line,
                                         SmallString<256> &EntryFnName);
 
   /// \brief Emit outilined function for 'target' directive.
