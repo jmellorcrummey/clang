@@ -173,7 +173,7 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
 
   // Activate requested workers.
   CGF.EmitBlock(SelectWorkersBB);
-  llvm::Value *ThreadID = Bld.CreateCall(GetNVPTXThreadID(), {}, "tid");
+  llvm::Value *ThreadID = GetNVPTXThreadID(CGF);
   llvm::Value *ActiveThread = Bld.CreateICmpSLT(
       ThreadID,
       Bld.CreateAlignedLoad(ActiveWorkers, ActiveWorkers->getAlignment()),
@@ -279,7 +279,7 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
   // Get the master thread id.
   llvm::Value *MasterID = GetMasterThreadID(CGF);
   // Current thread's identifier.
-  llvm::Value *ThreadID = Bld.CreateCall(GetNVPTXThreadID(), {}, "tid");
+  llvm::Value *ThreadID = GetNVPTXThreadID(CGF);
 
   // Setup BBs in entry function.
   llvm::BasicBlock *WorkerCheckBB = CGF.createBasicBlock(".check.for.worker");
@@ -313,9 +313,7 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
 
   // First action in sequential region:
   // Initialize the state of the OpenMP runtime library on the GPU.
-  llvm::Value *Args[] = {
-      Bld.getInt32(/*OmpHandle=*/0),
-      Bld.CreateCall(GetNVPTXThreadID(), {}, "thread_limit")};
+  llvm::Value *Args[] = {Bld.getInt32(/*OmpHandle=*/0), GetNVPTXThreadID(CGF)};
   CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL__kmpc_kernel_init), Args);
 }
 

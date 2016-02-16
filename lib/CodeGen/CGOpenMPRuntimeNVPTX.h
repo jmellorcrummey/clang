@@ -25,40 +25,58 @@ namespace CodeGen {
 class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
 private:
   /// \brief Get the GPU warp size.
-  llvm::Function *GetNVPTXWarpSize() {
-    return llvm::Intrinsic::getDeclaration(
-        &CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_warpsize);
+  llvm::Value *GetNVPTXWarpSize(CodeGenFunction &CGF) {
+    CGBuilderTy &Bld = CGF.Builder;
+    return Bld.CreateCall(
+        llvm::Intrinsic::getDeclaration(
+            &CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_warpsize),
+        {}, "nvptx_warp_size");
   }
 
   /// \brief Get the id of the current thread on the GPU.
-  llvm::Function *GetNVPTXThreadID() {
-    return llvm::Intrinsic::getDeclaration(
-        &CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_tid_x);
+  llvm::Value *GetNVPTXThreadID(CodeGenFunction &CGF) {
+    CGBuilderTy &Bld = CGF.Builder;
+    return Bld.CreateCall(
+        llvm::Intrinsic::getDeclaration(
+            &CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_tid_x),
+        {}, "nvptx_tid");
   }
 
   /// \brief Get the id of the current block on the GPU.
-  llvm::Function *GetNVPTXBlockID() {
-    return llvm::Intrinsic::getDeclaration(
-        &CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_ctaid_x);
+  llvm::Value *GetNVPTXBlockID(CodeGenFunction &CGF) {
+    CGBuilderTy &Bld = CGF.Builder;
+    return Bld.CreateCall(
+        llvm::Intrinsic::getDeclaration(
+            &CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_ctaid_x),
+        {}, "nvptx_block_id");
   }
 
   // \brief Get the maximum number of threads in a block of the GPU.
-  llvm::Function *GetNVPTXNumThreads() {
-    return llvm::Intrinsic::getDeclaration(
-        &CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_x);
+  llvm::Value *GetNVPTXNumThreads(CodeGenFunction &CGF) {
+    CGBuilderTy &Bld = CGF.Builder;
+    return Bld.CreateCall(
+        llvm::Intrinsic::getDeclaration(
+            &CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_x),
+        {}, "nvptx_num_threads");
   }
 
   /// \brief Get barrier #n to synchronize all threads in a block.
-  llvm::Function *GetNVPTXCTABarrier() {
-    return llvm::Intrinsic::getDeclaration(&CGM.getModule(),
-                                           llvm::Intrinsic::nvvm_barrier_n);
+  void GetNVPTXCTABarrier(CodeGenFunction &CGF) {
+    CGBuilderTy &Bld = CGF.Builder;
+    llvm::Value *Args[] = {Bld.getInt32(CTA_BARRIER)};
+    Bld.CreateCall(llvm::Intrinsic::getDeclaration(
+                       &CGM.getModule(), llvm::Intrinsic::nvvm_barrier_n),
+                   Args);
   }
 
   /// \brief Get barrier #n to synchronize selected (multiple of 32) threads in
   /// a block.
-  llvm::Function *GetNVPTXBarrier() {
-    return llvm::Intrinsic::getDeclaration(&CGM.getModule(),
-                                           llvm::Intrinsic::nvvm_barrier);
+  void GetNVPTXBarrier(CodeGenFunction &CGF, int ID, int NumThreads) {
+    CGBuilderTy &Bld = CGF.Builder;
+    llvm::Value *Args[] = {Bld.getInt32(ID), Bld.getInt32(NumThreads)};
+    Bld.CreateCall(llvm::Intrinsic::getDeclaration(
+                       &CGM.getModule(), llvm::Intrinsic::nvvm_barrier),
+                   Args);
   }
 
   /// \brief Get the thread id of the OMP master thread.
@@ -70,11 +88,10 @@ private:
   ///      If NumThreads is 1024, master id is 992.
   llvm::Value *GetMasterThreadID(CodeGenFunction &CGF) {
     CGBuilderTy &Bld = CGF.Builder;
-    llvm::Value *NumThreads = Bld.CreateCall(GetNVPTXNumThreads(), {});
+    llvm::Value *NumThreads = GetNVPTXNumThreads(CGF);
 
     // We assume that the warp size is a multiple of 2.
-    llvm::Value *Mask =
-        Bld.CreateSub(Bld.CreateCall(GetNVPTXWarpSize(), {}), Bld.getInt32(1));
+    llvm::Value *Mask = Bld.CreateSub(GetNVPTXWarpSize(CGF), Bld.getInt32(1));
 
     return Bld.CreateAnd(Bld.CreateSub(NumThreads, Bld.getInt32(1)),
                          Bld.CreateNot(Mask), "master_tid");
@@ -92,24 +109,20 @@ private:
   /// FIXME: Requires an expensive remainder operation.
   llvm::Value *GetTeamThreadId(CodeGenFunction &CGF) {
     CGBuilderTy &Bld = CGF.Builder;
-    return Bld.CreateURem(Bld.CreateCall(GetNVPTXThreadID(), {}),
-                          GetMasterThreadID(CGF), "team_tid");
+    return Bld.CreateURem(GetNVPTXThreadID(CGF), GetMasterThreadID(CGF),
+                          "team_tid");
   }
 
   /// \brief Get global thread id.
   llvm::Value *GetGlobalThreadId(CodeGenFunction &CGF) {
     CGBuilderTy &Bld = CGF.Builder;
-    return Bld.CreateAdd(Bld.CreateMul(Bld.CreateCall(GetNVPTXBlockID(), {}),
-                                       GetNumWorkers(CGF)),
-                         GetTeamThreadId(CGF), "global_tid");
+    return Bld.CreateAdd(
+        Bld.CreateMul(GetNVPTXBlockID(CGF), GetNumWorkers(CGF)),
+        GetTeamThreadId(CGF), "global_tid");
   }
 
   // \brief Synchronize all GPU threads in a block.
-  void SyncCTAThreads(CodeGenFunction &CGF) {
-    CGBuilderTy &Bld = CGF.Builder;
-    llvm::Value *Args[] = {Bld.getInt32(CTA_BARRIER)};
-    Bld.CreateCall(GetNVPTXCTABarrier(), Args);
-  }
+  void SyncCTAThreads(CodeGenFunction &CGF) { GetNVPTXCTABarrier(CGF); }
 
 public:
   explicit CGOpenMPRuntimeNVPTX(CodeGenModule &CGM);
