@@ -55,7 +55,7 @@ void CGOpenMPRuntimeNVPTX::initializeEnvironment() {
   // Arguments to work function.
   // This variable will be replaced once the actual size is determined,
   // after parsing all target regions.
-  llvm::ArrayType *ArgsTy = llvm::ArrayType::get(CGM.IntPtrTy, 1);
+  llvm::ArrayType *ArgsTy = llvm::ArrayType::get(CGM.IntPtrTy, 0);
   WorkArgs = new llvm::GlobalVariable(
       CGM.getModule(), ArgsTy, false, llvm::GlobalValue::InternalLinkage,
       llvm::Constant::getNullValue(ArgsTy), Twine("__scratch_work_args"), 0,
