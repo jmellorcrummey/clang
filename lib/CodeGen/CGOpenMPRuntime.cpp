@@ -3905,8 +3905,7 @@ private:
     // do the calculation based on the length of the section instead of relying
     // on CGF.getTypeSize(E->getType()).
     if (const auto *OAE = dyn_cast<OMPArraySectionExpr>(E)) {
-
-      auto BaseTy = OAE->getBase()->getType().getCanonicalType();
+      auto BaseTy = OAE->getBase()->IgnoreParenImpCasts()->getType().getCanonicalType();
       // Reference types are ignored for mapping purposes.
       if (auto *RefTy = BaseTy->getAs<ReferenceType>())
         BaseTy = RefTy->getPointeeType().getCanonicalType();
