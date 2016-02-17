@@ -10903,15 +10903,20 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
   assert(gpu_archs.size() == 1 && "Exactly one GPU Arch required for ptxas.");
   const std::string& gpu_arch = gpu_archs[0];
 
-
   ArgStringList CmdArgs;
   CmdArgs.push_back(TC.getTriple().isArch64Bit() ? "-m64" : "-m32");
+  if (Args.getLastArg(options::OPT_cuda_noopt_device_debug)) {
+    // ptxas does not accept -g option if optimization is enabled, so
+    // we ignore the compiler's -O* options if we want debug info.
+    CmdArgs.push_back("-g");
+    CmdArgs.push_back("--dont-merge-basicblocks");
+    CmdArgs.push_back("--return-at-end");
+  } else if (Arg *A = Args.getLastArg(options::OPT_O_Group)) {
+    // Map the -O we received to -O{0,1,2,3}.
+    //
+    // TODO: Perhaps we should map host -O2 to ptxas -O3. -O3 is ptxas's
+    // default, so it may correspond more closely to the spirit of clang -O2.
 
-  // Map the -O we received to -O{0,1,2,3}.
-  //
-  // TODO: Perhaps we should map host -O2 to ptxas -O3. -O3 is ptxas's default,
-  // so it may correspond more closely to the spirit of clang -O2.
-  if (Arg *A = Args.getLastArg(options::OPT_O_Group)) {
     // -O3 seems like the least-bad option when -Osomething is specified to
     // clang but it isn't handled below.
     StringRef OOpt = "3";
@@ -10940,9 +10945,6 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
   // Pass -v to ptxas if it was passed to the driver.
   if (Args.hasArg(options::OPT_v))
     CmdArgs.push_back("-v");
-
-  // Don't bother passing -g to ptxas: It's enabled by default at -O0, and
-  // not supported at other optimization levels.
 
   CmdArgs.push_back("--gpu-name");
   CmdArgs.push_back(Args.MakeArgString(gpu_arch));
