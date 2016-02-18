@@ -996,8 +996,8 @@ public:
   /// \param Device Expression evaluated in device clause associated with the
   /// target directive, or null if no device clause is used.
   virtual void emitTargetEnterDataCall(CodeGenFunction &CGF,
-                                   const OMPExecutableDirective &D,
-                                   const Expr *IfCond, const Expr *Device);
+                                       const OMPExecutableDirective &D,
+                                       const Expr *IfCond, const Expr *Device);
 };
 
 } // namespace CodeGen

@@ -4892,9 +4892,9 @@ void CGOpenMPRuntime::emitTargetDataCalls(CodeGenFunction &CGF,
 }
 
 void CGOpenMPRuntime::emitTargetEnterDataCall(CodeGenFunction &CGF,
-                                          const OMPExecutableDirective &D,
-                                          const Expr *IfCond,
-                                          const Expr *Device) {
+                                              const OMPExecutableDirective &D,
+                                              const Expr *IfCond,
+                                              const Expr *Device) {
   if (!CGF.HaveInsertPoint())
     return;
 
@@ -4916,13 +4916,13 @@ void CGOpenMPRuntime::emitTargetEnterDataCall(CodeGenFunction &CGF,
     llvm::Value *MapTypesArrayArg = nullptr;
 
     // Fill up the arrays and create the arguments.
-    emitOffloadingArrays(CGF, BasePointersArrayArg, PointersArrayArg, SizesArrayArg,
-                         MapTypesArrayArg, BasePointers, Pointers, Sizes,
-                         MapTypes);
-    emitOffloadingArraysArgument(CGF, BasePointersArrayArg, PointersArrayArg,
-                                 SizesArrayArg, MapTypesArrayArg,
-                                 BasePointersArrayArg, PointersArrayArg, SizesArrayArg,
-                                 MapTypesArrayArg, BasePointers.size());
+    emitOffloadingArrays(CGF, BasePointersArrayArg, PointersArrayArg,
+                         SizesArrayArg, MapTypesArrayArg, BasePointers,
+                         Pointers, Sizes, MapTypes);
+    emitOffloadingArraysArgument(
+        CGF, BasePointersArrayArg, PointersArrayArg, SizesArrayArg,
+        MapTypesArrayArg, BasePointersArrayArg, PointersArrayArg, SizesArrayArg,
+        MapTypesArrayArg, BasePointers.size());
 
     // Emit device ID if any.
     llvm::Value *DeviceID = nullptr;
