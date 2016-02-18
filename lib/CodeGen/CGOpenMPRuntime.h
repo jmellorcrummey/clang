@@ -170,6 +170,12 @@ private:
     OMPRTL__tgt_register_lib,
     // Call to void __tgt_unregister_lib(__tgt_bin_desc *desc);
     OMPRTL__tgt_unregister_lib,
+    // Call to void __tgt_target_data_begin(int32_t device_id, int32_t arg_num,
+    // void** args_base, void **args, size_t *arg_sizes, int32_t *arg_types);
+    OMPRTL__tgt_target_data_begin,
+    // Call to void __tgt_target_data_end(int32_t device_id, int32_t arg_num,
+    // void** args_base, void **args, size_t *arg_sizes, int32_t *arg_types);
+    OMPRTL__tgt_target_data_end,
   };
 
   /// \brief Values for bit flags used in the ident_t to describe the fields.
@@ -970,6 +976,17 @@ public:
   /// was emitted in the current module and return the function that registers
   /// it.
   virtual llvm::Function *emitRegistrationFunction();
+
+  /// \brief Emit the target data mapping code associated with \a D.
+  /// \param D Directive to emit.
+  /// \param IfCond Expression evaluated in if clause associated with the target
+  /// directive, or null if no if clause is used.
+  /// \param Device Expression evaluated in device clause associated with the
+  /// target directive, or null if no device clause is used.
+  /// \param CodeGen, Function that emits the enclosed region.
+  virtual void emitTargetDataCalls(CodeGenFunction &CGF,
+                                       const OMPExecutableDirective &D,
+                                       const Expr *IfCond, const Expr *Device, const RegionCodeGenTy &CodeGen);
 };
 
 } // namespace CodeGen

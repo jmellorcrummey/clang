@@ -2663,7 +2663,6 @@ void CodeGenFunction::EmitOMPTargetDirective(const OMPTargetDirective &S) {
 
   // Check if we have any if clause associated with the directive.
   const Expr *IfCond = nullptr;
-
   if (auto *C = S.getSingleClause<OMPIfClause>()) {
     IfCond = C->getCondition();
   }
@@ -2742,9 +2741,29 @@ void CodeGenFunction::EmitOMPTargetDataDirective(
     const OMPTargetDataDirective &S) {
   // emit the code inside the construct for now
   auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
-  CGM.getOpenMPRuntime().emitInlinedDirective(
-      *this, OMPD_target_data,
-      [&CS](CodeGenFunction &CGF) { CGF.EmitStmt(CS->getCapturedStmt()); });
+
+  // The target data enclosed region is implemented just by emitting the statement.
+  auto &&CodeGen = [&CS](CodeGenFunction &CGF) { CGF.EmitStmt(CS->getCapturedStmt()); };
+
+  // If we don't have target devices, don't bother emitting the data mapping code.
+  if (CGM.getLangOpts().OMPTargetTriples.empty()) {
+    CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_target_data, CodeGen);
+    return;
+  }
+
+  // Check if we have any if clause associated with the directive.
+  const Expr *IfCond = nullptr;
+  if (auto *C = S.getSingleClause<OMPIfClause>()) {
+    IfCond = C->getCondition();
+  }
+
+  // Check if we have any device clause associated with the directive.
+  const Expr *Device = nullptr;
+  if (auto *C = S.getSingleClause<OMPDeviceClause>()) {
+    Device = C->getDevice();
+  }
+
+  CGM.getOpenMPRuntime().emitTargetDataCalls(*this, S, IfCond, Device, CodeGen);
 }
 
 void CodeGenFunction::EmitOMPTargetEnterDataDirective(
