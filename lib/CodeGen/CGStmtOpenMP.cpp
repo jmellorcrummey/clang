@@ -2790,7 +2790,8 @@ void CodeGenFunction::EmitOMPTargetEnterDataDirective(
     Device = C->getDevice();
   }
 
-  CGM.getOpenMPRuntime().emitTargetEnterOrExitDataCall(*this, S, IfCond, Device);
+  CGM.getOpenMPRuntime().emitTargetEnterOrExitDataCall(*this, S, IfCond,
+                                                       Device);
 }
 
 void CodeGenFunction::EmitOMPTargetExitDataDirective(
@@ -2812,7 +2813,8 @@ void CodeGenFunction::EmitOMPTargetExitDataDirective(
     Device = C->getDevice();
   }
 
-  CGM.getOpenMPRuntime().emitTargetEnterOrExitDataCall(*this, S, IfCond, Device);
+  CGM.getOpenMPRuntime().emitTargetEnterOrExitDataCall(*this, S, IfCond,
+                                                       Device);
 }
 
 void CodeGenFunction::EmitOMPTargetParallelDirective(
