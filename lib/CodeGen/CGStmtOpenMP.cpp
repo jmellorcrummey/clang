@@ -2742,12 +2742,17 @@ void CodeGenFunction::EmitOMPTargetDataDirective(
   // emit the code inside the construct for now
   auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
 
-  // The target data enclosed region is implemented just by emitting the statement.
-  auto &&CodeGen = [&CS](CodeGenFunction &CGF) { CGF.EmitStmt(CS->getCapturedStmt()); };
+  // The target data enclosed region is implemented just by emitting the
+  // statement.
+  auto &&CodeGen = [&CS](CodeGenFunction &CGF) {
+    CGF.EmitStmt(CS->getCapturedStmt());
+  };
 
-  // If we don't have target devices, don't bother emitting the data mapping code.
+  // If we don't have target devices, don't bother emitting the data mapping
+  // code.
   if (CGM.getLangOpts().OMPTargetTriples.empty()) {
-    CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_target_data, CodeGen);
+    CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_target_data,
+                                                CodeGen);
     return;
   }
 

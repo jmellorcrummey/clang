@@ -4281,24 +4281,25 @@ enum OpenMPOffloadingReservedDeviceIDs {
 };
 } // anonymous namespace
 
-/// \brief Emit the arrays used to pass the captures and map information to the offloading runtime library. If there is no map or capture information, return nullptr by reference.
-static
-void emitOffloadingArrays(CodeGenFunction &CGF,
-    llvm::Value *&BasePointersArray,
-    llvm::Value *&PointersArray,
-    llvm::Value *&SizesArray,
-    llvm::Value *&MapTypesArray,
-    OpenMPMapClauseHandler::MapValuesArrayTy &BasePointers,
-    OpenMPMapClauseHandler::MapValuesArrayTy &Pointers,
-    OpenMPMapClauseHandler::MapValuesArrayTy &Sizes,
-    OpenMPMapClauseHandler::MapFlagsArrayTy &MapTypes) {
+/// \brief Emit the arrays used to pass the captures and map information to the
+/// offloading runtime library. If there is no map or capture information,
+/// return nullptr by reference.
+static void
+emitOffloadingArrays(CodeGenFunction &CGF, llvm::Value *&BasePointersArray,
+                     llvm::Value *&PointersArray, llvm::Value *&SizesArray,
+                     llvm::Value *&MapTypesArray,
+                     OpenMPMapClauseHandler::MapValuesArrayTy &BasePointers,
+                     OpenMPMapClauseHandler::MapValuesArrayTy &Pointers,
+                     OpenMPMapClauseHandler::MapValuesArrayTy &Sizes,
+                     OpenMPMapClauseHandler::MapFlagsArrayTy &MapTypes) {
   auto &CGM = CGF.CGM;
   auto &Ctx = CGF.getContext();
 
   BasePointersArray = PointersArray = SizesArray = MapTypesArray = nullptr;
 
   if (unsigned PointerNumVal = BasePointers.size()) {
-    // Detect if we have any capture size requiring runtime evaluation of the size so that a constant array could be eventually used.
+    // Detect if we have any capture size requiring runtime evaluation of the
+    // size so that a constant array could be eventually used.
     bool hasRuntimeEvaluationCaptureSize = false;
     for (auto *S : Sizes)
       if (!isa<llvm::Constant>(S)) {
@@ -4307,9 +4308,9 @@ void emitOffloadingArrays(CodeGenFunction &CGF,
       }
 
     llvm::APInt PointerNumAP(32, PointerNumVal, /*isSigned=*/true);
-    QualType PointerArrayType = Ctx.getConstantArrayType(
-        Ctx.VoidPtrTy, PointerNumAP, ArrayType::Normal,
-        /*IndexTypeQuals=*/0);
+    QualType PointerArrayType =
+        Ctx.getConstantArrayType(Ctx.VoidPtrTy, PointerNumAP, ArrayType::Normal,
+                                 /*IndexTypeQuals=*/0);
 
     BasePointersArray =
         CGF.CreateMemTemp(PointerArrayType, ".offload_baseptrs").getPointer();
@@ -4363,8 +4364,8 @@ void emitOffloadingArrays(CodeGenFunction &CGF,
         BPVal = CGF.Builder.CreateIntToPtr(BPVal, CGM.VoidPtrTy);
       }
       llvm::Value *BP = CGF.Builder.CreateConstInBoundsGEP2_32(
-          llvm::ArrayType::get(CGM.VoidPtrTy, PointerNumVal),
-          BasePointersArray, 0, i);
+          llvm::ArrayType::get(CGM.VoidPtrTy, PointerNumVal), BasePointersArray,
+          0, i);
       Address BPAddr(BP, Ctx.getTypeAlignInChars(Ctx.VoidPtrTy));
       CGF.Builder.CreateStore(BPVal, BPAddr);
 
@@ -4377,8 +4378,8 @@ void emitOffloadingArrays(CodeGenFunction &CGF,
         PVal = CGF.Builder.CreateIntToPtr(PVal, CGM.VoidPtrTy);
       }
       llvm::Value *P = CGF.Builder.CreateConstInBoundsGEP2_32(
-          llvm::ArrayType::get(CGM.VoidPtrTy, PointerNumVal), PointersArray,
-          0, i);
+          llvm::ArrayType::get(CGM.VoidPtrTy, PointerNumVal), PointersArray, 0,
+          i);
       Address PAddr(P, Ctx.getTypeAlignInChars(Ctx.VoidPtrTy));
       CGF.Builder.CreateStore(PVal, PAddr);
 
@@ -4388,25 +4389,21 @@ void emitOffloadingArrays(CodeGenFunction &CGF,
             /*Idx0=*/0,
             /*Idx1=*/i);
         Address SAddr(S, Ctx.getTypeAlignInChars(Ctx.getSizeType()));
-        CGF.Builder.CreateStore(CGF.Builder.CreateIntCast(
-                                    Sizes[i], CGM.SizeTy, /*isSigned=*/true),
-                                SAddr);
+        CGF.Builder.CreateStore(
+            CGF.Builder.CreateIntCast(Sizes[i], CGM.SizeTy, /*isSigned=*/true),
+            SAddr);
       }
     }
   }
 }
-/// \brief Emit the arguments to be passed to the runtime library based on the arrays of pointers, sizes and map types.
-static
-void emitOffloadingArraysArgument(CodeGenFunction &CGF,
-    llvm::Value *&BasePointersArrayArg,
-    llvm::Value *&PointersArrayArg,
-    llvm::Value *&SizesArrayArg,
-    llvm::Value *&MapTypesArrayArg,
-    llvm::Value *BasePointersArray,
-    llvm::Value *PointersArray,
-    llvm::Value *SizesArray,
-    llvm::Value *MapTypesArray,
-    unsigned NumElems) {
+/// \brief Emit the arguments to be passed to the runtime library based on the
+/// arrays of pointers, sizes and map types.
+static void emitOffloadingArraysArgument(
+    CodeGenFunction &CGF, llvm::Value *&BasePointersArrayArg,
+    llvm::Value *&PointersArrayArg, llvm::Value *&SizesArrayArg,
+    llvm::Value *&MapTypesArrayArg, llvm::Value *BasePointersArray,
+    llvm::Value *PointersArray, llvm::Value *SizesArray,
+    llvm::Value *MapTypesArray, unsigned NumElems) {
   auto &CGM = CGF.CGM;
   if (NumElems) {
     BasePointersArrayArg = CGF.Builder.CreateConstInBoundsGEP2_32(
@@ -4575,18 +4572,22 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
                         OffloadError);
 
   // Fill up the pointer arrays and transfer execution to the device.
-  auto &&ThenGen = [this, &BasePointers, &Pointers, &Sizes, &MapTypes, Device, OutlinedFnID,
-                    OffloadError, OffloadErrorQType](CodeGenFunction &CGF) {
+  auto &&ThenGen = [this, &BasePointers, &Pointers, &Sizes, &MapTypes, Device,
+                    OutlinedFnID, OffloadError,
+                    OffloadErrorQType](CodeGenFunction &CGF) {
 
     // Emit the offloading arrays.
     llvm::Value *BasePointersArray;
     llvm::Value *PointersArray;
     llvm::Value *SizesArray;
     llvm::Value *MapTypesArray;
-    emitOffloadingArrays(CGF, BasePointersArray, PointersArray, SizesArray, MapTypesArray,
-        BasePointers, Pointers, Sizes, MapTypes);
-    emitOffloadingArraysArgument(CGF, BasePointersArray, PointersArray, SizesArray, MapTypesArray,
-        BasePointersArray, PointersArray, SizesArray, MapTypesArray, BasePointers.size());
+    emitOffloadingArrays(CGF, BasePointersArray, PointersArray, SizesArray,
+                         MapTypesArray, BasePointers, Pointers, Sizes,
+                         MapTypes);
+    emitOffloadingArraysArgument(CGF, BasePointersArray, PointersArray,
+                                 SizesArray, MapTypesArray, BasePointersArray,
+                                 PointersArray, SizesArray, MapTypesArray,
+                                 BasePointers.size());
 
     // On top of the arrays that were filled up, the target offloading call
     // takes as arguments the device id as well as the host pointer. The host
@@ -4772,8 +4773,10 @@ llvm::Function *CGOpenMPRuntime::emitRegistrationFunction() {
 }
 
 void CGOpenMPRuntime::emitTargetDataCalls(CodeGenFunction &CGF,
-    const OMPExecutableDirective &D,
-    const Expr *IfCond, const Expr *Device, const RegionCodeGenTy &CodeGen){
+                                          const OMPExecutableDirective &D,
+                                          const Expr *IfCond,
+                                          const Expr *Device,
+                                          const RegionCodeGenTy &CodeGen) {
 
   if (!CGF.HaveInsertPoint())
     return;
@@ -4784,8 +4787,12 @@ void CGOpenMPRuntime::emitTargetDataCalls(CodeGenFunction &CGF,
   llvm::Value *MapTypesArray = nullptr;
   unsigned NumOfPtrs = 0;
 
-  // Generate the code for the opening of the data environment. Capture all the arguments of the runtime call by reference because they are used in the closing of the region.
-  auto &&BeginThenGen = [this, &D, &CGF, &BasePointersArray, &PointersArray, &SizesArray, &MapTypesArray, Device, &NumOfPtrs] (CodeGenFunction &CGF) {
+  // Generate the code for the opening of the data environment. Capture all the
+  // arguments of the runtime call by reference because they are used in the
+  // closing of the region.
+  auto &&BeginThenGen = [this, &D, &CGF, &BasePointersArray, &PointersArray,
+                         &SizesArray, &MapTypesArray, Device,
+                         &NumOfPtrs](CodeGenFunction &CGF) {
     // Fill up the arrays with all the mapped variables.
     OpenMPMapClauseHandler::MapValuesArrayTy BasePointers;
     OpenMPMapClauseHandler::MapValuesArrayTy Pointers;
@@ -4798,13 +4805,18 @@ void CGOpenMPRuntime::emitTargetDataCalls(CodeGenFunction &CGF,
     NumOfPtrs = BasePointers.size();
 
     // Fill up the arrays and create the arguments.
-    emitOffloadingArrays(CGF,BasePointersArray, PointersArray, SizesArray, MapTypesArray, BasePointers, Pointers, Sizes, MapTypes);
+    emitOffloadingArrays(CGF, BasePointersArray, PointersArray, SizesArray,
+                         MapTypesArray, BasePointers, Pointers, Sizes,
+                         MapTypes);
 
     llvm::Value *BasePointersArrayArg = nullptr;
     llvm::Value *PointersArrayArg = nullptr;
     llvm::Value *SizesArrayArg = nullptr;
     llvm::Value *MapTypesArrayArg = nullptr;
-    emitOffloadingArraysArgument(CGF,BasePointersArrayArg, PointersArrayArg, SizesArrayArg, MapTypesArrayArg, BasePointersArray, PointersArray, SizesArray, MapTypesArray, NumOfPtrs);
+    emitOffloadingArraysArgument(CGF, BasePointersArrayArg, PointersArrayArg,
+                                 SizesArrayArg, MapTypesArrayArg,
+                                 BasePointersArray, PointersArray, SizesArray,
+                                 MapTypesArray, NumOfPtrs);
 
     // Emit device ID if any.
     llvm::Value *DeviceID = nullptr;
@@ -4818,21 +4830,27 @@ void CGOpenMPRuntime::emitTargetDataCalls(CodeGenFunction &CGF,
     auto *PointerNum = CGF.Builder.getInt32(NumOfPtrs);
 
     llvm::Value *OffloadingArgs[] = {
-        DeviceID, PointerNum,   BasePointersArrayArg,
-        PointersArrayArg, SizesArrayArg,   MapTypesArrayArg};
+        DeviceID,         PointerNum,    BasePointersArrayArg,
+        PointersArrayArg, SizesArrayArg, MapTypesArrayArg};
     CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL__tgt_target_data_begin),
-                                      OffloadingArgs);
+                        OffloadingArgs);
   };
 
   // Generate code for the closing of the data region.
-  auto &&EndThenGen = [this, &CGF, &BasePointersArray, &PointersArray, &SizesArray, &MapTypesArray, Device, &NumOfPtrs] (CodeGenFunction &CGF) {
-    assert(BasePointersArray && PointersArray && SizesArray && MapTypesArray && NumOfPtrs && "Invalid data environment closing arguments.");
+  auto &&EndThenGen = [this, &CGF, &BasePointersArray, &PointersArray,
+                       &SizesArray, &MapTypesArray, Device,
+                       &NumOfPtrs](CodeGenFunction &CGF) {
+    assert(BasePointersArray && PointersArray && SizesArray && MapTypesArray &&
+           NumOfPtrs && "Invalid data environment closing arguments.");
 
     llvm::Value *BasePointersArrayArg = nullptr;
     llvm::Value *PointersArrayArg = nullptr;
     llvm::Value *SizesArrayArg = nullptr;
     llvm::Value *MapTypesArrayArg = nullptr;
-    emitOffloadingArraysArgument(CGF,BasePointersArrayArg, PointersArrayArg, SizesArrayArg, MapTypesArrayArg, BasePointersArray, PointersArray, SizesArray, MapTypesArray, NumOfPtrs);
+    emitOffloadingArraysArgument(CGF, BasePointersArrayArg, PointersArrayArg,
+                                 SizesArrayArg, MapTypesArrayArg,
+                                 BasePointersArray, PointersArray, SizesArray,
+                                 MapTypesArray, NumOfPtrs);
 
     // Emit device ID if any.
     llvm::Value *DeviceID = nullptr;
@@ -4846,13 +4864,14 @@ void CGOpenMPRuntime::emitTargetDataCalls(CodeGenFunction &CGF,
     auto *PointerNum = CGF.Builder.getInt32(NumOfPtrs);
 
     llvm::Value *OffloadingArgs[] = {
-        DeviceID, PointerNum,   BasePointersArrayArg,
-        PointersArrayArg, SizesArrayArg,   MapTypesArrayArg};
+        DeviceID,         PointerNum,    BasePointersArrayArg,
+        PointersArrayArg, SizesArrayArg, MapTypesArrayArg};
     CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL__tgt_target_data_end),
-                                      OffloadingArgs);
+                        OffloadingArgs);
   };
 
-  // In the event we get an if clause, we don't have to take any action on the else side.
+  // In the event we get an if clause, we don't have to take any action on the
+  // else side.
   auto &&ElseGen = [](CodeGenFunction &CGF) {};
 
   if (IfCond) {
