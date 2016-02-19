@@ -83,6 +83,7 @@ void SAclient(int arg) {
   SA<int,123> s;
   s.func(arg); // expected-note {{in instantiation of member function}}
   double marr[10][10][10];
+  double ***mptr;
   SB *p;
 
   SD u;
@@ -92,6 +93,18 @@ void SAclient(int arg) {
   #pragma omp target map(marr[:][0:2][0:2]) // expected-error {{expected variable name as a base of the array subscript}}
   {}
   #pragma omp target map(marr[2][3][0:2])
+  {}
+  #pragma omp target map(marr[:][:][:])
+  {}
+  #pragma omp target map(marr[:2][:][:])
+  {}
+  #pragma omp target map(marr[:2][:1][:]) // error
+  {}
+  #pragma omp target map(marr[:2][1:][:]) // error
+  {}
+  #pragma omp target map(marr[:2][:][:1]) // error
+  {}
+  #pragma omp target map(marr[:2][:][1:]) // error
   {}
   #pragma omp target map(r.ArrS[0].B)
   {}
