@@ -296,18 +296,19 @@ protected:
   llvm::Value *emitUpdateLocation(CodeGenFunction &CGF, SourceLocation Loc,
                                   unsigned Flags = 0);
 
-  /// \brief Returns specified OpenMP runtime function.
-  /// \param Function OpenMP runtime function.
-  /// \return Specified function.
-  llvm::Constant *createRuntimeFunction(OpenMPRTLFunction Function);
 
-private:
   /// \brief Returns pointer to ident_t type.
   llvm::Type *getIdentTyPointerTy();
 
   /// \brief Returns pointer to kmpc_micro type.
   llvm::Type *getKmpc_MicroPointerTy();
 
+  /// \brief Returns specified OpenMP runtime function.
+  /// \param Function OpenMP runtime function.
+  /// \return Specified function.
+  virtual llvm::Constant *createRuntimeFunction(unsigned Function);
+
+private:
   /// \brief Returns __kmpc_for_static_init_* runtime function for the specified
   /// size \a IVSize and sign \a IVSigned.
   llvm::Constant *createForStaticInitFunction(unsigned IVSize, bool IVSigned);
@@ -375,6 +376,12 @@ public:
   virtual ~CGOpenMPRuntime() {}
   virtual void release();
   virtual void clear();
+
+  /// \brief Emits captured variables for the outlined function for the
+  /// specified OpenMP parallel directive \a D.
+  virtual void
+  emitCapturedVars(CodeGenFunction &CGF, const OMPExecutableDirective &S,
+                   llvm::SmallVector<llvm::Value *, 16> &CapturedVars);
 
   /// \brief Emits outlined function for the specified OpenMP parallel directive
   /// \a D. This outlined function has type void(*)(kmp_int32 *ThreadID,

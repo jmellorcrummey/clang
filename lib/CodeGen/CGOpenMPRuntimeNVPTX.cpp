@@ -17,6 +17,98 @@
 using namespace clang;
 using namespace CodeGen;
 
+namespace {
+enum OpenMPRTLFunctionNVPTX {
+  // FIXME: We start from a high number, to make sure we do not conflict with
+  // the default enumerators. Find a better and non-intrusive way for doing
+  // this. Probably the best way is to copy everything as we need them.
+
+  // Call to void __kmpc_serialized_parallel(ident_t *loc, kmp_int32
+  // global_tid);
+  OMPRTL_NVPTX__kmpc_serialized_parallel = 0x10000,
+  // Call to void __kmpc_end_serialized_parallel(ident_t *loc, kmp_int32
+  // global_tid);
+  OMPRTL_NVPTX__kmpc_end_serialized_parallel,
+  /// \brief Call to void __kmpc_kernel_init(kmp_int32 omp_handle,
+  /// kmp_int32 thread_limit);
+  OMPRTL_NVPTX__kmpc_kernel_init,
+  /// \brief Call to void __kmpc_kernel_prepare_parallel(
+  /// kmp_int32 num_threads, kmp_int32 num_lanes);
+  OMPRTL_NVPTX__kmpc_kernel_prepare_parallel,
+  /// \brief Call to kmp_int32 __kmpc_kernel_parallel(kmp_int32 num_lanes);
+  OMPRTL_NVPTX__kmpc_kernel_parallel,
+  /// \brief Call to void __kmpc_kernel_end_parallel();
+  OMPRTL_NVPTX__kmpc_kernel_end_parallel,
+};
+} // anonymous namespace
+
+/// \brief Returns specified OpenMP runtime function for the current OpenMP implementation.
+/// \param Function OpenMP runtime function.
+/// \return Specified function.
+llvm::Constant *CGOpenMPRuntimeNVPTX::createRuntimeFunction(unsigned Function) {
+  llvm::Constant *RTLFn = nullptr;
+  switch (static_cast<OpenMPRTLFunctionNVPTX>(Function)) {
+  case OMPRTL_NVPTX__kmpc_serialized_parallel: {
+    // Build void __kmpc_serialized_parallel(ident_t *loc, kmp_int32
+    // global_tid);
+    llvm::Type *TypeParams[] = {getIdentTyPointerTy(), CGM.Int32Ty};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_serialized_parallel");
+    break;
+  }
+  case OMPRTL_NVPTX__kmpc_end_serialized_parallel: {
+    // Build void __kmpc_end_serialized_parallel(ident_t *loc, kmp_int32
+    // global_tid);
+    llvm::Type *TypeParams[] = {getIdentTyPointerTy(), CGM.Int32Ty};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_end_serialized_parallel");
+    break;
+  }
+  case OMPRTL_NVPTX__kmpc_kernel_init: {
+    // Build void __kmpc_kernel_init(kmp_int32 omp_handle,
+    // kmp_int32 thread_limit);
+    llvm::Type *TypeParams[] = {CGM.Int32Ty, CGM.Int32Ty};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_init");
+    break;
+  }
+  case OMPRTL_NVPTX__kmpc_kernel_prepare_parallel: {
+    /// Build void __kmpc_kernel_prepare_parallel(
+    /// kmp_int32 num_threads, kmp_int32 num_lanes);
+    llvm::Type *TypeParams[] = {CGM.Int32Ty, CGM.Int32Ty};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.Int32Ty, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_prepare_parallel");
+    break;
+  }
+  case OMPRTL_NVPTX__kmpc_kernel_parallel: {
+    /// Build void __kmpc_kernel_parallel(kmp_int32 num_lanes);
+    llvm::Type *TypeParams[] = {CGM.Int32Ty};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_parallel");
+    break;
+  }
+  case OMPRTL_NVPTX__kmpc_kernel_end_parallel: {
+    /// Build void __kmpc_kernel_end_parallel();
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, {}, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_end_parallel");
+    break;
+  }
+  }
+
+  // If we do not have a specialized version of this function, attempt to get
+  // a default one.
+  if (!RTLFn)
+    RTLFn = CGOpenMPRuntime::createRuntimeFunction(Function);
+
+  return RTLFn;
+}
+
 CGOpenMPRuntimeNVPTX::CGOpenMPRuntimeNVPTX(CodeGenModule &CGM)
     : CGOpenMPRuntime(CGM), ActiveWorkers(nullptr), WorkID(nullptr),
       WorkArgs(nullptr), MaxWorkArgs(0) {
@@ -183,7 +275,7 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
   // Signal start of parallel region.
   CGF.EmitBlock(ExecuteBB);
   llvm::Value *Args[] = {/*SimdNumLanes=*/Bld.getInt32(1)};
-  CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL__kmpc_kernel_parallel),
+  CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_parallel),
                       Args);
 
   // Process work items: outlined parallel functions.
@@ -226,7 +318,7 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
 
   // Signal end of parallel region.
   CGF.EmitBlock(TerminateBB);
-  CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL__kmpc_kernel_end_parallel),
+  CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_end_parallel),
                       ArrayRef<llvm::Value *>());
   CGF.EmitBranch(BarrierBB);
 
@@ -314,7 +406,7 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
   // First action in sequential region:
   // Initialize the state of the OpenMP runtime library on the GPU.
   llvm::Value *Args[] = {Bld.getInt32(/*OmpHandle=*/0), GetNVPTXThreadID(CGF)};
-  CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL__kmpc_kernel_init), Args);
+  CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_init), Args);
 }
 
 void CGOpenMPRuntimeNVPTX::emitEntryFooter(CodeGenFunction &CGF,
@@ -390,7 +482,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
     llvm::Value *Args[] = {GetNumWorkers(CGF),
                            /*SimdNumLanes=*/Bld.getInt32(1)};
     llvm::Value *ParallelThreads = CGF.EmitRuntimeCall(
-        createRuntimeFunction(OMPRTL__kmpc_kernel_prepare_parallel), Args);
+        createRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_prepare_parallel), Args);
 
     // Set number of workers to activate.
     Bld.CreateAlignedStore(ParallelThreads, ActiveWorkers,
@@ -430,7 +522,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
     // Build calls:
     // __kmpc_serialized_parallel(&Loc, GTid);
     llvm::Value *Args[] = {RTLoc, ThreadID};
-    CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL__kmpc_serialized_parallel),
+    CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL_NVPTX__kmpc_serialized_parallel),
                         Args);
 
     // OutlinedFn(&GTid, &zero, CapturedStruct);
@@ -448,7 +540,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
     // __kmpc_end_serialized_parallel(&Loc, GTid);
     llvm::Value *EndArgs[] = {emitUpdateLocation(CGF, Loc), ThreadID};
     CGF.EmitRuntimeCall(
-        createRuntimeFunction(OMPRTL__kmpc_end_serialized_parallel), EndArgs);
+        createRuntimeFunction(OMPRTL_NVPTX__kmpc_end_serialized_parallel), EndArgs);
   };
   if (IfCond) {
     emitOMPIfClause(CGF, IfCond, ThenGen, ElseGen);

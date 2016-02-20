@@ -93,7 +93,7 @@ enum IdentFieldIndex {
   /// and a pair of line numbers that delimit the construct.
   IdentField_PSource
 };
-namespace {
+
 /// \brief Schedule types for 'omp for' loops (these enumerators are taken from
 /// the enum sched_type in kmp.h).
 enum OpenMPSchedType {
@@ -310,6 +310,13 @@ static Address createIdentFieldGEP(CodeGenFunction &CGF, Address Addr,
                                    const llvm::Twine &Name = "") {
   auto Offset = getOffsetOfIdentField(Field);
   return CGF.Builder.CreateStructGEP(Addr, Field, Offset, Name);
+}
+
+void CGOpenMPRuntime::emitCapturedVars(
+    CodeGenFunction &CGF, const OMPExecutableDirective &S,
+    llvm::SmallVector<llvm::Value *, 16> &CapturedVars) {
+  auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
+  CGF.GenerateOpenMPCapturedVars(*CS, CapturedVars);
 }
 
 llvm::Value *CGOpenMPRuntime::emitParallelOutlinedFunction(
@@ -926,39 +933,6 @@ CGOpenMPRuntime::createRuntimeFunction(unsigned Function) {
     llvm::FunctionType *FnTy =
         llvm::FunctionType::get(CGM.Int32Ty, TypeParams, /*isVarArg*/ false);
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_unregister_lib");
-    break;
-  }
-  case OMPRTL__kmpc_kernel_init: {
-    // Build void __kmpc_kernel_init(kmp_int32 omp_handle,
-    // kmp_int32 thread_limit);
-    llvm::Type *TypeParams[] = {CGM.Int32Ty, CGM.Int32Ty};
-    llvm::FunctionType *FnTy =
-        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
-    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_init");
-    break;
-  }
-  case OMPRTL__kmpc_kernel_prepare_parallel: {
-    /// Build void __kmpc_kernel_prepare_parallel(
-    /// kmp_int32 num_threads, kmp_int32 num_lanes);
-    llvm::Type *TypeParams[] = {CGM.Int32Ty, CGM.Int32Ty};
-    llvm::FunctionType *FnTy =
-        llvm::FunctionType::get(CGM.Int32Ty, TypeParams, /*isVarArg*/ false);
-    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_prepare_parallel");
-    break;
-  }
-  case OMPRTL__kmpc_kernel_parallel: {
-    /// Build void __kmpc_kernel_parallel(kmp_int32 num_lanes);
-    llvm::Type *TypeParams[] = {CGM.Int32Ty};
-    llvm::FunctionType *FnTy =
-        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
-    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_parallel");
-    break;
-  }
-  case OMPRTL__kmpc_kernel_end_parallel: {
-    /// Build void __kmpc_kernel_end_parallel();
-    llvm::FunctionType *FnTy =
-        llvm::FunctionType::get(CGM.VoidTy, {}, /*isVarArg*/ false);
-    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_end_parallel");
     break;
   }
   }
