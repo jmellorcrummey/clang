@@ -439,7 +439,9 @@ static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
   // machines.
   lksf << "TARGET(binary)\n";
   for (unsigned i=0; i<Targets.size(); ++i)
-    lksf << "INPUT(" << Targets[i].second << ")\n";
+    lksf << "INPUT(\"" << Targets[i].second << "\")\n";
+    
+    //lksf << "INPUT(" << Targets[i].second << ")\n";
 
   lksf << "SECTIONS\n";
   lksf << "{\n";
