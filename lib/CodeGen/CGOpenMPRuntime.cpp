@@ -3972,6 +3972,44 @@ void CGOpenMPRuntime::emitTargetOutlinedFunction(
       DeviceID, FileID, ParentName, Line, OutlinedFn, OutlinedFnID);
 }
 
+/// \brief Obtain the base type of an array expression.
+static QualType GetArraySectionExprBaseType(const OMPArraySectionExpr *E) {
+  // Determine the dimension we care about. We need to skip all the nested array sections to determine that.
+  unsigned Dimension = 0;
+  const Expr *BaseE = E->getBase()->IgnoreParenImpCasts();;
+  while (auto *SE = dyn_cast<OMPArraySectionExpr>(BaseE)) {
+    BaseE = SE->getBase()->IgnoreParenImpCasts();
+    ++Dimension;
+  }
+
+  // Look through reference types in the base expression.
+  QualType BaseQTy = BaseE->getType().getCanonicalType();
+  if (BaseQTy->isReferenceType())
+    BaseQTy = BaseQTy->getPointeeType();
+
+  // Get the type for the dimension we care about. It has to be a pointer or array type.
+  for (; Dimension; --Dimension) {
+    if (auto *PTy = BaseQTy->getAs<PointerType>()) {
+      BaseQTy = PTy->getPointeeType().getCanonicalType();;
+      continue;
+    }
+    auto *ATy = cast<ArrayType>(BaseQTy.getTypePtr());
+    BaseQTy = ATy->getElementType().getCanonicalType();;
+  }
+  return BaseQTy;
+}
+
+/// \brief Obtain the element type of an array expression.
+static QualType GetArraySectionExprElementType(const OMPArraySectionExpr *E) {
+  auto Ty = GetArraySectionExprBaseType(E);
+  if (auto *PTy = Ty->getAs<PointerType>()) {
+    Ty = PTy->getPointeeType().getCanonicalType();;
+  } else {
+    auto *ATy = cast<ArrayType>(Ty.getTypePtr());
+    Ty = ATy->getElementType().getCanonicalType();;
+  }
+  return Ty;
+}
 namespace {
 // \brief Utility to extract information from the map clauses associated with a
 // given construct and provide a convenient interface to obtain the information
@@ -4096,15 +4134,11 @@ private:
     // do the calculation based on the length of the section instead of relying
     // on CGF.getTypeSize(E->getType()).
     if (const auto *OAE = dyn_cast<OMPArraySectionExpr>(E)) {
-      auto BaseTy =
-          OAE->getBase()->IgnoreParenImpCasts()->getType().getCanonicalType();
-      // Reference types are ignored for mapping purposes.
-      if (auto *RefTy = BaseTy->getAs<ReferenceType>())
-        BaseTy = RefTy->getPointeeType().getCanonicalType();
+      auto BaseTy = GetArraySectionExprBaseType(OAE);
 
       // If there is no length associated with the expression, that means we
       // are using the whole length of the base.
-      if (!OAE->getLength())
+      if (!OAE->getLength() && OAE->getColonLoc().isValid())
         return CGF.getTypeSize(BaseTy);
 
       llvm::Value *ElemSize;
@@ -4115,6 +4149,10 @@ private:
         assert(ATy && "Expecting array type if not a pointer type.");
         ElemSize = CGF.getTypeSize(ATy->getElementType().getCanonicalType());
       }
+
+      // If we don't have a length at this point, that is because we have an array section with a single element.
+      if (!OAE->getLength())
+        return ElemSize;
 
       auto *LengthVal = CGF.EmitScalarExpr(OAE->getLength());
       LengthVal =
@@ -4326,9 +4364,47 @@ private:
         auto Next = std::next(I);
 
         // We need to generate the addresses and sizes if this is the last
-        // component, or if the component is a pointer. In this case, the
-        // pointer becomes the base address for the following components.
-        if (Next == CE || I->first->getType()->isAnyPointerType()) {
+        // component, if the component is a pointer or if it is an array section whose length is not one. In this is a pointer, it becomes the base address for the following components.
+
+        // A final array section, is one whose length is not one.
+        auto IsFinalArraySection = [this] (const Expr *E) -> bool {
+          auto *OASE = dyn_cast<OMPArraySectionExpr>(E);
+
+          // If is not an array section and therefore not a unity-size one.
+          if (!OASE)
+            return false;
+
+          // An array section with no colon always refer to a single element.
+          if (OASE->getColonLoc().isInvalid())
+            return false;
+
+          auto *Length = OASE->getLength();
+
+          // If we don't have a length we have to check if the array has size 1
+          // for this dimension. Also, we should always expect a length if the base type is pointer.
+          if (!Length) {
+            auto BaseQTy = GetArraySectionExprBaseType(OASE);
+            if (auto *ATy = dyn_cast<ConstantArrayType>(BaseQTy.getTypePtr()))
+              return ATy->getSize().getSExtValue() != 1;
+            // If we don't have a constant dimension length, we have to consider
+            // the current section as having any size, so it is not necessarily
+            // unitary.
+            return true;
+          }
+
+          // Check if the length evaluates to 1.
+          llvm::APSInt ConstLength;
+          if (!Length->EvaluateAsInt(ConstLength, CGF.getContext()))
+            return true; // Can have more that size 1.
+
+          return ConstLength.getSExtValue() != 1;
+        }(I->first);
+
+        // Get information on whether the element is a pointer. Have to do a special treatment for array sections given that they are built-in types.
+        const auto *OASE = dyn_cast<OMPArraySectionExpr>(I->first);
+        bool IsPointer = (OASE && GetArraySectionExprElementType(OASE)->isAnyPointerType()) || I->first->getType()->isAnyPointerType();
+
+        if (Next == CE || IsPointer || IsFinalArraySection) {
 
           // If this is not the last component, we expect the pointer to be
           // associated with an array expression or member expression.
@@ -4351,6 +4427,10 @@ private:
           // the first one (there is a set of entries for each capture).
           Types.push_back(getMapTypeBits(InfoForExpr, !IsExpressionFirstInfo,
                                          !IsEntriesFirstInfo));
+
+          // If we have a final array section, we are done with this expression.
+          if (IsFinalArraySection)
+            break;
 
           // The pointer becomes the base for the next element.
           if (Next != CE)
