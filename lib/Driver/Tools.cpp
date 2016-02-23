@@ -233,7 +233,7 @@ static void AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
   // the last inputs - one for each offloading device - as they are going to be
   // embedded in the fat binary by a custom linker script.
   if (TC.getOffloadingKind() == ToolChain::OK_OpenMP_Host) {
-    Arg *Tgts = Args.getLastArg(options::OPT_omptargets_EQ);
+    Arg *Tgts = Args.getLastArg(options::OPT_fomptargets_EQ);
     assert(Tgts && Tgts->getNumValues() &&
            "OpenMP offloading has to have targets specified.");
     NumberOfInputs -= Tgts->getNumValues();
@@ -281,7 +281,7 @@ static void AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
 /// \brief Add OpenMP linker script arguments at the end of the argument list
 /// so that the fat binary is built by embedding each of the device images into
 /// the host. The device images are the last inputs, one for each device and
-/// come in the same order the triples are passed through the omptargets option.
+/// come in the same order the triples are passed through the fomptargets option.
 /// The linker script also defines a few symbols required by the code generation
 /// so that the images can be easily retrieved at runtime by the offloading
 /// library. This should be used in tool chains that support linker scripts.
@@ -298,7 +298,7 @@ static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
   // end of the input list. So we do a reverse scanning.
   SmallVector<std::pair<llvm::Triple, const char *>, 4> Targets;
 
-  Arg *Tgts = Args.getLastArg(options::OPT_omptargets_EQ);
+  Arg *Tgts = Args.getLastArg(options::OPT_fomptargets_EQ);
   assert(Tgts && Tgts->getNumValues() &&
          "OpenMP offloading has to have targets specified.");
 
@@ -2514,11 +2514,9 @@ static void addExceptionArgs(const ArgList &Args, types::ID InputType,
   }
 
   if (types::isCXX(InputType)) {
-    // Disable C++ EH by default on XCore, PS4, and MSVC.
-    // FIXME: Remove MSVC from this list once things work.
-    bool CXXExceptionsEnabled = Triple.getArch() != llvm::Triple::xcore &&
-                                !Triple.isPS4CPU() &&
-                                !Triple.isWindowsMSVCEnvironment();
+    // Disable C++ EH by default on XCore and PS4.
+    bool CXXExceptionsEnabled =
+        Triple.getArch() != llvm::Triple::xcore && !Triple.isPS4CPU();
     Arg *ExceptionArg = Args.getLastArg(
         options::OPT_fcxx_exceptions, options::OPT_fno_cxx_exceptions,
         options::OPT_fexceptions, options::OPT_fno_exceptions);
@@ -5021,7 +5019,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   // -fmodule-name specifies the module that is currently being built (or
   // used for header checking by -fmodule-maps).
-  Args.AddLastArg(CmdArgs, options::OPT_fmodule_name);
+  Args.AddLastArg(CmdArgs, options::OPT_fmodule_name_EQ);
 
   // -fmodule-map-file can be used to specify files containing module
   // definitions.
@@ -5716,24 +5714,24 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back(I->getFilename());
     }
 
-  // OpenMP offloading device jobs take the argument -omp-host-ir-file-path
+  // OpenMP offloading device jobs take the argument -fomp-host-ir-file-path
   // to specify the result of the compile phase on the host, so the meaningful
   // device declarations can be identified. Also, -fopenmp-is-device is passed
   // along to tell the frontend that it is generating code for a device, so that
   // only the relevant declarations are emitted.
   if (IsOpenMPDeviceCompileJob) {
     CmdArgs.push_back("-fopenmp-is-device");
-    CmdArgs.push_back("-omp-host-ir-file-path");
+    CmdArgs.push_back("-fomp-host-ir-file-path");
     CmdArgs.push_back(Args.MakeArgString(Inputs.back().getFilename()));
   }
 
   // For all the host OpenMP offloading compile jobs we need to pass the targets
-  // information using -omptargets= option.
+  // information using -fomptargets= option.
   if (isa<CompileJobAction>(JA) &&
       getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Host) {
-    SmallString<128> TargetInfo("-omptargets=");
+    SmallString<128> TargetInfo("-fomptargets=");
 
-    Arg *Tgts = Args.getLastArg(options::OPT_omptargets_EQ);
+    Arg *Tgts = Args.getLastArg(options::OPT_fomptargets_EQ);
     assert(Tgts && Tgts->getNumValues() &&
            "OpenMP offloading has to have targets specified.");
     for (unsigned i = 0; i < Tgts->getNumValues(); ++i) {
@@ -5918,10 +5916,9 @@ static bool maybeConsumeDash(const std::string &EH, size_t &I) {
 
 namespace {
 struct EHFlags {
-  EHFlags() : Synch(false), Asynch(false), NoExceptC(false) {}
-  bool Synch;
-  bool Asynch;
-  bool NoExceptC;
+  bool Synch = false;
+  bool Asynch = false;
+  bool NoUnwindC = false;
 };
 } // end anonymous namespace
 
@@ -5930,8 +5927,7 @@ struct EHFlags {
 /// - s: Cleanup after "synchronous" exceptions, aka C++ exceptions.
 /// - a: Cleanup after "asynchronous" exceptions, aka structured exceptions.
 ///      The 'a' modifier is unimplemented and fundamentally hard in LLVM IR.
-/// - c: Assume that extern "C" functions are implicitly noexcept.  This
-///      modifier is an optimization, so we ignore it for now.
+/// - c: Assume that extern "C" functions are implicitly nounwind.
 /// The default is /EHs-c-, meaning cleanups are disabled.
 static EHFlags parseClangCLEHFlags(const Driver &D, const ArgList &Args) {
   EHFlags EH;
@@ -5945,7 +5941,7 @@ static EHFlags parseClangCLEHFlags(const Driver &D, const ArgList &Args) {
         EH.Asynch = maybeConsumeDash(EHVal, I);
         continue;
       case 'c':
-        EH.NoExceptC = maybeConsumeDash(EHVal, I);
+        EH.NoUnwindC = maybeConsumeDash(EHVal, I);
         continue;
       case 's':
         EH.Synch = maybeConsumeDash(EHVal, I);
@@ -5956,6 +5952,14 @@ static EHFlags parseClangCLEHFlags(const Driver &D, const ArgList &Args) {
       D.Diag(clang::diag::err_drv_invalid_value) << "/EH" << EHVal;
       break;
     }
+  }
+  // The /GX, /GX- flags are only processed if there are not /EH flags.
+  // The default is that /GX is not specified.
+  if (EHArgs.empty() &&
+      Args.hasFlag(options::OPT__SLASH_GX, options::OPT__SLASH_GX_,
+                   /*default=*/false)) {
+    EH.Synch = true;
+    EH.NoUnwindC = true;
   }
 
   return EH;
@@ -6035,10 +6039,11 @@ void Clang::AddClangCLArgs(const ArgList &Args, ArgStringList &CmdArgs,
 
   const Driver &D = getToolChain().getDriver();
   EHFlags EH = parseClangCLEHFlags(D, Args);
-  // FIXME: Do something with NoExceptC.
   if (EH.Synch || EH.Asynch) {
     CmdArgs.push_back("-fcxx-exceptions");
     CmdArgs.push_back("-fexceptions");
+    if (EH.NoUnwindC)
+      CmdArgs.push_back("-fexternc-nounwind");
   }
 
   // /EP should expand to -E -P.
@@ -6297,7 +6302,7 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
 
   // The (un)bundling command looks like this:
   // clang-offload-bundler -type=bc
-  //   -omptargets=host-triple,device-triple1,device-triple2
+  //   -fomptargets=host-triple,device-triple1,device-triple2
   //   -inputs=input_file
   //   -outputs=unbundle_file_host,unbundle_file_tgt1,unbundle_file_tgt2"
   //   (-unbundle)
@@ -6313,13 +6318,13 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
   CmdArgs.push_back(TCArgs.MakeArgString(
       Twine("-type=") + types::getTypeTempSuffix(BundledFile.getType())));
 
-  // Get the triples. The order is the same that comes in omptargets option.
+  // Get the triples. The order is the same that comes in fomptargets option.
   {
     SmallString<128> Triples;
     Triples += "-targets=offload-host-";
     Triples += getToolChain().getTripleString();
 
-    Arg *TargetsArg = TCArgs.getLastArg(options::OPT_omptargets_EQ);
+    Arg *TargetsArg = TCArgs.getLastArg(options::OPT_fomptargets_EQ);
     for (auto *A : TargetsArg->getValues()) {
       // We have to use the string that exactly matches the triple here.
       llvm::Triple T(A);
@@ -6815,7 +6820,10 @@ void wasm::Linker::ConstructJob(Compilation &C, const JobAction &JA,
                                 const InputInfoList &Inputs,
                                 const ArgList &Args,
                                 const char *LinkingOutput) const {
-  const char *Linker = Args.MakeArgString(getToolChain().GetLinkerPath());
+
+  const ToolChain &ToolChain = getToolChain();
+  const Driver &D = ToolChain.getDriver();
+  const char *Linker = Args.MakeArgString(ToolChain.GetLinkerPath());
   ArgStringList CmdArgs;
   CmdArgs.push_back("-flavor");
   CmdArgs.push_back("ld");
@@ -6827,9 +6835,48 @@ void wasm::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   if (areOptimizationsEnabled(Args))
     CmdArgs.push_back("--gc-sections");
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  if (Args.hasArg(options::OPT_rdynamic))
+    CmdArgs.push_back("-export-dynamic");
+  if (Args.hasArg(options::OPT_s))
+    CmdArgs.push_back("--strip-all");
+  if (Args.hasArg(options::OPT_shared))
+    CmdArgs.push_back("-shared");
+  if (Args.hasArg(options::OPT_static))
+    CmdArgs.push_back("-Bstatic");
+
+  Args.AddAllArgs(CmdArgs, options::OPT_L);
+  ToolChain.AddFilePathLibArgs(Args, CmdArgs);
+
+  if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nostartfiles)) {
+    if (Args.hasArg(options::OPT_shared))
+      CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("rcrt1.o")));
+    else if (Args.hasArg(options::OPT_pie))
+      CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("Scrt1.o")));
+    else
+      CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("crt1.o")));
+
+    CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("crti.o")));
+  }
+
+  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
+
+  if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
+    if (D.CCCIsCXX())
+      ToolChain.AddCXXStdlibLibArgs(Args, CmdArgs);
+
+    if (Args.hasArg(options::OPT_pthread))
+      CmdArgs.push_back("-lpthread");
+
+    CmdArgs.push_back("-lc");
+    CmdArgs.push_back("-lcompiler_rt");
+  }
+
+  if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nostartfiles))
+    CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("crtn.o")));
+
   CmdArgs.push_back("-o");
   CmdArgs.push_back(Output.getFilename());
+
   C.addCommand(llvm::make_unique<Command>(JA, *this, Linker, CmdArgs, Inputs));
 }
 
@@ -9918,6 +9965,8 @@ std::unique_ptr<Command> visualstudio::Compiler::GetCommand(
   // Flags that can simply be passed through.
   Args.AddAllArgs(CmdArgs, options::OPT__SLASH_LD);
   Args.AddAllArgs(CmdArgs, options::OPT__SLASH_LDd);
+  Args.AddAllArgs(CmdArgs, options::OPT__SLASH_GX);
+  Args.AddAllArgs(CmdArgs, options::OPT__SLASH_GX_);
   Args.AddAllArgs(CmdArgs, options::OPT__SLASH_EH);
   Args.AddAllArgs(CmdArgs, options::OPT__SLASH_Zl);
 
@@ -10903,15 +10952,20 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
   assert(gpu_archs.size() == 1 && "Exactly one GPU Arch required for ptxas.");
   const std::string& gpu_arch = gpu_archs[0];
 
-
   ArgStringList CmdArgs;
   CmdArgs.push_back(TC.getTriple().isArch64Bit() ? "-m64" : "-m32");
+  if (Args.getLastArg(options::OPT_cuda_noopt_device_debug)) {
+    // ptxas does not accept -g option if optimization is enabled, so
+    // we ignore the compiler's -O* options if we want debug info.
+    CmdArgs.push_back("-g");
+    CmdArgs.push_back("--dont-merge-basicblocks");
+    CmdArgs.push_back("--return-at-end");
+  } else if (Arg *A = Args.getLastArg(options::OPT_O_Group)) {
+    // Map the -O we received to -O{0,1,2,3}.
+    //
+    // TODO: Perhaps we should map host -O2 to ptxas -O3. -O3 is ptxas's
+    // default, so it may correspond more closely to the spirit of clang -O2.
 
-  // Map the -O we received to -O{0,1,2,3}.
-  //
-  // TODO: Perhaps we should map host -O2 to ptxas -O3. -O3 is ptxas's default,
-  // so it may correspond more closely to the spirit of clang -O2.
-  if (Arg *A = Args.getLastArg(options::OPT_O_Group)) {
     // -O3 seems like the least-bad option when -Osomething is specified to
     // clang but it isn't handled below.
     StringRef OOpt = "3";
@@ -10940,9 +10994,6 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
   // Pass -v to ptxas if it was passed to the driver.
   if (Args.hasArg(options::OPT_v))
     CmdArgs.push_back("-v");
-
-  // Don't bother passing -g to ptxas: It's enabled by default at -O0, and
-  // not supported at other optimization levels.
 
   CmdArgs.push_back("--gpu-name");
   CmdArgs.push_back(Args.MakeArgString(gpu_arch));

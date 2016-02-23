@@ -229,6 +229,11 @@ private:
     }
   };
 
+  /// \brief Returns specified OpenMP runtime function for the current OpenMP implementation.
+  /// \param Function OpenMP runtime function.
+  /// \return Specified function.
+  llvm::Constant *createRuntimeFunction(unsigned Function) override;
+
   /// \brief Start a new target region.
   void enterTarget();
 
