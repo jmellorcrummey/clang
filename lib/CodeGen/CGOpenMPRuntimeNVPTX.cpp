@@ -457,3 +457,16 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
     ThenGen(CGF);
   }
 }
+
+//
+// Generate optimized code resembling static schedule with chunk size of 1
+// whenever the standard gives us freedom.  This allows maximum coalescing on
+// the NVPTX target.
+//
+bool CGOpenMPRuntimeNVPTX::optimizeStaticChunkOne(
+    OpenMPScheduleClauseKind ScheduleKind, bool ChunkSizeOne,
+    bool ordered) const {
+  return !ordered && (ScheduleKind == OMPC_SCHEDULE_unknown ||
+                      ScheduleKind == OMPC_SCHEDULE_auto ||
+                      (ScheduleKind == OMPC_SCHEDULE_static && ChunkSizeOne));
+}

@@ -291,6 +291,14 @@ private:
                                const VarDecl *ThreadIDVar,
                                OpenMPDirectiveKind InnermostKind,
                                const RegionCodeGenTy &CodeGen) override;
+
+  /// \brief Check if we should generate code as if \a ScheduleKind is static
+  /// with a chunk size of 1.
+  /// \param ScheduleKind Schedule Kind specified in the 'schedule' clause.
+  /// \param Chunk size.
+  ///
+  bool optimizeStaticChunkOne(OpenMPScheduleClauseKind ScheduleKind,
+                              bool ChunkSizeOne, bool ordered) const override;
 };
 
 } // CodeGen namespace.

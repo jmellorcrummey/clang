@@ -1638,6 +1638,7 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
 
       // Detect the loop schedule kind and chunk.
       llvm::Value *Chunk = nullptr;
+      bool ChunkSizeOne = false;
       OpenMPScheduleClauseKind ScheduleKind = OMPC_SCHEDULE_unknown;
       OpenMPScheduleClauseModifier M1 = OMPC_SCHEDULE_MODIFIER_unknown;
       OpenMPScheduleClauseModifier M2 = OMPC_SCHEDULE_MODIFIER_unknown;
@@ -1646,6 +1647,10 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
         M1 = C->getFirstScheduleModifier();
         M2 = C->getSecondScheduleModifier();
         if (const auto *Ch = C->getChunkSize()) {
+          llvm::APSInt Result;
+          if (ConstantFoldsToSimpleInteger(Ch, Result)) {
+            ChunkSizeOne = Result == 1;
+          }
           Chunk = EmitScalarExpr(Ch);
           Chunk = EmitScalarConversion(Chunk, Ch->getType(),
                                        S.getIterationVariable()->getType(),
@@ -1655,13 +1660,69 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
       const unsigned IVSize = getContext().getTypeSize(IVExpr->getType());
       const bool IVSigned = IVExpr->getType()->hasSignedIntegerRepresentation();
       const bool Ordered = S.getSingleClause<OMPOrderedClause>() != nullptr;
-      // OpenMP 4.5, 2.7.1 Loop Construct, Description.
-      // If the static schedule kind is specified or if the ordered clause is
-      // specified, and if no monotonic modifier is specified, the effect will
-      // be as if the monotonic modifier was specified.
-      if (RT.isStaticNonchunked(ScheduleKind,
-                                /* Chunked */ Chunk != nullptr) &&
-          !Ordered) {
+      if (RT.optimizeStaticChunkOne(ScheduleKind, ChunkSizeOne, Ordered)) {
+        // For NVPTX and other GPU targets high performance is often achieved
+        // if adjacent threads access memory in a coalesced manner.  This is
+        // true for loops that access memory with stride one if a static
+        // schedule with chunk size of 1 is used.  We generate such code
+        // whenever the OpenMP standard gives us freedom to do so.
+        //
+        // This case is called if there is no schedule clause, with a
+        // schedule(auto), or with a schedule(static,1).
+        //
+        // Codegen is optimized for this case.  Since chunk size is 1 we do not
+        // need to generate the inner loop, i.e., the chunk iterator can be
+        // removed.
+        // while(UB = min(UB, GlobalUB), idx = LB, idx < UB) {
+        //   BODY;
+        //   LB = LB + ST;
+        //   UB = UB + ST;
+        // }
+        if (!Chunk)
+          Chunk = Builder.getIntN(IVSize, 1);
+        if (isOpenMPSimdDirective(S.getDirectiveKind()))
+          EmitOMPSimdInit(S, /*IsMonotonic=*/true);
+        RT.emitForStaticInit(*this, S.getLocStart(), OMPC_SCHEDULE_static,
+                             IVSize, IVSigned, Ordered, IL.getAddress(),
+                             LB.getAddress(), UB.getAddress(), ST.getAddress(),
+                             Chunk);
+        auto LoopExit =
+            getJumpDestInCurrentScope(createBasicBlock("omp.loop.exit"));
+
+        // Start the loop with a block that tests the condition.
+        auto CondBlock = createBasicBlock("omp.dispatch.cond");
+        EmitBlock(CondBlock);
+        // UB = min(UB, GlobalUB);
+        EmitIgnoredExpr(S.getEnsureUpperBound());
+        // IV = LB;
+        EmitIgnoredExpr(S.getInit());
+        // IV < UB;
+        llvm::Value *BoolCondVal = EvaluateExprAsBool(S.getCond());
+
+        auto LoopBody = createBasicBlock("omp.dispatch.body");
+        Builder.CreateCondBr(BoolCondVal, LoopBody, LoopExit.getBlock());
+        EmitBlock(LoopBody);
+
+        EmitOMPLoopBody(S, LoopExit);
+        EmitStopPoint(&S);
+
+        auto ContinueBlock = createBasicBlock("omp.dispatch.inc");
+        EmitBlock(ContinueBlock);
+        // Emit "LB = LB + Stride", "UB = UB + Stride".
+        EmitIgnoredExpr(S.getNextLowerBound());
+        EmitIgnoredExpr(S.getNextUpperBound());
+        EmitBranch(CondBlock);
+
+        EmitBlock(LoopExit.getBlock());
+        // Tell the runtime we are done.
+        RT.emitForStaticFinish(*this, S.getLocStart());
+      } else if (RT.isStaticNonchunked(ScheduleKind,
+                                       /* Chunked */ Chunk != nullptr) &&
+                 !Ordered) {
+        // OpenMP 4.5, 2.7.1 Loop Construct, Description.
+        // If the static schedule kind is specified or if the ordered clause is
+        // specified, and if no monotonic modifier is specified, the effect will
+        // be as if the monotonic modifier was specified.
         if (isOpenMPSimdDirective(S.getDirectiveKind()))
           EmitOMPSimdInit(S, /*IsMonotonic=*/true);
         // OpenMP [2.7.1, Loop Construct, Description, table 2-1]
