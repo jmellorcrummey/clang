@@ -2410,11 +2410,9 @@ static void addExceptionArgs(const ArgList &Args, types::ID InputType,
   }
 
   if (types::isCXX(InputType)) {
-    // Disable C++ EH by default on XCore, PS4, and MSVC.
-    // FIXME: Remove MSVC from this list once things work.
-    bool CXXExceptionsEnabled = Triple.getArch() != llvm::Triple::xcore &&
-                                !Triple.isPS4CPU() &&
-                                !Triple.isWindowsMSVCEnvironment();
+    // Disable C++ EH by default on XCore and PS4.
+    bool CXXExceptionsEnabled =
+        Triple.getArch() != llvm::Triple::xcore && !Triple.isPS4CPU();
     Arg *ExceptionArg = Args.getLastArg(
         options::OPT_fcxx_exceptions, options::OPT_fno_cxx_exceptions,
         options::OPT_fexceptions, options::OPT_fno_exceptions);
@@ -4911,7 +4909,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   // -fmodule-name specifies the module that is currently being built (or
   // used for header checking by -fmodule-maps).
-  Args.AddLastArg(CmdArgs, options::OPT_fmodule_name);
+  Args.AddLastArg(CmdArgs, options::OPT_fmodule_name_EQ);
 
   // -fmodule-map-file can be used to specify files containing module
   // definitions.
@@ -5777,10 +5775,9 @@ static bool maybeConsumeDash(const std::string &EH, size_t &I) {
 
 namespace {
 struct EHFlags {
-  EHFlags() : Synch(false), Asynch(false), NoExceptC(false) {}
-  bool Synch;
-  bool Asynch;
-  bool NoExceptC;
+  bool Synch = false;
+  bool Asynch = false;
+  bool NoUnwindC = false;
 };
 } // end anonymous namespace
 
@@ -5789,8 +5786,7 @@ struct EHFlags {
 /// - s: Cleanup after "synchronous" exceptions, aka C++ exceptions.
 /// - a: Cleanup after "asynchronous" exceptions, aka structured exceptions.
 ///      The 'a' modifier is unimplemented and fundamentally hard in LLVM IR.
-/// - c: Assume that extern "C" functions are implicitly noexcept.  This
-///      modifier is an optimization, so we ignore it for now.
+/// - c: Assume that extern "C" functions are implicitly nounwind.
 /// The default is /EHs-c-, meaning cleanups are disabled.
 static EHFlags parseClangCLEHFlags(const Driver &D, const ArgList &Args) {
   EHFlags EH;
@@ -5804,7 +5800,7 @@ static EHFlags parseClangCLEHFlags(const Driver &D, const ArgList &Args) {
         EH.Asynch = maybeConsumeDash(EHVal, I);
         continue;
       case 'c':
-        EH.NoExceptC = maybeConsumeDash(EHVal, I);
+        EH.NoUnwindC = maybeConsumeDash(EHVal, I);
         continue;
       case 's':
         EH.Synch = maybeConsumeDash(EHVal, I);
@@ -5815,6 +5811,14 @@ static EHFlags parseClangCLEHFlags(const Driver &D, const ArgList &Args) {
       D.Diag(clang::diag::err_drv_invalid_value) << "/EH" << EHVal;
       break;
     }
+  }
+  // The /GX, /GX- flags are only processed if there are not /EH flags.
+  // The default is that /GX is not specified.
+  if (EHArgs.empty() &&
+      Args.hasFlag(options::OPT__SLASH_GX, options::OPT__SLASH_GX_,
+                   /*default=*/false)) {
+    EH.Synch = true;
+    EH.NoUnwindC = true;
   }
 
   return EH;
@@ -5894,10 +5898,11 @@ void Clang::AddClangCLArgs(const ArgList &Args, ArgStringList &CmdArgs,
 
   const Driver &D = getToolChain().getDriver();
   EHFlags EH = parseClangCLEHFlags(D, Args);
-  // FIXME: Do something with NoExceptC.
   if (EH.Synch || EH.Asynch) {
     CmdArgs.push_back("-fcxx-exceptions");
     CmdArgs.push_back("-fexceptions");
+    if (EH.NoUnwindC)
+      CmdArgs.push_back("-fexternc-nounwind");
   }
 
   // /EP should expand to -E -P.
@@ -6608,7 +6613,10 @@ void wasm::Linker::ConstructJob(Compilation &C, const JobAction &JA,
                                 const InputInfoList &Inputs,
                                 const ArgList &Args,
                                 const char *LinkingOutput) const {
-  const char *Linker = Args.MakeArgString(getToolChain().GetLinkerPath());
+
+  const ToolChain &ToolChain = getToolChain();
+  const Driver &D = ToolChain.getDriver();
+  const char *Linker = Args.MakeArgString(ToolChain.GetLinkerPath());
   ArgStringList CmdArgs;
   CmdArgs.push_back("-flavor");
   CmdArgs.push_back("ld");
@@ -6620,9 +6628,48 @@ void wasm::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   if (areOptimizationsEnabled(Args))
     CmdArgs.push_back("--gc-sections");
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  if (Args.hasArg(options::OPT_rdynamic))
+    CmdArgs.push_back("-export-dynamic");
+  if (Args.hasArg(options::OPT_s))
+    CmdArgs.push_back("--strip-all");
+  if (Args.hasArg(options::OPT_shared))
+    CmdArgs.push_back("-shared");
+  if (Args.hasArg(options::OPT_static))
+    CmdArgs.push_back("-Bstatic");
+
+  Args.AddAllArgs(CmdArgs, options::OPT_L);
+  ToolChain.AddFilePathLibArgs(Args, CmdArgs);
+
+  if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nostartfiles)) {
+    if (Args.hasArg(options::OPT_shared))
+      CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("rcrt1.o")));
+    else if (Args.hasArg(options::OPT_pie))
+      CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("Scrt1.o")));
+    else
+      CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("crt1.o")));
+
+    CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("crti.o")));
+  }
+
+  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
+
+  if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
+    if (D.CCCIsCXX())
+      ToolChain.AddCXXStdlibLibArgs(Args, CmdArgs);
+
+    if (Args.hasArg(options::OPT_pthread))
+      CmdArgs.push_back("-lpthread");
+
+    CmdArgs.push_back("-lc");
+    CmdArgs.push_back("-lcompiler_rt");
+  }
+
+  if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nostartfiles))
+    CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("crtn.o")));
+
   CmdArgs.push_back("-o");
   CmdArgs.push_back(Output.getFilename());
+
   C.addCommand(llvm::make_unique<Command>(JA, *this, Linker, CmdArgs, Inputs));
 }
 
@@ -9706,6 +9753,8 @@ std::unique_ptr<Command> visualstudio::Compiler::GetCommand(
   // Flags that can simply be passed through.
   Args.AddAllArgs(CmdArgs, options::OPT__SLASH_LD);
   Args.AddAllArgs(CmdArgs, options::OPT__SLASH_LDd);
+  Args.AddAllArgs(CmdArgs, options::OPT__SLASH_GX);
+  Args.AddAllArgs(CmdArgs, options::OPT__SLASH_GX_);
   Args.AddAllArgs(CmdArgs, options::OPT__SLASH_EH);
   Args.AddAllArgs(CmdArgs, options::OPT__SLASH_Zl);
 
