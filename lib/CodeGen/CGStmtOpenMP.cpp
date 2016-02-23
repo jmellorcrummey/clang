@@ -1660,7 +1660,7 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
       const unsigned IVSize = getContext().getTypeSize(IVExpr->getType());
       const bool IVSigned = IVExpr->getType()->hasSignedIntegerRepresentation();
       const bool Ordered = S.getSingleClause<OMPOrderedClause>() != nullptr;
-      if (RT.optimizeStaticChunkOne(ScheduleKind, ChunkSizeOne, Ordered)) {
+      if (RT.generateCoalescedSchedule(ScheduleKind, ChunkSizeOne, Ordered)) {
         // For NVPTX and other GPU targets high performance is often achieved
         // if adjacent threads access memory in a coalesced manner.  This is
         // true for loops that access memory with stride one if a static

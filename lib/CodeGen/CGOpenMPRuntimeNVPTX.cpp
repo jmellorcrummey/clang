@@ -463,7 +463,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
 // whenever the standard gives us freedom.  This allows maximum coalescing on
 // the NVPTX target.
 //
-bool CGOpenMPRuntimeNVPTX::optimizeStaticChunkOne(
+bool CGOpenMPRuntimeNVPTX::generateCoalescedSchedule(
     OpenMPScheduleClauseKind ScheduleKind, bool ChunkSizeOne,
     bool ordered) const {
   return !ordered && (ScheduleKind == OMPC_SCHEDULE_unknown ||

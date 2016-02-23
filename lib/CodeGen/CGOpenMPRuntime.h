@@ -712,8 +712,8 @@ public:
   /// \param ScheduleKind Schedule Kind specified in the 'schedule' clause.
   /// \param Chunk size.
   ///
-  virtual bool optimizeStaticChunkOne(OpenMPScheduleClauseKind ScheduleKind,
-                                      bool ChunkSizeOne, bool ordered) const;
+  virtual bool generateCoalescedSchedule(OpenMPScheduleClauseKind ScheduleKind,
+                                         bool ChunkSizeOne, bool ordered) const;
 
   /// \brief Check if the specified \a ScheduleKind is dynamic.
   /// This kind of worksharing directive is emitted without outer loop.

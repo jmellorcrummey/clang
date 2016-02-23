@@ -297,8 +297,9 @@ private:
   /// \param ScheduleKind Schedule Kind specified in the 'schedule' clause.
   /// \param Chunk size.
   ///
-  bool optimizeStaticChunkOne(OpenMPScheduleClauseKind ScheduleKind,
-                              bool ChunkSizeOne, bool ordered) const override;
+  bool generateCoalescedSchedule(OpenMPScheduleClauseKind ScheduleKind,
+                                 bool ChunkSizeOne,
+                                 bool ordered) const override;
 };
 
 } // CodeGen namespace.

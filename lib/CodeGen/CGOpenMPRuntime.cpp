@@ -1568,7 +1568,7 @@ bool CGOpenMPRuntime::isStaticNonchunked(OpenMPScheduleClauseKind ScheduleKind,
   return Schedule == OMP_sch_static;
 }
 
-bool CGOpenMPRuntime::optimizeStaticChunkOne(
+bool CGOpenMPRuntime::generateCoalescedSchedule(
     OpenMPScheduleClauseKind ScheduleKind, bool ChunkSizeOne,
     bool ordered) const {
   return false;
