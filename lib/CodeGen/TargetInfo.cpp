@@ -117,6 +117,8 @@ const TargetInfo &ABIInfo::getTarget() const {
   return CGT.getTarget();
 }
 
+bool ABIInfo:: isAndroid() const { return getTarget().getTriple().isAndroid(); }
+
 bool ABIInfo::isHomogeneousAggregateBaseType(QualType Ty) const {
   return false;
 }
@@ -614,6 +616,9 @@ private:
     for (auto &Arg : FI.arguments())
       Arg.info = classifyArgumentType(Arg.type);
   }
+
+  Address EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
+                    QualType Ty) const override;
 };
 
 class WebAssemblyTargetCodeGenInfo final : public TargetCodeGenInfo {
@@ -663,6 +668,14 @@ ABIArgInfo WebAssemblyABIInfo::classifyReturnType(QualType RetTy) const {
 
   // Otherwise just do the default thing.
   return DefaultABIInfo::classifyReturnType(RetTy);
+}
+
+Address WebAssemblyABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
+                                      QualType Ty) const {
+  return emitVoidPtrVAArg(CGF, VAListAddr, Ty, /*Indirect=*/ false,
+                          getContext().getTypeInfoInChars(Ty),
+                          CharUnits::fromQuantity(4),
+                          /*AllowHigherAlign=*/ true);
 }
 
 //===----------------------------------------------------------------------===//
@@ -3505,6 +3518,7 @@ public:
 
 Address PPC32_SVR4_ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAList,
                                       QualType Ty) const {
+  const unsigned OverflowLimit = 8;
   if (const ComplexType *CTy = Ty->getAs<ComplexType>()) {
     // TODO: Implement this. For now ignore.
     (void)CTy;
@@ -3547,7 +3561,7 @@ Address PPC32_SVR4_ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAList,
   }
 
   llvm::Value *CC =
-      Builder.CreateICmpULT(NumRegs, Builder.getInt8(8), "cond");
+      Builder.CreateICmpULT(NumRegs, Builder.getInt8(OverflowLimit), "cond");
 
   llvm::BasicBlock *UsingRegs = CGF.createBasicBlock("using_regs");
   llvm::BasicBlock *UsingOverflow = CGF.createBasicBlock("using_overflow");
@@ -3598,6 +3612,8 @@ Address PPC32_SVR4_ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAList,
   Address MemAddr = Address::invalid();
   {
     CGF.EmitBlock(UsingOverflow);
+
+    Builder.CreateStore(Builder.getInt8(OverflowLimit), NumRegsAddr);
 
     // Everything in the overflow area is rounded up to a size of at least 4.
     CharUnits OverflowAreaAlign = CharUnits::fromQuantity(4);
@@ -4316,6 +4332,11 @@ ABIArgInfo AArch64ABIInfo::classifyArgumentType(QualType Ty) const {
   // Handle illegal vector types here.
   if (isIllegalVectorType(Ty)) {
     uint64_t Size = getContext().getTypeSize(Ty);
+    // Android promotes <2 x i8> to i16, not i32
+    if(isAndroid() && (Size <= 16)) {
+      llvm::Type *ResType = llvm::Type::getInt16Ty(getVMContext());
+      return ABIArgInfo::getDirect(ResType);
+    }
     if (Size <= 32) {
       llvm::Type *ResType = llvm::Type::getInt32Ty(getVMContext());
       return ABIArgInfo::getDirect(ResType);
@@ -4798,11 +4819,6 @@ public:
     default:
       return false;
     }
-  }
-
-  bool isAndroid() const {
-    return (getTarget().getTriple().getEnvironment() ==
-            llvm::Triple::Android);
   }
 
   ABIKind getABIKind() const { return Kind; }

@@ -2108,7 +2108,7 @@ public:
                                           VersionTuple Obsoleted,
                                           bool IsUnavailable,
                                           StringRef Message,
-                                          bool IsNopartial,
+                                          bool IsStrict,
                                           AvailabilityMergeKind AMK,
                                           unsigned AttrSpellingListIndex);
   TypeVisibilityAttr *mergeTypeVisibilityAttr(Decl *D, SourceRange Range,
@@ -3536,8 +3536,7 @@ public:
 
   void redelayDiagnostics(sema::DelayedDiagnosticPool &pool);
 
-  enum AvailabilityDiagnostic { AD_Deprecation, AD_Unavailable, AD_Partial,
-                                AD_NotYetIntroduced };
+  enum AvailabilityDiagnostic { AD_Deprecation, AD_Unavailable, AD_Partial };
 
   void EmitAvailabilityWarning(AvailabilityDiagnostic AD,
                                NamedDecl *D, StringRef Message,
@@ -3970,6 +3969,8 @@ public:
                         BinaryOperatorKind Opc, Expr *LHSExpr, Expr *RHSExpr);
   ExprResult CreateBuiltinBinOp(SourceLocation OpLoc, BinaryOperatorKind Opc,
                                 Expr *LHSExpr, Expr *RHSExpr);
+
+  void DiagnoseCommaOperator(const Expr *LHS, SourceLocation Loc);
 
   /// ActOnConditionalOp - Parse a ?: operation.  Note that 'LHS' may be null
   /// in the case of a the GNU conditional expr extension.
@@ -8922,6 +8923,7 @@ public:
   void CodeCompletePostfixExpression(Scope *S, ExprResult LHS);
   void CodeCompleteTag(Scope *S, unsigned TagSpec);
   void CodeCompleteTypeQualifiers(DeclSpec &DS);
+  void CodeCompleteBracketDeclarator(Scope *S);
   void CodeCompleteCase(Scope *S);
   void CodeCompleteCall(Scope *S, Expr *Fn, ArrayRef<Expr *> Args);
   void CodeCompleteConstructor(Scope *S, QualType Type, SourceLocation Loc,
@@ -9109,13 +9111,6 @@ public:
   };
   static FormatStringType GetFormatStringType(const FormatAttr *Format);
 
-  void CheckFormatString(const StringLiteral *FExpr, const Expr *OrigFormatExpr,
-                         ArrayRef<const Expr *> Args, bool HasVAListArg,
-                         unsigned format_idx, unsigned firstDataArg,
-                         FormatStringType Type, bool inFunctionCall,
-                         VariadicCallType CallType,
-                         llvm::SmallBitVector &CheckedVarArgs);
-  
   bool FormatStringHasSArg(const StringLiteral *FExpr);
   
   static bool GetFormatNSStringIdx(const FormatAttr *Format, unsigned &Idx);

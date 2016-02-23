@@ -1083,17 +1083,18 @@ void Sema::EndOpenMPDSABlock(Stmt *CurDirective) {
             PrivateCopies.push_back(nullptr);
             continue;
           }
-          DE = DE->IgnoreParens();
           VarDecl *VD = nullptr;
           FieldDecl *FD = nullptr;
           ValueDecl *D;
-          if (auto *DRE = dyn_cast<DeclRefExpr>(DE)) {
+          auto *DRE = cast<DeclRefExpr>(DE->IgnoreParens());
+          if (auto *OCE = dyn_cast<OMPCapturedExprDecl>(DRE->getDecl())) {
+            FD = cast<FieldDecl>(
+                cast<MemberExpr>(OCE->getInit()->IgnoreImpCasts())
+                    ->getMemberDecl());
+            D = FD;
+          } else {
             VD = cast<VarDecl>(DRE->getDecl());
             D = VD;
-          } else {
-            assert(isa<MemberExpr>(DE));
-            FD = cast<FieldDecl>(cast<MemberExpr>(DE)->getMemberDecl());
-            D = FD;
           }
           QualType Type = D->getType().getNonReferenceType();
           auto DVar = DSAStack->getTopDSA(D, false);
@@ -7607,47 +7608,28 @@ OMPClause *Sema::ActOnOpenMPLastprivateClause(ArrayRef<Expr *> VarList,
   SmallVector<Expr *, 8> AssignmentOps;
   for (auto &RefExpr : VarList) {
     assert(RefExpr && "NULL expr in OpenMP lastprivate clause.");
-    if (isa<DependentScopeDeclRefExpr>(RefExpr)) {
+    auto Res = getPrivateItem(*this, RefExpr);
+    if (Res.second) {
       // It will be analyzed later.
       Vars.push_back(RefExpr);
       SrcExprs.push_back(nullptr);
       DstExprs.push_back(nullptr);
       AssignmentOps.push_back(nullptr);
-      continue;
     }
+    ValueDecl *D = Res.first;
+    if (!D)
+      continue;
 
     SourceLocation ELoc = RefExpr->getExprLoc();
-    // OpenMP [2.1, C/C++]
-    //  A list item is a variable name.
-    // OpenMP  [2.14.3.5, Restrictions, p.1]
-    //  A variable that is part of another variable (as an array or structure
-    //  element) cannot appear in a lastprivate clause.
-    DeclRefExpr *DE = dyn_cast_or_null<DeclRefExpr>(RefExpr);
-    if (!DE || !isa<VarDecl>(DE->getDecl())) {
-      Diag(ELoc, diag::err_omp_expected_var_name_member_expr)
-          << 0 << RefExpr->getSourceRange();
-      continue;
-    }
-    Decl *D = DE->getDecl();
-    VarDecl *VD = cast<VarDecl>(D);
-
-    QualType Type = VD->getType();
-    if (Type->isDependentType() || Type->isInstantiationDependentType()) {
-      // It will be analyzed later.
-      Vars.push_back(DE);
-      SrcExprs.push_back(nullptr);
-      DstExprs.push_back(nullptr);
-      AssignmentOps.push_back(nullptr);
-      continue;
-    }
+    QualType Type = D->getType();
+    auto *VD = dyn_cast<VarDecl>(D);
 
     // OpenMP [2.14.3.5, Restrictions, C/C++, p.2]
     //  A variable that appears in a lastprivate clause must not have an
     //  incomplete type or a reference type.
     if (RequireCompleteType(ELoc, Type,
-                            diag::err_omp_lastprivate_incomplete_type)) {
+                            diag::err_omp_lastprivate_incomplete_type))
       continue;
-    }
     Type = Type.getNonReferenceType();
 
     // OpenMP [2.14.1.1, Data-sharing Attribute Rules for Variables Referenced
@@ -7655,14 +7637,14 @@ OMPClause *Sema::ActOnOpenMPLastprivateClause(ArrayRef<Expr *> VarList,
     //  Variables with the predetermined data-sharing attributes may not be
     //  listed in data-sharing attributes clauses, except for the cases
     //  listed below.
-    DSAStackTy::DSAVarData DVar = DSAStack->getTopDSA(VD, false);
+    DSAStackTy::DSAVarData DVar = DSAStack->getTopDSA(D, false);
     if (DVar.CKind != OMPC_unknown && DVar.CKind != OMPC_lastprivate &&
         DVar.CKind != OMPC_firstprivate &&
         (DVar.CKind != OMPC_private || DVar.RefExpr != nullptr)) {
       Diag(ELoc, diag::err_omp_wrong_dsa)
           << getOpenMPClauseName(DVar.CKind)
           << getOpenMPClauseName(OMPC_lastprivate);
-      ReportOriginalDSA(*this, DSAStack, VD, DVar);
+      ReportOriginalDSA(*this, DSAStack, D, DVar);
       continue;
     }
 
@@ -7676,15 +7658,28 @@ OMPClause *Sema::ActOnOpenMPLastprivateClause(ArrayRef<Expr *> VarList,
     DSAStackTy::DSAVarData TopDVar = DVar;
     if (isOpenMPWorksharingDirective(CurrDir) &&
         !isOpenMPParallelDirective(CurrDir)) {
-      DVar = DSAStack->getImplicitDSA(VD, true);
+      DVar = DSAStack->getImplicitDSA(D, true);
       if (DVar.CKind != OMPC_shared) {
         Diag(ELoc, diag::err_omp_required_access)
             << getOpenMPClauseName(OMPC_lastprivate)
             << getOpenMPClauseName(OMPC_shared);
-        ReportOriginalDSA(*this, DSAStack, VD, DVar);
+        ReportOriginalDSA(*this, DSAStack, D, DVar);
         continue;
       }
     }
+
+    // OpenMP 4.5 [2.10.8, Distribute Construct, p.3]
+    // A list item may appear in a firstprivate or lastprivate clause but not
+    // both.
+    if (CurrDir == OMPD_distribute) {
+      DSAStackTy::DSAVarData DVar = DSAStack->getTopDSA(D, false);
+      if (DVar.CKind == OMPC_firstprivate) {
+        Diag(ELoc, diag::err_omp_firstprivate_and_lastprivate_in_distribute);
+        ReportOriginalDSA(*this, DSAStack, D, DVar);
+        continue;
+      }
+    }
+
     // OpenMP [2.14.3.5, Restrictions, C++, p.1,2]
     //  A variable of class type (or array thereof) that appears in a
     //  lastprivate clause requires an accessible, unambiguous default
@@ -7694,42 +7689,32 @@ OMPClause *Sema::ActOnOpenMPLastprivateClause(ArrayRef<Expr *> VarList,
     //  lastprivate clause requires an accessible, unambiguous copy assignment
     //  operator for the class type.
     Type = Context.getBaseElementType(Type).getNonReferenceType();
-    auto *SrcVD = buildVarDecl(*this, DE->getLocStart(),
+    auto *SrcVD = buildVarDecl(*this, RefExpr->getLocStart(),
                                Type.getUnqualifiedType(), ".lastprivate.src",
-                               VD->hasAttrs() ? &VD->getAttrs() : nullptr);
-    auto *PseudoSrcExpr = buildDeclRefExpr(
-        *this, SrcVD, Type.getUnqualifiedType(), DE->getExprLoc());
+                               D->hasAttrs() ? &D->getAttrs() : nullptr);
+    auto *PseudoSrcExpr =
+        buildDeclRefExpr(*this, SrcVD, Type.getUnqualifiedType(), ELoc);
     auto *DstVD =
-        buildVarDecl(*this, DE->getLocStart(), Type, ".lastprivate.dst",
-                     VD->hasAttrs() ? &VD->getAttrs() : nullptr);
-    auto *PseudoDstExpr =
-        buildDeclRefExpr(*this, DstVD, Type, DE->getExprLoc());
+        buildVarDecl(*this, RefExpr->getLocStart(), Type, ".lastprivate.dst",
+                     D->hasAttrs() ? &D->getAttrs() : nullptr);
+    auto *PseudoDstExpr = buildDeclRefExpr(*this, DstVD, Type, ELoc);
     // For arrays generate assignment operation for single element and replace
     // it by the original array element in CodeGen.
-    auto AssignmentOp = BuildBinOp(/*S=*/nullptr, DE->getExprLoc(), BO_Assign,
+    auto AssignmentOp = BuildBinOp(/*S=*/nullptr, ELoc, BO_Assign,
                                    PseudoDstExpr, PseudoSrcExpr);
     if (AssignmentOp.isInvalid())
       continue;
-    AssignmentOp = ActOnFinishFullExpr(AssignmentOp.get(), DE->getExprLoc(),
+    AssignmentOp = ActOnFinishFullExpr(AssignmentOp.get(), ELoc,
                                        /*DiscardedValue=*/true);
     if (AssignmentOp.isInvalid())
       continue;
 
-    // OpenMP 4.5 [2.10.8, Distribute Construct, p.3]
-    // A list item may appear in a firstprivate or lastprivate clause but not
-    // both.
-    if (CurrDir == OMPD_distribute) {
-      DSAStackTy::DSAVarData DVar = DSAStack->getTopDSA(VD, false);
-      if (DVar.CKind == OMPC_firstprivate) {
-        Diag(ELoc, diag::err_omp_firstprivate_and_lastprivate_in_distribute);
-        ReportOriginalDSA(*this, DSAStack, VD, DVar);
-        continue;
-      }
-    }
-
+    DeclRefExpr *Ref = nullptr;
+    if (!VD)
+      Ref = buildCapture(*this, D->getIdentifier(), RefExpr);
     if (TopDVar.CKind != OMPC_firstprivate)
-      DSAStack->addDSA(VD, DE, OMPC_lastprivate);
-    Vars.push_back(DE);
+      DSAStack->addDSA(D, RefExpr->IgnoreParens(), OMPC_lastprivate, Ref);
+    Vars.push_back(VD ? RefExpr->IgnoreParens() : Ref);
     SrcExprs.push_back(PseudoSrcExpr);
     DstExprs.push_back(PseudoDstExpr);
     AssignmentOps.push_back(AssignmentOp.get());
@@ -8551,7 +8536,8 @@ static bool FinishOpenMPLinearClause(OMPLinearClause &Clause, DeclRefExpr *IV,
       Updates.push_back(Update.get());
       Finals.push_back(Final.get());
     }
-    ++CurInit, ++CurPrivate;
+    ++CurInit;
+    ++CurPrivate;
   }
   Clause.setUpdates(Updates);
   Clause.setFinals(Finals);
@@ -9085,6 +9071,91 @@ static bool CheckTypeMappable(SourceLocation SL, SourceRange SR, Sema &SemaRef,
   return true;
 }
 
+/// \brief Return true if it can be proven that the provided array expression
+/// (array section or array subscript) specify the whole size of the array whose
+/// base type is \a BaseQTy.
+static bool CheckArrayExpressionReferToWholeSize(Sema &SemaRef, const Expr *E,
+                                                 QualType BaseQTy) {
+  auto *OASE = dyn_cast<OMPArraySectionExpr>(E);
+
+  // If this is an array subscript, it refers to the whole size if the size of
+  // the dimension is constant and equals 1. Also, an array section assumes the
+  // format of an array subscript if no colon is used.
+  if (isa<ArraySubscriptExpr>(E) || (OASE && OASE->getColonLoc().isInvalid())) {
+    if (auto *ATy = dyn_cast<ConstantArrayType>(BaseQTy.getTypePtr()))
+      return ATy->getSize().getSExtValue() == 1;
+    return false;
+  }
+
+  assert(OASE && "Expecting array section if not an array subscript.");
+  auto *LowerBound = OASE->getLowerBound();
+  auto *Length = OASE->getLength();
+
+  // If there is a lower bound that does not evaluates to zero, we are not
+  // convering the whole dimension.
+  if (LowerBound) {
+    llvm::APSInt ConstLowerBound;
+    if (!LowerBound->EvaluateAsInt(ConstLowerBound, SemaRef.getASTContext()))
+      return false; // Can't get the integer value as a constant.
+    if (ConstLowerBound.getSExtValue())
+      return false;
+  }
+
+  // If we don't have a length we covering the whole dimension.
+  if (!Length) {
+    return true;
+  }
+
+  // If the base is a pointer, we don't have a way to get the size of the
+  // pointee.
+  if (BaseQTy->isPointerType())
+    return false;
+
+  // We can only check if the length is the same as the size of the dimension
+  // if we have a constant array.
+  auto *CATy = dyn_cast<ConstantArrayType>(BaseQTy.getTypePtr());
+  if (!CATy)
+    return false;
+
+  llvm::APSInt ConstLength;
+  if (!Length->EvaluateAsInt(ConstLength, SemaRef.getASTContext()))
+    return false; // Can't get the integer value as a constant.
+
+  return CATy->getSize().getSExtValue() == ConstLength.getSExtValue();
+}
+
+// Return true if it can be proven that the provided array expression (array
+// section or array subscript) specify a single element of the array whose base
+// type is \a BaseQTy.
+static bool CheckArrayExpressionReferToUnitySize(Sema &SemaRef, const Expr *E,
+                                                 QualType BaseQTy) {
+  auto *OASE = dyn_cast<OMPArraySectionExpr>(E);
+
+  // An array subscript always refer to a single element. Also, an array section
+  // assumes the format of an array subscript if no colon is used.
+  if (isa<ArraySubscriptExpr>(E) || (OASE && OASE->getColonLoc().isInvalid()))
+    return true;
+
+  assert(OASE && "Expecting array section if not an array subscript.");
+  auto *Length = OASE->getLength();
+
+  // If we don't have a length we have to check if the array has unitary size
+  // for this dimension. Also, we should always expect a length if the base type
+  // is pointer.
+  if (!Length) {
+    if (auto *ATy = dyn_cast<ConstantArrayType>(BaseQTy.getTypePtr()))
+      return ATy->getSize().getSExtValue() == 1;
+    return false;
+  }
+
+  // Check if the length evaluates to 1.
+  llvm::APSInt ConstLength;
+  if (!Length->EvaluateAsInt(ConstLength, SemaRef.getASTContext()))
+    return false; // Can't get the integer value as a constant.
+
+  return ConstLength.getSExtValue() == 1;
+}
+
 // Return the expression of the base of the map clause or null if it cannot
 // be determined and do all the necessary checks to see if the expression is
 // valid as a standalone map clause expression.
@@ -9113,14 +9184,13 @@ static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
 
   Expr *RelevantExpr = nullptr;
 
-  // Flags to help capture some memory
-
   // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.2]
   //  If a list item is an array section, it must specify contiguous storage.
   //
   // For this restriction it is sufficient that we make sure only references
   // to variables or fields and array expressions, and that no array sections
-  // exist except in the rightmost expression. E.g. these would be invalid:
+  // exist except in the rightmost expression (unless they cover the whole
+  // dimension of the array). E.g. these would be invalid:
   //
   //   r.ArrS[3:5].Arr[6:7]
   //
@@ -9131,12 +9201,11 @@ static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
   //
   //   r.ArrS[3].x
 
-  bool IsRightMostExpression = true;
+  bool AllowUnitySizeArraySection = true;
+  bool AllowWholeSizeArraySection = true;
 
-  while (!RelevantExpr) {
-    auto AllowArraySection = IsRightMostExpression;
-    IsRightMostExpression = false;
-
+  for (bool IsRightMostExpression = true; !RelevantExpr;
+       IsRightMostExpression = false) {
     E = E->IgnoreParenImpCasts();
 
     if (auto *CurE = dyn_cast<DeclRefExpr>(E)) {
@@ -9144,6 +9213,11 @@ static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
         break;
 
       RelevantExpr = CurE;
+
+      // If we got a reference to a declaration, we should not expect any array
+      // section before that.
+      AllowUnitySizeArraySection = false;
+      AllowWholeSizeArraySection = false;
       continue;
     }
 
@@ -9191,6 +9265,15 @@ static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
           break;
         }
 
+      // If we got a member expression, we should not expect any array section
+      // before that:
+      //
+      // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.7]
+      //  If a list item is an element of a structure, only the rightmost symbol
+      //  of the variable reference can be an array section.
+      //
+      AllowUnitySizeArraySection = false;
+      AllowWholeSizeArraySection = false;
       continue;
     }
 
@@ -9202,35 +9285,76 @@ static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
             << 0 << CurE->getSourceRange();
         break;
       }
+
+      // If we got an array subscript that express the whole dimension we
+      // can have any array expressions before. If it only expressing part of
+      // the dimension, we can only have unitary-size array expressions.
+      if (!CheckArrayExpressionReferToWholeSize(SemaRef, CurE, E->getType())) {
+        AllowWholeSizeArraySection = false;
+      }
       continue;
     }
 
     if (auto *CurE = dyn_cast<OMPArraySectionExpr>(E)) {
-      // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.7]
-      //  If a list item is an element of a structure, only the rightmost symbol
-      //  of the variable reference can be an array section.
-      //
-      if (!AllowArraySection) {
-        SemaRef.Diag(ELoc, diag::err_omp_array_section_in_rightmost_expression)
-            << CurE->getSourceRange();
-        break;
-      }
-
       E = CurE->getBase()->IgnoreParenImpCasts();
+
+      // Determine the dimension we care about. We need to skip all the nested
+      // array sections to determine that.
+      unsigned Dimension = 0;
+      auto *BaseE = E;
+      while (auto *SE = dyn_cast<OMPArraySectionExpr>(BaseE)) {
+        BaseE = SE->getBase()->IgnoreParenImpCasts();
+        ++Dimension;
+      }
 
       // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, C++, p.1]
       //  If the type of a list item is a reference to a type T then the type
       //  will be considered to be T for all purposes of this clause.
-      QualType CurType = E->getType();
+      QualType CurType = BaseE->getType();
       if (CurType->isReferenceType())
         CurType = CurType->getPointeeType();
 
-      if (!CurType->isAnyPointerType() && !CurType->isArrayType()) {
+      // Get the type for the dimension we care about. It has to be a pointer or
+      // array type.
+      for (; Dimension; --Dimension) {
+        if (auto *PTy = CurType->getAs<PointerType>()) {
+          CurType = PTy->getPointeeType();
+          continue;
+        }
+        auto *ATy = cast<ArrayType>(CurType.getTypePtr());
+        CurType = ATy->getElementType();
+      }
+
+      bool IsPointer = CurType->isAnyPointerType();
+
+      if (!IsPointer && !CurType->isArrayType()) {
         SemaRef.Diag(ELoc, diag::err_omp_expected_base_var_name)
             << 0 << CurE->getSourceRange();
         break;
       }
 
+      bool IsWhole =
+          CheckArrayExpressionReferToWholeSize(SemaRef, CurE, CurType);
+      bool IsUnity =
+          CheckArrayExpressionReferToUnitySize(SemaRef, CurE, CurType);
+
+      if (AllowWholeSizeArraySection && AllowUnitySizeArraySection) {
+        // Any array section is currently allowed.
+        //
+        // If this array section refers to the whole dimension we can still
+        // accept other array sections before this one, except if the base is a
+        // pointer. Otherwise, only unitary sections are accepted.
+        if (!IsWhole || IsPointer)
+          AllowWholeSizeArraySection = false;
+      } else if ((AllowUnitySizeArraySection && !IsUnity) ||
+                 (AllowWholeSizeArraySection && !IsWhole)) {
+        // A unity or whole array section is not allowed and that is not
+        // compatible with the properties of the current array section.
+        SemaRef.Diag(
+            ELoc, diag::err_omp_array_section_leads_to_non_contiguous_storage)
+            << CurE->getSourceRange();
+        break;
+      }
       continue;
     }
 

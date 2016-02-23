@@ -74,6 +74,10 @@ def warn_infinite_recursive_function : Warning<
   "all paths through this function will call itself">,
   InGroup<InfiniteRecursion>, DefaultIgnore;
 
+def warn_comma_operator : Warning<"possible misuse of comma operator here">,
+  InGroup<DiagGroup<"comma">>, DefaultIgnore;
+def note_cast_to_void : Note<"cast expression to void to silence warning">;
+
 // Constant expressions
 def err_expr_not_ice : Error<
   "expression is not an %select{integer|integral}0 constant expression">;
@@ -837,7 +841,7 @@ def warn_accessor_property_type_mismatch : Warning<
 def not_conv_function_declared_at : Note<"type conversion function declared here">;
 def note_method_declared_at : Note<"method %0 declared here">;
 def note_property_attribute : Note<"property %0 is declared "
-  "%select{deprecated|unavailable|partial|not-yet-introduced}1 here">;
+  "%select{deprecated|unavailable|partial}1 here">;
 def err_setter_type_void : Error<"type of setter must be void">;
 def err_duplicate_method_decl : Error<"duplicate declaration of method %0">;
 def warn_duplicate_method_decl : 
@@ -2119,6 +2123,10 @@ def err_attribute_too_few_arguments : Error<
 def err_attribute_invalid_vector_type : Error<"invalid vector element type %0">;
 def err_attribute_bad_neon_vector_size : Error<
   "Neon vector size must be 64 or 128 bits">;
+def err_attribute_requires_positive_integer : Error<
+  "%0 attribute requires a positive integral compile time constant expression">;
+def err_attribute_requires_opencl_version : Error<
+  "%0 attribute requires OpenCL version %1 or above">;
 def warn_unsupported_target_attribute
     : Warning<"Ignoring unsupported '%0' in the target attribute string">,
     InGroup<IgnoredAttributes>;
@@ -4120,14 +4128,9 @@ def err_unavailable_message : Error<"%0 is unavailable: %1">;
 def warn_unavailable_fwdclass_message : Warning<
     "%0 may be unavailable because the receiver type is unknown">,
     InGroup<UnavailableDeclarations>;
-def err_notyetintroduced : Error<"%0 is not introduced yet">;
-def err_notyetintroduced_message : Error<"%0 is not introduced yet: %1">;
-def warn_notyetintroduced_fwdclass_message : Warning<
-    "%0 may not be introduced because the receiver type is unknown">,
-    InGroup<NotYetIntroducedDeclarations>;
 def note_availability_specified_here : Note<
   "%0 has been explicitly marked "
-  "%select{unavailable|deleted|deprecated|partial|not-yet-introduced}1 here">;
+  "%select{unavailable|deleted|deprecated|partial}1 here">;
 def note_implicitly_deleted : Note<
   "explicitly defaulted function was implicitly deleted here">;
 def note_inherited_deleted_here : Note<
@@ -7761,8 +7764,8 @@ def err_omp_expected_named_var_member_or_array_expression: Error<
   "expected expression containing only member accesses and/or array sections based on named variables">;
 def err_omp_bit_fields_forbidden_in_map_clause : Error<
   "bit fields cannot be used to specify storage in a map clause">;
-def err_omp_array_section_in_rightmost_expression : Error<
-  "array section can only be associated with the rightmost variable in a map clause expression">;
+def err_omp_array_section_leads_to_non_contiguous_storage : Error<
+  "employed array section is or can be incompatible with contiguous storage requirements">;
 def err_omp_union_type_not_allowed : Error<
   "mapped storage cannot be derived from a union">;
 def err_omp_expected_access_to_data_field : Error<
