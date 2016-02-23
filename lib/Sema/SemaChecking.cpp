@@ -1307,17 +1307,30 @@ static bool SemaBuiltinCpuSupports(Sema &S, CallExpr *TheCall) {
 bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
   unsigned i = 0, l = 0, u = 0;
   switch (BuiltinID) {
-  default: return false;
+  default:
+    return false;
   case X86::BI__builtin_cpu_supports:
     return SemaBuiltinCpuSupports(*this, TheCall);
   case X86::BI__builtin_ms_va_start:
     return SemaBuiltinMSVAStart(TheCall);
-  case X86::BI_mm_prefetch: i = 1; l = 0; u = 3; break;
-  case X86::BI__builtin_ia32_sha1rnds4: i = 2, l = 0; u = 3; break;
+  case X86::BI_mm_prefetch:
+    i = 1;
+    l = 0;
+    u = 3;
+    break;
+  case X86::BI__builtin_ia32_sha1rnds4:
+    i = 2;
+    l = 0;
+    u = 3;
+    break;
   case X86::BI__builtin_ia32_vpermil2pd:
   case X86::BI__builtin_ia32_vpermil2pd256:
   case X86::BI__builtin_ia32_vpermil2ps:
-  case X86::BI__builtin_ia32_vpermil2ps256: i = 3, l = 0; u = 3; break;
+  case X86::BI__builtin_ia32_vpermil2ps256:
+    i = 3;
+    l = 0;
+    u = 3;
+    break;
   case X86::BI__builtin_ia32_cmpb128_mask:
   case X86::BI__builtin_ia32_cmpw128_mask:
   case X86::BI__builtin_ia32_cmpd128_mask:
@@ -1341,13 +1354,25 @@ bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
   case X86::BI__builtin_ia32_ucmpb512_mask:
   case X86::BI__builtin_ia32_ucmpw512_mask:
   case X86::BI__builtin_ia32_ucmpd512_mask:
-  case X86::BI__builtin_ia32_ucmpq512_mask: i = 2; l = 0; u = 7; break;
+  case X86::BI__builtin_ia32_ucmpq512_mask:
+    i = 2;
+    l = 0;
+    u = 7;
+    break;
   case X86::BI__builtin_ia32_roundps:
   case X86::BI__builtin_ia32_roundpd:
   case X86::BI__builtin_ia32_roundps256:
-  case X86::BI__builtin_ia32_roundpd256: i = 1, l = 0; u = 15; break;
+  case X86::BI__builtin_ia32_roundpd256:
+    i = 1;
+    l = 0;
+    u = 15;
+    break;
   case X86::BI__builtin_ia32_roundss:
-  case X86::BI__builtin_ia32_roundsd: i = 2, l = 0; u = 15; break;
+  case X86::BI__builtin_ia32_roundsd:
+    i = 2;
+    l = 0;
+    u = 15;
+    break;
   case X86::BI__builtin_ia32_cmpps:
   case X86::BI__builtin_ia32_cmpss:
   case X86::BI__builtin_ia32_cmppd:
@@ -1355,7 +1380,11 @@ bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
   case X86::BI__builtin_ia32_cmpps256:
   case X86::BI__builtin_ia32_cmppd256:
   case X86::BI__builtin_ia32_cmpps512_mask:
-  case X86::BI__builtin_ia32_cmppd512_mask: i = 2; l = 0; u = 31; break;
+  case X86::BI__builtin_ia32_cmppd512_mask:
+    i = 2;
+    l = 0;
+    u = 31;
+    break;
   case X86::BI__builtin_ia32_vpcomub:
   case X86::BI__builtin_ia32_vpcomuw:
   case X86::BI__builtin_ia32_vpcomud:
@@ -1363,7 +1392,11 @@ bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
   case X86::BI__builtin_ia32_vpcomb:
   case X86::BI__builtin_ia32_vpcomw:
   case X86::BI__builtin_ia32_vpcomd:
-  case X86::BI__builtin_ia32_vpcomq: i = 2; l = 0; u = 7; break;
+  case X86::BI__builtin_ia32_vpcomq:
+    i = 2;
+    l = 0;
+    u = 7;
+    break;
   }
   return SemaBuiltinConstantArgRange(TheCall, i, l, u);
 }
@@ -3232,6 +3265,16 @@ enum StringLiteralCheckType {
 };
 } // end anonymous namespace
 
+static void CheckFormatString(Sema &S, const StringLiteral *FExpr,
+                              const Expr *OrigFormatExpr,
+                              ArrayRef<const Expr *> Args,
+                              bool HasVAListArg, unsigned format_idx,
+                              unsigned firstDataArg,
+                              Sema::FormatStringType Type,
+                              bool inFunctionCall,
+                              Sema::VariadicCallType CallType,
+                              llvm::SmallBitVector &CheckedVarArgs);
+
 // Determine if an expression is a string literal or constant string.
 // If this function returns false on the arguments to a function expecting a
 // format string, we will usually need to emit a warning.
@@ -3404,8 +3447,9 @@ checkFormatStringExpr(Sema &S, const Expr *E, ArrayRef<const Expr *> Args,
       StrE = cast<StringLiteral>(E);
 
     if (StrE) {
-      S.CheckFormatString(StrE, E, Args, HasVAListArg, format_idx, firstDataArg,
-                          Type, InFunctionCall, CallType, CheckedVarArgs);
+      CheckFormatString(S, StrE, E, Args, HasVAListArg, format_idx,
+                        firstDataArg, Type, InFunctionCall, CallType,
+                        CheckedVarArgs);
       return SLCT_CheckedLiteral;
     }
 
@@ -4873,27 +4917,30 @@ bool CheckScanfHandler::HandleScanfSpecifier(
   return true;
 }
 
-void Sema::CheckFormatString(const StringLiteral *FExpr,
-                             const Expr *OrigFormatExpr,
-                             ArrayRef<const Expr *> Args,
-                             bool HasVAListArg, unsigned format_idx,
-                             unsigned firstDataArg, FormatStringType Type,
-                             bool inFunctionCall, VariadicCallType CallType,
-                             llvm::SmallBitVector &CheckedVarArgs) {
+static void CheckFormatString(Sema &S, const StringLiteral *FExpr,
+                              const Expr *OrigFormatExpr,
+                              ArrayRef<const Expr *> Args,
+                              bool HasVAListArg, unsigned format_idx,
+                              unsigned firstDataArg,
+                              Sema::FormatStringType Type,
+                              bool inFunctionCall,
+                              Sema::VariadicCallType CallType,
+                              llvm::SmallBitVector &CheckedVarArgs) {
   // CHECK: is the format string a wide literal?
   if (!FExpr->isAscii() && !FExpr->isUTF8()) {
     CheckFormatHandler::EmitFormatDiagnostic(
-      *this, inFunctionCall, Args[format_idx],
-      PDiag(diag::warn_format_string_is_wide_literal), FExpr->getLocStart(),
+      S, inFunctionCall, Args[format_idx],
+      S.PDiag(diag::warn_format_string_is_wide_literal), FExpr->getLocStart(),
       /*IsStringLocation*/true, OrigFormatExpr->getSourceRange());
     return;
   }
-  
+
   // Str - The format string.  NOTE: this is NOT null-terminated!
   StringRef StrRef = FExpr->getString();
   const char *Str = StrRef.data();
   // Account for cases where the string literal is truncated in a declaration.
-  const ConstantArrayType *T = Context.getAsConstantArrayType(FExpr->getType());
+  const ConstantArrayType *T =
+    S.Context.getAsConstantArrayType(FExpr->getType());
   assert(T && "String literal not of constant array type!");
   size_t TypeSize = T->getSize().getZExtValue();
   size_t StrLen = std::min(std::max(TypeSize, size_t(1)) - 1, StrRef.size());
@@ -4904,8 +4951,8 @@ void Sema::CheckFormatString(const StringLiteral *FExpr,
   if (TypeSize <= StrRef.size() &&
       StrRef.substr(0, TypeSize).find('\0') == StringRef::npos) {
     CheckFormatHandler::EmitFormatDiagnostic(
-        *this, inFunctionCall, Args[format_idx],
-        PDiag(diag::warn_printf_format_string_not_null_terminated),
+        S, inFunctionCall, Args[format_idx],
+        S.PDiag(diag::warn_printf_format_string_not_null_terminated),
         FExpr->getLocStart(),
         /*IsStringLocation=*/true, OrigFormatExpr->getSourceRange());
     return;
@@ -4914,32 +4961,33 @@ void Sema::CheckFormatString(const StringLiteral *FExpr,
   // CHECK: empty format string?
   if (StrLen == 0 && numDataArgs > 0) {
     CheckFormatHandler::EmitFormatDiagnostic(
-      *this, inFunctionCall, Args[format_idx],
-      PDiag(diag::warn_empty_format_string), FExpr->getLocStart(),
+      S, inFunctionCall, Args[format_idx],
+      S.PDiag(diag::warn_empty_format_string), FExpr->getLocStart(),
       /*IsStringLocation*/true, OrigFormatExpr->getSourceRange());
     return;
   }
-  
-  if (Type == FST_Printf || Type == FST_NSString ||
-      Type == FST_FreeBSDKPrintf || Type == FST_OSTrace) {
-    CheckPrintfHandler H(*this, FExpr, OrigFormatExpr, firstDataArg,
-                         numDataArgs, (Type == FST_NSString || Type == FST_OSTrace),
+
+  if (Type == Sema::FST_Printf || Type == Sema::FST_NSString ||
+      Type == Sema::FST_FreeBSDKPrintf || Type == Sema::FST_OSTrace) {
+    CheckPrintfHandler H(S, FExpr, OrigFormatExpr, firstDataArg,
+                         numDataArgs, (Type == Sema::FST_NSString ||
+                                       Type == Sema::FST_OSTrace),
                          Str, HasVAListArg, Args, format_idx,
                          inFunctionCall, CallType, CheckedVarArgs);
-  
+
     if (!analyze_format_string::ParsePrintfString(H, Str, Str + StrLen,
-                                                  getLangOpts(),
-                                                  Context.getTargetInfo(),
-                                                  Type == FST_FreeBSDKPrintf))
+                                                  S.getLangOpts(),
+                                                  S.Context.getTargetInfo(),
+                                            Type == Sema::FST_FreeBSDKPrintf))
       H.DoneProcessing();
-  } else if (Type == FST_Scanf) {
-    CheckScanfHandler H(*this, FExpr, OrigFormatExpr, firstDataArg, numDataArgs,
+  } else if (Type == Sema::FST_Scanf) {
+    CheckScanfHandler H(S, FExpr, OrigFormatExpr, firstDataArg, numDataArgs,
                         Str, HasVAListArg, Args, format_idx,
                         inFunctionCall, CallType, CheckedVarArgs);
-    
+
     if (!analyze_format_string::ParseScanfString(H, Str, Str + StrLen,
-                                                 getLangOpts(),
-                                                 Context.getTargetInfo()))
+                                                 S.getLangOpts(),
+                                                 S.Context.getTargetInfo()))
       H.DoneProcessing();
   } // TODO: handle other formats
 }
