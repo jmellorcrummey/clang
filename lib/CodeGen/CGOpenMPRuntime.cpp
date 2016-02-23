@@ -3974,9 +3974,10 @@ void CGOpenMPRuntime::emitTargetOutlinedFunction(
 
 /// \brief Obtain the base type of an array expression.
 static QualType GetArraySectionExprBaseType(const OMPArraySectionExpr *E) {
-  // Determine the dimension we care about. We need to skip all the nested array sections to determine that.
+  // Determine the dimension we care about. We need to skip all the nested array
+  // sections to determine that.
   unsigned Dimension = 0;
-  const Expr *BaseE = E->getBase()->IgnoreParenImpCasts();;
+  const Expr *BaseE = E->getBase()->IgnoreParenImpCasts();
   while (auto *SE = dyn_cast<OMPArraySectionExpr>(BaseE)) {
     BaseE = SE->getBase()->IgnoreParenImpCasts();
     ++Dimension;
@@ -3987,14 +3988,15 @@ static QualType GetArraySectionExprBaseType(const OMPArraySectionExpr *E) {
   if (BaseQTy->isReferenceType())
     BaseQTy = BaseQTy->getPointeeType();
 
-  // Get the type for the dimension we care about. It has to be a pointer or array type.
+  // Get the type for the dimension we care about. It has to be a pointer or
+  // array type.
   for (; Dimension; --Dimension) {
     if (auto *PTy = BaseQTy->getAs<PointerType>()) {
-      BaseQTy = PTy->getPointeeType().getCanonicalType();;
+      BaseQTy = PTy->getPointeeType().getCanonicalType();
       continue;
     }
     auto *ATy = cast<ArrayType>(BaseQTy.getTypePtr());
-    BaseQTy = ATy->getElementType().getCanonicalType();;
+    BaseQTy = ATy->getElementType().getCanonicalType();
   }
   return BaseQTy;
 }
@@ -4003,10 +4005,10 @@ static QualType GetArraySectionExprBaseType(const OMPArraySectionExpr *E) {
 static QualType GetArraySectionExprElementType(const OMPArraySectionExpr *E) {
   auto Ty = GetArraySectionExprBaseType(E);
   if (auto *PTy = Ty->getAs<PointerType>()) {
-    Ty = PTy->getPointeeType().getCanonicalType();;
+    Ty = PTy->getPointeeType().getCanonicalType();
   } else {
     auto *ATy = cast<ArrayType>(Ty.getTypePtr());
-    Ty = ATy->getElementType().getCanonicalType();;
+    Ty = ATy->getElementType().getCanonicalType();
   }
   return Ty;
 }
@@ -4150,7 +4152,8 @@ private:
         ElemSize = CGF.getTypeSize(ATy->getElementType().getCanonicalType());
       }
 
-      // If we don't have a length at this point, that is because we have an array section with a single element.
+      // If we don't have a length at this point, that is because we have an
+      // array section with a single element.
       if (!OAE->getLength())
         return ElemSize;
 
@@ -4364,10 +4367,12 @@ private:
         auto Next = std::next(I);
 
         // We need to generate the addresses and sizes if this is the last
-        // component, if the component is a pointer or if it is an array section whose length is not one. In this is a pointer, it becomes the base address for the following components.
+        // component, if the component is a pointer or if it is an array section
+        // whose length is not one. In this is a pointer, it becomes the base
+        // address for the following components.
 
         // A final array section, is one whose length is not one.
-        auto IsFinalArraySection = [this] (const Expr *E) -> bool {
+        auto IsFinalArraySection = [this](const Expr *E) -> bool {
           auto *OASE = dyn_cast<OMPArraySectionExpr>(E);
 
           // If is not an array section and therefore not a unity-size one.
@@ -4381,7 +4386,8 @@ private:
           auto *Length = OASE->getLength();
 
           // If we don't have a length we have to check if the array has size 1
-          // for this dimension. Also, we should always expect a length if the base type is pointer.
+          // for this dimension. Also, we should always expect a length if the
+          // base type is pointer.
           if (!Length) {
             auto BaseQTy = GetArraySectionExprBaseType(OASE);
             if (auto *ATy = dyn_cast<ConstantArrayType>(BaseQTy.getTypePtr()))
@@ -4400,9 +4406,14 @@ private:
           return ConstLength.getSExtValue() != 1;
         }(I->first);
 
-        // Get information on whether the element is a pointer. Have to do a special treatment for array sections given that they are built-in types.
+        // Get information on whether the element is a pointer. Have to do a
+        // special treatment for array sections given that they are built-in
+        // types.
         const auto *OASE = dyn_cast<OMPArraySectionExpr>(I->first);
-        bool IsPointer = (OASE && GetArraySectionExprElementType(OASE)->isAnyPointerType()) || I->first->getType()->isAnyPointerType();
+        bool IsPointer =
+            (OASE &&
+             GetArraySectionExprElementType(OASE)->isAnyPointerType()) ||
+            I->first->getType()->isAnyPointerType();
 
         if (Next == CE || IsPointer || IsFinalArraySection) {
 
