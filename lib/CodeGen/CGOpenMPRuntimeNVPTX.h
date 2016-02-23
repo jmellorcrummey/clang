@@ -300,6 +300,12 @@ private:
   bool generateCoalescedSchedule(OpenMPScheduleClauseKind ScheduleKind,
                                  bool ChunkSizeOne,
                                  bool ordered) const override;
+
+  /// \brief Check if we must always generate a barrier at the end of a
+  /// particular construct regardless of the presence of a nowait clause.
+  /// This may occur when a particular offload device does not support
+  /// concurrent execution of certain directive and clause combinations.
+  bool requiresBarrier(const OMPLoopDirective &S) const override;
 };
 
 } // CodeGen namespace.

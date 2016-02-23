@@ -1752,6 +1752,10 @@ void CGOpenMPRuntime::emitProcBindClause(CodeGenFunction &CGF,
   CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL__kmpc_push_proc_bind), Args);
 }
 
+bool CGOpenMPRuntime::requiresBarrier(const OMPLoopDirective &S) const {
+  return false;
+}
+
 void CGOpenMPRuntime::emitFlush(CodeGenFunction &CGF, ArrayRef<const Expr *>,
                                 SourceLocation Loc) {
   if (!CGF.HaveInsertPoint())

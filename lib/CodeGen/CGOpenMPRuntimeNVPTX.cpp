@@ -470,3 +470,12 @@ bool CGOpenMPRuntimeNVPTX::generateCoalescedSchedule(
                       ScheduleKind == OMPC_SCHEDULE_auto ||
                       (ScheduleKind == OMPC_SCHEDULE_static && ChunkSizeOne));
 }
+
+bool CGOpenMPRuntimeNVPTX::requiresBarrier(const OMPLoopDirective &S) const {
+  const bool Ordered = S.getSingleClause<OMPOrderedClause>() != nullptr;
+  OpenMPScheduleClauseKind ScheduleKind = OMPC_SCHEDULE_unknown;
+  if (auto *C = S.getSingleClause<OMPScheduleClause>())
+    ScheduleKind = C->getScheduleKind();
+  return Ordered || ScheduleKind == OMPC_SCHEDULE_dynamic ||
+         ScheduleKind == OMPC_SCHEDULE_guided;
+}

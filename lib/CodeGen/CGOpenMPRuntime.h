@@ -835,6 +835,12 @@ public:
                                  SourceLocation Loc, bool PerformInit,
                                  CodeGenFunction *CGF = nullptr);
 
+  /// \brief Check if we must always generate a barrier at the end of a
+  /// particular construct regardless of the presence of a nowait clause.
+  /// This may occur when a particular offload device does not support
+  /// concurrent execution of certain directive and clause combinations.
+  virtual bool requiresBarrier(const OMPLoopDirective &S) const;
+
   /// \brief Emit flush of the variables specified in 'omp flush' directive.
   /// \param Vars List of variables to flush.
   virtual void emitFlush(CodeGenFunction &CGF, ArrayRef<const Expr *> Vars,

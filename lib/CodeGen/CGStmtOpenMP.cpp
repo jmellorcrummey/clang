@@ -1793,7 +1793,8 @@ void CodeGenFunction::EmitOMPForDirective(const OMPForDirective &S) {
   }
 
   // Emit an implicit barrier at the end.
-  if (!S.getSingleClause<OMPNowaitClause>() || HasLastprivates) {
+  if (CGM.getOpenMPRuntime().requiresBarrier(S) ||
+      !S.getSingleClause<OMPNowaitClause>() || HasLastprivates) {
     CGM.getOpenMPRuntime().emitBarrierCall(*this, S.getLocStart(), OMPD_for);
   }
 }
