@@ -84,6 +84,7 @@ void SAclient(int arg) {
   s.func(arg); // expected-note {{in instantiation of member function}}
   double marr[10][10][10];
   double marr2[5][10][1];
+  double mvla[5][arg][10];
   double ***mptr;
   SB *p;
 
@@ -131,6 +132,15 @@ void SAclient(int arg) {
   #pragma omp target map(marr[:1][:2][0]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
   {}
   #pragma omp target map(marr2[:1][:2][0])
+  {}
+
+  #pragma omp target map(mvla[:1][:][0]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
+  {}
+  #pragma omp target map(mvla[:2][:arg][:]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
+  {}
+  #pragma omp target map(mvla[1][2:arg][:])
+  {}
+  #pragma omp target map(mvla[:1][:][:])
   {}
 
   #pragma omp target map(mptr[:2][2+2-4:1][0:5+5]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
