@@ -3185,6 +3185,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   // TODO: integrate within GenerateNextLabel function
   void EnterSimdRegion(CodeGenFunction &CGF, ArrayRef<OMPClause *> Clauses) {
 
+    printf("======> Inside EnterSimdRegion\n");
     // record that we hit a simd region both in the stack of pragmas and
     // in the bit vector used to calculate optimal number of lanes
     OMPRegionTypesStack.push_back(OMP_Simd);
@@ -3280,6 +3281,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   void ExitSimdRegion(CodeGenFunction &CGF, llvm::Value *LoopIndex,
                       llvm::AllocaInst *LoopCount) {
 
+    rintf("======> Inside ExitSimdRegion\n");
     assert((OMPRegionTypesStack.back() == OMP_Simd) &&
            "Exiting #simd"
            "region but never entered it");

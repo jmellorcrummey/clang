@@ -2235,6 +2235,7 @@ void CodeGenFunction::EmitSIMDForHelperCall(llvm::Function *BodyFunc,
                                             llvm::Value *LoopIndex,
                                             bool IsLastIter) {
   // Emit call to the helper function.
+  printf("======> Inside EmitSIMDForHelperCall: Emit SIMD for non-inlined function!\n");
   SmallVector<llvm::Value *, 3> HelperArgs;
   HelperArgs.push_back(CapStruct.getAddress());
   HelperArgs.push_back(Builder.CreateLoad(LoopIndex));
@@ -2253,6 +2254,7 @@ void CodeGenFunction::EmitSIMDForHelperCall(llvm::Function *BodyFunc,
 
 llvm::Function *CodeGenFunction::EmitSimdFunction(CGPragmaSimdWrapper &W) {
   const CapturedStmt &CS = *W.getAssociatedStmt();
+  printf("======> Inside EmitSimdFunction: Emit SIMD function body, inlint it!\n");
 
   CGSIMDForStmtInfo CSInfo(W, LoopStack.getCurLoopID(),
                               LoopStack.getCurLoopParallel());
@@ -2270,6 +2272,7 @@ llvm::Function *CodeGenFunction::EmitSimdFunction(CGPragmaSimdWrapper &W) {
 
 void CodeGenFunction::EmitPragmaSimd(CodeGenFunction::CGPragmaSimdWrapper &W) {
   // hook for special handling of nvptx backend: empty code gen for others
+  printf("======> Inside EmitPragmaSimd\n");
   ArrayRef<OMPClause *> clauses =
       isa<OMPExecutableDirective>(W.getStmt())
           ? cast<OMPExecutableDirective>(W.getStmt())->clauses()

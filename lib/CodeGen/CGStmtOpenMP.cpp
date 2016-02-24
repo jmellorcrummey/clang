@@ -1262,6 +1262,7 @@ CodeGenFunction::EmitOMPDirectiveWithLoop(OpenMPDirectiveKind DKind,
                  DKind == OMPD_distribute_simd ||
                  DKind == OMPD_teams_distribute_simd ||
                  DKind == OMPD_target_teams_distribute_simd;
+  printf("======> Inside EmitOMPDirectiveWithLoop (HasSimd: %d )\n", HasSimd);
   CGPragmaOmpSimd SimdWrapper(&S);
   llvm::Function *BodyFunction = 0;
   bool SeparateLastIter = false;
@@ -1322,6 +1323,7 @@ CodeGenFunction::EmitOMPDirectiveWithLoop(OpenMPDirectiveKind DKind,
 
   llvm::BasicBlock *PrecondEndBB = createBasicBlock("omp.loop.precond_end");
   {
+    printf("======> Inside EmitOMPDirectiveWithLoop: CodeGen for clauses\n");
     RunCleanupsScope ExecutedScope(*this);
     // CodeGen for clauses (call start).
     for (ArrayRef<OMPClause *>::iterator I = S.clauses().begin(),
@@ -1347,6 +1349,7 @@ CodeGenFunction::EmitOMPDirectiveWithLoop(OpenMPDirectiveKind DKind,
                             Schedule == KMP_SCH_DISTRIBUTE_STATIC;
     // CodeGen for "omp for {Associated statement}".
     {
+      printf("======> Inside EmitOMPDirectiveWithLoop: CodeGen for CodeGen for: omp for {Associated statement}\n");
       llvm::Value *Loc = OPENMPRTL_LOC(S.getLocStart(), *this);
       llvm::Value *GTid =
           OPENMPRTL_THREADNUM(S.getLocStart(), *this);
@@ -1553,6 +1556,7 @@ CodeGenFunction::EmitOMPDirectiveWithLoop(OpenMPDirectiveKind DKind,
         FiniBB = createBasicBlock("omp.loop.fini");
       }
       if (HasSimd) {
+        printf("======> Inside EmitOMPDirectiveWithLoop: Update vectorizer width on the loop stack\n");
         // Update vectorizer width on the loop stack.
         SeparateLastIter = SimdWrapper.emitSafelen(this);
 
@@ -1584,6 +1588,7 @@ CodeGenFunction::EmitOMPDirectiveWithLoop(OpenMPDirectiveKind DKind,
       }
 
       if (HasSimd) {
+        printf("======> Inside EmitOMPDirectiveWithLoop: Push current LoopInfo onto the LoopStack\n");
         // Push current LoopInfo onto the LoopStack.
         LoopStack.push(MainBB);
       }
@@ -1631,20 +1636,26 @@ CodeGenFunction::EmitOMPDirectiveWithLoop(OpenMPDirectiveKind DKind,
             BreakContinue(getJumpDestInCurrentScope(EndBB),
                           getJumpDestInCurrentScope(ContBlock)));
         if (HasSimd) {
+          printf("======> Inside EmitOMPDirectiveWithLoop: Handle SIMD\n");
           if (CGM.getLangOpts().OpenMPTargetMode &&
               (CGM.getTarget().getTriple().getArch() == llvm::Triple::nvptx ||
                CGM.getTarget().getTriple().getArch() ==
                    llvm::Triple::nvptx64)) {
+            printf("======> Inside EmitOMPDirectiveWithLoop: Handle SIMD - TRUE\n");
             InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
             RunCleanupsScope ExecutedScope(*this);
             CGPragmaOmpSimd Wrapper(&S);
             EmitPragmaSimd(Wrapper);
           } else {
+            printf("======> Inside EmitOMPDirectiveWithLoop: Handle SIMD - FALSE\n");
             RunCleanupsScope Scope(*this);
+            printf("======> Inside EmitOMPDirectiveWithLoop: Call SIMD function\n");
             BodyFunction = EmitSimdFunction(SimdWrapper);
+            printf("======> Inside EmitOMPDirectiveWithLoop: SIMD for helper call\n");
             EmitSIMDForHelperCall(BodyFunction, CapStruct, Private, false);
           }
         } else {
+          printf("======> Inside EmitOMPDirectiveWithLoop: Emit directive with parallel (instead of SIMD)\n");
           RunCleanupsScope Scope(*this);
           if (IsInnerLoopGen || !IsComplexParallelLoop) {
             if (SKind == OMPD_for)
@@ -1701,6 +1712,7 @@ CodeGenFunction::EmitOMPDirectiveWithLoop(OpenMPDirectiveKind DKind,
         //      }
         EmitBranch(MainBB);
         if (HasSimd) {
+          printf("======> Inside EmitOMPDirectiveWithLoop: Pop current LoopInfo onto the LoopStack\n");
           LoopStack.pop();
         }
         EmitBlock(FiniBB);
@@ -1717,6 +1729,7 @@ CodeGenFunction::EmitOMPDirectiveWithLoop(OpenMPDirectiveKind DKind,
           // Emit the following for the lastprivate vars update:
           //   call __simd_helper(cs, idx, 1)
           //
+          printf("======> Inside EmitOMPDirectiveWithLoop: Handle SIMD Last Iteration - SIMD for helper call\n");
           EmitSIMDForHelperCall(BodyFunction, CapStruct, Private, true);
         }
         EmitBranch(!IsStaticSchedule || ChunkSize != 0 ? OMPLoopBB : EndBB);
@@ -1774,6 +1787,7 @@ CodeGenFunction::EmitOMPDirectiveWithLoop(OpenMPDirectiveKind DKind,
 
   if (HasSimd) {
     // Emit the final values of 'linear' variables.
+    printf("======> Inside EmitOMPDirectiveWithLoop: HasSIMD - Emit linear final\n");
     SimdWrapper.emitLinearFinal(*this);
   }
 
