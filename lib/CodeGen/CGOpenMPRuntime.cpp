@@ -3281,7 +3281,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   void ExitSimdRegion(CodeGenFunction &CGF, llvm::Value *LoopIndex,
                       llvm::AllocaInst *LoopCount) {
 
-    rintf("======> Inside ExitSimdRegion\n");
+    printf("======> Inside ExitSimdRegion\n");
     assert((OMPRegionTypesStack.back() == OMP_Simd) &&
            "Exiting #simd"
            "region but never entered it");
