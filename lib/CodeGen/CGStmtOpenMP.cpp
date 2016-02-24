@@ -7481,6 +7481,7 @@ void CodeGenFunction::EmitOMPTeamsDirective(const OMPTeamsDirective &S) {
 // Generate the instructions for '#pragma omp simd' directive.
 void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
 
+  printf("======> Inside EmitOMPSimdDirective\n");
   // If the current OpenMP implementation does not need microtasks for parallel
   // it has to share data between threads.
   // FIXME: Maybe create a special hook for SIMD as there may be implementations
@@ -7488,6 +7489,7 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
   // management by the compiler.
   if (!CGM.getOpenMPRuntime().requiresMicroTaskForParallel()) {
 
+    printf("======> Inside EmitOMPSimdDirective: Doesn't Require Micro Task\n");
     bool IsNvptxTarget =
         CGM.getLangOpts().OpenMPTargetMode &&
         (CGM.getTarget().getTriple().getArch() == llvm::Triple::nvptx ||
@@ -7496,6 +7498,7 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
     // If this is a nvptx target we do not support codegen for parallel in
     // functions that are not entry points.
     if (IsNvptxTarget) {
+      printf("======> Inside EmitOMPSimdDirective: Is NVPTX\n");
       CapturedStmt *CS = cast<CapturedStmt>(S.getAssociatedStmt());
       const DeclContext *DC = CS->getCapturedDecl()->getParent();
       while (DC) {
@@ -7518,6 +7521,7 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
     CGPragmaOmpSimd Wrapper(&S);
     EmitPragmaSimd(Wrapper);
   } else {
+    printf("======> Inside EmitOMPSimdDirective: Requires Micro Task\n");
     InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
     RunCleanupsScope ExecutedScope(*this);
     CGPragmaOmpSimd Wrapper(&S);
