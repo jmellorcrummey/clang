@@ -7531,6 +7531,7 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
 
 // Generate the instructions for '#pragma omp for simd' directive.
 void CodeGenFunction::EmitOMPForSimdDirective(const OMPForSimdDirective &S) {
+  printf(" ======> Inside EmitOMPSimdDirective: EmitOMPForSimdDirective\n ");
   InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
   RunCleanupsScope ExecutedScope(*this);
   EmitOMPDirectiveWithLoop(OMPD_for_simd, OMPD_for_simd, S);
@@ -7539,6 +7540,7 @@ void CodeGenFunction::EmitOMPForSimdDirective(const OMPForSimdDirective &S) {
 // Generate the instructions for '#pragma omp distribute simd' directive.
 void CodeGenFunction::EmitOMPDistributeSimdDirective(
     const OMPDistributeSimdDirective &S) {
+  printf(" ======> Inside EmitOMPSimdDirective: EmitOMPDistributeSimdDirective\n ");
   InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
   RunCleanupsScope ExecutedScope(*this);
   EmitOMPDirectiveWithLoop(OMPD_distribute_simd, OMPD_distribute_simd, S);
@@ -7548,6 +7550,7 @@ void CodeGenFunction::EmitOMPDistributeSimdDirective(
 // directive.
 void CodeGenFunction::EmitOMPDistributeParallelForDirective(
     const OMPDistributeParallelForDirective &S) {
+  printf(" ======> Inside EmitOMPSimdDirective: EmitOMPDistributeParallelForDirective\n ");
   InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
   RunCleanupsScope ExecutedScope(*this);
   assert(S.getLowerBound() && "No lower bound");
@@ -7563,6 +7566,7 @@ void CodeGenFunction::EmitOMPDistributeParallelForDirective(
 // directive.
 void CodeGenFunction::EmitOMPDistributeParallelForSimdDirective(
     const OMPDistributeParallelForSimdDirective &S) {
+  printf(" ======> Inside EmitOMPSimdDirective: EmitOMPDistributeParallelForDirective\n ");
   InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
   RunCleanupsScope ExecutedScope(*this);
   assert(S.getLowerBound() && "No lower bound");
