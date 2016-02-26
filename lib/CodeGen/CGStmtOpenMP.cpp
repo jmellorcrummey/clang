@@ -907,6 +907,7 @@ void CodeGenFunction::EmitOMPDirectiveWithParallelNoMicrotask(
     OpenMPDirectiveKind DKind, ArrayRef<OpenMPDirectiveKind> SKinds,
     const OMPExecutableDirective &S) {
 
+  printf(" ======> Inside EmitOMPSimdDirective: EmitOMPDirectiveWithParallelNoMicrotask\n ");
   // Generate shared args for captured stmt.
   CapturedStmt *CS = cast<CapturedStmt>(S.getAssociatedStmt());
 
@@ -925,6 +926,7 @@ void CodeGenFunction::EmitOMPDirectiveWithParallelNoMicrotask(
   // If this is a nvptx target we do not support codegen for parallel in
   // functions that are not entry points.
   if (IsNvptxTarget) {
+    printf(" ======> Inside EmitOMPSimdDirective: EmitOMPDirectiveWithParallelNoMicrotask: IsNvptxTarget\n ");
     const DeclContext *DC = CS->getCapturedDecl()->getParent();
     while (DC) {
       // If this is in a declare target just emit the captured statment as is.
@@ -977,7 +979,8 @@ void CodeGenFunction::EmitOMPDirectiveWithParallelNoMicrotask(
 
   // CodeGen for clauses (call start).
   {
-        for (ArrayRef<OMPClause *>::iterator I = S.clauses().begin(), E =
+    printf(" ======> Inside EmitOMPSimdDirective: EmitOMPDirectiveWithParallelNoMicrotask: Code gen for clauses\n ");
+    for (ArrayRef<OMPClause *>::iterator I = S.clauses().begin(), E =
         S.clauses().end(); I != E; ++I)
       if (*I
           && (!IsAllowedClause((*I)->getClauseKind(), SKinds)
@@ -1022,6 +1025,7 @@ void CodeGenFunction::EmitOMPDirectiveWithParallelNoMicrotask(
   if (DKind == OMPD_parallel && !IsNvptxTarget) {
     EmitOMPCancelBarrier(S.getLocEnd(), KMP_IDENT_BARRIER_IMPL);
   } else if (IsNvptxTarget) {
+    printf(" ======> Inside EmitOMPSimdDirective: EmitOMPDirectiveWithParallelNoMicrotask: IsNvptxTarget\n ");
     // in nvptx we need to transition back to serial execution and to do so
     // a synchronization is required: always codegen a barrier here, even if
     // nowait was specified
@@ -1047,6 +1051,7 @@ void CodeGenFunction::EmitOMPDirectiveWithParallelMicrotask(
     OpenMPDirectiveKind DKind, ArrayRef<OpenMPDirectiveKind> SKinds,
     const OMPExecutableDirective &S) {
 
+  printf(" ======> Inside EmitOMPDirectiveWithParallelMicrotask\n ");
   // Are we generating code for a target?
   bool isTargetMode = CGM.getLangOpts().OpenMPTargetMode;
 
@@ -1226,24 +1231,28 @@ void CodeGenFunction::EmitOMPDirectiveWithParallelMicrotask(
 
 /// Generate an instructions for '#pragma omp parallel' directive.
 void CodeGenFunction::EmitOMPParallelDirective(const OMPParallelDirective &S) {
+  printf(" ======> Inside EmitOMPParallelDirective\n ");
   EmitOMPDirectiveWithParallel(OMPD_parallel, OMPD_unknown, S);
 }
 
 /// Generate an instructions for '#pragma omp parallel for' directive.
 void
 CodeGenFunction::EmitOMPParallelForDirective(const OMPParallelForDirective &S) {
+  printf(" ======> Inside EmitOMPParallelForDirective\n ");
   EmitOMPDirectiveWithParallel(OMPD_parallel_for, OMPD_for, S);
 }
 
 /// Generate an instructions for '#pragma omp parallel for simd' directive.
 void CodeGenFunction::EmitOMPParallelForSimdDirective(
     const OMPParallelForSimdDirective &S) {
+  printf(" ======> Inside EmitOMPParallelForSimdDirective\n ");
   EmitOMPDirectiveWithParallel(OMPD_parallel_for_simd, OMPD_for_simd, S);
 }
 
 /// Generate an instructions for '#pragma omp parallel sections' directive.
 void CodeGenFunction::EmitOMPParallelSectionsDirective(
     const OMPParallelSectionsDirective &S) {
+  printf(" ======> Inside EmitOMPParallelSectionsDirective\n ");
   EmitOMPDirectiveWithParallel(OMPD_parallel_sections, OMPD_sections, S);
 }
 
@@ -1824,6 +1833,7 @@ void CodeGenFunction::EmitOMPDirectiveWithTeams(OpenMPDirectiveKind DKind,
 void CodeGenFunction::EmitOMPDirectiveWithTeamsNoMicrotask(
     OpenMPDirectiveKind DKind, OpenMPDirectiveKind SKind,
     const OMPExecutableDirective &S) {
+  printf("======> Inside EmitOMPDirectiveWithTeamsNoMicrotask\n");
   // Generate shared args for captured stmt.
   CapturedStmt *CS = cast<CapturedStmt>(S.getAssociatedStmt());
 
@@ -1953,6 +1963,7 @@ void CodeGenFunction::EmitOMPDirectiveWithTeamsNoMicrotask(
 void CodeGenFunction::EmitOMPDirectiveWithTeamsMicrotask(
     OpenMPDirectiveKind DKind, OpenMPDirectiveKind SKind,
     const OMPExecutableDirective &S) {
+  printf("======> Inside EmitOMPDirectiveWithTeamsMicrotask\n");
   // Generate shared args for captured stmt.
   CapturedStmt *CS = cast<CapturedStmt>(S.getAssociatedStmt());
 
@@ -2280,6 +2291,7 @@ ProcessDependAddresses(CodeGenFunction &CGF, const OMPExecutableDirective &S) {
 void CodeGenFunction::EmitOMPDirectiveWithTarget(OpenMPDirectiveKind DKind,
     OpenMPDirectiveKind SKind, const OMPExecutableDirective &S) {
 
+  printf("======> Inside EmitOMPDirectiveWithTarget\n");
   CapturedStmt *CS = cast<CapturedStmt>(S.getAssociatedStmt());
 
   // Are we generating code for a target?
@@ -7583,6 +7595,7 @@ void CodeGenFunction::EmitOMPDistributeParallelForSimdDirective(
 // directive.
 void CodeGenFunction::EmitOMPTeamsDistributeParallelForDirective(
     const OMPTeamsDistributeParallelForDirective &S) {
+  printf("======> Inside EmitOMPTeamsDistributeParallelForDirective\n");
   InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
   RunCleanupsScope ExecutedScope(*this);
   EmitOMPDirectiveWithTeams(OMPD_teams_distribute_parallel_for,
@@ -7593,6 +7606,7 @@ void CodeGenFunction::EmitOMPTeamsDistributeParallelForDirective(
 // directive.
 void CodeGenFunction::EmitOMPTeamsDistributeParallelForSimdDirective(
     const OMPTeamsDistributeParallelForSimdDirective &S) {
+  printf("======> Inside EmitOMPTeamsDistributeParallelForSimdDirective\n");
   InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
   RunCleanupsScope ExecutedScope(*this);
   EmitOMPDirectiveWithTeams(OMPD_teams_distribute_parallel_for_simd,
@@ -7603,6 +7617,7 @@ void CodeGenFunction::EmitOMPTeamsDistributeParallelForSimdDirective(
 // for' directive.
 void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForDirective(
     const OMPTargetTeamsDistributeParallelForDirective &S) {
+  printf("======> Inside EmitOMPTargetTeamsDistributeParallelForDirective\n");
   InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
   RunCleanupsScope ExecutedScope(*this);
   EmitOMPDirectiveWithTarget(OMPD_target_teams_distribute_parallel_for,
@@ -7613,6 +7628,7 @@ void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForDirective(
 // for simd' directive.
 void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForSimdDirective(
     const OMPTargetTeamsDistributeParallelForSimdDirective &S) {
+  printf("======> Inside EmitOMPTargetTeamsDistributeParallelForSimdDirective\n");
   InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
   RunCleanupsScope ExecutedScope(*this);
   EmitOMPDirectiveWithTarget(OMPD_target_teams_distribute_parallel_for_simd,
@@ -7621,6 +7637,7 @@ void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForSimdDirective(
 
 // Generate the instructions for '#pragma omp target' directive.
 void CodeGenFunction::EmitOMPTargetDirective(const OMPTargetDirective &S) {
+  printf("======> Inside EmitOMPTargetDirective\n");
   RunCleanupsScope ExecutedScope(*this);
   EmitOMPDirectiveWithTarget(OMPD_target, OMPD_unknown, S);
 }
@@ -7629,6 +7646,7 @@ void CodeGenFunction::EmitOMPTargetDirective(const OMPTargetDirective &S) {
 void CodeGenFunction::EmitOMPTargetDataDirective(
     const OMPTargetDataDirective &S) {
 
+  printf("======> Inside EmitOMPTargetDataDirective\n");
   CGM.OpenMPSupport.startOpenMPRegion(false);
   CGM.OpenMPSupport.setNoWait(false);
 
@@ -7735,6 +7753,7 @@ void CodeGenFunction::EmitOMPTargetDataDirective(
 void CodeGenFunction::EmitOMPTargetEnterDataDirective(
     const OMPTargetEnterDataDirective &S) {
 
+  printf("======> Inside EmitOMPTargetEnterDataDirective\n");
   CGM.OpenMPSupport.startOpenMPRegion(false);
   CGM.OpenMPSupport.setNoWait(false);
 
@@ -7806,6 +7825,7 @@ void CodeGenFunction::EmitOMPTargetEnterDataDirective(
 void CodeGenFunction::EmitOMPTargetExitDataDirective(
     const OMPTargetExitDataDirective &S) {
 
+  printf("======> Inside EmitOMPTargetExitDataDirective\n");
   CGM.OpenMPSupport.startOpenMPRegion(false);
   CGM.OpenMPSupport.setNoWait(false);
 
@@ -7877,6 +7897,7 @@ void CodeGenFunction::EmitOMPTargetExitDataDirective(
 void CodeGenFunction::EmitOMPTargetUpdateDirective(
     const OMPTargetUpdateDirective &S) {
 
+  printf("======> Inside EmitOMPTargetUpdateDirective\n");
   // We create a new region for this so we can reuse whatever is in the stack
   // for the map clause.
   CGM.OpenMPSupport.startOpenMPRegion(false);
@@ -8060,6 +8081,7 @@ void CodeGenFunction::EmitOMPTargetUpdateDirective(
 // Generate the instructions for '#pragma omp target teams' directive.
 void
 CodeGenFunction::EmitOMPTargetTeamsDirective(const OMPTargetTeamsDirective &S) {
+  printf("======> Inside EmitOMPTargetTeamsDirective\n");
   InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
   RunCleanupsScope ExecutedScope(*this);
   EmitOMPDirectiveWithTarget(OMPD_target_teams, OMPD_teams, S);
@@ -8068,6 +8090,7 @@ CodeGenFunction::EmitOMPTargetTeamsDirective(const OMPTargetTeamsDirective &S) {
 /// Generate an instructions for '#pragma omp teams distribute' directive.
 void CodeGenFunction::EmitOMPTeamsDistributeDirective(
     const OMPTeamsDistributeDirective &S) {
+  printf("======> Inside EmitOMPTeamsDistributeDirective\n");
   InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
   RunCleanupsScope ExecutedScope(*this);
   EmitOMPDirectiveWithTeams(OMPD_teams_distribute, OMPD_distribute, S);
@@ -8076,6 +8099,7 @@ void CodeGenFunction::EmitOMPTeamsDistributeDirective(
 /// Generate an instructions for '#pragma omp teams distribute simd' directive.
 void CodeGenFunction::EmitOMPTeamsDistributeSimdDirective(
     const OMPTeamsDistributeSimdDirective &S) {
+  printf("======> Inside EmitOMPTeamsDistributeSimdDirective\n");
   InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
   RunCleanupsScope ExecutedScope(*this);
   EmitOMPDirectiveWithTeams(OMPD_teams_distribute_simd, OMPD_distribute_simd,
@@ -8086,6 +8110,7 @@ void CodeGenFunction::EmitOMPTeamsDistributeSimdDirective(
 /// directive.
 void CodeGenFunction::EmitOMPTargetTeamsDistributeDirective(
     const OMPTargetTeamsDistributeDirective &S) {
+  printf("======> Inside EmitOMPTargetTeamsDistributeDirective\n");
   InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
   RunCleanupsScope ExecutedScope(*this);
   EmitOMPDirectiveWithTarget(OMPD_target_teams_distribute,
@@ -8096,6 +8121,7 @@ void CodeGenFunction::EmitOMPTargetTeamsDistributeDirective(
 /// directive.
 void CodeGenFunction::EmitOMPTargetTeamsDistributeSimdDirective(
     const OMPTargetTeamsDistributeSimdDirective &S) {
+  printf("======> Inside EmitOMPTargetTeamsDistributeSimdDirective\n");
   InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
   RunCleanupsScope ExecutedScope(*this);
   EmitOMPDirectiveWithTarget(OMPD_target_teams_distribute_simd,
