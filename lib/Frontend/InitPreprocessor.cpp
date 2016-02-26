@@ -884,6 +884,12 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
     //   yyyy and mm are the year and the month designations of the
     //   version of the OpenMP API that the implementation support.
     Builder.defineMacro("_OPENMP", "201307");
+
+    // Define macros for host and device.
+    if (LangOpts.OpenMPTargetMode)
+      Builder.defineMacro("__OPENMP_IS_DEVICE__");
+    else
+      Builder.defineMacro("__OPENMP_IS_HOST__");
   }
 
   // CUDA device path compilaton

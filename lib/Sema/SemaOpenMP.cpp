@@ -438,28 +438,6 @@ OpenMPClauseKind DSAStackTy::getTopDSA(VarDecl *D, DeclRefExpr *&E) {
     return OMPC_threadprivate;
 
   // OpenMP [2.9.1.1, Data-sharing Attribute Rules for Variables Referenced
-  // in a Construct, C/C++, predetermined, p.1]
-  // Variables with automatic storage duration that are declared in a scope
-  // inside the construct are private.
-  OpenMPDirectiveKind Kind = getCurrentDirective();
-  if (Kind != OMPD_parallel && Kind != OMPD_parallel_for &&
-      Kind != OMPD_parallel_for_simd && Kind != OMPD_distribute_parallel_for &&
-      Kind != OMPD_distribute_parallel_for_simd &&
-      Kind != OMPD_teams_distribute_parallel_for &&
-      Kind != OMPD_teams_distribute_parallel_for_simd &&
-      Kind != OMPD_target_teams_distribute_parallel_for &&
-      Kind != OMPD_target_teams_distribute_parallel_for_simd &&
-      Kind != OMPD_task && Kind != OMPD_teams &&
-      Kind != OMPD_parallel_sections && Kind != OMPD_target_teams &&
-      Kind != OMPD_teams_distribute && Kind != OMPD_teams_distribute_simd &&
-      Kind != OMPD_target_teams_distribute &&
-      Kind != OMPD_target_teams_distribute_simd) {
-    if (isOpenMPLocal(D, Stack.rbegin() + 1) && D->isLocalVarDecl() &&
-        (D->getStorageClass() == SC_Auto || D->getStorageClass() == SC_None))
-      return OMPC_private;
-  }
-
-  // OpenMP [2.9.1.1, Data-sharing Attribute Rules for Variables Referenced
   // in a Construct, C/C++, predetermined, p.4]
   //  Static data memebers are shared.
   if (D->isStaticDataMember()) {
@@ -1611,6 +1589,8 @@ static void CheckDeclInTargetContext(SourceLocation SL, SourceRange SR,
                                      Sema &SemaRef, DSAStackTy *Stack,
                                      Decl *D) {
   if (!D)
+    return;
+  if (D->isTemplateParameter())
     return;
   Decl *LD = 0;
   if (isa<TagDecl>(D)) {
@@ -3021,7 +3001,7 @@ Stmt *Sema::AddDistributedParallelArgsIntoCapturedStmt(CapturedStmt *Cap,
        I != E; ++I) {
     if (I->capturesVariable())
       MarkVariableReferenced(I->getLocation(), I->getCapturedVar());
-    else
+    else if (I->capturesThis())
       CheckCXXThisCapture(I->getLocation(), /*explicit*/ false);
   }
   StmtResult CapturedBody = ActOnCapturedRegionEnd(Body);
@@ -5747,6 +5727,9 @@ OMPClause *Sema::ActOnOpenMPFirstPrivateClause(ArrayRef<Expr *> VarList,
               << getOpenMPDirectiveName(CurrDir);
           if (PrevRef) {
             Diag(PrevRef->getExprLoc(), diag::note_omp_explicit_dsa)
+                << getOpenMPClauseName(Kind);
+          } else {
+            Diag(VD->getLocation(), diag::note_omp_predetermined_dsa)
                 << getOpenMPClauseName(Kind);
           }
           continue;

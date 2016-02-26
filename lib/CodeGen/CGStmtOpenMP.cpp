@@ -92,6 +92,7 @@ static bool isLoopDirective(const OMPExecutableDirective *ED) {
          isa<OMPTargetTeamsDistributeSimdDirective>(ED);
 }
 
+
 static bool isParallelDirective(const OMPExecutableDirective *ED) {
   return isa<OMPParallelDirective>(ED) || isa<OMPParallelForDirective>(ED)
       || isa<OMPParallelForSimdDirective>(ED)
@@ -679,6 +680,19 @@ public:
   ~BuilderInsertPositionRAII() { Builder.restoreIP(SavedIP); }
 };
 
+static bool HasReductionClause(const OMPExecutableDirective &S) {
+  ArrayRef<OMPClause *> Clauses = S.clauses();
+  if (Clauses.data() != nullptr) {
+    for (ArrayRef<OMPClause *>::iterator I = Clauses.begin(),
+                                         E = Clauses.end();
+                                         I != E; ++I) {
+      if (*I && (*I)->getClauseKind() == OMPC_reduction)
+        return true;
+    }
+  }
+  return false;
+}
+
 /// \brief RAII object for OpenMP region.
 class OpenMPRegionRAII {
 public:
@@ -738,7 +752,6 @@ public:
       CGF.InitOpenMPTargetFunction(S, CS, VLAToLoad);
       break;
     case OMPRegionType_Shared_Parallel:
-    case OMPRegionType_Shared_Simd:
       isTargetRegion = false;
       // We need to understand whether the captured information for the current
       // function was generated before or if it is going to be generated for this
@@ -748,6 +761,20 @@ public:
       CGF.InitOpenMPSharedizeParameters(
           CS, RegionType == OMPRegionType_Shared_Parallel, MappingDecls,
           MappingDeclVals, VLAExprLocs, VLAExprVals);
+      break;
+    case OMPRegionType_Shared_Simd:
+      isTargetRegion = false;
+      // We need to understand whether the captured information for the current
+      // function was generated before or if it is going to be generated for this
+      // region.
+      OwnsCaptureStmtInfo = CGF.CapturedStmtInfo == nullptr;
+
+      if (/* Currently SIMD with reduction clause is ignored */
+          !HasReductionClause(S)) {
+        CGF.InitOpenMPSharedizeParameters(
+          CS, RegionType == OMPRegionType_Shared_Parallel, MappingDecls,
+          MappingDeclVals, VLAExprLocs, VLAExprVals);
+      }
       break;
     }
   }
@@ -1637,7 +1664,25 @@ CodeGenFunction::EmitOMPDirectiveWithLoop(OpenMPDirectiveKind DKind,
                    llvm::Triple::nvptx64)) {
             InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
             RunCleanupsScope ExecutedScope(*this);
-            CGPragmaOmpSimd Wrapper(&S);
+
+            // Setup the LB and UB for the SIMD region.  Place in shared memory
+            // if SIMD spans warps
+            bool SimdSpansWarps = DKind == OMPD_target_teams_distribute_simd ||
+                DKind == OMPD_teams_distribute_simd ||
+                DKind == OMPD_distribute_simd;
+            if (SimdSpansWarps &&
+                /* Currently SIMD with reduction clause is ignored */
+                !HasReductionClause(S)) {
+              unsigned NestingLevel =
+                  CGM.getOpenMPRuntime().CalculateParallelNestingLevel();
+              CGM.getOpenMPRuntime().startSharedRegion(NestingLevel);
+              // Save the variable as a shared variable
+              CGM.getOpenMPRuntime().addToSharedRegion(Private, NestingLevel,
+                  false);
+              CGM.getOpenMPRuntime().addToSharedRegion(PUB, NestingLevel,
+                  false);
+            }
+            CGPragmaOmpSimd Wrapper(&S, Private, PUB);
             EmitPragmaSimd(Wrapper);
           } else {
             RunCleanupsScope Scope(*this);
@@ -2639,14 +2684,39 @@ void CodeGenFunction::EmitOMPDirectiveWithTarget(OpenMPDirectiveKind DKind,
         if (dealtWithByMapClause)
           continue;
 
-        uint64_t VS = CGM.getDataLayout().getTypeSizeInBits(
-            CGM.getTypes().ConvertTypeForMem(MapType)) / 8;
+        // If this refers to a variable and it was not dealt with in the map
+        // clause, it means this is an implicit map, so we will let the user
+        // know about it if he requested that.
+        if (DE && CGM.getLangOpts().OpenMPTargetListImplMaps) {
+          const ValueDecl *VD = DE->getDecl();
+          auto &SM = CGM.getContext().getSourceManager();
+          S.getLocStart().print(llvm::errs(), SM);
+          llvm::errs() << ": note: variable '" << VD->getName() << "' of type '"
+                       << VD->getType().getAsString()
+                       << "' is being implicitly mapped.\n";
+        }
+
+        llvm::Value *VS = nullptr;
+        if (QTy->isVariablyModifiedType()) {
+          QualType PT = QTy->getPointeeType();
+          QualType eltType;
+          llvm::Value *numElts;
+          std::tie(numElts, eltType) = getVLASize(PT);
+          CharUnits eltSize = getContext().getTypeSizeInChars(eltType);
+          VS = numElts;
+          if (!eltSize.isOne())
+            VS = Builder.CreateNUWMul(VS, CGM.getSize(eltSize));
+        } else {
+          uint64_t VSI = CGM.getDataLayout().getTypeSizeInBits(
+              CGM.getTypes().ConvertTypeForMem(MapType)) / 8;
+          VS = Builder.getInt64(VSI);
+        }
 
         unsigned DefaultType = OMP_TGT_MAPTYPE_TO | OMP_TGT_MAPTYPE_FROM;
 
         RealArgBasePointerValues.push_back(Arg);
         RealArgPointerValues.push_back(Arg);
-        RealArgSizeValues.push_back(Builder.getInt64(VS));
+        RealArgSizeValues.push_back(VS);
         RealArgTypeValues.push_back( DefaultType);
 
         // If this is a lambda structure with pointer fields, translate
@@ -2655,12 +2725,21 @@ void CodeGenFunction::EmitOMPDirectiveWithTarget(OpenMPDirectiveKind DKind,
         if (DE && DE->getType()->isClassType()) {
           if (CXXRecordDecl const *CD = DE->getBestDynamicClassType()) {
             if (CD->isLambda()) {
-              int64_t idx = 0;
-              for (auto it = CD->field_begin();
-                  it != CD->field_end(); ++it, ++idx) {
-                // Look for captured-by-reference fields
-                if (!(*it)->getType()->isReferenceType())
+              // Register lambda (and nested lambdas) for target codegen
+              CGM.getOpenMPRuntime().registerLambda(CD);
+
+              uint64_t idx = 0;
+              for (LambdaCapture cap : CD->captures()) {
+                if (cap.capturesVLAType() /* VLA type is copied by value */ ||
+                    // Need to map (translate) all pointers, whether captured
+                    // by value or reference.  Otherwise, ignore copy-by-value
+                    // variables.
+                    (!cap.capturesThis() &&
+                      !cap.getCapturedVar()->getType()->isPointerType() &&
+                       cap.getCaptureKind() == LambdaCaptureKind::LCK_ByCopy)) {
+                  idx++;
                   continue;
+                }
 
                 llvm::PointerType *StructPtr =
                     cast<llvm::PointerType>(Arg->getType());
@@ -2672,13 +2751,15 @@ void CodeGenFunction::EmitOMPDirectiveWithTarget(OpenMPDirectiveKind DKind,
                 llvm::Value *B = Builder.CreateLoad(P);
 
                 uint64_t VS = CGM.getDataLayout().getTypeSizeInBits(
-                    CGM.getTypes().ConvertTypeForMem((*it)->getType())) / 8;
+                    B->getType()) / 8;
 
                 RealArgBasePointerValues.push_back(P);
                 RealArgPointerValues.push_back(B);
                 RealArgSizeValues.push_back(Builder.getInt64(VS));
                 RealArgTypeValues.push_back( OMP_TGT_MAPTYPE_POINTER |
                     OMP_TGT_MAPTYPE_EXTRA );
+
+                idx++;
               }
             }
           }
@@ -2686,6 +2767,18 @@ void CodeGenFunction::EmitOMPDirectiveWithTarget(OpenMPDirectiveKind DKind,
 
       }
     }
+
+    // TODO: Being able to do this here would be ideal.
+    // Recursively look for nested lambdas inside the target region
+//    llvm::errs() << "Looking for nested lambdas in target\n";
+//    for (Decl *DC : Fn->decls()) {
+//      if (const CXXRecordDecl *RD = dyn_cast<CXXRecordDecl>(DC)) {
+//        if (RD->isLambda()) {
+//          RD->dump();
+//          CGM.getOpenMPRuntime().registerLambda(RD);
+//        }
+//      }
+//    }
 
     // Because we are coalescing the codegen of the map clause with the target
     // outlining we need to inform the clause codegen to not do anything
@@ -5339,7 +5432,8 @@ CodeGenFunction::EmitPreOMPReductionClause(const OMPReductionClause &C,
         } else {
         llvm::Value *Zero =
             llvm::Constant::getNullValue(Private->getAllocatedType());
-           InitTempAlloca(Private, Zero);
+	   
+	   Builder.CreateStore(Zero, Private);
 	}
         break;
       }
@@ -5353,7 +5447,7 @@ CodeGenFunction::EmitPreOMPReductionClause(const OMPReductionClause &C,
         } else {
         llvm::Value *AllOnes =
             llvm::Constant::getAllOnesValue(Private->getAllocatedType());
-        InitTempAlloca(Private, AllOnes);
+	Builder.CreateStore(AllOnes, Private);
         }
         break;
       }
@@ -5406,9 +5500,9 @@ CodeGenFunction::EmitPreOMPReductionClause(const OMPReductionClause &C,
              Init = llvm::ConstantFP::get(CGM.getLLVMContext(), InitVal);
           }
           ComplexPairTy Value(Init, Init);
-          //LValue Dst = MakeNaturalAlignAddrLValue(Private, ElementQTy);
-          //EmitStoreOfComplex(Value, PrivateElement, true);
-	   Builder.CreateStore(Value, PrivateElement);
+          LValue Dst = MakeNaturalAlignAddrLValue(PrivateElement, ElementQTy);
+          EmitStoreOfComplex(Value, PrivateElement, true);
+	  // Builder.CreateStore(Value, PrivateElement);
 #endif
 	  }
 	} else {
@@ -5417,16 +5511,16 @@ CodeGenFunction::EmitPreOMPReductionClause(const OMPReductionClause &C,
               CGM.getDataLayout().getTypeStoreSizeInBits(Ty));
           llvm::Value *Init =
               llvm::ConstantInt::get(CGM.getLLVMContext(), InitVal);
-          InitTempAlloca(Private, Init);
+	  Builder.CreateStore(Init, Private);
         } else if (QTy->isRealFloatingType()) {
           const llvm::fltSemantics &FS = Ty->getFltSemantics();
           llvm::APFloat InitVal = llvm::APFloat::getZero(FS);
           llvm::Value *Init =
               llvm::ConstantFP::get(CGM.getLLVMContext(), InitVal);
-          InitTempAlloca(Private, Init);
+	  Builder.CreateStore(Init, Private);
         } else if (QTy->isPointerType()) {
-          InitTempAlloca(Private, llvm::ConstantPointerNull::get(
-                                      cast<llvm::PointerType>(Ty)));
+          Builder.CreateStore(llvm::ConstantPointerNull::get(
+                     cast<llvm::PointerType>(Ty)), Private);
         } else if (QTy->isAnyComplexType()) {
           const ComplexType *CmplxTy = QTy->castAs<ComplexType>();
           QualType ElTy = CmplxTy->getElementType();
@@ -5455,13 +5549,13 @@ CodeGenFunction::EmitPreOMPReductionClause(const OMPReductionClause &C,
                               1);
           llvm::Value *Init =
               llvm::ConstantInt::get(CGM.getLLVMContext(), InitVal);
-          InitTempAlloca(Private, Init);
+         Builder.CreateStore(Init, Private);
         } else if (QTy->isRealFloatingType()) {
           const llvm::fltSemantics &FS = Ty->getFltSemantics();
           llvm::APFloat InitVal(FS, 1);
           llvm::Value *Init =
               llvm::ConstantFP::get(CGM.getLLVMContext(), InitVal);
-          InitTempAlloca(Private, Init);
+         Builder.CreateStore(Init, Private);
         } else if (QTy->isPointerType()) {
           llvm::APInt InitVal(CGM.getDataLayout().getTypeStoreSizeInBits(Ty),
                               1);
@@ -5469,7 +5563,7 @@ CodeGenFunction::EmitPreOMPReductionClause(const OMPReductionClause &C,
               llvm::ConstantInt::get(CGM.getLLVMContext(), InitVal);
           Init = llvm::ConstantExpr::getCast(llvm::Instruction::IntToPtr, Init,
                                              Ty);
-          InitTempAlloca(Private, Init);
+          Builder.CreateStore(Init, Private);
         } else if (QTy->isAnyComplexType()) {
           const ComplexType *CmplxTy = QTy->castAs<ComplexType>();
           QualType ElTy = CmplxTy->getElementType();
@@ -5496,16 +5590,16 @@ CodeGenFunction::EmitPreOMPReductionClause(const OMPReductionClause &C,
               CGM.getDataLayout().getTypeStoreSizeInBits(Ty));
           llvm::Value *Init =
               llvm::ConstantInt::get(CGM.getLLVMContext(), InitVal);
-          InitTempAlloca(Private, Init);
+          Builder.CreateStore(Init, Private);
         } else if (QTy->isRealFloatingType()) {
           llvm::APFloat InitVal = llvm::APFloat::getAllOnesValue(
               CGM.getDataLayout().getTypeStoreSizeInBits(Ty));
           llvm::Value *Init =
               llvm::ConstantFP::get(CGM.getLLVMContext(), InitVal);
-          InitTempAlloca(Private, Init);
+          Builder.CreateStore(Init, Private);
         } else if (QTy->isPointerType()) {
           llvm::Value *Init = llvm::Constant::getAllOnesValue(Ty);
-          InitTempAlloca(Private, Init);
+          Builder.CreateStore(Init, Private);
         } else if (QTy->isAnyComplexType()) {
           const ComplexType *CmplxTy = QTy->castAs<ComplexType>();
           QualType ElTy = CmplxTy->getElementType();
@@ -5532,19 +5626,19 @@ CodeGenFunction::EmitPreOMPReductionClause(const OMPReductionClause &C,
               CGM.getDataLayout().getTypeStoreSizeInBits(Ty));
           llvm::Value *Init =
               llvm::ConstantInt::get(CGM.getLLVMContext(), InitVal);
-          InitTempAlloca(Private, Init);
+          Builder.CreateStore(Init, Private);
         } else if (QTy->isUnsignedIntegerOrEnumerationType()) {
           llvm::APInt InitVal = llvm::APInt::getMaxValue(
               CGM.getDataLayout().getTypeStoreSizeInBits(Ty));
           llvm::Value *Init =
               llvm::ConstantInt::get(CGM.getLLVMContext(), InitVal);
-          InitTempAlloca(Private, Init);
+          Builder.CreateStore(Init, Private);
         } else if (QTy->isRealFloatingType()) {
           const llvm::fltSemantics &FS = Ty->getFltSemantics();
           llvm::APFloat InitVal = llvm::APFloat::getLargest(FS);
           llvm::Value *Init =
               llvm::ConstantFP::get(CGM.getLLVMContext(), InitVal);
-          InitTempAlloca(Private, Init);
+          Builder.CreateStore(Init, Private);
         } else if (QTy->isPointerType()) {
           llvm::APInt InitVal = llvm::APInt::getMaxValue(
               CGM.getDataLayout().getTypeStoreSizeInBits(Ty));
@@ -5552,7 +5646,7 @@ CodeGenFunction::EmitPreOMPReductionClause(const OMPReductionClause &C,
               llvm::ConstantInt::get(CGM.getLLVMContext(), InitVal);
           Init = llvm::ConstantExpr::getCast(llvm::Instruction::IntToPtr, Init,
                                              Ty);
-          InitTempAlloca(Private, Init);
+          Builder.CreateStore(Init, Private);
         }
         break;
       }
@@ -5562,19 +5656,19 @@ CodeGenFunction::EmitPreOMPReductionClause(const OMPReductionClause &C,
               CGM.getDataLayout().getTypeStoreSizeInBits(Ty));
           llvm::Value *Init =
               llvm::ConstantInt::get(CGM.getLLVMContext(), InitVal);
-          InitTempAlloca(Private, Init);
+          Builder.CreateStore(Init, Private);
         } else if (QTy->isUnsignedIntegerOrEnumerationType()) {
           llvm::APInt InitVal = llvm::APInt::getMinValue(
               CGM.getDataLayout().getTypeStoreSizeInBits(Ty));
           llvm::Value *Init =
               llvm::ConstantInt::get(CGM.getLLVMContext(), InitVal);
-          InitTempAlloca(Private, Init);
+          Builder.CreateStore(Init, Private);
         } else if (QTy->isRealFloatingType()) {
           const llvm::fltSemantics &FS = Ty->getFltSemantics();
           llvm::APFloat InitVal = llvm::APFloat::getLargest(FS, true);
           llvm::Value *Init =
               llvm::ConstantFP::get(CGM.getLLVMContext(), InitVal);
-          InitTempAlloca(Private, Init);
+          Builder.CreateStore(Init, Private);
         } else if (QTy->isPointerType()) {
           llvm::APInt InitVal = llvm::APInt::getMinValue(
               CGM.getDataLayout().getTypeStoreSizeInBits(Ty));
@@ -5582,7 +5676,7 @@ CodeGenFunction::EmitPreOMPReductionClause(const OMPReductionClause &C,
               llvm::ConstantInt::get(CGM.getLLVMContext(), InitVal);
           Init = llvm::ConstantExpr::getCast(llvm::Instruction::IntToPtr, Init,
                                              Ty);
-          InitTempAlloca(Private, Init);
+          Builder.CreateStore(Init, Private);
         }
         break;
       }
@@ -5651,7 +5745,11 @@ CodeGenFunction::EmitPostOMPReductionClause(const OMPReductionClause &C,
       if (combined){
         // For handling combined directives case 1 is required.
         res = llvm::ConstantInt::get(Int32Ty, 1);
-      } else {
+      } else if (CGM.getOpenMPRuntime().IsCompileAssignedAcrossBlocks(S)) {
+        res = llvm::ConstantInt::get(Int32Ty, 0);
+      } else if (CGM.getOpenMPRuntime().IsCompileAssignedWholeBlock(S)) {
+        res = llvm::ConstantInt::get(Int32Ty, 1);
+      }else {
         // For non-combined directives the decision is taken by the runtime.
         res = EmitRuntimeCall(CGM.CreateRuntimeFunction(
               llvm::TypeBuilder<omp_get_num_threads, false>::get(
@@ -5722,8 +5820,11 @@ CodeGenFunction::EmitPostOMPReductionClause(const OMPReductionClause &C,
       llvm::Value *NoArgs[] = {Loc};
       llvm::CallInst *Res = EmitRuntimeCall(OPENMPRTL_FUNC(reduce_combined), NoArgs);
       Switch = Builder.CreateSwitch(Res, DefaultBlock, 2);
-    } else {
-      // Non-combined directives.
+    } else { // Non-combined directives.
+      if (CGM.getOpenMPRuntime().IsCompileAssignedAcrossBlocks(S)) {
+	llvm::Value *Res = llvm::ConstantInt::get(Int32Ty, 2);
+        Switch = Builder.CreateSwitch(Res, DefaultBlock, 2);
+      } else if (CGM.getOpenMPRuntime().IsCompileAssignedWholeBlock(S)) {
       llvm::CallInst *Res = EmitRuntimeCall(CGM.OpenMPSupport.getNoWait()
                                               ? OPENMPRTL_FUNC(reduce_nowait)
                                               : OPENMPRTL_FUNC(reduce),
@@ -5731,6 +5832,17 @@ CodeGenFunction::EmitPostOMPReductionClause(const OMPReductionClause &C,
       Switch = Builder.CreateSwitch(Res, DefaultBlock, 2);
       // Case 1 is only needed for non-combined directives
       Switch->addCase(llvm::ConstantInt::get(Int32Ty, 1), RedBB1);
+      } else if (CGM.getOpenMPRuntime().IsCompileAssignedWarp(S)) {
+	llvm_unreachable("under construction");
+      }else {
+      llvm::CallInst *Res = EmitRuntimeCall(CGM.OpenMPSupport.getNoWait()
+                                              ? OPENMPRTL_FUNC(reduce_nowait)
+                                              : OPENMPRTL_FUNC(reduce),
+                                          RealArgs);
+      Switch = Builder.CreateSwitch(Res, DefaultBlock, 2);
+      // Case 1 is only needed for non-combined directives
+      Switch->addCase(llvm::ConstantInt::get(Int32Ty, 1), RedBB1);
+      }
     }
     // Case 2 is needed for both combined and non-combined directives
     Switch->addCase(llvm::ConstantInt::get(Int32Ty, 2), RedBB2);
@@ -7379,15 +7491,28 @@ bool CodeGenFunction::CGPragmaOmpSimd::walkLocalVariablesToEmit(
 
 void CodeGenFunction::CGPragmaOmpSimd::emitInit(CodeGenFunction &CGF,
                                                 llvm::Value *&LoopIndex,
+                                                llvm::Value *&LoopStart,
                                                 llvm::Value *&LoopCount) {
   // Emit loop index
   const Expr *IterVar = getNewIterVarFromLoopDirective(SimdOmp);
   LoopIndex = CGF.CreateMemTemp(IterVar->getType(), ".idx.");
   const VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(IterVar)->getDecl());
   CGF.CGM.OpenMPSupport.addOpenMPPrivateVar(VD, LoopIndex);
+  if (LoopLB) {
+    LoopStart = CGF.Builder.CreateLoad(LoopLB);
+  } else {
+    LoopStart = llvm::ConstantInt::get(
+        CGF.EmitAnyExpr(IterVar).getScalarVal()->getType(), 0);
+  }
 
   // Emit loop count.
-  LoopCount = CGF.EmitAnyExpr(getLoopCount()).getScalarVal();
+  if (LoopUB) {
+    llvm::Value *UB = CGF.Builder.CreateLoad(LoopUB);
+    LoopCount = CGF.Builder.CreateAdd(UB,
+        llvm::ConstantInt::get(UB->getType(), 1));
+  } else {
+    LoopCount = CGF.EmitAnyExpr(getLoopCount()).getScalarVal();
+  }
 }
 
 // Emit the final values of the loop counters and linear vars.
@@ -7607,6 +7732,15 @@ void CodeGenFunction::EmitOMPTargetDirective(const OMPTargetDirective &S) {
 void CodeGenFunction::EmitOMPTargetDataDirective(
     const OMPTargetDataDirective &S) {
 
+  CapturedStmt *CS = cast<CapturedStmt>(S.getAssociatedStmt());
+
+  // If there are no devices specified we ignore the target directive and just
+  // produce regular host code
+  if (CGM.getLangOpts().OMPTargetTriples.empty()) {
+    EmitStmt(CS->getCapturedStmt());
+    return;
+  }
+
   CGM.OpenMPSupport.startOpenMPRegion(false);
   CGM.OpenMPSupport.setNoWait(false);
 
@@ -7665,8 +7799,6 @@ void CodeGenFunction::EmitOMPTargetDataDirective(
   // FIXME: Currently we are replicating all the code captured by the directive
   // in case we have an if-clause. It would be enough to guard the map runtime
   // calls with the if-clause conditional.
-
-  CapturedStmt *CS = cast<CapturedStmt>(S.getAssociatedStmt());
   EmitStmt(CS->getCapturedStmt());
 
   // Wrap the call to target_data_end in the if-clause condition
@@ -7712,6 +7844,12 @@ void CodeGenFunction::EmitOMPTargetDataDirective(
 // Generate the instructions for '#pragma omp target enter data' directive.
 void CodeGenFunction::EmitOMPTargetEnterDataDirective(
     const OMPTargetEnterDataDirective &S) {
+
+  // If there are no devices specified we ignore the target directive and just
+  // produce regular host code
+  if (CGM.getLangOpts().OMPTargetTriples.empty()) {
+    return;
+  }
 
   CGM.OpenMPSupport.startOpenMPRegion(false);
   CGM.OpenMPSupport.setNoWait(false);
@@ -7784,6 +7922,12 @@ void CodeGenFunction::EmitOMPTargetEnterDataDirective(
 void CodeGenFunction::EmitOMPTargetExitDataDirective(
     const OMPTargetExitDataDirective &S) {
 
+  // If there are no devices specified we ignore the target directive and just
+  // produce regular host code
+  if (CGM.getLangOpts().OMPTargetTriples.empty()) {
+    return;
+  }
+
   CGM.OpenMPSupport.startOpenMPRegion(false);
   CGM.OpenMPSupport.setNoWait(false);
 
@@ -7854,6 +7998,12 @@ void CodeGenFunction::EmitOMPTargetExitDataDirective(
 // Generate the instructions for '#pragma omp target update' directive.
 void CodeGenFunction::EmitOMPTargetUpdateDirective(
     const OMPTargetUpdateDirective &S) {
+
+  // If there are no devices specified we ignore the target directive and just
+  // produce regular host code
+  if (CGM.getLangOpts().OMPTargetTriples.empty()) {
+    return;
+  }
 
   // We create a new region for this so we can reuse whatever is in the stack
   // for the map clause.

@@ -232,7 +232,7 @@ int foo() {
 // CK3: @__omptgt__SimdNumLanes = common addrspace(3) global i32 0
 // CK3: @__omptgt__[[KERNUNQ3:[a-zA-Z0-9_\.]+]]__thread_limit = global i32 0
 // CK3: @__omptgt__[[KERNUNQ3]]__simd_info = constant i8 1
-// CK3: @__omptgt__shared_data_ = common addrspace(3) global [{{[0-9]+}} x i8] zeroinitializer
+// CK3: @__omptgt__shared_data_ = internal addrspace(3) global [{{[0-9]+}} x i8] zeroinitializer
 
 #include <stdio.h>
 

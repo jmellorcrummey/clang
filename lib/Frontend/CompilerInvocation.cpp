@@ -1680,6 +1680,8 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   // We only need to dump the kernels for the host.
   Opts.OpenMPTargetListKernels = Opts.OpenMP && !Opts.OpenMPTargetMode &&
                                  Args.hasArg(OPT_omp_list_offload_kernels);
+  Opts.OpenMPTargetListImplMaps = Opts.OpenMP && !Opts.OpenMPTargetMode &&
+                                  Args.hasArg(OPT_omp_list_implicit_maps);
 
   // Get the OpenMP target triples if any
   if ( Arg *A = Args.getLastArg(options::OPT_omptargets_EQ) ){

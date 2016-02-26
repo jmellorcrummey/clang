@@ -298,6 +298,7 @@ public:
                                   llvm::Constant *Destructee);
   void registerOtherGlobalVariable(const VarDecl *Other);
   void registerOtherFunction(const FunctionDecl *Other, StringRef Name);
+  void registerLambda(const CXXRecordDecl *LR);
 
   // Return true if there is any OpenMP target code to be generated
   bool hasAnyTargetCodeToBeEmitted();
@@ -722,18 +723,26 @@ public:
   virtual bool requiresMicroTaskForParallel();
 
   // \brief Emit initialization of index for #pragma omp simd loop
-  virtual void EmitSimdInitialization(llvm::Value *LoopIndex,
-                                      llvm::Value *LoopCount,
+  virtual void EmitSimdInitialization(llvm::Value *&LoopIndex,
+                                      llvm::Value *&LoopStart,
+                                      llvm::Value *&LoopCount,
+                                      OpenMPDirectiveKind DKind,
                                       CodeGenFunction &CGF);
 
   virtual void EmitSimdIncrement(llvm::Value *LoopIndex, llvm::Value *LoopCount,
                                  CodeGenFunction &CGF);
+
+  //trial
+  virtual bool IsCompileAssignedAcrossBlocks(const OMPExecutableDirective &S) {return false;};
+  virtual bool IsCompileAssignedWholeBlock(const OMPExecutableDirective &S) {return false;};
+  virtual bool IsCompileAssignedWarp(const OMPExecutableDirective &S) {return false;};
 
   // to be removed
   virtual llvm::Value * Get_kmpc_print_int();
   virtual llvm::Value * Get_kmpc_print_address_int64();
 
   virtual llvm::Value * Get_omp_get_num_threads();
+  virtual llvm::Value * Get_omp_get_thread_num();
   virtual llvm::Value * Get_omp_get_num_teams();
 };
 

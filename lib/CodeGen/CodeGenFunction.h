@@ -285,7 +285,8 @@ public:
       /// \brief Emit the SIMD loop initalization, loop stride expression
       /// as loop invariants, and cache those values.
       virtual void emitInit(CodeGenFunction &CGF,
-          llvm::Value *&LoopIndex, llvm::Value *&LoopCount) = 0;
+          llvm::Value *&LoopIndex, llvm::Value *&LoopStart,
+          llvm::Value *&LoopCount) = 0;
 
       /// \brief Emit the loop increment.
       virtual void emitIncrement(CodeGenFunction &CGF,
@@ -328,8 +329,10 @@ public:
 
   class CGPragmaOmpSimd : public CGPragmaSimdWrapper {
     public:
-      CGPragmaOmpSimd(const OMPExecutableDirective *S)
-        : SimdOmp(S) {}
+      CGPragmaOmpSimd(const OMPExecutableDirective *S,
+          llvm::Value *LoopLB = nullptr,
+          llvm::Value *LoopUB = nullptr)
+        : SimdOmp(S), LoopLB(LoopLB), LoopUB(LoopUB) {}
 
       virtual bool emitSafelen(CodeGenFunction *CGF) const;
       virtual bool walkLocalVariablesToEmit(
@@ -337,7 +340,8 @@ public:
                       CGSIMDForStmtInfo *Info) const;
 
       virtual void emitInit(CodeGenFunction &CGF,
-          llvm::Value *&LoopIndex, llvm::Value *&LoopCount);
+          llvm::Value *&LoopIndex,  llvm::Value *&LoopStart,
+          llvm::Value *&LoopCount);
 
       virtual void emitIncrement(CodeGenFunction &CGF,
                                  llvm::Value *IndexVar) const { }
@@ -358,6 +362,8 @@ public:
 
     private:
       const OMPExecutableDirective *SimdOmp;
+      llvm::Value *LoopLB;
+      llvm::Value *LoopUB;
   };
 
   /// \brief API for SIMD for statement code generation.

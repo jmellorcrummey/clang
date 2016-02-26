@@ -35,13 +35,18 @@ for(int i=0; i<100; i++){
 // CK1-NEXT: %[[PROD:[a-zA-Z0-9_\.]+]] = mul i32 %[[TID1]], %[[TID2]]
 // CK1-NEXT: %[[SUM:[a-zA-Z0-9_\.]+]] = add i32 %[[TID0]], %[[PROD]]
 // CK1-NEXT: store i32 0, i32* %[[I:[a-zA-Z0-9_\.]+]]
+// CK1-NEXT: %[[ORIGIDX1:[a-zA-Z0-9_\.]+]] = load i32, i32* %[[I]], align 4
+// CK1-NEXT: %[[CMP1:[a-zA-Z0-9_\.]+]] = icmp slt i32 %[[ORIGIDX1]], 100
+// CK1-NEXT: br i1 %[[CMP1]], label %[[PRECOND:[a-zA-Z0-9_\.]+]], label %[[ENDCOMBFOR:[a-zA-Z0-9_\.]+]]
+
+// CK1: [[PRECOND]]:
 // CK1-NEXT: store i32 %[[SUM]], i32* %[[IDX:[a-zA-Z0-9_\.]+]]
 // CK1-NEXT: br label %[[CONDCOMBFOR:[a-zA-Z0-9_\.]+]]
 
 // CK1: [[CONDCOMBFOR]]:
 // CK1-NEXT: %[[ITVAR:[a-zA-Z0-9_\.]+]] = load i32, i32* %[[IDX]]
 // CK1-NEXT: %[[COND:[a-zA-Z0-9_\.]+]] = icmp sle i32 %[[ITVAR]], 99
-// CK1-NEXT: br i1 %[[COND]], label %[[BODYCOMBFOR:[a-zA-Z0-9_\.]+]], label %[[ENDCOMBFOR:[a-zA-Z0-9_\.]+]]
+// CK1-NEXT: br i1 %[[COND]], label %[[BODYCOMBFOR:[a-zA-Z0-9_\.]+]], label %[[ENDCOMBFOR]]
 
 // CK1: [[BODYCOMBFOR]]:
 // CK1-NEXT: store i32 0, i32* %[[I]]
@@ -96,9 +101,9 @@ int foo() {
 // CK2: %[[TMP4:[a-zA-Z0-9_\.]+]] = alloca { i32, i32, i32, i32, i8* }
 // CK2: %[[TMP10:[a-zA-Z0-9_\.]+]] = alloca { i32, i32, i32, i32, i8* }
 // CK2: %[[TMP15:[a-zA-Z0-9_\.]+]] = alloca { i32, i32, i32, i32, i8* }
-// CK2: store i32 0, i32* %[[RED]]
 // CK2: store i32* %0, i32** %[[ADDR]]
 // CK2: store i32 %[[OMPHANDLE:[a-zA-Z0-9_\.]+]], i32* %[[OMPHANDLEADDR]]
+// CK2: store i32 0, i32* %[[RED]]
 // CK2: %[[REDADDR:[a-zA-Z0-9_\.]+]] = getelementptr { i32* }, { i32* }* %[[REDRECVAR]], i32 0, i32 0
 // CK2: store i32* %[[RED]], i32** %[[REDADDR]]
 // CK2-NEXT: br label %[[STARTCOMBFOR:[a-zA-Z0-9_\.]+]]
@@ -110,13 +115,18 @@ int foo() {
 // CK2-NEXT: %[[PROD:[a-zA-Z0-9_\.]+]] = mul i32 %[[TID1]], %[[TID2]]
 // CK2-NEXT: %[[SUM:[a-zA-Z0-9_\.]+]] = add i32 %[[TID0]], %[[PROD]]
 // CK2-NEXT: store i32 0, i32* %[[I:[a-zA-Z0-9_\.]+]]
+// CK2-NEXT: %[[ORIGIDX1:[a-zA-Z0-9_\.]+]] = load i32, i32* %[[I]], align 4
+// CK2-NEXT: %[[CMP1:[a-zA-Z0-9_\.]+]] = icmp slt i32 %[[ORIGIDX1]], 100
+// CK2-NEXT: br i1 %[[CMP1]], label %[[PRECOND:[a-zA-Z0-9_\.]+]], label %[[ENDCOMBFOR:[a-zA-Z0-9_\.]+]]
+
+// CK2: [[PRECOND]]:
 // CK2-NEXT: store i32 %[[SUM]], i32* %[[IDX]]
 // CK2-NEXT: br label %[[CONDCOMBFOR:[a-zA-Z0-9_\.]+]]
 
 // CK2: [[CONDCOMBFOR]]:
 // CK2-NEXT: %[[ITVAR:[a-zA-Z0-9_\.]+]] = load i32, i32* %[[IDX]]
 // CK2-NEXT: %[[COND:[a-zA-Z0-9_\.]+]] = icmp sle i32 %[[ITVAR]], 99
-// CK2-NEXT: br i1 %[[COND]], label %[[BODYCOMBFOR:[a-zA-Z0-9_\.]+]], label %[[ENDCOMBFOR:[a-zA-Z0-9_\.]+]]
+// CK2-NEXT: br i1 %[[COND]], label %[[BODYCOMBFOR:[a-zA-Z0-9_\.]+]], label %[[ENDCOMBFOR]]
 
 // CK2: [[BODYCOMBFOR]]:
 // CK2-NEXT: store i32 0, i32* %[[I]]

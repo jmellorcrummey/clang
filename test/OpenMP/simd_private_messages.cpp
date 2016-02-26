@@ -84,15 +84,8 @@ int main(int argc, char **argv) {
   for (int k = 0; k < argc; ++k) ++k;
   #pragma omp parallel
   {
-    int i; // expected-note {{predetermined as private}}
-    #pragma omp simd lastprivate(i), private(i) // expected-error {{private variable cannot be lastprivate}}
-    for (int k = 0; k < argc; ++k) ++k;
-  }
-  // TODO: The following seems to be incorrect -- why cannot it be lastprivate in simd?
-  #pragma omp parallel
-  {
-    int i; // expected-note {{predetermined as private}}
-    #pragma omp simd lastprivate(i) // expected-error {{private variable cannot be lastprivate}}
+    int i;
+    #pragma omp simd lastprivate(i), private(i) // expected-error {{lastprivate variable cannot be private}} expected-note {{defined as lastprivate}}
     for (int k = 0; k < argc; ++k) ++k;
   }
   #pragma omp parallel shared(i)
