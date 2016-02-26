@@ -4096,7 +4096,8 @@ private:
     // do the calculation based on the length of the section instead of relying
     // on CGF.getTypeSize(E->getType()).
     if (const auto *OAE = dyn_cast<OMPArraySectionExpr>(E)) {
-      auto BaseTy = OMPArraySectionExpr::getBaseOriginalType(OAE->getBase()->IgnoreParenImpCasts());
+      auto BaseTy = OMPArraySectionExpr::getBaseOriginalType(
+          OAE->getBase()->IgnoreParenImpCasts());
 
       // If there is no length associated with the expression, that means we
       // are using the whole length of the base.
@@ -4349,7 +4350,8 @@ private:
           // for this dimension. Also, we should always expect a length if the
           // base type is pointer.
           if (!Length) {
-            auto BaseQTy = OMPArraySectionExpr::getBaseOriginalType(OASE->getBase()->IgnoreParenImpCasts());
+            auto BaseQTy = OMPArraySectionExpr::getBaseOriginalType(
+                OASE->getBase()->IgnoreParenImpCasts());
             if (auto *ATy = dyn_cast<ConstantArrayType>(BaseQTy.getTypePtr()))
               return ATy->getSize().getSExtValue() != 1;
             // If we don't have a constant dimension length, we have to consider
@@ -4370,9 +4372,10 @@ private:
         // special treatment for array sections given that they are built-in
         // types.
         const auto *OASE = dyn_cast<OMPArraySectionExpr>(I->first);
-        bool IsPointer =
-            (OASE && OMPArraySectionExpr::getBaseOriginalType(OASE)->isAnyPointerType()) ||
-            I->first->getType()->isAnyPointerType();
+        bool IsPointer = (OASE &&
+                          OMPArraySectionExpr::getBaseOriginalType(OASE)
+                              ->isAnyPointerType()) ||
+                         I->first->getType()->isAnyPointerType();
 
         if (Next == CE || IsPointer || IsFinalArraySection) {
 
