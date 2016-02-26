@@ -86,15 +86,18 @@ void SAclient(int arg) {
   double marr2[5][10][1];
   double mvla[5][arg][10];
   double ***mptr;
+  const int n = 0;
+  const int m = 1;
+
   SB *p;
 
   SD u;
   SC r(p),t(p);
   #pragma omp target map(r)
   {}
-  #pragma omp target map(marr[2][0:2][0:2]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
+  #pragma omp target map(marr[2][0:2][0:2]) // expected-error {{can't prove employed array section specifies contiguous storage}}
   {}
-  #pragma omp target map(marr[:][0:2][0:2]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
+  #pragma omp target map(marr[:][0:2][0:2]) // expected-error {{can't prove employed array section specifies contiguous storage}}
   {}
   #pragma omp target map(marr[2][3][0:2])
   {}
@@ -102,25 +105,39 @@ void SAclient(int arg) {
   {}
   #pragma omp target map(marr[:2][:][:])
   {}
-  #pragma omp target map(marr[:2][:1][:]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
+  #pragma omp target map(marr[arg:][:][:])
   {}
-  #pragma omp target map(marr[:2][1:][:]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
+  #pragma omp target map(marr[arg:])
   {}
-  #pragma omp target map(marr[:2][:][:1]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
+  #pragma omp target map(marr[arg:][:arg][:]) // expected-error {{can't prove employed array section specifies contiguous storage}}
   {}
-  #pragma omp target map(marr[:2][:][1:]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
+  #pragma omp target map(marr[:arg][:])
+  {}
+  #pragma omp target map(marr[:arg][n:])
+  {}
+  #pragma omp target map(marr[:][:arg][n:]) // expected-error {{can't prove employed array section specifies contiguous storage}}
+  {}
+  #pragma omp target map(marr[n:m][:arg][n:])
+  {}
+  #pragma omp target map(marr[:2][:1][:]) // expected-error {{can't prove employed array section specifies contiguous storage}}
+  {}
+  #pragma omp target map(marr[:2][1:][:]) // expected-error {{can't prove employed array section specifies contiguous storage}}
+  {}
+  #pragma omp target map(marr[:2][:][:1]) // expected-error {{can't prove employed array section specifies contiguous storage}}
+  {}
+  #pragma omp target map(marr[:2][:][1:]) // expected-error {{can't prove employed array section specifies contiguous storage}}
   {}
   #pragma omp target map(marr[:1][:2][:])
   {}
   #pragma omp target map(marr[:1][0][:])
   {}
-  #pragma omp target map(marr[:arg][:2][:]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
+  #pragma omp target map(marr[:arg][:2][:]) // expected-error {{can't prove employed array section specifies contiguous storage}}
   {}
   #pragma omp target map(marr[:1][3:1][:2])
   {}
-  #pragma omp target map(marr[:1][3:arg][:2]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
+  #pragma omp target map(marr[:1][3:arg][:2]) // expected-error {{can't prove employed array section specifies contiguous storage}}
   {}
-  #pragma omp target map(marr[:1][3:2][:2]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
+  #pragma omp target map(marr[:1][3:2][:2]) // expected-error {{can't prove employed array section specifies contiguous storage}}
   {}
   #pragma omp target map(marr[:2][:10][:])
   {}
@@ -129,38 +146,46 @@ void SAclient(int arg) {
   #pragma omp target map(marr[:2][2+2-4:][0:5+5])
   {}
 
-  #pragma omp target map(marr[:1][:2][0]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
+  #pragma omp target map(marr[:1][:2][0]) // expected-error {{can't prove employed array section specifies contiguous storage}}
   {}
   #pragma omp target map(marr2[:1][:2][0])
   {}
 
-  #pragma omp target map(mvla[:1][:][0]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
+  #pragma omp target map(mvla[:1][:][0]) // expected-error {{can't prove employed array section specifies contiguous storage}}
   {}
-  #pragma omp target map(mvla[:2][:arg][:]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
+  #pragma omp target map(mvla[:2][:arg][:]) // expected-error {{can't prove employed array section specifies contiguous storage}}
   {}
   #pragma omp target map(mvla[1][2:arg][:])
   {}
   #pragma omp target map(mvla[:1][:][:])
   {}
 
-  #pragma omp target map(mptr[:2][2+2-4:1][0:5+5]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
+  #pragma omp target map(mptr[:2][2+2-4:1][0:5+5]) // expected-error {{can't prove employed array section specifies contiguous storage}}
   {}
   #pragma omp target map(mptr[:1][:2-1][2:4-3])
   {}
-  #pragma omp target map(mptr[:1][:arg][2:4-3]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
+  #pragma omp target map(mptr[:1][:arg][2:4-3]) // expected-error {{can't prove employed array section specifies contiguous storage}}
   {}
   #pragma omp target map(mptr[:1][:2-1][0:2])
   {}
-  #pragma omp target map(mptr[:1][:2][0:2]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
+  #pragma omp target map(mptr[:1][:2][0:2]) // expected-error {{can't prove employed array section specifies contiguous storage}}
   {}
   #pragma omp target map(mptr[:1][:][0:2]) // expected-error {{section length is unspecified and cannot be inferred because subscripted value is not an array}}
   {}
-  #pragma omp target map(mptr[:2][:1][0:2]) // expected-error {{employed array section is or can be incompatible with contiguous storage requirements}}
+  #pragma omp target map(mptr[:2][:1][0:2]) // expected-error {{can't prove employed array section specifies contiguous storage}}
   {}
 
   #pragma omp target map(r.ArrS[0].B)
   {}
+  #pragma omp target map(r.ArrS[:1].B) // expected-error {{OpenMP array section is not allowed here}}
+  {}
+  #pragma omp target map(r.ArrS[:arg].B) // expected-error {{OpenMP array section is not allowed here}}
+  {}
   #pragma omp target map(r.ArrS[0].Arr[1:23])
+  {}
+  #pragma omp target map(r.ArrS[0].Arr[1:arg])
+  {}
+  #pragma omp target map(r.ArrS[0].Arr[arg:23])
   {}
   #pragma omp target map(r.ArrS[0].Error) // expected-error {{no member named 'Error' in 'SB'}}
   {}
