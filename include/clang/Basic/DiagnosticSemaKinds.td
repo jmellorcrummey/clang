@@ -7712,6 +7712,18 @@ def err_atomic_init_constant : Error<
   " in the declaration statement in the program scope">;
 def err_opencl_implicit_vector_conversion : Error<
   "implicit conversions between vector types (%0 and %1) are not permitted">;
+def err_opencl_dereferencing : Error<
+  "dereferencing pointer of type %0 is not allowed in OpenCL">;
+def err_opencl_block_proto_variadic : Error<
+  "invalid block prototype, variadic arguments are not allowed in OpenCL">;
+def err_opencl_invalid_type_array : Error<
+  "array of %0 type is invalid in OpenCL">;
+def err_opencl_ternary_with_block : Error<
+  "block type cannot be used as expression in ternary expression in OpenCL">;
+def err_opencl_pointer_to_type : Error<
+  "pointer to type %0 is invalid in OpenCL">;
+def err_opencl_type_can_only_be_used_as_function_parameter : Error <
+  "type %0 can only be used as a function parameter in OpenCL">;
 
 // OpenCL v2.0 s6.13.6 -- Builtin Pipe Functions
 def err_opencl_builtin_pipe_first_arg : Error<
@@ -7722,6 +7734,14 @@ def err_opencl_builtin_pipe_invalid_arg : Error<
   "invalid argument type to function %0 (expecting %1)">;
 def err_opencl_builtin_pipe_invalid_access_modifier : Error<
   "invalid pipe access modifier (expecting %0)">;
+
+// OpenCL access qualifier
+def err_opencl_invalid_access_qualifier : Error<
+  "access qualifier can only be used for pipe and image type">;
+def err_opencl_invalid_read_write : Error<
+  "access qualifier %0 can not be used for %1 %select{|earlier than OpenCL2.0 version}2">;
+def err_opencl_multiple_access_qualifiers : Error<
+  "multiple access qualifiers">;
 
 // OpenCL Section 6.8.g
 def err_opencl_unknown_type_specifier : Error<
@@ -7764,8 +7784,8 @@ def err_omp_expected_named_var_member_or_array_expression: Error<
   "expected expression containing only member accesses and/or array sections based on named variables">;
 def err_omp_bit_fields_forbidden_in_map_clause : Error<
   "bit fields cannot be used to specify storage in a map clause">;
-def err_omp_array_section_leads_to_non_contiguous_storage : Error<
-  "employed array section is or can be incompatible with contiguous storage requirements">;
+def err_cannot_prove_omp_array_section_specifies_contiguous_storage : Error<
+  "can't prove employed array section specifies contiguous storage">;
 def err_omp_union_type_not_allowed : Error<
   "mapped storage cannot be derived from a union">;
 def err_omp_expected_access_to_data_field : Error<
