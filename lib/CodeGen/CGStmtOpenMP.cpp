@@ -2761,15 +2761,13 @@ void CodeGenFunction::EmitOMPTargetExitDataDirective(
 
   // Check if we have any if clause associated with the directive.
   const Expr *IfCond = nullptr;
-  if (auto *C = S.getSingleClause<OMPIfClause>()) {
+  if (auto *C = S.getSingleClause<OMPIfClause>())
     IfCond = C->getCondition();
-  }
 
   // Check if we have any device clause associated with the directive.
   const Expr *Device = nullptr;
-  if (auto *C = S.getSingleClause<OMPDeviceClause>()) {
+  if (auto *C = S.getSingleClause<OMPDeviceClause>())
     Device = C->getDevice();
-  }
 
   CGM.getOpenMPRuntime().emitTargetEnterOrExitDataCall(*this, S, IfCond,
                                                        Device);
