@@ -1270,9 +1270,8 @@ CodeGenFunction::EmitOMPDirectiveWithLoop(OpenMPDirectiveKind DKind,
   bool HasSimd = DKind == OMPD_parallel_for_simd || DKind == OMPD_for_simd ||
                  DKind == OMPD_distribute_simd ||
                  DKind == OMPD_teams_distribute_simd ||
-                 DKind == OMPD_target_teams_distribute_simd ||
-                 DKind == OMPD_simd;
-  printf("======> Inside EmitOMPDirectiveWithLoop (HasSimd: %d )\n", HasSimd);
+                 DKind == OMPD_target_teams_distribute_simd;
+  printf("======> Inside EmitOMPDirectiveWithLoop (HasSimd: %d ; DKind: %d)\n", HasSimd, DKind);
   CGPragmaOmpSimd SimdWrapper(&S);
   llvm::Function *BodyFunction = 0;
   bool SeparateLastIter = false;
