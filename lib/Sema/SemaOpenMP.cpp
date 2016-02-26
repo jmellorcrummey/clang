@@ -9267,7 +9267,9 @@ static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
         // A unity or whole array section is not allowed and that is not
         // compatible with the properties of the current array section.
         SemaRef.Diag(
-            ELoc, diag::err_cannot_prove_omp_array_section_specifies_contiguous_storage)
+            ELoc,
+            diag::
+                err_cannot_prove_omp_array_section_specifies_contiguous_storage)
             << CurE->getSourceRange();
         break;
       }
