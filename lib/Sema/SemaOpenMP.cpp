@@ -9233,7 +9233,8 @@ static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
     if (auto *CurE = dyn_cast<OMPArraySectionExpr>(E)) {
       E = CurE->getBase()->IgnoreParenImpCasts();
 
-      auto CurType = OMPArraySectionExpr::getBaseOriginalType(E);
+      auto CurType =
+          OMPArraySectionExpr::getBaseOriginalType(E).getCanonicalType();
 
       // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, C++, p.1]
       //  If the type of a list item is a reference to a type T then the type
