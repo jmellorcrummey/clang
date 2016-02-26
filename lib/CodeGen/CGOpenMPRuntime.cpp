@@ -3972,46 +3972,6 @@ void CGOpenMPRuntime::emitTargetOutlinedFunction(
       DeviceID, FileID, ParentName, Line, OutlinedFn, OutlinedFnID);
 }
 
-/// \brief Obtain the base type of an array expression.
-static QualType GetArraySectionExprBaseType(const OMPArraySectionExpr *E) {
-  // Determine the dimension we care about. We need to skip all the nested array
-  // sections to determine that.
-  unsigned Dimension = 0;
-  const Expr *BaseE = E->getBase()->IgnoreParenImpCasts();
-  while (auto *SE = dyn_cast<OMPArraySectionExpr>(BaseE)) {
-    BaseE = SE->getBase()->IgnoreParenImpCasts();
-    ++Dimension;
-  }
-
-  // Look through reference types in the base expression.
-  QualType BaseQTy = BaseE->getType().getCanonicalType();
-  if (BaseQTy->isReferenceType())
-    BaseQTy = BaseQTy->getPointeeType();
-
-  // Get the type for the dimension we care about. It has to be a pointer or
-  // array type.
-  for (; Dimension; --Dimension) {
-    if (auto *PTy = BaseQTy->getAs<PointerType>()) {
-      BaseQTy = PTy->getPointeeType().getCanonicalType();
-      continue;
-    }
-    auto *ATy = cast<ArrayType>(BaseQTy.getTypePtr());
-    BaseQTy = ATy->getElementType().getCanonicalType();
-  }
-  return BaseQTy;
-}
-
-/// \brief Obtain the element type of an array expression.
-static QualType GetArraySectionExprElementType(const OMPArraySectionExpr *E) {
-  auto Ty = GetArraySectionExprBaseType(E);
-  if (auto *PTy = Ty->getAs<PointerType>()) {
-    Ty = PTy->getPointeeType().getCanonicalType();
-  } else {
-    auto *ATy = cast<ArrayType>(Ty.getTypePtr());
-    Ty = ATy->getElementType().getCanonicalType();
-  }
-  return Ty;
-}
 namespace {
 // \brief Utility to extract information from the map clauses associated with a
 // given construct and provide a convenient interface to obtain the information
@@ -4136,7 +4096,7 @@ private:
     // do the calculation based on the length of the section instead of relying
     // on CGF.getTypeSize(E->getType()).
     if (const auto *OAE = dyn_cast<OMPArraySectionExpr>(E)) {
-      auto BaseTy = GetArraySectionExprBaseType(OAE);
+      auto BaseTy = OMPArraySectionExpr::getBaseOriginalType(OAE->getBase()->IgnoreParenImpCasts());
 
       // If there is no length associated with the expression, that means we
       // are using the whole length of the base.
@@ -4389,7 +4349,7 @@ private:
           // for this dimension. Also, we should always expect a length if the
           // base type is pointer.
           if (!Length) {
-            auto BaseQTy = GetArraySectionExprBaseType(OASE);
+            auto BaseQTy = OMPArraySectionExpr::getBaseOriginalType(OASE->getBase()->IgnoreParenImpCasts());
             if (auto *ATy = dyn_cast<ConstantArrayType>(BaseQTy.getTypePtr()))
               return ATy->getSize().getSExtValue() != 1;
             // If we don't have a constant dimension length, we have to consider
@@ -4411,8 +4371,7 @@ private:
         // types.
         const auto *OASE = dyn_cast<OMPArraySectionExpr>(I->first);
         bool IsPointer =
-            (OASE &&
-             GetArraySectionExprElementType(OASE)->isAnyPointerType()) ||
+            (OASE && OMPArraySectionExpr::getBaseOriginalType(OASE)->isAnyPointerType()) ||
             I->first->getType()->isAnyPointerType();
 
         if (Next == CE || IsPointer || IsFinalArraySection) {
