@@ -37,25 +37,10 @@ class OMPLexicalScope {
     }
   }
 
-  class PostUpdateCleanup final : public EHScopeStack::Cleanup {
-    const OMPExecutableDirective &S;
-
-  public:
-    PostUpdateCleanup(const OMPExecutableDirective &S) : S(S) {}
-
-    void Emit(CodeGenFunction &CGF, Flags /*flags*/) override {
-      if (!CGF.HaveInsertPoint())
-        return;
-      (void)S;
-      // TODO: add cleanups for clauses that require post update.
-    }
-  };
-
 public:
   OMPLexicalScope(CodeGenFunction &CGF, const OMPExecutableDirective &S)
       : Scope(CGF, S.getSourceRange()) {
     emitPreInitStmt(CGF, S);
-    CGF.EHStack.pushCleanup<PostUpdateCleanup>(NormalAndEHCleanup, S);
   }
 };
 } // namespace
@@ -696,6 +681,8 @@ void CodeGenFunction::EmitOMPLastprivateClauseFinal(
       ++ISrcRef;
       ++IDestRef;
     }
+    if (auto *PostUpdate = C->getPostUpdateExpr())
+      EmitIgnoredExpr(PostUpdate);
   }
   if (IsLastIterCond)
     EmitBlock(DoneBB, /*IsFinished=*/true);
@@ -2733,15 +2720,13 @@ void CodeGenFunction::EmitOMPTargetDataDirective(
 
   // Check if we have any if clause associated with the directive.
   const Expr *IfCond = nullptr;
-  if (auto *C = S.getSingleClause<OMPIfClause>()) {
+  if (auto *C = S.getSingleClause<OMPIfClause>())
     IfCond = C->getCondition();
-  }
 
   // Check if we have any device clause associated with the directive.
   const Expr *Device = nullptr;
-  if (auto *C = S.getSingleClause<OMPDeviceClause>()) {
+  if (auto *C = S.getSingleClause<OMPDeviceClause>())
     Device = C->getDevice();
-  }
 
   CGM.getOpenMPRuntime().emitTargetDataCalls(*this, S, IfCond, Device, CodeGen);
 }
