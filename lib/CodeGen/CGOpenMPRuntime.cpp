@@ -3434,6 +3434,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
    // handled by the caller
    bool ParallelRegionHasOpenMPLoop(const Stmt *S) {
 
+     printf("====> ParallelRegionHasOpenMPLoop\n");
      if (!S)
        return false;
 
@@ -3459,6 +3460,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
    // handled by the caller
    bool ParallelRegionHasSimd(const Stmt *S) {
 
+     printf("====> ParallelRegionHasSimd\n");
      if (!S)
        return false;
 
@@ -3485,6 +3487,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
                               ArrayRef<OpenMPDirectiveKind> SKinds,
                               const OMPExecutableDirective &S) {
 
+     printf("====> CalculateNumberOfLanes\n");
      // #parallel for eliminates all #simd inside
      if (isa<OMPParallelForDirective>(S))
        return 1;
@@ -3496,15 +3499,20 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
        return WARP_SIZE;
 
      // when there is an independent single #for, bail out and use 1 lane
-     if (ParallelRegionHasOpenMPLoop(&S))
+     if (ParallelRegionHasOpenMPLoop(&S)){
+       printf("====> ParallelRegionHasOpenMPLoop returned True\n");
        return 1;
+     }
 
      // no single #for, search for #simd or #for simd and if found, select
      // WARP_SIZE lanes
-     if (ParallelRegionHasSimd(&S))
+     if (ParallelRegionHasSimd(&S)){
+       printf("====> ParallelRegionHasSimd returned True\n");
        return WARP_SIZE;
+     }
 
      // finally, no #for, #for simd, or #simd: use 1 lane
+     printf("====> CalculateNumberOfLanes returns 1\n");
      return 1;
    }
 
