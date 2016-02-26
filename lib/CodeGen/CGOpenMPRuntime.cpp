@@ -4097,7 +4097,8 @@ private:
     // on CGF.getTypeSize(E->getType()).
     if (const auto *OAE = dyn_cast<OMPArraySectionExpr>(E)) {
       auto BaseTy = OMPArraySectionExpr::getBaseOriginalType(
-          OAE->getBase()->IgnoreParenImpCasts());
+                        OAE->getBase()->IgnoreParenImpCasts())
+                        .getCanonicalType();
 
       // If there is no length associated with the expression, that means we
       // are using the whole length of the base.
@@ -4351,7 +4352,8 @@ private:
           // base type is pointer.
           if (!Length) {
             auto BaseQTy = OMPArraySectionExpr::getBaseOriginalType(
-                OASE->getBase()->IgnoreParenImpCasts());
+                               OASE->getBase()->IgnoreParenImpCasts())
+                               .getCanonicalType();
             if (auto *ATy = dyn_cast<ConstantArrayType>(BaseQTy.getTypePtr()))
               return ATy->getSize().getSExtValue() != 1;
             // If we don't have a constant dimension length, we have to consider
@@ -4374,6 +4376,7 @@ private:
         const auto *OASE = dyn_cast<OMPArraySectionExpr>(I->first);
         bool IsPointer = (OASE &&
                           OMPArraySectionExpr::getBaseOriginalType(OASE)
+                              .getCanonicalType()
                               ->isAnyPointerType()) ||
                          I->first->getType()->isAnyPointerType();
 
