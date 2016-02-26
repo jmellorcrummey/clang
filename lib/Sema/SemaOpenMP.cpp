@@ -9233,32 +9233,13 @@ static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
     if (auto *CurE = dyn_cast<OMPArraySectionExpr>(E)) {
       E = CurE->getBase()->IgnoreParenImpCasts();
 
-      // Determine the dimension we care about. We need to skip all the nested
-      // array sections to determine that.
-      unsigned Dimension = 0;
-      auto *BaseE = E;
-      while (auto *SE = dyn_cast<OMPArraySectionExpr>(BaseE)) {
-        BaseE = SE->getBase()->IgnoreParenImpCasts();
-        ++Dimension;
-      }
+      auto CurType = OMPArraySectionExpr::getBaseOriginalType(E);
 
       // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, C++, p.1]
       //  If the type of a list item is a reference to a type T then the type
       //  will be considered to be T for all purposes of this clause.
-      QualType CurType = BaseE->getType();
       if (CurType->isReferenceType())
         CurType = CurType->getPointeeType();
-
-      // Get the type for the dimension we care about. It has to be a pointer or
-      // array type.
-      for (; Dimension; --Dimension) {
-        if (auto *PTy = CurType->getAs<PointerType>()) {
-          CurType = PTy->getPointeeType();
-          continue;
-        }
-        auto *ATy = cast<ArrayType>(CurType.getTypePtr());
-        CurType = ATy->getElementType();
-      }
 
       bool IsPointer = CurType->isAnyPointerType();
 
@@ -9286,7 +9267,7 @@ static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
         // A unity or whole array section is not allowed and that is not
         // compatible with the properties of the current array section.
         SemaRef.Diag(
-            ELoc, diag::err_omp_array_section_leads_to_non_contiguous_storage)
+            ELoc, diag::err_cannot_prove_omp_array_section_specifies_contiguous_storage)
             << CurE->getSourceRange();
         break;
       }
