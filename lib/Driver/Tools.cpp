@@ -440,8 +440,6 @@ static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
   lksf << "TARGET(binary)\n";
   for (unsigned i=0; i<Targets.size(); ++i)
     lksf << "INPUT(\"" << Targets[i].second << "\")\n";
-    
-    //lksf << "INPUT(" << Targets[i].second << ")\n";
 
   lksf << "SECTIONS\n";
   lksf << "{\n";
@@ -4453,6 +4451,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
           // offload kernels that are being generated.
           if (Args.hasArg(options::OPT_omp_list_offload_kernels))
             CmdArgs.push_back("-omp-list-offload-kernels");
+          if (Args.hasArg(options::OPT_omp_list_implicit_maps))
+            CmdArgs.push_back("-omp-list-implicit-maps");
 
           ArrayRef<const char *> Vals = Tgts->getValues();
 
@@ -9930,8 +9930,11 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.hasArg(options::OPT_v))
     CmdArgs.push_back("-v");
 
-  if (Args.hasArg(options::OPT_g_Flag))
+  if (Args.hasArg(options::OPT_g_Flag)) {
     CmdArgs.push_back("-g");
+    CmdArgs.push_back("--dont-merge-basicblocks");
+    CmdArgs.push_back("--return-at-end");
+  }
 
   CmdArgs.push_back("-o");
   CmdArgs.push_back(Output.getFilename());
@@ -9946,8 +9949,12 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(Args.MakeArgString(CPU));
   }
 
+  char *NumRegs = getenv("CLANG_NVPTX_MAX_REGS");
   CmdArgs.push_back("-maxrregcount");
-  CmdArgs.push_back("64");
+  if (NumRegs)
+    CmdArgs.push_back(NumRegs);
+  else
+    CmdArgs.push_back("64");
 
   for (InputInfoList::const_iterator
        it = Inputs.begin(), ie = Inputs.end(); it != ie; ++it) {
@@ -9994,6 +10001,12 @@ static void BitcodeToCubin(Compilation &C, const JobAction &JA, const Tool &T,
     AsCmdArgs.push_back("-arch");
     AsCmdArgs.push_back(Args.MakeArgString(CPU));
   }
+  char *NumRegs = getenv("CLANG_NVPTX_MAX_REGS");
+  AsCmdArgs.push_back("-maxrregcount");
+  if (NumRegs)
+    AsCmdArgs.push_back(NumRegs);
+  else
+    AsCmdArgs.push_back("64");
   const char *AsExec = Args.MakeArgString(TC.GetProgramPath("ptxas"));
   C.addCommand(llvm::make_unique<Command>(JA, T, AsExec, AsCmdArgs, Inputs));
 
@@ -10049,9 +10062,18 @@ void NVPTX::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   std::string LibDevice;
   if (LinkMath) {
     // Reconstruct name of libdevice library.
-    std::string Version = Args.MakeArgString(CPU);
-    Version = Version.substr(2, Version.length() - 2); // remove "sm"
-    std::string LibDeviceName = "libdevice.compute" + Version + ".10.bc";
+    std::string Version = llvm::StringSwitch<const char *>(CPU)
+                              .Case("sm_20", "20")
+                              .Case("sm_21", "20")
+                              .Case("sm_30", "30")
+                              .Case("sm_35", "35")
+                              .Case("sm_37", "35")
+                              .Case("sm_50", "50")
+                              .Case("sm_52", "50")
+                              .Case("sm_52", "53")
+                              .Default("20");
+
+    std::string LibDeviceName = "libdevice.compute_" + Version + ".10.bc";
     std::string LibDeviceInput;
 
     // Find in -L<path> and LIBRARY_PATH.

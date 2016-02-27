@@ -2299,13 +2299,20 @@ void CodeGenFunction::EmitPragmaSimd(CodeGenFunction::CGPragmaSimdWrapper &W) {
 
   // Emit the for-loop.
   llvm::Value *LoopIndex = 0;
+  llvm::Value *LoopStart = 0;
   llvm::Value *LoopCount = 0;
 
   // Emit the loop control variable and cache its initial value and the
   // stride value.
   // Also emit loop index and loop count, depending on stmt.
 
-  W.emitInit(*this, LoopIndex, LoopCount);
+  W.emitInit(*this, LoopIndex, LoopStart, LoopCount);
+
+  // Init depends on backend: special handling for nvptx
+  OpenMPDirectiveKind DKind = dyn_cast<OMPExecutableDirective>(W.getStmt())->
+      getDirectiveKind();
+  CGM.getOpenMPRuntime().EmitSimdInitialization(LoopIndex, LoopStart,
+      LoopCount, DKind, *this);
 
   llvm::AllocaInst *LoopCountStack =
       CreateTempAlloca(LoopCount->getType(), "loop.count.stack");
@@ -2336,9 +2343,6 @@ void CodeGenFunction::EmitPragmaSimd(CodeGenFunction::CGPragmaSimdWrapper &W) {
   {
     JumpDest LoopExit = getJumpDestInCurrentScope("for.end");
     RunCleanupsScope ForScope(*this);
-
-    // Init depends on backend: special handling for nvptx
-    CGM.getOpenMPRuntime().EmitSimdInitialization(LoopIndex, LoopCount, *this);
 
     if (SeparateLastIter)
       // Lastprivate or linear variable present, remove last iteration.

@@ -85,7 +85,7 @@ int main(int argc, char **argv) {
   #pragma omp parallel
   {
     int i; // expected-note {{predetermined as private}}
-    #pragma omp for firstprivate(i), private(i) // expected-error {{private variable cannot be firstprivate}}
+    #pragma omp for firstprivate(i), private(i) // expected-error {{private variable in '#pragma omp parallel' cannot be firstprivate in '#pragma omp for'}}
     for (int k = 0; k < argc; ++k) ++k;
   }
   #pragma omp parallel shared(i)

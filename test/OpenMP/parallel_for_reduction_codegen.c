@@ -23,12 +23,7 @@ void T1(){
 
   sum = 0;
 
-// CK1:  [[RES1:%[0-9]*]] = call i32 @__gpu_block_reduce()
-// CK1-DAG:  [[RES2:%[0-9]*]] = icmp eq i32 [[RES1]], 1
-// CK1-DAG: br i1 [[RES2]], label %[[BR1:[a-zA-Z0-9_\.]+]], label %[[BR2:[a-zA-Z0-9_\.]+]]
-//CK1: [[BR1]]:
-//CK1-DAG: %[[REF:[a-zA-a0-9\*()\"]+]] = 
-//CK1-DAG: call void @omp_reduction_op[[OPN:[0-9]*]](i8* %[[REF]], i8* %[[REF]], i8* %[[SIZEREF:[a-zA-a0-9\*()\"]+]])
+//CK1: call void @omp_reduction_op[[OPN:[0-9]*]](i8* %[[REF:[a-zA-a0-9\*()\"]+]], i8* %[[REF:[a-zA-a0-9\*()\"]+]], i8* %[[SIZEREF:[a-zA-a0-9\*()\"]+]])
 //CK1: define internal void @omp_reduction_op(i8*, i8*, i8*)
 //CK1-DAG: [[RES2:%[0-9]*]] = call i32 @__gpu_warpBlockRedu_fixed4_add(i32 [[PARA1:%[0-9]*]])
 
@@ -57,12 +52,7 @@ void T2(){
 
   sum = 0;
 
-// CK2:  [[RES1:%[0-9]*]] = call i32 @__gpu_block_reduce()
-// CK2-NEXT:  [[RES2:%[0-9]*]] = icmp eq i32 [[RES1]], 1
-// CK2-NEXT: br i1 [[RES2]], label %[[BR1:[a-zA-Z0-9_\.]+]], label %[[BR2:[a-zA-Z0-9_\.]+]]
-//CK2: [[BR1]]:
-//CK2-NEXT: %[[REF:[a-zA-a0-9\*()\"]+]] = 
-//CK2-DAG: call void @omp_reduction_op[[OPN:[0-9]*]](i8* %[[REF]], i8* %[[REF]], i8* %[[SIZEREF:[a-zA-a0-9\*()\"]+]])
+//CK2-DAG: call void @omp_reduction_op[[OPN:[0-9]*]](i8* %[[REF:[a-zA-a0-9\*()\"]+]], i8* %[[REF:[a-zA-a0-9\*()\"]+]], i8* %[[SIZEREF:[a-zA-a0-9\*()\"]+]])
 //CK2: define internal void @omp_reduction_op(i8*, i8*, i8*)
 //CK2-DAG: [[RES2:%[0-9]*]] = call double @__gpu_warpBlockRedu_float8_mul(double [[PARA1:%[0-9]*]])
 

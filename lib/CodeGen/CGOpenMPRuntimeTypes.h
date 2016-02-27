@@ -214,6 +214,7 @@ typedef void(__kmpc_print_address_int64)(int64_t i);
 
 // OMP runtime functions used within clang
 typedef int32_t(omp_get_num_threads)();
+typedef int32_t(omp_get_thread_num)();
 typedef int32_t(omp_get_num_teams)();
 
 
