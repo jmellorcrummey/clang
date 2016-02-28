@@ -2900,8 +2900,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   // Look for a SIMD directive in the given code block
   bool BlockHasSimd(const Stmt &S) {
     printf("====> BlockHasSimd: isa<OMPSimdDirective>(S) %d\n",isa<OMPSimdDirective>(S));
-    if (!&S)
-      return false;
     if (isa<OMPSimdDirective>(S))
       return true;
     // traverse all children: if #simd is found, return true else
@@ -2909,7 +2907,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     bool hasSimdPragma = false;
     for (Stmt::const_child_iterator ii = S.child_begin(), ie = S.child_end();
           ii != ie; ++ii) {
-      hasSimdPragma |= BlockHasSimd(**ii);
+      if (!*ii)
+        hasSimdPragma |= false;
+      else
+        hasSimdPragma |= BlockHasSimd(**ii);
     }
     // scanned the entire region and no #for was found
     return hasSimdPragma;
@@ -2948,6 +2949,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     printf("             => Apply combined: %d\n", applyCombinedConstruct);
     printf("Conditions for nested construct with SIMD inside:\n");
     printf("    => Has SIMD pragma inside: %d\n", StmtHasSIMDinBlock(S));
+    printf("End\n");
 
     if (applyCombinedConstruct){
       // Set a flag to true to mark the use of a combined construct
