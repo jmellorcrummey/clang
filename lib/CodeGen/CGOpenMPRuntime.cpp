@@ -2897,6 +2897,37 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     return NULL;
   }
 
+  // Look for a SIMD directive in the given code block
+  bool BlockHasSimd(const Stmt *S) {
+
+    printf("====> BlockHasSimd\n");
+    if (!S)
+      return false;
+
+    // traverse all children: if #for simd or #simd is found, return true else
+    // continue scanning subtree
+    for (Stmt::const_child_iterator ii = S->child_begin(), ie = S->child_end();
+          ii != ie; ++ii) {
+      // if we found a #simd in the current node or, recursively,
+      // in one of its children directly return true without looking any more
+      if (isa<OMPSimdDirective>(*ii))
+        return true;
+      if (ParallelRegionHasSimd(*ii))
+        return true;
+    }
+
+    // scanned the entire region and no #for was found
+    return false;
+  }
+
+  bool StmtHasSIMDinBlock(const OMPExecutableDirective &S){
+    // const Stmt *Body = S.getAssociatedStmt();
+    // if (const CapturedStmt *CS = dyn_cast_or_null<CapturedStmt>(Body))
+    //   Body = CS->getCapturedStmt();
+    // const ForStmt *For = dyn_cast_or_null<ForStmt>(Body);
+    BlockHasSimd(&S);
+  }
+
   // Enter the target loop code generation for NVPTX.
   void EnterTargetLoop(SourceLocation Loc,
       CodeGenFunction &CGF, StringRef TgtFunName, OpenMPDirectiveKind DKind,
@@ -2911,9 +2942,19 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // the control loop.
     // Additional supported directives/clauses:
     //    - reduction(+:red)
-    if (SKind == OMPD_teams_distribute_parallel_for &&
-        StmtHasScheduleStaticOne(S, CGF, SKind) &&
-        !StmtHasOMPPragmas(S, CGF)){
+    bool applyCombinedConstruct = SKind == OMPD_teams_distribute_parallel_for &&
+                                  StmtHasScheduleStaticOne(S, CGF, SKind) &&
+                                  !StmtHasOMPPragmas(S, CGF);
+
+    printf("Considering if combined construct is applicable:\n");
+    printf("    => SKIND is (OMPD_teams_distribute_parallel_for %d): %d\n", OMPD_teams_distribute_parallel_for, SKind);
+    printf("    => schedule(static, 1): %d\n", StmtHasScheduleStaticOne(S, CGF, SKind));
+    printf("    => Has other OMP pragmas inside. StmtHasOMPPragmas(S, CGF): %d\n", StmtHasOMPPragmas(S, CGF));
+    printf("             => Apply combined: %d\n", applyCombinedConstruct);
+    printf("Conditions for nested construct with SIMD inside:\n");
+    printf("    => Has SIMD pragma inside: %d\n", StmtHasSIMDinBlock(S));
+
+    if (applyCombinedConstruct){
       // Set a flag to true to mark the use of a combined construct
       CGF.combined = true;
       combined = true;
