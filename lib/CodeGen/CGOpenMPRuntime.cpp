@@ -2831,7 +2831,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   // Traverse a loop body searching for further pragmas and function calls
   bool CheckOMPPragmas(const Stmt &S) {
     // For LULESH assume that there are never any pragmas inside:
-    printf("    CheckOMPPragmas:  isa<OMPExecutableDirective>(S) = %d, isa<OMPDirective>(S) = %d\n", isa<OMPExecutableDirective>(S), isa<OMPDirective>(S));
+    printf("    CheckOMPPragmas:  isa<OMPExecutableDirective>(S) = %d\n", isa<OMPExecutableDirective>(S));
     if(isa<OMPExecutableDirective>(S)) return true;
 
     // if we see a function call, we will not look for its body and just
