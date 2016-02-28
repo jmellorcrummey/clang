@@ -2831,7 +2831,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   // Traverse a loop body searching for further pragmas and function calls
   bool CheckOMPPragmas(const Stmt &S) {
     // For LULESH assume that there are never any pragmas inside:
-    printf("====> BlockHasSimd: isa<OMPExecutableDirective>(S) = %d, isa<OMPSimdDirective>(S) %d\n", isa<OMPExecutableDirective>(S), isa<OMPSimdDirective>(S));
     if(isa<OMPExecutableDirective>(S)) return true;
 
     // if we see a function call, we will not look for its body and just
@@ -2921,11 +2920,11 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   }
 
   bool StmtHasSIMDinBlock(const OMPExecutableDirective &S){
-    // const Stmt *Body = S.getAssociatedStmt();
-    // if (const CapturedStmt *CS = dyn_cast_or_null<CapturedStmt>(Body))
-    //   Body = CS->getCapturedStmt();
-    // const ForStmt *For = dyn_cast_or_null<ForStmt>(Body);
-    return BlockHasSimd(&S);
+    const Stmt *Body = S.getAssociatedStmt();
+    if (const CapturedStmt *CS = dyn_cast_or_null<CapturedStmt>(Body))
+      Body = CS->getCapturedStmt();
+    const ForStmt *For = dyn_cast_or_null<ForStmt>(Body);
+    return BlockHasSimd(*For->getBody());
   }
 
   // Enter the target loop code generation for NVPTX.
