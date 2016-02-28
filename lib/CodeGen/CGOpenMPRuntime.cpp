@@ -2831,12 +2831,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   // Traverse a loop body searching for further pragmas and function calls
   bool CheckOMPPragmas(const Stmt &S) {
     // For LULESH assume that there are never any pragmas inside:
-    printf("    CheckOMPPragmas:  isa<OMPExecutableDirective>(S) = %d\n", isa<OMPExecutableDirective>(S));
     if(isa<OMPExecutableDirective>(S)) return true;
 
     // if we see a function call, we will not look for its body and just
     // assume that it contains openmp pragmas
-    printf("    CheckOMPPragmas:  isa<CallExpr>(S) = %d\n", isa<CallExpr>(S));
     if(isa<CallExpr>(S)) return true;
 
     // check all children recursively
@@ -2912,8 +2910,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
           ii != ie; ++ii) {
       // if we found a #simd in the current node or, recursively,
       // in one of its children directly return true without looking any more
-      if (isa<OMPSimdDirective>(*ii))
+      if (isa<OMPSimdDirective>(*ii)){
+        printf("HAS SIMD PRAGMA INSIDE\n");
         return true;
+      }
       if (BlockHasSimd(*ii))
         return true;
     }
