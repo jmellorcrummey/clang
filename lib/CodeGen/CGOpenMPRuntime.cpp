@@ -2899,22 +2899,18 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
   // Look for a SIMD directive in the given code block
   bool BlockHasSimd(const Stmt &S) {
-
     printf("====> BlockHasSimd: isa<OMPSimdDirective>(S) %d\n",isa<OMPSimdDirective>(S));
-    if (!S)
+    if (!*S)
       return false;
-
     if (isa<OMPSimdDirective>(S))
       return true;
-
     // traverse all children: if #simd is found, return true else
     // continue scanning subtree
     bool hasSimdPragma = false;
-    for (Stmt::const_child_iterator ii = S->child_begin(), ie = S->child_end();
+    for (Stmt::const_child_iterator ii = S.child_begin(), ie = S.child_end();
           ii != ie; ++ii) {
       hasSimdPragma |= BlockHasSimd(**ii);
     }
-
     // scanned the entire region and no #for was found
     return hasSimdPragma;
   }
