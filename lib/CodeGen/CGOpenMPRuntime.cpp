@@ -2912,7 +2912,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     bool hasSimdPragma = false;
     for (Stmt::const_child_iterator ii = S->child_begin(), ie = S->child_end();
           ii != ie; ++ii) {
-      hasSimdPragma |= BlockHasSimd(*ii);
+      hasSimdPragma |= BlockHasSimd(**ii);
     }
 
     // scanned the entire region and no #for was found
