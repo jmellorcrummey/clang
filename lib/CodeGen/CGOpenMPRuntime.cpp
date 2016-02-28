@@ -2925,7 +2925,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // if (const CapturedStmt *CS = dyn_cast_or_null<CapturedStmt>(Body))
     //   Body = CS->getCapturedStmt();
     // const ForStmt *For = dyn_cast_or_null<ForStmt>(Body);
-    BlockHasSimd(&S);
+    return BlockHasSimd(&S);
   }
 
   // Enter the target loop code generation for NVPTX.
