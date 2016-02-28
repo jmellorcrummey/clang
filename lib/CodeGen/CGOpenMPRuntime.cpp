@@ -2900,7 +2900,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   // Look for a SIMD directive in the given code block
   bool BlockHasSimd(const Stmt &S) {
     printf("====> BlockHasSimd: isa<OMPSimdDirective>(S) %d\n",isa<OMPSimdDirective>(S));
-    if (!*S)
+    if (!&S)
       return false;
     if (isa<OMPSimdDirective>(S))
       return true;
