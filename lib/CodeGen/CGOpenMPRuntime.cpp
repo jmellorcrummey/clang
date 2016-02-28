@@ -2904,22 +2904,19 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     if (!S)
       return false;
 
-    // traverse all children: if #for simd or #simd is found, return true else
+    if (isa<OMPSimdDirective>(S))
+      return true;
+
+    // traverse all children: if #simd is found, return true else
     // continue scanning subtree
+    bool hasSimdPragma = false;
     for (Stmt::const_child_iterator ii = S->child_begin(), ie = S->child_end();
           ii != ie; ++ii) {
-      // if we found a #simd in the current node or, recursively,
-      // in one of its children directly return true without looking any more
-      if (isa<OMPSimdDirective>(*ii)){
-        printf("HAS SIMD PRAGMA INSIDE\n");
-        return true;
-      }
-      if (BlockHasSimd(*ii))
-        return true;
+      hasSimdPragma |= BlockHasSimd(*ii);
     }
 
     // scanned the entire region and no #for was found
-    return false;
+    return hasSimdPragma;
   }
 
   bool StmtHasSIMDinBlock(const OMPExecutableDirective &S){
