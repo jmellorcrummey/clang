@@ -2836,13 +2836,14 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // if we see a function call, we will not look for its body and just
     // assume that it contains openmp pragmas
+    printf("    CheckOMPPragmas:  isa<CallExpr>(S) = %d\n", isa<CallExpr>(S));
     if(isa<CallExpr>(S)) return true;
 
     // check all children recursively
     bool ChildrenHaveOmp = false;
     for(Stmt::const_child_iterator ii=S.child_begin(), ie=S.child_end();
         ii != ie; ++ii){
-      if (*ii)
+      if (!*ii)
         ChildrenHaveOmp |= false;
       else
         ChildrenHaveOmp |= CheckOMPPragmas(**ii);
