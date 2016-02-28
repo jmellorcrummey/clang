@@ -2912,7 +2912,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       // in one of its children directly return true without looking any more
       if (isa<OMPSimdDirective>(*ii))
         return true;
-      if (ParallelRegionHasSimd(*ii))
+      if (BlockHasSimd(*ii))
         return true;
     }
 
