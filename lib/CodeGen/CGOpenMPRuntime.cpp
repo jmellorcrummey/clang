@@ -2830,12 +2830,15 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
   // Traverse a loop body searching for further pragmas and function calls
   bool CheckOMPPragmas(const Stmt &S) {
+    printf("======> CheckOMPPragmas: %d\n", isa<OMPExecutableDirective>(S));
     // For LULESH assume that there are never any pragmas inside:
     if(isa<OMPExecutableDirective>(S)) return true;
 
     // if we see a function call, we will not look for its body and just
     // assume that it contains openmp pragmas
-    if(isa<CallExpr>(S)) return true;
+    if(isa<CallExpr>(S)){
+       return true;
+    }
 
     // check all children recursively
     bool ChildrenHaveOmp = false;
@@ -2897,31 +2900,63 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     return NULL;
   }
 
-  // Look for a SIMD directive in the given code block
-  bool BlockHasSimd(const Stmt &S) {
-    printf("====> BlockHasSimd: isa<OMPSimdDirective>(S) %d\n",isa<OMPSimdDirective>(S));
-    if (isa<OMPSimdDirective>(S))
-      return true;
-    // traverse all children: if #simd is found, return true else
-    // continue scanning subtree
-    bool hasSimdPragma = false;
-    for (Stmt::const_child_iterator ii = S.child_begin(), ie = S.child_end();
-          ii != ie; ++ii) {
-      if (!*ii)
-        hasSimdPragma |= false;
-      else
-        hasSimdPragma |= BlockHasSimd(**ii);
-    }
-    // scanned the entire region and no #for was found
-    return hasSimdPragma;
+  bool isSimdDirective(const Stmt &S){
+     return isa<OMPSimdDirective>(S);
   }
 
-  bool StmtHasSIMDinBlock(const OMPExecutableDirective &S){
+  // Look for a SIMD directive in the given code block
+  bool OnlyTopBlockHasSimd(const Stmt &S) {
+    printf("====> OnlyTopBlockHasSimd: isa<OMPSimdDirective>(S) %d\n", isa<OMPSimdDirective>(S));
+    // If the simd directive is a SIMD then return true as long as not in a sub-block.
+    if (isa<OMPSimdDirective>(S))
+      return true;
+
+    // Traverse all children of the for body: if #simd is found, return true.
+    // Subtree doesn't need to be traversed in this case.
+    int hasSimdPragma = 0;
+    int invalidateSimdNest = false;
+
+    // Traverse all the top block statements.
+    for (Stmt::const_child_iterator ii = S.child_begin(), ie = S.child_end();
+         ii != ie; ++ii) {
+      if (*ii){
+        printf("Visit top Stmt (%d)\n", isa<OMPSimdDirective>(*ii));
+        if (isSimdDirective(**ii)){
+           hasSimdPragma++;
+           continue;
+        }
+        // If either another non-simd pragma is encountered in the top block
+        // or some other OMP directive in the sub-block then nest is invalid.
+        if (CheckOMPPragmas(**ii)){
+          invalidateSimdNest = true;
+          break;
+        }
+      }
+    }
+
+    // True if only ONE simd pragma exists.
+    return hasSimdPragma == 1 && !invalidateSimdNest;
+  }
+
+  bool SIMDinTopBlock(const OMPExecutableDirective &S){
+    // We must check if the for loop has any SIMD pragmas
+    // as direct children (aprt of its body).
+    // An invalid simd placement would be:
+    //
+    //   #pragma omp target teams distribute parallel for
+    //   for(...){
+    //
+    //      ControlFlowStmt{
+    //        #pragma omp simd
+    //      }
+    //      
+    //   }
+    // Also ensure no other pragmas exist.
     const Stmt *Body = S.getAssociatedStmt();
     if (const CapturedStmt *CS = dyn_cast_or_null<CapturedStmt>(Body))
       Body = CS->getCapturedStmt();
     const ForStmt *For = dyn_cast_or_null<ForStmt>(Body);
-    return BlockHasSimd(*For->getBody());
+    return OnlyTopBlockHasSimd(*For->getBody());
   }
 
   // Enter the target loop code generation for NVPTX.
@@ -2932,7 +2967,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     CGBuilderTy &Bld = CGF.Builder;
 
     // If the statement looks like:
+    //
     //  #pragma omp target distribute parallel for schedule(static, 1)
+    //
     // and no other pragmas exist in the body of the loop then
     // recognize it as a combined construct which admits a simplified version of
     // the control loop.
@@ -2942,13 +2979,32 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
                                   StmtHasScheduleStaticOne(S, CGF, SKind) &&
                                   !StmtHasOMPPragmas(S, CGF);
 
+    // Support for nested constructs with simplified code generation.
+    //
+    // #pragma omp target teams distribute parallel for
+    // for(int i ...){
+    //   <S1>
+    //   #pragma omp simd
+    //   for(int j ...){
+    //      <S2>
+    //   }
+    // }
+    //
+    // 1. The SIMD pragma must be a direct descendant of the outer for loop.
+    // 2. No other pragmas or function calls exist in the body of the SIMD.
+    // 3. No explicit schedule(static, 1) clause on the outer loop.
+    bool applyNestedSimd = SKind == OMPD_teams_distribute_parallel_for &&
+                           !StmtHasScheduleStaticOne(S, CGF, SKind) &&
+                           SIMDinTopBlock(S);
+
     printf("Considering if combined construct is applicable:\n");
     printf("    => SKIND is (OMPD_teams_distribute_parallel_for %d): %d\n", OMPD_teams_distribute_parallel_for, SKind);
     printf("    => schedule(static, 1): %d\n", StmtHasScheduleStaticOne(S, CGF, SKind));
     printf("    => Has other OMP pragmas inside. StmtHasOMPPragmas(S, CGF): %d\n", StmtHasOMPPragmas(S, CGF));
     printf("             => Apply combined: %d\n", applyCombinedConstruct);
     printf("Conditions for nested construct with SIMD inside:\n");
-    printf("    => Has SIMD pragma inside: %d\n", StmtHasSIMDinBlock(S));
+    printf("    => Has SIMD pragma inside (not in subblock): %d\n", SIMDinTopBlock(S));
+    printf("             => Apply nested parallelism: %d\n", applyNestedSimd);
     printf("End\n");
 
     if (applyCombinedConstruct){
@@ -2967,6 +3023,20 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
       // Emit combined construct code.
       EmitOMPCombinedDirectiveLoop(DKind, SKind, S, CGF, TgtFunName, reduction_C);
+    /*
+    } else if (applyNestedSimd){
+      // Set a flag to true to mark the use of a simfplified Code Gen path
+      CGF.combined = true;
+      combined = true;
+
+      ThreadLimitGlobal = new llvm::GlobalVariable(
+          CGF.CGM.getModule(), Bld.getInt32Ty(), false,
+          llvm::GlobalValue::ExternalLinkage, Bld.getInt32(0),
+          TgtFunName + Twine("_thread_limit"));
+
+      // Emit combined construct code.
+      EmitOMPCombinedDirectiveLoop(DKind, SKind, S, CGF, TgtFunName);
+    */
     } else {
       // In case no special set of directives has been encountered then
       // produce the control loop.
