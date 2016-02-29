@@ -3023,11 +3023,14 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
       // Emit combined construct code.
       EmitOMPCombinedDirectiveLoop(DKind, SKind, S, CGF, TgtFunName, reduction_C);
-    /*
     } else if (applyNestedSimd){
       // Set a flag to true to mark the use of a simfplified Code Gen path
-      CGF.combined = true;
-      combined = true;
+      CGF.combinedSimd = true;
+      combinedSimd = true;
+
+      // If the directives contain a reduction clause then we insert appropriate
+      // code before the main loop.
+      const OMPClause *reduction_C = StmtHasReductionClause(S, CGF, SKind);
 
       ThreadLimitGlobal = new llvm::GlobalVariable(
           CGF.CGM.getModule(), Bld.getInt32Ty(), false,
@@ -3035,8 +3038,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
           TgtFunName + Twine("_thread_limit"));
 
       // Emit combined construct code.
-      EmitOMPCombinedDirectiveLoop(DKind, SKind, S, CGF, TgtFunName);
-    */
+      EmitOMPCombinedDirectiveLoop(DKind, SKind, S, CGF, TgtFunName, reduction_C);
     } else {
       // In case no special set of directives has been encountered then
       // produce the control loop.
