@@ -2829,15 +2829,17 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
   // Traverse a loop body searching for further pragmas and function calls
   bool CheckOMPPragmas(const Stmt &S) {
-    printf("======> CheckOMPPragmas: %d\n", isa<OMPExecutableDirective>(S));
+    // printf("======> CheckOMPPragmas: %d %d\n", isa<OMPExecutableDirective>(S), isa<CallExpr>(S));
     // For LULESH assume that there are never any pragmas inside:
     if(isa<OMPExecutableDirective>(S)) return true;
 
     // if we see a function call, we will not look for its body and just
     // assume that it contains openmp pragmas
-    if(isa<CallExpr>(S)){
-       return true;
-    }
+
+    // TODO: re-enable this for non-Firedrake runs.
+    //if(isa<CallExpr>(S)){
+    //   return true;
+    //}
 
     // check all children recursively
     bool ChildrenHaveOmp = false;
