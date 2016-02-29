@@ -2497,7 +2497,6 @@ void CodeGenFunction::EmitOMPDirectiveWithTarget(OpenMPDirectiveKind DKind,
     CGM.getOpenMPRuntime().PostProcessTargetFunction(CurFuncDecl, Fn, FI);
 
     CGF.OpenMPRoot = OpenMPRoot ? OpenMPRoot : this;
-    bool combined = false;
 
     // Start target region
     // This will complete the initialization done before
@@ -2514,9 +2513,9 @@ void CodeGenFunction::EmitOMPDirectiveWithTarget(OpenMPDirectiveKind DKind,
       if (isTargetMode)
         // generate control loop for nvptx, empty codegen otherwise
         CGM.getOpenMPRuntime().EnterTargetLoop(CS->getLocStart(), CGF,
-            FD->getName(), DKind, SKind, S, combined);
+            FD->getName(), DKind, SKind, S);
 
-      if (!combined){
+      if (!CGF.combined){
         // Emit the contents of the target region
         switch (SKind) {
         default:
@@ -2555,7 +2554,7 @@ void CodeGenFunction::EmitOMPDirectiveWithTarget(OpenMPDirectiveKind DKind,
         // region to possibly excluded non-master threads
         CGM.getOpenMPRuntime().ExitTargetLoop(CS->getLocStart(),
                                               CGF, false, FD->getName(),
-                                              SKind, combined);
+                                              SKind);
       CGF.FinishFunction();
     }
 

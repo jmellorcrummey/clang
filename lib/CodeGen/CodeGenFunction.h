@@ -130,6 +130,7 @@ public:
   /// Flag to signal the handling of a combination of directives which involves
   /// different level of parallelism (threads, warps, blocks)
   bool combined = false;
+  bool combinedSimd = false;
 
   CodeGenModule &CGM;  // Per-module state.
   const TargetInfo &Target;

@@ -1416,8 +1416,7 @@ void CGOpenMPRuntime::EnterTargetControlLoop(SourceLocation Loc,
 }
 void CGOpenMPRuntime::EnterTargetLoop(SourceLocation Loc,
     CodeGenFunction &CGF, StringRef TgtFunName, OpenMPDirectiveKind DKind,
-    OpenMPDirectiveKind &SKind, const OMPExecutableDirective &S,
-    bool &combined) {
+    OpenMPDirectiveKind &SKind, const OMPExecutableDirective &S) {
 }
 
 void CGOpenMPRuntime::ExitTargetControlLoop(SourceLocation Loc,
@@ -1427,7 +1426,7 @@ void CGOpenMPRuntime::ExitTargetControlLoop(SourceLocation Loc,
 
 void CGOpenMPRuntime::ExitTargetLoop(SourceLocation Loc,
     CodeGenFunction &CGF, bool prevIsParallel, StringRef TgtFunName,
-    OpenMPDirectiveKind SKind, bool combined) {
+    OpenMPDirectiveKind SKind) {
 }
 
 void CGOpenMPRuntime::GenerateNextLabel(CodeGenFunction &CGF,
@@ -2962,13 +2961,16 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   // Enter the target loop code generation for NVPTX.
   void EnterTargetLoop(SourceLocation Loc,
       CodeGenFunction &CGF, StringRef TgtFunName, OpenMPDirectiveKind DKind,
-      OpenMPDirectiveKind &SKind, const OMPExecutableDirective &S, bool &combined) {
+      OpenMPDirectiveKind &SKind, const OMPExecutableDirective &S) {
 
     CGBuilderTy &Bld = CGF.Builder;
 
     // If the statement looks like:
     //
     //  #pragma omp target distribute parallel for schedule(static, 1)
+    //  for(int i ...){
+    //     <S1>
+    //  }
     //
     // and no other pragmas exist in the body of the loop then
     // recognize it as a combined construct which admits a simplified version of
@@ -3010,7 +3012,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     if (applyCombinedConstruct){
       // Set a flag to true to mark the use of a combined construct
       CGF.combined = true;
-      combined = true;
 
       // If the directives contain a reduction clause then we insert appropriate
       // code before the main loop.
@@ -3026,7 +3027,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     } else if (applyNestedSimd){
       // Set a flag to true to mark the use of a simfplified Code Gen path
       CGF.combinedSimd = true;
-      combinedSimd = true;
 
       // If the directives contain a reduction clause then we insert appropriate
       // code before the main loop.
@@ -3049,12 +3049,12 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   // Exit the target loop code generation for NVPTX.
   void ExitTargetLoop(SourceLocation Loc, CodeGenFunction &CGF,
                       bool prevIsParallel, StringRef TgtFunName,
-                      OpenMPDirectiveKind SKind, bool combined) {
+                      OpenMPDirectiveKind SKind) {
     CGBuilderTy &Bld = CGF.Builder;
 
     // If no special combination of directives was encountered then
     // include control loop specific exit code.
-    if (!combined){
+    if (!CGF.combined){
       ExitTargetControlLoop(Loc, CGF, prevIsParallel, TgtFunName, SKind);
     }
     Bld.SetInsertPoint(EndTarget);

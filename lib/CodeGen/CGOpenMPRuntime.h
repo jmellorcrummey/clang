@@ -630,7 +630,7 @@ public:
 
   virtual void EnterTargetLoop(SourceLocation Loc,
       CodeGenFunction &CGF, StringRef TgtFunName, OpenMPDirectiveKind DKind,
-      OpenMPDirectiveKind &SKind, const OMPExecutableDirective &S, bool &combined);
+      OpenMPDirectiveKind &SKind, const OMPExecutableDirective &S);
 
   // \brief Code generation for closing of sequential region. Set ups the next
   // labels for special back-ends (e.g. nvptx)
@@ -640,7 +640,7 @@ public:
 
   virtual void ExitTargetLoop(SourceLocation Loc,
       CodeGenFunction &CGF, bool prevIsParallel, StringRef TgtFunName,
-      OpenMPDirectiveKind SKind, bool combined);
+      OpenMPDirectiveKind SKind);
 
   // \brief Function to close an openmp region. Set the labels and generate
   // new switch case
