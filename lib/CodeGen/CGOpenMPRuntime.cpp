@@ -2666,6 +2666,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         CGF.CGM.getLLVMContext(), ".body.combined.simd.for", CGF.CurFn);
     llvm::BasicBlock *IncCombinedFor = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".inc.combined.simd.for", CGF.CurFn);
+     llvm::BasicBlock *ExtraIncCombinedFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".extra.inc.combined.simd.for", CGF.CurFn);
     EndTarget = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".end.combined.simd.for.and.target", CGF.CurFn);
 
@@ -2695,10 +2697,18 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         Builder.getInt64Ty();
 
     // Hardcode 1 warp per column for now.
-    llvm::Constant *const32 = llvm::ConstantInt::get(VarTy, 32, isSigned);
-    llvm::Value *LB_pre = Builder.CreateUDiv(Builder.CreateCall(Get_thread_num(), {}), const32);
-    llvm::Value *LB = Builder.CreateAdd(LB_pre, Builder.CreateMul(
+    //llvm::Value *const32 = Builder.getInt32(5); // 2^5
+    //llvm::Value *threadID = Builder.CreateCall(Get_thread_num(), {}) 
+    //llvm::Value *args1[] = {threadID, Builder.getInt32(0), const32}
+    //llvm::Value *LB_pre = Builder.CreateCall(Get_shuffle(threadID->getType), args1);
+    //llvm::Value *LB = Builder.CreateAdd(LB_pre, Builder.CreateMul(
+    //    Builder.CreateCall(Get_num_threads(), {}), Builder.CreateCall(Get_team_num(), {})));
+    
+    llvm::Value *LB = Builder.CreateAdd(Builder.CreateCall(Get_thread_num(), {}), Builder.CreateMul(
         Builder.CreateCall(Get_num_threads(), {}), Builder.CreateCall(Get_team_num(), {})));
+    llvm::Value *const32 = Builder.getInt32(5); // 2^5
+    llvm::Value *args1[] = {LB, Builder.getInt32(0), const32};
+    LB = Builder.CreateCall(Get_shuffle(VarTy), args1);
 
     Expr *UBExpr = nullptr;
     if (const OMPTargetTeamsDistributeParallelForDirective *D =
@@ -2781,9 +2791,27 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // FOR INC: tid +=  gridDim.x * blockDim.x
     Builder.SetInsertPoint(IncCombinedFor);
-    llvm::Value *step = Builder.CreateMul(Builder.CreateCall(Get_num_teams(), {}),
-        Builder.CreateCall(Get_num_threads(), {}));
+    //llvm::Value *step = Builder.CreateMul(Builder.CreateCall(Get_num_teams(), {}),
+    //    Builder.CreateCall(Get_num_threads(), {}));
+    llvm::Value *step = Builder.getInt32(1);
     Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(Private), step),
+                                          Private);
+
+    // Get the modulus of the thread ID by const32 and subtract 32 from it
+    llvm::Value *indexValue = Builder.CreateLoad(Private);
+    llvm::Value *args2[] = {indexValue, Builder.getInt32(0), const32};
+    indexValue = Builder.CreateCall(Get_shuffle(VarTy), args2);
+    indexValue = Builder.CreateSub(
+        Builder.CreateSub(Builder.CreateLoad(Private), indexValue), Builder.getInt32(32));
+    Builder.CreateCondBr(
+        Builder.CreateICmpNE(indexValue, Builder.getInt32(0)), CondCombinedFor, ExtraIncCombinedFor);
+
+    // Create the extra INC block for the adding of the large step.
+    Builder.SetInsertPoint(ExtraIncCombinedFor);
+    llvm::Value *largeStep = Builder.CreateMul(Builder.CreateCall(Get_num_teams(), {}),
+        Builder.CreateCall(Get_num_threads(), {}));
+    largeStep = Builder.CreateSub(largeStep, Builder.getInt32(32));
+    Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(Private), largeStep),
                                           Private);
     Builder.CreateBr(CondCombinedFor);
 
