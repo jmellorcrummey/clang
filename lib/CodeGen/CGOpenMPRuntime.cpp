@@ -2712,57 +2712,57 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // Setup loop iteration var
     llvm::AllocaInst *Private = CGF.CreateMemTemp(QTy, ".idx.");
 
-    // // Traverse any collapsed loops
-    // const Stmt *Body = S.getAssociatedStmt();
-    // ArrayRef<Expr *> Arr = nullptr;
-    // unsigned numCollapsed = 0;
-    // if (const OMPTargetTeamsDistributeParallelForDirective *D =
-    //         dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S)) {
-    //   Arr = D->getCounters();
-    //   numCollapsed = D->getCollapsedNumber();
-    // } else {
-    //   assert(0 && "generating combined construct for an unsupported pragma sequence\n");
-    // }
-    // if (const CapturedStmt *CS = dyn_cast_or_null<CapturedStmt>(Body))
-    //   Body = CS->getCapturedStmt();
-    // const VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(IterVar)->getDecl());
-    // CGM.OpenMPSupport.addOpenMPPrivateVar(VD, Private);
-    // for (unsigned I = 0; I < numCollapsed; ++I) {
-    //   CodeGenFunction::RunCleanupsScope InitScope(CGF);
-    //   const VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(Arr[I])->getDecl());
-    //   bool SkippedContainers = false;
-    //   while (!SkippedContainers) {
-    //     if (const AttributedStmt *AS = dyn_cast_or_null<AttributedStmt>(Body))
-    //       Body = AS->getSubStmt();
-    //     else if (const CompoundStmt *CS =
-    //                  dyn_cast_or_null<CompoundStmt>(Body)) {
-    //       if (CS->size() != 1) {
-    //         SkippedContainers = true;
-    //       } else {
-    //         Body = CS->body_back();
-    //       }
-    //     } else
-    //       SkippedContainers = true;
-    //   }
-    //   const ForStmt *For = dyn_cast_or_null<ForStmt>(Body);
-    //   Body = For->getBody();
-    //   if (CGM.OpenMPSupport.getTopOpenMPPrivateVar(VD))
-    //     continue;
-    //   QualType QTy = Arr[I]->getType();
-    //   llvm::AllocaInst *Private =
-    //       CGF.CreateMemTemp(QTy, CGM.getMangledName(VD) + ".private.");
-    //   CGM.OpenMPSupport.addOpenMPPrivateVar(VD, Private);
-    //   llvm::BasicBlock *PrecondBB = llvm::BasicBlock::Create(
-    //           CGF.CGM.getLLVMContext(), "omp.loop.precond");
-    //   if (isa<DeclStmt>(For->getInit()))
-    //     CGF.EmitAnyExprToMem(VD->getAnyInitializer(), Private,
-    //                      VD->getType().getQualifiers(),
-    //                      /*IsInitializer=*/true);
-    //   else
-    //     CGF.EmitStmt(For->getInit());
-    //   CGF.EmitBranchOnBoolExpr(For->getCond(), PrecondBB, EndTarget, 0);
-    //   CGF.EmitBlock(PrecondBB);
-    // }
+    // Traverse any collapsed loops
+    const Stmt *Body = S.getAssociatedStmt();
+    ArrayRef<Expr *> Arr = nullptr;
+    unsigned numCollapsed = 0;
+    if (const OMPTargetTeamsDistributeParallelForDirective *D =
+            dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S)) {
+      Arr = D->getCounters();
+      numCollapsed = D->getCollapsedNumber();
+    } else {
+      assert(0 && "generating combined construct for an unsupported pragma sequence\n");
+    }
+    if (const CapturedStmt *CS = dyn_cast_or_null<CapturedStmt>(Body))
+      Body = CS->getCapturedStmt();
+    const VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(IterVar)->getDecl());
+    CGM.OpenMPSupport.addOpenMPPrivateVar(VD, Private);
+    for (unsigned I = 0; I < numCollapsed; ++I) {
+      CodeGenFunction::RunCleanupsScope InitScope(CGF);
+      const VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(Arr[I])->getDecl());
+      bool SkippedContainers = false;
+      while (!SkippedContainers) {
+        if (const AttributedStmt *AS = dyn_cast_or_null<AttributedStmt>(Body))
+          Body = AS->getSubStmt();
+        else if (const CompoundStmt *CS =
+                     dyn_cast_or_null<CompoundStmt>(Body)) {
+          if (CS->size() != 1) {
+            SkippedContainers = true;
+          } else {
+            Body = CS->body_back();
+          }
+        } else
+          SkippedContainers = true;
+      }
+      const ForStmt *For = dyn_cast_or_null<ForStmt>(Body);
+      Body = For->getBody();
+      if (CGM.OpenMPSupport.getTopOpenMPPrivateVar(VD))
+        continue;
+      QualType QTy = Arr[I]->getType();
+      llvm::AllocaInst *Private =
+          CGF.CreateMemTemp(QTy, CGM.getMangledName(VD) + ".private.");
+      CGM.OpenMPSupport.addOpenMPPrivateVar(VD, Private);
+      llvm::BasicBlock *PrecondBB = llvm::BasicBlock::Create(
+              CGF.CGM.getLLVMContext(), "omp.loop.precond");
+      if (isa<DeclStmt>(For->getInit()))
+        CGF.EmitAnyExprToMem(VD->getAnyInitializer(), Private,
+                         VD->getType().getQualifiers(),
+                         /*IsInitializer=*/true);
+      else
+        CGF.EmitStmt(For->getInit());
+      CGF.EmitBranchOnBoolExpr(For->getCond(), PrecondBB, EndTarget, 0);
+      CGF.EmitBlock(PrecondBB);
+    }
 
     Builder.CreateStore(LB, Private);
     Builder.CreateBr(CondCombinedFor);
