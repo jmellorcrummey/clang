@@ -376,7 +376,7 @@ InputInfo Driver::CreateBundledOffloadingResult(Compilation &C,
   // Get the result file based on BaseInput file name and the previous host
   // action.
   InputInfo BundledFile =
-      CreateActionResult(C, *BundleAction->begin(), Results[0].getBaseInput(),
+      CreateActionResult(C, *BundleAction->input_begin(), Results[0].getBaseInput(),
                          /*BoundArch=*/nullptr,
                          /*AtTopLevel=*/true, /*MultipleArchs=*/false);
 
@@ -2205,7 +2205,7 @@ InputInfo Driver::BuildJobsForActionNoCache(
     // so we do not consider it having multiple architectures. We just use the
     // naming that a regular host input file would have.
     auto Result =
-        BuildJobsForAction(C, *OUA->begin(), TC, BoundArch, AtTopLevel,
+        BuildJobsForAction(C, *OUA->input_begin(), TC, BoundArch, AtTopLevel,
                            /*MultipleArchs=*/false, LinkingOutput,
                            CachedResults, OffloadingHostResults);
     return CreateUnbundledOffloadingResult(C, OUA, TC, Result,
@@ -2221,7 +2221,7 @@ InputInfo Driver::BuildJobsForActionNoCache(
       // The input job of the bundling action is meant for multiple targets and
       // is not a top level job - the bundling job is the top level for the
       // current output.
-      Results[i] = BuildJobsForAction(C, *OBA->begin(), CurTC,
+      Results[i] = BuildJobsForAction(C, *OBA->input_begin(), CurTC,
                                       CreateOffloadingPseudoArchName(C, CurTC),
                                       /*AtTopLevel=*/false,
                                       /*MultipleArchs=*/true, LinkingOutput,
@@ -2280,7 +2280,8 @@ InputInfo Driver::BuildJobsForActionNoCache(
     TC = &C.getDefaultToolChain();
 
   const Tool *T =
-      selectToolForJob(C, isSaveTempsEnabled(), TC, JA, Inputs, CollapsedCHA);
+      selectToolForJob(C, isSaveTempsEnabled(), embedBitcodeEnabled(), TC, JA,
+                       Inputs, CollapsedCHA);
   if (!T)
     return InputInfo();
 
