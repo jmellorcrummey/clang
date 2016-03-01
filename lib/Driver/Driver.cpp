@@ -50,7 +50,7 @@ Driver::Driver(StringRef ClangExecutable, StringRef DefaultTargetTriple,
                DiagnosticsEngine &Diags,
                IntrusiveRefCntPtr<vfs::FileSystem> VFS)
     : Opts(createDriverOptTable()), Diags(Diags), VFS(VFS), Mode(GCCMode),
-      SaveTemps(SaveTempsNone), LTOMode(LTOK_None),
+      SaveTemps(SaveTempsNone), BitcodeEmbed(EmbedNone), LTOMode(LTOK_None),
       ClangExecutable(ClangExecutable),
       SysRoot(DEFAULT_SYSROOT), UseStdLib(true),
       DefaultTargetTriple(DefaultTargetTriple),
@@ -733,6 +733,19 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
                     .Case("cwd", SaveTempsCwd)
                     .Case("obj", SaveTempsObj)
                     .Default(SaveTempsCwd);
+  }
+
+  // Ignore -fembed-bitcode options with LTO
+  // since the output will be bitcode anyway.
+  if (!Args.hasFlag(options::OPT_flto, options::OPT_fno_lto, false)) {
+    if (Args.hasArg(options::OPT_fembed_bitcode))
+      BitcodeEmbed = EmbedBitcode;
+    else if (Args.hasArg(options::OPT_fembed_bitcode_marker))
+      BitcodeEmbed = EmbedMarker;
+  } else {
+    // claim the bitcode option under LTO so no warning is issued.
+    Args.ClaimAllArgs(options::OPT_fembed_bitcode);
+    Args.ClaimAllArgs(options::OPT_fembed_bitcode_marker);
   }
 
   setLTOMode(Args);
@@ -2036,7 +2049,8 @@ void Driver::BuildJobs(Compilation &C) const {
 // CudaHostAction, updates CollapsedCHA with the pointer to it so the
 // caller can deal with extra handling such action requires.
 static const Tool *selectToolForJob(Compilation &C, bool SaveTemps,
-                                    const ToolChain *TC, const JobAction *JA,
+                                    bool EmbedBitcode, const ToolChain *TC,
+                                    const JobAction *JA,
                                     const ActionList *&Inputs,
                                     const CudaHostAction *&CollapsedCHA) {
   const Tool *ToolForJob = nullptr;
@@ -2054,37 +2068,52 @@ static const Tool *selectToolForJob(Compilation &C, bool SaveTemps,
       isa<AssembleJobAction>(JA) && Inputs->size() == 1 &&
       isa<BackendJobAction>(*Inputs->begin()) &&
       !TC->RequiresHostToolChainForOffloadingAction(*Inputs->begin())) {
-    // A BackendJob is always preceded by a CompileJob, and without
-    // -save-temps they will always get combined together, so instead of
-    // checking the backend tool, check if the tool for the CompileJob
-    // has an integrated assembler. However, if OpenMP offloading is required
-    // the backend and compile jobs have to be kept separate and an integrated
-    // assembler of the backend job will be queried instead.
-    JobAction *CurJA = cast<BackendJobAction>(*Inputs->begin());
-    const ActionList *BackendInputs = &CurJA->getInputs();
-    CudaHostAction *CHA = nullptr;
-    if (!RequiresOpenMPOffloading(TC)) {
-      // Compile job may be wrapped in CudaHostAction, extract it if
-      // that's the case and update CollapsedCHA if we combine phases.
-      CHA = dyn_cast<CudaHostAction>(*CurJA->begin());
-      CurJA =
-          cast<CompileJobAction>(CHA ? *CHA->input_begin() : *BackendInputs->begin());
-      assert(CurJA && "Backend job is not preceeded by compile job.");
-    }
-    const Tool *CurTool = TC->SelectTool(*CurJA);
-    if (!CurTool)
+    // A BackendJob is always preceded by a CompileJob, and without -save-temps
+    // or -fembed-bitcode, they will always get combined together, so instead of
+    // checking the backend tool, check if the tool for the CompileJob has an
+    // integrated assembler. For -fembed-bitcode, CompileJob is still used to
+    // look up tools for BackendJob, but they need to match before we can split
+    // them. If OpenMP offloading is required backend and compile jobs have to
+    // be kept separate and an integrated of the backend job will be queried
+    // instead.
+    const ActionList *BackendInputs = &(*Inputs)[0]->getInputs();
+    // Compile job may be wrapped in CudaHostAction, extract it if
+    // that's the case and update CollapsedCHA if we combine phases.
+    CudaHostAction *CHA = dyn_cast<CudaHostAction>(*BackendInputs->begin());
+    JobAction *CompileJA = cast<CompileJobAction>(
+        CHA ? *CHA->input_begin() : *BackendInputs->begin());
+    assert(CompileJA && "Backend job is not preceeded by compile job.");
+    const Tool *Compiler = TC->SelectTool(*CompileJA);
+    if (!Compiler)
       return nullptr;
-    if (CurTool->hasIntegratedAssembler()) {
-      Inputs = &CurJA->getInputs();
-      ToolForJob = CurTool;
+    // When using -fembed-bitcode, it is required to have the same tool (clang)
+    // for both CompilerJA and BackendJA. Otherwise, combine two stages.
+    if (EmbedBitcode) {
+      JobAction *InputJA = cast<JobAction>(*Inputs->begin());
+      const Tool *BackendTool = TC->SelectTool(*InputJA);
+      if (BackendTool == Compiler)
+        CompileJA = InputJA;
+    }
+    // If we are supporting OpenMP offloading we have to split backend and
+    // compile jobs.
+    if (RequiresOpenMPOffloading(TC)) {
+      JobAction *InputJA = cast<JobAction>(*Inputs->begin());
+      const Tool *BackendTool = TC->SelectTool(*InputJA);
+      if (BackendTool == Compiler)
+        CompileJA = InputJA;
+    }
+    if (Compiler->hasIntegratedAssembler()) {
+      Inputs = &CompileJA->getInputs();
+      ToolForJob = Compiler;
       CollapsedCHA = CHA;
     }
   }
 
   // A backend job should always be combined with the preceding compile job
-  // unless OPT_save_temps is enabled and the compiler is capable of emitting
-  // LLVM IR as an intermediate output. The OpenMP offloading implementation
-  // also requires the Compile and Backend jobs to be separate.
+  // unless OPT_save_temps or OPT_fembed_bitcode is enabled and the compiler is
+  // capable of emitting LLVM IR as an intermediate output. The OpenMP
+  // offloading implementation also requires the Compile and Backend jobs to be
+  // separate.
   if (isa<BackendJobAction>(JA) && !RequiresOpenMPOffloading(TC) &&
       !TC->RequiresHostToolChainForOffloadingAction(*Inputs->begin())) {
     // Check if the compiler supports emitting LLVM IR.
@@ -2098,7 +2127,8 @@ static const Tool *selectToolForJob(Compilation &C, bool SaveTemps,
     const Tool *Compiler = TC->SelectTool(*CompileJA);
     if (!Compiler)
       return nullptr;
-    if (!Compiler->canEmitIR() || !SaveTemps) {
+    if (!Compiler->canEmitIR() ||
+        (!SaveTemps && !EmbedBitcode)) {
       Inputs = &CompileJA->getInputs();
       ToolForJob = Compiler;
       CollapsedCHA = CHA;
