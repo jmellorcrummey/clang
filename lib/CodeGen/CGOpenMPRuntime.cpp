@@ -2658,17 +2658,16 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     }
 
     // Set the names of the basic block tags
-    std::string constructName = "combined.simd"
     llvm::BasicBlock *StartCombinedFor = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".start."+constructName+".for", CGF.CurFn);
+        CGF.CGM.getLLVMContext(), ".start.combined.simd.for", CGF.CurFn);
     llvm::BasicBlock *CondCombinedFor = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".cond."+constructName+".for", CGF.CurFn);
+        CGF.CGM.getLLVMContext(), ".cond.combined.simd.for", CGF.CurFn);
     llvm::BasicBlock *BodyCombinedFor = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".body."+constructName+".for", CGF.CurFn);
+        CGF.CGM.getLLVMContext(), ".body.combined.simd.for", CGF.CurFn);
     llvm::BasicBlock *IncCombinedFor = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".inc."+constructName+".for", CGF.CurFn);
+        CGF.CGM.getLLVMContext(), ".inc.combined.simd.for", CGF.CurFn);
     EndTarget = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".end."+constructName+".for.and.target", CGF.CurFn);
+        CGF.CGM.getLLVMContext(), ".end.combined.simd.for.and.target", CGF.CurFn);
 
     // Start populating the basic blocks which perform the init, cond and inc
     // of the combined construct for loop.
@@ -2695,7 +2694,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     llvm::Type *VarTy = TypeSize == 32 ? Builder.getInt32Ty() :
         Builder.getInt64Ty();
 
-    llvm::Value *LB = Builder.CreateAdd(Builder.CreateCall(Get_thread_num(), {}), Builder.CreateMul(
+    // Hardcode 1 warp per column for now.
+    llvm::Constant *const32 = llvm::ConstantInt::get(VarTy, 32, isSigned);
+    llvm::Value *LB_pre = Builder.CreateUDiv(Builder.CreateCall(Get_thread_num(), {}), const32);
+    llvm::Value *LB = Builder.CreateAdd(LB_pre, Builder.CreateMul(
         Builder.CreateCall(Get_num_threads(), {}), Builder.CreateCall(Get_team_num(), {})));
 
     Expr *UBExpr = nullptr;
@@ -2705,8 +2707,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     else
       assert(0 && "generating combined construct for an unsupported pragma sequence\n");
 
-    // Hardcode 1 warp per column for now.
-    llvm::Value *UB = CGF.EmitScalarExpr(Builder.CreateMul(UBExpr, 32));
+    llvm::Value *UB = CGF.EmitScalarExpr(UBExpr);
     UB = Builder.CreateIntCast(UB, VarTy, isSigned);
 
     // Setup loop iteration var
@@ -3199,6 +3200,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     bool applyNestedSimd = SKind == OMPD_teams_distribute_parallel_for &&
                            !StmtHasScheduleStaticOne(S, CGF, SKind) &&
                            SIMDinTopBlock(S);
+    applyNestedSimd = true;
 
     printf("Considering if combined construct is applicable:\n");
     printf("    => SKIND is (OMPD_teams_distribute_parallel_for %d): %d\n", OMPD_teams_distribute_parallel_for, SKind);
