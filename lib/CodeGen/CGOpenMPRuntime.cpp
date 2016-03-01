@@ -2635,6 +2635,203 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
   /// Generate instructions for a combined construct.
   void
+  EmitOMPCombinedSimdDirectiveLoop(OpenMPDirectiveKind DKind,
+                                   OpenMPDirectiveKind SKind,
+                                   const OMPExecutableDirective &S,
+                                   CodeGenFunction &CGF,
+                                   StringRef TgtFunName,
+                                   const OMPClause * reduction_clause) {
+    // // Set distribute
+    CGF.CGM.OpenMPSupport.startOpenMPRegion(false);
+    CGF.CGM.OpenMPSupport.setNoWait(false);
+    CGF.CGM.OpenMPSupport.setMergeable(true);
+    CGF.CGM.OpenMPSupport.setOrdered(false);
+    CGF.CGM.OpenMPSupport.setDistribute(true);
+
+    // Implement a new for loop.
+    CGBuilderTy &Builder = CGF.Builder;
+
+    //Init and Pre reduction clause treatment
+    if (reduction_clause){
+      CGF.EmitInitOMPReductionClause(*cast<OMPReductionClause>(reduction_clause), S);
+      CGF.EmitPreOMPReductionClause(*cast<OMPReductionClause>(reduction_clause), S);
+    }
+
+    // Set the names of the basic block tags
+    std::string constructName = "combined.simd"
+    llvm::BasicBlock *StartCombinedFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".start."+constructName+".for", CGF.CurFn);
+    llvm::BasicBlock *CondCombinedFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".cond."+constructName+".for", CGF.CurFn);
+    llvm::BasicBlock *BodyCombinedFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".body."+constructName+".for", CGF.CurFn);
+    llvm::BasicBlock *IncCombinedFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".inc."+constructName+".for", CGF.CurFn);
+    EndTarget = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".end."+constructName+".for.and.target", CGF.CurFn);
+
+    // Start populating the basic blocks which perform the init, cond and inc
+    // of the combined construct for loop.
+    Builder.CreateBr(StartCombinedFor);
+    Builder.SetInsertPoint(StartCombinedFor);
+
+    // generating:
+    // for (int idx = threadIdx.x + blockIdx.x * blockDim.x ;
+    //          idx < UB; idx += blockDim.x * gridDim.x)
+    Expr *IterVar = nullptr;
+    if (const OMPTargetTeamsDistributeParallelForDirective *D =
+            dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S))
+      IterVar = D->getNewIterVar();
+    else
+      assert(0 && "generating combined construct for an unsupported pragma sequence\n");
+
+    QualType QTy = IterVar->getType();
+    uint64_t TypeSize = 32;
+    if (CGF.getContext().getTypeSize(QTy) > TypeSize)
+      TypeSize = 64;
+    bool isSigned = true;
+    if (QTy->hasUnsignedIntegerRepresentation())
+      isSigned = false;
+    llvm::Type *VarTy = TypeSize == 32 ? Builder.getInt32Ty() :
+        Builder.getInt64Ty();
+
+    llvm::Value *LB = Builder.CreateAdd(Builder.CreateCall(Get_thread_num(), {}), Builder.CreateMul(
+        Builder.CreateCall(Get_num_threads(), {}), Builder.CreateCall(Get_team_num(), {})));
+
+    Expr *UBExpr = nullptr;
+    if (const OMPTargetTeamsDistributeParallelForDirective *D =
+            dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S))
+      UBExpr = D->getNewIterEnd();
+    else
+      assert(0 && "generating combined construct for an unsupported pragma sequence\n");
+
+    // Hardcode 1 warp per column for now.
+    llvm::Value *UB = CGF.EmitScalarExpr(Builder.CreateMul(UBExpr, 32));
+    UB = Builder.CreateIntCast(UB, VarTy, isSigned);
+
+    // Setup loop iteration var
+    llvm::AllocaInst *Private = CGF.CreateMemTemp(QTy, ".idx.");
+
+    // // Traverse any collapsed loops
+    // const Stmt *Body = S.getAssociatedStmt();
+    // ArrayRef<Expr *> Arr = nullptr;
+    // unsigned numCollapsed = 0;
+    // if (const OMPTargetTeamsDistributeParallelForDirective *D =
+    //         dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S)) {
+    //   Arr = D->getCounters();
+    //   numCollapsed = D->getCollapsedNumber();
+    // } else {
+    //   assert(0 && "generating combined construct for an unsupported pragma sequence\n");
+    // }
+    // if (const CapturedStmt *CS = dyn_cast_or_null<CapturedStmt>(Body))
+    //   Body = CS->getCapturedStmt();
+    // const VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(IterVar)->getDecl());
+    // CGM.OpenMPSupport.addOpenMPPrivateVar(VD, Private);
+    // for (unsigned I = 0; I < numCollapsed; ++I) {
+    //   CodeGenFunction::RunCleanupsScope InitScope(CGF);
+    //   const VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(Arr[I])->getDecl());
+    //   bool SkippedContainers = false;
+    //   while (!SkippedContainers) {
+    //     if (const AttributedStmt *AS = dyn_cast_or_null<AttributedStmt>(Body))
+    //       Body = AS->getSubStmt();
+    //     else if (const CompoundStmt *CS =
+    //                  dyn_cast_or_null<CompoundStmt>(Body)) {
+    //       if (CS->size() != 1) {
+    //         SkippedContainers = true;
+    //       } else {
+    //         Body = CS->body_back();
+    //       }
+    //     } else
+    //       SkippedContainers = true;
+    //   }
+    //   const ForStmt *For = dyn_cast_or_null<ForStmt>(Body);
+    //   Body = For->getBody();
+    //   if (CGM.OpenMPSupport.getTopOpenMPPrivateVar(VD))
+    //     continue;
+    //   QualType QTy = Arr[I]->getType();
+    //   llvm::AllocaInst *Private =
+    //       CGF.CreateMemTemp(QTy, CGM.getMangledName(VD) + ".private.");
+    //   CGM.OpenMPSupport.addOpenMPPrivateVar(VD, Private);
+    //   llvm::BasicBlock *PrecondBB = llvm::BasicBlock::Create(
+    //           CGF.CGM.getLLVMContext(), "omp.loop.precond");
+    //   if (isa<DeclStmt>(For->getInit()))
+    //     CGF.EmitAnyExprToMem(VD->getAnyInitializer(), Private,
+    //                      VD->getType().getQualifiers(),
+    //                      /*IsInitializer=*/true);
+    //   else
+    //     CGF.EmitStmt(For->getInit());
+    //   CGF.EmitBranchOnBoolExpr(For->getCond(), PrecondBB, EndTarget, 0);
+    //   CGF.EmitBlock(PrecondBB);
+    // }
+
+    Builder.CreateStore(LB, Private);
+    Builder.CreateBr(CondCombinedFor);
+
+    // FOR COND: tid <= N
+    Builder.SetInsertPoint(CondCombinedFor);
+    if (isSigned){
+      Builder.CreateCondBr(Builder.CreateICmpSLE(Builder.CreateLoad(Private), UB),
+                           BodyCombinedFor, EndTarget);
+    }
+    else {
+      Builder.CreateCondBr(Builder.CreateICmpULE(Builder.CreateLoad(Private), UB),
+                           BodyCombinedFor, EndTarget);
+    }
+
+    // FOR INC: tid +=  gridDim.x * blockDim.x
+    Builder.SetInsertPoint(IncCombinedFor);
+    llvm::Value *step = Builder.CreateMul(Builder.CreateCall(Get_num_teams(), {}),
+        Builder.CreateCall(Get_num_threads(), {}));
+    Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(Private), step),
+                                          Private);
+    Builder.CreateBr(CondCombinedFor);
+
+    // FOR BODY
+    Builder.SetInsertPoint(BodyCombinedFor);
+
+    //RunCleanupsScope ThenScope(*this);
+    Expr *InitExpr = nullptr;
+    if (const OMPTargetTeamsDistributeParallelForDirective *D =
+        dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S))
+      InitExpr = D->getInit();
+    else
+      assert(0 && "generating combined construct for an unsupported pragma sequence\n");
+
+    {
+      // FIXME: do we need all these clean ups?
+      CodeGenFunction::RunCleanupsScope ThenScope(CGF);
+      CGF.EmitStmt(InitExpr);
+      {
+        CodeGenFunction::RunCleanupsScope BodyScope(CGF);
+        CGF.EmitStmt(Body);
+      }
+      Builder.CreateBr(IncCombinedFor);
+    }
+
+    Builder.SetInsertPoint(EndTarget);
+    if (reduction_clause){
+      // Insert sync here since we are done with the loop and we
+      // have to make sure all threads have finished their work.
+      // This is in line with the OpenMP spec since this would be
+      // a barrier after a parallel statement
+      EmitNativeBarrier(CGF);
+
+      // Continue with the reduction
+      CGF.EmitPostOMPReductionClause(*cast<OMPReductionClause>(reduction_clause), S);
+      CGF.EmitCloseOMPReductionClause(*cast<OMPReductionClause>(reduction_clause), S);
+      CGF.EmitFinalOMPReductionClause(*cast<OMPReductionClause>(reduction_clause), S);
+
+      // Create safety block
+      llvm::BasicBlock *safetyNet = llvm::BasicBlock::Create(
+          CGF.CGM.getLLVMContext(), ".safety.net.", CGF.CurFn);
+      Builder.CreateBr(safetyNet);
+      EndTarget = safetyNet;
+    }
+    CGF.CGM.OpenMPSupport.endOpenMPRegion();
+  }
+
+  /// Generate instructions for a combined construct.
+  void
   EmitOMPCombinedDirectiveLoop(OpenMPDirectiveKind DKind,
                                OpenMPDirectiveKind SKind,
                                const OMPExecutableDirective &S,
@@ -2657,16 +2854,18 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       CGF.EmitPreOMPReductionClause(*cast<OMPReductionClause>(reduction_clause), S);
     }
 
+    // Set the names of the basic block tags
+    std::string constructName = "combined";
     llvm::BasicBlock *StartCombinedFor = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".start.combined.for", CGF.CurFn);
+        CGF.CGM.getLLVMContext(), ".start."+constructName+".for", CGF.CurFn);
     llvm::BasicBlock *CondCombinedFor = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".cond.combined.for", CGF.CurFn);
+        CGF.CGM.getLLVMContext(), ".cond."+constructName+".for", CGF.CurFn);
     llvm::BasicBlock *BodyCombinedFor = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".body.combined.for", CGF.CurFn);
+        CGF.CGM.getLLVMContext(), ".body."+constructName+".for", CGF.CurFn);
     llvm::BasicBlock *IncCombinedFor = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".inc.combined.for", CGF.CurFn);
+        CGF.CGM.getLLVMContext(), ".inc."+constructName+".for", CGF.CurFn);
     EndTarget = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".end.combined.for.and.target", CGF.CurFn);
+        CGF.CGM.getLLVMContext(), ".end."+constructName+".for.and.target", CGF.CurFn);
 
     // Start populating the basic blocks which perform the init, cond and inc
     // of the combined construct for loop.
@@ -3040,7 +3239,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
           TgtFunName + Twine("_thread_limit"));
 
       // Emit combined construct code.
-      EmitOMPCombinedDirectiveLoop(DKind, SKind, S, CGF, TgtFunName, reduction_C);
+      EmitOMPCombinedSimdDirectiveLoop(DKind, SKind, S, CGF, TgtFunName, reduction_C);
     } else {
       // In case no special set of directives has been encountered then
       // produce the control loop.
@@ -3056,7 +3255,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // If no special combination of directives was encountered then
     // include control loop specific exit code.
-    if (!CGF.combined){
+    if (!CGF.combined && !CGF.combinedSimd){
       ExitTargetControlLoop(Loc, CGF, prevIsParallel, TgtFunName, SKind);
     }
     Bld.SetInsertPoint(EndTarget);

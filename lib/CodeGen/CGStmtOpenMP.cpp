@@ -2515,7 +2515,7 @@ void CodeGenFunction::EmitOMPDirectiveWithTarget(OpenMPDirectiveKind DKind,
         CGM.getOpenMPRuntime().EnterTargetLoop(CS->getLocStart(), CGF,
             FD->getName(), DKind, SKind, S);
 
-      if (!CGF.combined){
+      if (!CGF.combined && !CGF.combinedSimd){
         // Emit the contents of the target region
         switch (SKind) {
         default:
