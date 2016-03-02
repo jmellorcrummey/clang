@@ -2254,7 +2254,7 @@ void CodeGenFunction::EmitSIMDForHelperCall(llvm::Function *BodyFunc,
 
 llvm::Function *CodeGenFunction::EmitSimdFunction(CGPragmaSimdWrapper &W) {
   const CapturedStmt &CS = *W.getAssociatedStmt();
-  printf("======> Inside EmitSimdFunction: Emit SIMD function body, inlint it!\n");
+  printf("======> Inside EmitSimdFunction: Emit SIMD function body, inline it!\n");
 
   CGSIMDForStmtInfo CSInfo(W, LoopStack.getCurLoopID(),
                               LoopStack.getCurLoopParallel());
@@ -2278,6 +2278,7 @@ void CodeGenFunction::EmitPragmaSimd(CodeGenFunction::CGPragmaSimdWrapper &W) {
           ? cast<OMPExecutableDirective>(W.getStmt())->clauses()
           : nullptr;
   CGM.getOpenMPRuntime().EnterSimdRegion(*this, clauses);
+  /*
 
   if (W.isOmp()) {
     // Start a region for loop index and loops' counters
@@ -2439,7 +2440,7 @@ void CodeGenFunction::EmitPragmaSimd(CodeGenFunction::CGPragmaSimdWrapper &W) {
   }
 
   EmitBlock(ContBlock, true);
-
+  */
   if (W.isOmp())
     CGM.OpenMPSupport.endOpenMPRegion();
 }

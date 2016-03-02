@@ -7655,12 +7655,14 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
     InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
     RunCleanupsScope ExecutedScope(*this);
     CGPragmaOmpSimd Wrapper(&S);
+    printf("======> Inside EmitOMPSimdDirective: Call to EmitPragmaSimd\n");
     EmitPragmaSimd(Wrapper);
   } else {
     printf("======> Inside EmitOMPSimdDirective: Requires Micro Task\n");
     InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
     RunCleanupsScope ExecutedScope(*this);
     CGPragmaOmpSimd Wrapper(&S);
+    printf("======> Inside EmitOMPSimdDirective: Call to EmitPragmaSimd\n");
     EmitPragmaSimd(Wrapper);
   }
 }
