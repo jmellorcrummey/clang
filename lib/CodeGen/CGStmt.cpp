@@ -2278,7 +2278,6 @@ void CodeGenFunction::EmitPragmaSimd(CodeGenFunction::CGPragmaSimdWrapper &W) {
           ? cast<OMPExecutableDirective>(W.getStmt())->clauses()
           : nullptr;
   CGM.getOpenMPRuntime().EnterSimdRegion(*this, clauses);
-  /*
 
   if (W.isOmp()) {
     // Start a region for loop index and loops' counters
@@ -2440,7 +2439,7 @@ void CodeGenFunction::EmitPragmaSimd(CodeGenFunction::CGPragmaSimdWrapper &W) {
   }
 
   EmitBlock(ContBlock, true);
-  */
+
   if (W.isOmp())
     CGM.OpenMPSupport.endOpenMPRegion();
 }
