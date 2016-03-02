@@ -2383,6 +2383,11 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
           llvm::Intrinsic::nvvm_barrier0);
   }
 
+  llvm::Function * Get_memfence () {
+    return llvm::Intrinsic::getDeclaration(&CGM.getModule(),
+          llvm::Intrinsic::nvvm_membar_gl);
+  }
+
   llvm::Function * Get_shuffle (llvm::Type *VarTy) {
     assert((VarTy->isFloatingPointTy() || VarTy->isIntegerTy()) &&
            "Unsupported variable type in Get_shuffle()");
@@ -2632,8 +2637,186 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
              "Number of OMP parallel regions cannot be a negative number");
   }
 
+  void
+  EmitOMPInnerSimdLoop(const OMPExecutableDirective &S,
+                       CodeGenFunction &CGF,
+                       llvm::AllocaInst *Private,
+                       llvm::Value *const32,
+                       llvm::BasicBlock *OuterLoopBody){
 
-  /// Generate instructions for a combined construct.
+    // Implement a new for loop.
+    CGBuilderTy &Builder = CGF.Builder;
+
+    // Set the names of the basic block tags
+    llvm::BasicBlock *StartCombinedFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".start.inner.simd.for", CGF.CurFn);
+    llvm::BasicBlock *CondCombinedFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".cond.inner.simd.for", CGF.CurFn);
+    llvm::BasicBlock *BodyCombinedFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".body.inner.simd.for", CGF.CurFn);
+    llvm::BasicBlock *IncCombinedFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".inc.inner.simd.for", CGF.CurFn);
+    llvm::BasicBlock *EndTarget = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".end.inner.simd.for", CGF.CurFn);
+ 
+    printf("Setup of blocks! Done\n");
+
+    // Start populating the basic blocks which perform the init, cond and inc
+    // of the combined construct for loop.
+    Builder.CreateBr(StartCombinedFor);
+    Builder.SetInsertPoint(StartCombinedFor);
+
+    // generating:
+    // for (int j = i mod 32; j < LAYERS; j += 32)
+    Expr *IterVar = nullptr;
+    if (const OMPSimdDirective *D =
+            dyn_cast<OMPSimdDirective>(&S))
+      IterVar = D->getNewIterVar();
+    else
+      assert(0 && "generating combined construct for an unsupported pragma sequence\n");
+
+    QualType QTy = IterVar->getType();
+    uint64_t TypeSize = 32;
+    if (CGF.getContext().getTypeSize(QTy) > TypeSize)
+      TypeSize = 64;
+    bool isSigned = true;
+    if (QTy->hasUnsignedIntegerRepresentation())
+      isSigned = false;
+    llvm::Type *VarTy = TypeSize == 32 ? Builder.getInt32Ty() :
+        Builder.getInt64Ty();
+
+    printf("Setup of IterVar and Qty! Done\n");
+    // Get the modulus of the outer loop iteration var by const32
+    llvm::Value *threadID = Builder.CreateAdd(Builder.CreateCall(Get_thread_num(), {}), Builder.CreateMul(
+        Builder.CreateCall(Get_num_threads(), {}), Builder.CreateCall(Get_team_num(), {})));
+    llvm::Value *args1[] = {threadID, Builder.getInt32(0), const32};
+    llvm::Value *LB = Builder.CreateCall(Get_shuffle(VarTy), args1);
+    LB = Builder.CreateSub(threadID, LB);
+
+    printf("Setup of LB! Done\n");
+    // Use inner loop upper bound
+    Expr *UBExpr = nullptr;
+    if (const OMPSimdDirective *D =
+            dyn_cast<OMPSimdDirective>(&S))
+      UBExpr = D->getNewIterEnd();
+    else
+      assert(0 && "generating combined construct for an unsupported pragma sequence\n");
+
+    llvm::Value *UB = CGF.EmitScalarExpr(UBExpr);
+    UB = Builder.CreateIntCast(UB, VarTy, isSigned);
+
+    printf("Setup of UB! Done\n");
+    // Setup loop iteration var
+    llvm::AllocaInst *InnerPrivate = CGF.CreateMemTemp(QTy, ".inner.idx.");
+
+    // Traverse any collapsed loops
+    const Stmt *Body = S.getAssociatedStmt();
+    ArrayRef<Expr *> Arr = nullptr;
+    unsigned numCollapsed = 0;
+    if (const OMPSimdDirective *D =
+            dyn_cast<OMPSimdDirective>(&S)) {
+      Arr = D->getCounters();
+      numCollapsed = D->getCollapsedNumber();
+    } else {
+      assert(0 && "generating combined construct for an unsupported pragma sequence\n");
+    }
+
+    printf("Setup of Collapse1! Done\n");
+    if (const CapturedStmt *CS = dyn_cast_or_null<CapturedStmt>(Body))
+      Body = CS->getCapturedStmt();
+
+    const VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(IterVar)->getDecl());
+    CGM.OpenMPSupport.addOpenMPPrivateVar(VD, InnerPrivate);
+    for (unsigned I = 0; I < numCollapsed; ++I) {
+      printf("Inside Collapse!\n");
+      CodeGenFunction::RunCleanupsScope InitScope(CGF);
+      const VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(Arr[I])->getDecl());
+      bool SkippedContainers = false;
+      while (!SkippedContainers) {
+        if (const AttributedStmt *AS = dyn_cast_or_null<AttributedStmt>(Body))
+          Body = AS->getSubStmt();
+        else if (const CompoundStmt *CS =
+                     dyn_cast_or_null<CompoundStmt>(Body)) {
+          if (CS->size() != 1) {
+            SkippedContainers = true;
+          } else {
+            Body = CS->body_back();
+          }
+        } else
+          SkippedContainers = true;
+      }
+      const ForStmt *For = dyn_cast_or_null<ForStmt>(Body);
+      Body = For->getBody();
+      if (CGM.OpenMPSupport.getTopOpenMPPrivateVar(VD))
+        continue;
+      QualType QTy = Arr[I]->getType();
+      llvm::AllocaInst *InnerPrivate =
+          CGF.CreateMemTemp(QTy, CGM.getMangledName(VD) + ".private.");
+      CGM.OpenMPSupport.addOpenMPPrivateVar(VD, InnerPrivate);
+      llvm::BasicBlock *PrecondBB = llvm::BasicBlock::Create(
+              CGF.CGM.getLLVMContext(), "omp.inner.loop.precond");
+      if (isa<DeclStmt>(For->getInit()))
+        CGF.EmitAnyExprToMem(VD->getAnyInitializer(), InnerPrivate,
+                         VD->getType().getQualifiers(), true);
+      else
+        CGF.EmitStmt(For->getInit());
+      // Use local EndTarget which should branch back
+      // to where we left the outer for.
+      CGF.EmitBranchOnBoolExpr(For->getCond(), PrecondBB, EndTarget, 0);
+      CGF.EmitBlock(PrecondBB);
+    }
+    printf("Setup of Collapse! Done\n");
+
+    Builder.CreateStore(LB, InnerPrivate);
+    Builder.CreateBr(CondCombinedFor);
+
+    // FOR COND: j <= LAYERS
+    Builder.SetInsertPoint(CondCombinedFor);
+    if (isSigned){
+      Builder.CreateCondBr(Builder.CreateICmpSLE(Builder.CreateLoad(InnerPrivate), UB),
+                           BodyCombinedFor, EndTarget);
+    }
+    else {
+      Builder.CreateCondBr(Builder.CreateICmpULE(Builder.CreateLoad(InnerPrivate), UB),
+                           BodyCombinedFor, EndTarget);
+    }
+    printf("Setup of Cond! Done\n");
+
+    // FOR INC: tid += const32
+    Builder.SetInsertPoint(IncCombinedFor);
+    // Change the 32 to be 32 * K in the chunked case.
+    llvm::Value *step = Builder.getInt32(32);
+    Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(InnerPrivate), step),
+                                          InnerPrivate);
+    Builder.CreateBr(CondCombinedFor);
+    printf("Setup of INC! Done\n");
+
+    // FOR BODY
+    Builder.SetInsertPoint(BodyCombinedFor);
+
+    //RunCleanupsScope ThenScope(*this);
+    Expr *InitExpr = nullptr;
+    if (const OMPSimdDirective *D =
+        dyn_cast<OMPSimdDirective>(&S))
+      InitExpr = D->getInit();
+    else
+      assert(0 && "generating combined construct for an unsupported pragma sequence\n");
+    printf("Setup of Init! Done\n");
+    {
+      CodeGenFunction::RunCleanupsScope ThenScope(CGF);
+      CGF.EmitStmt(InitExpr);
+      {
+        printf("Setup of Init Before Body! Done\n");
+        CodeGenFunction::RunCleanupsScope BodyScope(CGF);
+        CGF.EmitStmt(Body);
+      }
+      Builder.CreateBr(IncCombinedFor);
+    }
+    Builder.SetInsertPoint(EndTarget);
+    Builder.CreateBr(OuterLoopBody);
+  }
+
+  /// Generate instructions for a combined-SIMD construct.
   void
   EmitOMPCombinedSimdDirectiveLoop(OpenMPDirectiveKind DKind,
                                    OpenMPDirectiveKind SKind,
@@ -2664,9 +2847,11 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         CGF.CGM.getLLVMContext(), ".cond.combined.simd.for", CGF.CurFn);
     llvm::BasicBlock *BodyCombinedFor = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".body.combined.simd.for", CGF.CurFn);
+    llvm::BasicBlock *AftetInnerPragmaBodyFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".after.inner.simd.body.for", CGF.CurFn);
     llvm::BasicBlock *IncCombinedFor = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".inc.combined.simd.for", CGF.CurFn);
-     llvm::BasicBlock *ExtraIncCombinedFor = llvm::BasicBlock::Create(
+    llvm::BasicBlock *ExtraIncCombinedFor = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".extra.inc.combined.simd.for", CGF.CurFn);
     EndTarget = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".end.combined.simd.for.and.target", CGF.CurFn);
@@ -2697,13 +2882,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         Builder.getInt64Ty();
 
     // Hardcode 1 warp per column for now.
-    //llvm::Value *const32 = Builder.getInt32(5); // 2^5
-    //llvm::Value *threadID = Builder.CreateCall(Get_thread_num(), {}) 
-    //llvm::Value *args1[] = {threadID, Builder.getInt32(0), const32}
-    //llvm::Value *LB_pre = Builder.CreateCall(Get_shuffle(threadID->getType), args1);
-    //llvm::Value *LB = Builder.CreateAdd(LB_pre, Builder.CreateMul(
-    //    Builder.CreateCall(Get_num_threads(), {}), Builder.CreateCall(Get_team_num(), {})));
-    
     llvm::Value *LB = Builder.CreateAdd(Builder.CreateCall(Get_thread_num(), {}), Builder.CreateMul(
         Builder.CreateCall(Get_num_threads(), {}), Builder.CreateCall(Get_team_num(), {})));
     llvm::Value *const32 = Builder.getInt32(5); // 2^5
@@ -2832,7 +3010,35 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       CGF.EmitStmt(InitExpr);
       {
         CodeGenFunction::RunCleanupsScope BodyScope(CGF);
-        CGF.EmitStmt(Body);
+        // Handle the body of the pragma parallel for.
+        // It contains a SIMD as a direct descendant.
+        //     1. Loop through all the direct descendents and if they are different
+        //        from a SIMD pragma then generate the code for them as usual.
+        //     2. When a SIMD pragma is encountered then emit custom code for the loop.
+        //     3. The body of the SIMD loop is handled using the existing code generation
+        //        method.
+        for (Stmt::const_child_iterator ii = Body->child_begin(), ie = Body->child_end();
+             ii != ie; ++ii) {
+            // ii is a direct descendant of the for loop which we generated custom code for.
+            if (*ii){
+                printf("Visit top Stmt (%d)\n", isa<OMPSimdDirective>(*ii));
+                if (!isSimdDirective(**ii)){
+                    CodeGenFunction::RunCleanupsScope BodyScope(CGF);
+                    CGF.EmitStmt(*ii);
+                } else {
+                    printf("Handle SIMD so generate a custom loop for it\n");
+                    Builder.CreateCall(Get_memfence(), {});
+                    // Gen custom code
+                    if ((*ii)->getStmtClass() == Stmt::OMPSimdDirectiveClass){
+                        EmitOMPInnerSimdLoop((cast<OMPSimdDirective>(**ii)), CGF, Private, const32, AftetInnerPragmaBodyFor);
+                        Builder.SetInsertPoint(AftetInnerPragmaBodyFor);
+                    } else {
+                        assert(0 && "Generating code for non-simd pragma inside combined construct is not supported\n");
+                    }
+                }
+            }
+        }
+        //CGF.EmitStmt(Body);
       }
       Builder.CreateBr(IncCombinedFor);
     }
@@ -3228,7 +3434,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     bool applyNestedSimd = SKind == OMPD_teams_distribute_parallel_for &&
                            !StmtHasScheduleStaticOne(S, CGF, SKind) &&
                            SIMDinTopBlock(S);
-    applyNestedSimd = true;
 
     printf("Considering if combined construct is applicable:\n");
     printf("    => SKIND is (OMPD_teams_distribute_parallel_for %d): %d\n", OMPD_teams_distribute_parallel_for, SKind);
