@@ -2178,6 +2178,8 @@ void OMPClauseEnqueue::VisitOMPSharedClause(const OMPSharedClause *C) {
 }
 void OMPClauseEnqueue::VisitOMPReductionClause(const OMPReductionClause *C) {
   VisitOMPClauseList(C);
+  VisitOMPClauseWithPreInit(C);
+  VisitOMPClauseWithPostUpdate(C);
   for (auto *E : C->privates()) {
     Visitor->AddStmt(E);
   }
@@ -3157,6 +3159,9 @@ clang_parseTranslationUnit_Impl(CXIndex CIdx, const char *source_filename,
   // Configure the diagnostics.
   IntrusiveRefCntPtr<DiagnosticsEngine>
     Diags(CompilerInstance::createDiagnostics(new DiagnosticOptions));
+
+  if (options & CXTranslationUnit_KeepGoing)
+    Diags->setFatalsAsError(true);
 
   // Recover resources if we crash before exiting this function.
   llvm::CrashRecoveryContextCleanupRegistrar<DiagnosticsEngine,
@@ -5581,6 +5586,8 @@ CXCursor clang_getCursorDefinition(CXCursor C) {
   case Decl::OMPThreadPrivate:
   case Decl::ObjCTypeParam:
   case Decl::BuiltinTemplate:
+  case Decl::PragmaComment:
+  case Decl::PragmaDetectMismatch:
     return C;
 
   // Declaration kinds that don't make any sense here, but are

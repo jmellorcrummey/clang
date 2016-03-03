@@ -1865,7 +1865,11 @@ public:
 
   void getTargetDefines(const LangOptions &Opts,
                         MacroBuilder &Builder) const override {
-    Builder.defineMacro("__R600__");
+    if (getTriple().getArch() == llvm::Triple::amdgcn)
+      Builder.defineMacro("__AMDGCN__");
+    else
+      Builder.defineMacro("__R600__");
+
     if (hasFMAF)
       Builder.defineMacro("__HAS_FMAF__");
     if (hasLDEXPF)
@@ -1927,6 +1931,8 @@ public:
       .Case("tonga",    GK_VOLCANIC_ISLANDS)
       .Case("iceland",  GK_VOLCANIC_ISLANDS)
       .Case("carrizo",  GK_VOLCANIC_ISLANDS)
+      .Case("fiji",     GK_VOLCANIC_ISLANDS)
+      .Case("stoney",   GK_VOLCANIC_ISLANDS)
       .Default(GK_NONE);
 
     if (GPU == GK_NONE) {
@@ -2022,8 +2028,8 @@ const char * const AMDGPUTargetInfo::GCCRegNames[] = {
   "s104", "s105", "s106", "s107", "s108", "s109", "s110", "s111",
   "s112", "s113", "s114", "s115", "s116", "s117", "s118", "s119",
   "s120", "s121", "s122", "s123", "s124", "s125", "s126", "s127"
-  "exec", "vcc", "scc", "m0", "flat_scr", "exec_lo", "exec_hi",
-  "vcc_lo", "vcc_hi", "flat_scr_lo", "flat_scr_hi"
+  "exec", "vcc", "scc", "m0", "flat_scratch", "exec_lo", "exec_hi",
+  "vcc_lo", "vcc_hi", "flat_scratch_lo", "flat_scratch_hi"
 };
 
 ArrayRef<const char *> AMDGPUTargetInfo::getGCCRegNames() const {
@@ -2887,7 +2893,8 @@ void X86TargetInfo::setSSELevel(llvm::StringMap<bool> &Features,
   case AVX512F:
     Features["avx512f"] = Features["avx512cd"] = Features["avx512er"] =
       Features["avx512pf"] = Features["avx512dq"] = Features["avx512bw"] =
-      Features["avx512vl"] = false;
+      Features["avx512vl"] = Features["avx512vbmi"] =
+      Features["avx512ifma"] = false;
   }
 }
 
@@ -2985,8 +2992,9 @@ void X86TargetInfo::setFeatureEnabledImpl(llvm::StringMap<bool> &Features,
     setSSELevel(Features, AVX2, Enabled);
   } else if (Name == "avx512f") {
     setSSELevel(Features, AVX512F, Enabled);
-  } else if (Name == "avx512cd" || Name == "avx512er" || Name == "avx512pf"
-          || Name == "avx512dq" || Name == "avx512bw" || Name == "avx512vl") {
+  } else if (Name == "avx512cd" || Name == "avx512er" || Name == "avx512pf" ||
+             Name == "avx512dq" || Name == "avx512bw" || Name == "avx512vl" ||
+             Name == "avx512vbmi" || Name == "avx512ifma") {
     if (Enabled)
       setSSELevel(Features, AVX512F, Enabled);
   } else if (Name == "fma") {
@@ -3014,15 +3022,11 @@ void X86TargetInfo::setFeatureEnabledImpl(llvm::StringMap<bool> &Features,
     else
       setSSELevel(Features, SSE41, Enabled);
   } else if (Name == "xsave") {
-    if (Enabled)
-      setSSELevel(Features, AVX, Enabled);
-    else
+    if (!Enabled)
       Features["xsaveopt"] = false;
   } else if (Name == "xsaveopt" || Name == "xsavec" || Name == "xsaves") {
-    if (Enabled) {
+    if (Enabled)
       Features["xsave"] = true;
-      setSSELevel(Features, AVX, Enabled);
-    }
   }
 }
 
@@ -3398,6 +3402,10 @@ void X86TargetInfo::getTargetDefines(const LangOptions &Opts,
     Builder.defineMacro("__AVX512BW__");
   if (HasAVX512VL)
     Builder.defineMacro("__AVX512VL__");
+  if (HasAVX512VBMI)
+    Builder.defineMacro("__AVX512VBMI__");
+  if (HasAVX512IFMA)
+    Builder.defineMacro("__AVX512IFMA__");
 
   if (HasSHA)
     Builder.defineMacro("__SHA__");
@@ -4226,6 +4234,7 @@ public:
       : X86_64TargetInfo(Triple) {
     TLSSupported = false;
     WCharType = UnsignedShort;
+    UserLabelPrefix = "";
   }
   void getTargetDefines(const LangOptions &Opts,
                         MacroBuilder &Builder) const override {

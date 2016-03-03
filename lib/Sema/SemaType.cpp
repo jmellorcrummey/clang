@@ -100,9 +100,8 @@ static void diagnoseBadTypeAttribute(Sema &S, const AttributeList &attr,
     case AttributeList::AT_ObjCGC: \
     case AttributeList::AT_ObjCOwnership
 
-// Function type attributes.
-#define FUNCTION_TYPE_ATTRS_CASELIST \
-    case AttributeList::AT_NoReturn: \
+// Calling convention attributes.
+#define CALLING_CONV_ATTRS_CASELIST \
     case AttributeList::AT_CDecl: \
     case AttributeList::AT_FastCall: \
     case AttributeList::AT_StdCall: \
@@ -111,9 +110,14 @@ static void diagnoseBadTypeAttribute(Sema &S, const AttributeList &attr,
     case AttributeList::AT_VectorCall: \
     case AttributeList::AT_MSABI: \
     case AttributeList::AT_SysVABI: \
-    case AttributeList::AT_Regparm: \
     case AttributeList::AT_Pcs: \
     case AttributeList::AT_IntelOclBicc
+
+// Function type attributes.
+#define FUNCTION_TYPE_ATTRS_CASELIST \
+    case AttributeList::AT_NoReturn: \
+    case AttributeList::AT_Regparm: \
+    CALLING_CONV_ATTRS_CASELIST
 
 // Microsoft-specific type qualifiers.
 #define MS_TYPE_ATTRS_CASELIST  \
@@ -2957,6 +2961,26 @@ getCCForDeclaratorChunk(Sema &S, Declarator &D,
                         unsigned ChunkIndex) {
   assert(D.getTypeObject(ChunkIndex).Kind == DeclaratorChunk::Function);
 
+  // Check for an explicit CC attribute.
+  for (auto Attr = FTI.AttrList; Attr; Attr = Attr->getNext()) {
+    switch (Attr->getKind()) {
+    CALLING_CONV_ATTRS_CASELIST: {
+      // Ignore attributes that don't validate or can't apply to the
+      // function type.  We'll diagnose the failure to apply them in
+      // handleFunctionTypeAttr.
+      CallingConv CC;
+      if (!S.CheckCallingConvAttr(*Attr, CC) &&
+          (!FTI.isVariadic || supportsVariadicCall(CC))) {
+        return CC;
+      }
+      break;
+    }
+
+    default:
+      break;
+    }
+  }
+
   bool IsCXXInstanceMethod = false;
 
   if (S.getLangOpts().CPlusPlus) {
@@ -3982,9 +4006,9 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
         SmallVector<QualType, 16> ParamTys;
         ParamTys.reserve(FTI.NumParams);
 
-        SmallVector<bool, 16> ConsumedParameters;
-        ConsumedParameters.reserve(FTI.NumParams);
-        bool HasAnyConsumedParameters = false;
+        SmallVector<FunctionProtoType::ExtParameterInfo, 16>
+          ExtParameterInfos(FTI.NumParams);
+        bool HasAnyInterestingExtParameterInfos = false;
 
         for (unsigned i = 0, e = FTI.NumParams; i != e; ++i) {
           ParmVarDecl *Param = cast<ParmVarDecl>(FTI.Params[i].Param);
@@ -4042,17 +4066,16 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
             }
           }
 
-          if (LangOpts.ObjCAutoRefCount) {
-            bool Consumed = Param->hasAttr<NSConsumedAttr>();
-            ConsumedParameters.push_back(Consumed);
-            HasAnyConsumedParameters |= Consumed;
+          if (LangOpts.ObjCAutoRefCount && Param->hasAttr<NSConsumedAttr>()) {
+            ExtParameterInfos[i] = ExtParameterInfos[i].withIsConsumed(true);
+            HasAnyInterestingExtParameterInfos = true;
           }
 
           ParamTys.push_back(ParamTy);
         }
 
-        if (HasAnyConsumedParameters)
-          EPI.ConsumedParameters = ConsumedParameters.data();
+        if (HasAnyInterestingExtParameterInfos)
+          EPI.ExtParameterInfos = ExtParameterInfos.data();
 
         SmallVector<QualType, 4> Exceptions;
         SmallVector<ParsedType, 2> DynamicExceptions;
@@ -5950,18 +5973,28 @@ static bool handleFunctionTypeAttr(TypeProcessingState &state,
     }
   }
 
-  // Diagnose use of callee-cleanup calling convention on variadic functions.
+  // Diagnose use of variadic functions with calling conventions that
+  // don't support them (e.g. because they're callee-cleanup).
+  // We delay warning about this on unprototyped function declarations
+  // until after redeclaration checking, just in case we pick up a
+  // prototype that way.  And apparently we also "delay" warning about
+  // unprototyped function types in general, despite not necessarily having
+  // much ability to diagnose it later.
   if (!supportsVariadicCall(CC)) {
     const FunctionProtoType *FnP = dyn_cast<FunctionProtoType>(fn);
     if (FnP && FnP->isVariadic()) {
       unsigned DiagID = diag::err_cconv_varargs;
+
       // stdcall and fastcall are ignored with a warning for GCC and MS
       // compatibility.
-      if (CC == CC_X86StdCall || CC == CC_X86FastCall)
+      bool IsInvalid = true;
+      if (CC == CC_X86StdCall || CC == CC_X86FastCall) {
         DiagID = diag::warn_cconv_varargs;
+        IsInvalid = false;
+      }
 
       S.Diag(attr.getLoc(), DiagID) << FunctionType::getNameForCallConv(CC);
-      attr.setInvalid();
+      if (IsInvalid) attr.setInvalid();
       return true;
     }
   }
@@ -5977,9 +6010,14 @@ static bool handleFunctionTypeAttr(TypeProcessingState &state,
   // Modify the CC from the wrapped function type, wrap it all back, and then
   // wrap the whole thing in an AttributedType as written.  The modified type
   // might have a different CC if we ignored the attribute.
-  FunctionType::ExtInfo EI = unwrapped.get()->getExtInfo().withCallingConv(CC);
-  QualType Equivalent =
+  QualType Equivalent;
+  if (CCOld == CC) {
+    Equivalent = type;
+  } else {
+    auto EI = unwrapped.get()->getExtInfo().withCallingConv(CC);
+    Equivalent =
       unwrapped.wrap(S, S.Context.adjustFunctionType(unwrapped.get(), EI));
+  }
   type = S.Context.getAttributedType(CCAttrKind, type, Equivalent);
   return true;
 }

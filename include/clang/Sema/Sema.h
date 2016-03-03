@@ -29,6 +29,7 @@
 #include "clang/Basic/LangOptions.h"
 #include "clang/Basic/Module.h"
 #include "clang/Basic/OpenMPKinds.h"
+#include "clang/Basic/PragmaKinds.h"
 #include "clang/Basic/Specifiers.h"
 #include "clang/Basic/TemplateKinds.h"
 #include "clang/Basic/TypeTraits.h"
@@ -5295,11 +5296,18 @@ public:
                             ArrayRef<CXXCtorInitializer*> MemInits,
                             bool AnyErrors);
 
+  /// \brief Check class-level dllimport/dllexport attribute. The caller must
+  /// ensure that referenceDLLExportedClassMethods is called some point later
+  /// when all outer classes of Class are complete.
   void checkClassLevelDLLAttribute(CXXRecordDecl *Class);
+
+  void referenceDLLExportedClassMethods();
+
   void propagateDLLAttrToBaseClassTemplate(
       CXXRecordDecl *Class, Attr *ClassAttr,
       ClassTemplateSpecializationDecl *BaseTemplateSpec,
       SourceLocation BaseLoc);
+
   void CheckCompletedCXXClass(CXXRecordDecl *Record);
   void ActOnFinishCXXMemberSpecification(Scope* S, SourceLocation RLoc,
                                          Decl *TagDecl,
@@ -6975,6 +6983,33 @@ public:
     SavedPendingLocalImplicitInstantiations;
   };
 
+  /// A helper class for building up ExtParameterInfos.
+  class ExtParameterInfoBuilder {
+    SmallVector<FunctionProtoType::ExtParameterInfo, 16> Infos;
+    bool HasInteresting = false;
+
+  public:
+    /// Set the ExtParameterInfo for the parameter at the given index,
+    /// 
+    void set(unsigned index, FunctionProtoType::ExtParameterInfo info) {
+      assert(Infos.size() <= index);
+      Infos.resize(index);
+      Infos.push_back(info);
+
+      if (!HasInteresting)
+        HasInteresting = (info != FunctionProtoType::ExtParameterInfo());
+    }
+
+    /// Return a pointer (suitable for setting in an ExtProtoInfo) to the
+    /// ExtParameterInfo array we've built up.
+    const FunctionProtoType::ExtParameterInfo *
+    getPointerOrNull(unsigned numParams) {
+      if (!HasInteresting) return nullptr;
+      Infos.resize(numParams);
+      return Infos.data();
+    }
+  };
+
   void PerformPendingInstantiations(bool LocalOnly = false);
 
   TypeSourceInfo *SubstType(TypeSourceInfo *T,
@@ -7004,9 +7039,11 @@ public:
                                 bool ExpectParameterPack);
   bool SubstParmTypes(SourceLocation Loc,
                       ParmVarDecl **Params, unsigned NumParams,
+                      const FunctionProtoType::ExtParameterInfo *ExtParamInfos,
                       const MultiLevelTemplateArgumentList &TemplateArgs,
                       SmallVectorImpl<QualType> &ParamTypes,
-                      SmallVectorImpl<ParmVarDecl *> *OutParams = nullptr);
+                      SmallVectorImpl<ParmVarDecl *> *OutParams,
+                      ExtParameterInfoBuilder &ParamInfos);
   ExprResult SubstExpr(Expr *E,
                        const MultiLevelTemplateArgumentList &TemplateArgs);
 
@@ -7574,20 +7611,6 @@ public:
     PPK_Pop      // #pragma pack(pop, [identifier], [n])
   };
 
-  enum PragmaMSStructKind {
-    PMSST_OFF,  // #pragms ms_struct off
-    PMSST_ON    // #pragms ms_struct on
-  };
-
-  enum PragmaMSCommentKind {
-    PCK_Unknown,
-    PCK_Linker,   // #pragma comment(linker, ...)
-    PCK_Lib,      // #pragma comment(lib, ...)
-    PCK_Compiler, // #pragma comment(compiler, ...)
-    PCK_ExeStr,   // #pragma comment(exestr, ...)
-    PCK_User      // #pragma comment(user, ...)
-  };
-
   /// ActOnPragmaPack - Called on well formed \#pragma pack(...).
   void ActOnPragmaPack(PragmaPackKind Kind,
                        IdentifierInfo *Name,
@@ -7601,7 +7624,8 @@ public:
 
   /// ActOnPragmaMSComment - Called on well formed
   /// \#pragma comment(kind, "arg").
-  void ActOnPragmaMSComment(PragmaMSCommentKind Kind, StringRef Arg);
+  void ActOnPragmaMSComment(SourceLocation CommentLoc, PragmaMSCommentKind Kind,
+                            StringRef Arg);
 
   /// ActOnPragmaMSPointersToMembers - called on well formed \#pragma
   /// pointers_to_members(representation method[, general purpose
@@ -7647,7 +7671,8 @@ public:
   void ActOnPragmaDump(Scope *S, SourceLocation Loc, IdentifierInfo *II);
 
   /// ActOnPragmaDetectMismatch - Call on well-formed \#pragma detect_mismatch
-  void ActOnPragmaDetectMismatch(StringRef Name, StringRef Value);
+  void ActOnPragmaDetectMismatch(SourceLocation Loc, StringRef Name,
+                                 StringRef Value);
 
   /// ActOnPragmaUnused - Called on well-formed '\#pragma unused'.
   void ActOnPragmaUnused(const Token &Identifier,
@@ -7761,6 +7786,10 @@ public:
   void AddModeAttr(SourceRange AttrRange, Decl *D, IdentifierInfo *Name,
                    unsigned SpellingListIndex, bool InInstantiation = false);
 
+  void AddNSConsumedAttr(SourceRange AttrRange, Decl *D,
+                         unsigned SpellingListIndex, bool isNSConsumed,
+                         bool isTemplateInstantiation);
+
   //===--------------------------------------------------------------------===//
   // C++ Coroutines TS
   //
@@ -7798,7 +7827,7 @@ public:
   /// constructs.
   VarDecl *IsOpenMPCapturedDecl(ValueDecl *D);
   ExprResult getOpenMPCapturedExpr(VarDecl *Capture, ExprValueKind VK,
-                                   ExprObjectKind OK);
+                                   ExprObjectKind OK, SourceLocation Loc);
 
   /// \brief Check if the specified variable is used in 'private' clause.
   /// \param Level Relative level of nested OpenMP construct for that the check
