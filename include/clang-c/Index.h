@@ -1142,9 +1142,9 @@ enum CXTranslationUnit_Flags {
    * intent of producing a precompiled header.
    */
   CXTranslationUnit_Incomplete = 0x02,
-  
+
   /**
-   * \brief Used to indicate that the translation unit should be built with an 
+   * \brief Used to indicate that the translation unit should be built with an
    * implicit precompiled header for the preamble.
    *
    * An implicit precompiled header is used as an optimization when a
@@ -1158,7 +1158,7 @@ enum CXTranslationUnit_Flags {
    * precompiled header to improve parsing performance.
    */
   CXTranslationUnit_PrecompiledPreamble = 0x04,
-  
+
   /**
    * \brief Used to indicate that the translation unit should cache some
    * code-completion results with each reparse of the source file.

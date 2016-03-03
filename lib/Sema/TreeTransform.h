@@ -604,11 +604,11 @@ public:
   /// variables vector are acceptable.
   ///
   /// Return true on error.
-  bool TransformFunctionTypeParams(SourceLocation Loc,
-                                   ParmVarDecl **Params, unsigned NumParams,
+  bool TransformFunctionTypeParams(SourceLocation Loc, ParmVarDecl **Params,
+                                   unsigned NumParams,
                                    const QualType *ParamTypes,
                                    SmallVectorImpl<QualType> &PTypes,
-                                   SmallVectorImpl<ParmVarDecl*> *PVars);
+                                   SmallVectorImpl<ParmVarDecl *> *PVars);
 
   /// \brief Transforms a single function-type parameter.  Return null
   /// on error.
@@ -4604,13 +4604,11 @@ ParmVarDecl *TreeTransform<Derived>::TransformFunctionTypeParam(
   return newParm;
 }
 
-template<typename Derived>
-bool TreeTransform<Derived>::
-  TransformFunctionTypeParams(SourceLocation Loc,
-                              ParmVarDecl **Params, unsigned NumParams,
-                              const QualType *ParamTypes,
-                              SmallVectorImpl<QualType> &OutParamTypes,
-                              SmallVectorImpl<ParmVarDecl*> *PVars) {
+template <typename Derived>
+bool TreeTransform<Derived>::TransformFunctionTypeParams(
+    SourceLocation Loc, ParmVarDecl **Params, unsigned NumParams,
+    const QualType *ParamTypes, SmallVectorImpl<QualType> &OutParamTypes,
+    SmallVectorImpl<ParmVarDecl *> *PVars) {
   int indexAdjustment = 0;
 
   for (unsigned i = 0; i != NumParams; ++i) {
@@ -11114,10 +11112,9 @@ TreeTransform<Derived>::TransformBlockExpr(BlockExpr *E) {
   SmallVector<QualType, 4> paramTypes;
 
   // Parameter substitution.
-  if (getDerived().TransformFunctionTypeParams(E->getCaretLocation(),
-                                               oldBlock->param_begin(),
-                                               oldBlock->param_size(),
-                                               nullptr, paramTypes, &params)) {
+  if (getDerived().TransformFunctionTypeParams(
+          E->getCaretLocation(), oldBlock->param_begin(),
+          oldBlock->param_size(), nullptr, paramTypes, &params)) {
     getSema().ActOnBlockError(E->getCaretLocation(), /*Scope=*/nullptr);
     return ExprError();
   }
@@ -11126,9 +11123,8 @@ TreeTransform<Derived>::TransformBlockExpr(BlockExpr *E) {
   QualType exprResultType =
       getDerived().TransformType(exprFunctionType->getReturnType());
 
-  QualType functionType =
-    getDerived().RebuildFunctionProtoType(exprResultType, paramTypes,
-                                          exprFunctionType->getExtProtoInfo());
+  QualType functionType = getDerived().RebuildFunctionProtoType(
+      exprResultType, paramTypes, exprFunctionType->getExtProtoInfo());
   blockScope->FunctionType = functionType;
 
   // Set the parameters on the block decl.

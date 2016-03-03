@@ -1708,8 +1708,8 @@ ParmVarDecl *Sema::SubstParmVarDecl(ParmVarDecl *OldParm,
 /// \brief Substitute the given template arguments into the given set of
 /// parameters, producing the set of parameter types that would be generated
 /// from such a substitution.
-bool Sema::SubstParmTypes(SourceLocation Loc, 
-                          ParmVarDecl **Params, unsigned NumParams,
+bool Sema::SubstParmTypes(SourceLocation Loc, ParmVarDecl **Params,
+                          unsigned NumParams,
                           const MultiLevelTemplateArgumentList &TemplateArgs,
                           SmallVectorImpl<QualType> &ParamTypes,
                           SmallVectorImpl<ParmVarDecl *> *OutParams) {
@@ -1719,9 +1719,8 @@ bool Sema::SubstParmTypes(SourceLocation Loc,
   
   TemplateInstantiator Instantiator(*this, TemplateArgs, Loc, 
                                     DeclarationName());
-  return Instantiator.TransformFunctionTypeParams(Loc, Params, NumParams,
-                                                  nullptr, ParamTypes,
-                                                  OutParams);
+  return Instantiator.TransformFunctionTypeParams(
+      Loc, Params, NumParams, nullptr, ParamTypes, OutParams);
 }
 
 /// \brief Perform substitution on the base class specifiers of the

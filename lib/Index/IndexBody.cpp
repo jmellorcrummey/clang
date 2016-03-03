@@ -210,8 +210,8 @@ public:
     if (ObjCMethodDecl *MD = E->getBoxingMethod()) {
       SymbolRoleSet Roles = (unsigned)SymbolRole::Call;
       Roles |= (unsigned)SymbolRole::Implicit;
-      return IndexCtx.handleReference(MD, E->getLocStart(),
-                                      Parent, ParentDC, Roles, {}, E);
+      return IndexCtx.handleReference(MD, E->getLocStart(), Parent, ParentDC,
+                                      Roles, {}, E);
     }
     return true;
   }
@@ -220,8 +220,8 @@ public:
     if (ObjCMethodDecl *MD = E->getDictWithObjectsMethod()) {
       SymbolRoleSet Roles = (unsigned)SymbolRole::Call;
       Roles |= (unsigned)SymbolRole::Implicit;
-      return IndexCtx.handleReference(MD, E->getLocStart(),
-                                      Parent, ParentDC, Roles, {}, E);
+      return IndexCtx.handleReference(MD, E->getLocStart(), Parent, ParentDC,
+                                      Roles, {}, E);
     }
     return true;
   }
@@ -230,15 +230,16 @@ public:
     if (ObjCMethodDecl *MD = E->getArrayWithObjectsMethod()) {
       SymbolRoleSet Roles = (unsigned)SymbolRole::Call;
       Roles |= (unsigned)SymbolRole::Implicit;
-      return IndexCtx.handleReference(MD, E->getLocStart(),
-                                      Parent, ParentDC, Roles, {}, E);
+      return IndexCtx.handleReference(MD, E->getLocStart(), Parent, ParentDC,
+                                      Roles, {}, E);
     }
     return true;
   }
 
   bool VisitCXXConstructExpr(CXXConstructExpr *E) {
     return IndexCtx.handleReference(E->getConstructor(), E->getLocation(),
-                                    Parent, ParentDC, (unsigned)SymbolRole::Call, {}, E);
+                                    Parent, ParentDC,
+                                    (unsigned)SymbolRole::Call, {}, E);
   }
 
   bool TraverseCXXOperatorCallExpr(CXXOperatorCallExpr *E,

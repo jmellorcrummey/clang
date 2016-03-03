@@ -3153,7 +3153,7 @@ private:
     assert(getExceptionSpecType() != EST_Uninstantiated &&
            getExceptionSpecType() != EST_Unevaluated);
 
-    return reinterpret_cast<const bool*>(eh_end);
+    return reinterpret_cast<const bool *>(eh_end);
   }
 
 public:

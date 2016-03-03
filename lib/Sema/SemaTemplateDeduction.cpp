@@ -2557,8 +2557,8 @@ Sema::SubstituteExplicitTemplateArguments(
   // return type, substitute it after the arguments to ensure we substitute
   // in lexical order.
   if (Proto->hasTrailingReturn()) {
-    if (SubstParmTypes(Function->getLocation(),
-                       Function->param_begin(), Function->getNumParams(),
+    if (SubstParmTypes(Function->getLocation(), Function->param_begin(),
+                       Function->getNumParams(),
                        MultiLevelTemplateArgumentList(*ExplicitArgumentList),
                        ParamTypes))
       return TDK_SubstitutionFailure;
@@ -2590,21 +2590,20 @@ Sema::SubstituteExplicitTemplateArguments(
     if (ResultType.isNull() || Trap.hasErrorOccurred())
       return TDK_SubstitutionFailure;
   }
-  
+
   // Instantiate the types of each of the function parameters given the
   // explicitly-specified template arguments if we didn't do so earlier.
   if (!Proto->hasTrailingReturn() &&
-      SubstParmTypes(Function->getLocation(),
-                     Function->param_begin(), Function->getNumParams(),
+      SubstParmTypes(Function->getLocation(), Function->param_begin(),
+                     Function->getNumParams(),
                      MultiLevelTemplateArgumentList(*ExplicitArgumentList),
                      ParamTypes))
     return TDK_SubstitutionFailure;
 
   if (FunctionType) {
-    *FunctionType = BuildFunctionType(ResultType, ParamTypes,
-                                      Function->getLocation(),
-                                      Function->getDeclName(),
-                                      Proto->getExtProtoInfo());
+    *FunctionType =
+        BuildFunctionType(ResultType, ParamTypes, Function->getLocation(),
+                          Function->getDeclName(), Proto->getExtProtoInfo());
     if (FunctionType->isNull() || Trap.hasErrorOccurred())
       return TDK_SubstitutionFailure;
   }

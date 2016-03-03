@@ -205,9 +205,9 @@ collectModuleHeaderIncludes(const LangOptions &LangOpts, FileManager &FileMgr,
     Module->addTopHeader(UmbrellaHeader.Entry);
     if (Module->Parent) {
       // Include the umbrella header for submodules.
-      if (std::error_code Err = addHeaderInclude(UmbrellaHeader.NameAsWritten,
-                                                 Includes, LangOpts,
-                                                 Module->IsExternC))
+      if (std::error_code Err =
+              addHeaderInclude(UmbrellaHeader.NameAsWritten, Includes, LangOpts,
+                               Module->IsExternC))
         return Err;
     }
   } else if (Module::DirectoryName UmbrellaDir = Module->getUmbrellaDir()) {

@@ -2541,8 +2541,8 @@ bool Sema::IsBlockPointerConversion(QualType FromType, QualType ToType,
        // Argument types are too different. Abort.
        return false;
    }
-   if (LangOpts.ObjCAutoRefCount && 
-       !Context.FunctionTypesMatchOnNSConsumedAttrs(FromFunctionType, 
+   if (LangOpts.ObjCAutoRefCount &&
+       !Context.FunctionTypesMatchOnNSConsumedAttrs(FromFunctionType,
                                                     ToFunctionType))
      return false;
    
