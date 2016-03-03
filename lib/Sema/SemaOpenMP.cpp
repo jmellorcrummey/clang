@@ -9067,12 +9067,12 @@ static bool CheckTypeMappable(SourceLocation SL, SourceRange SR, Sema &SemaRef,
   return true;
 }
 
-/// \brief Return 1 if it can be proven that the provided array expression
-/// (array section or array subscript) specify the whole size of the array whose
-/// base type is \a BaseQTy. Return -1 if it can be proved it is not and return
-/// 0 if it is inconclusive.
-static int CheckArrayExpressionReferToWholeSize(Sema &SemaRef, const Expr *E,
-                                                QualType BaseQTy) {
+/// \brief Return true if it can be proven that the provided array expression
+/// (array section or array subscript) does NOT specify the whole size of the
+/// array whose base type is \a BaseQTy.
+static bool CheckArrayExpressionDoesNotReferToWholeSize(Sema &SemaRef,
+                                                        const Expr *E,
+                                                        QualType BaseQTy) {
   auto *OASE = dyn_cast<OMPArraySectionExpr>(E);
 
   // If this is an array subscript, it refers to the whole size if the size of
@@ -9080,9 +9080,9 @@ static int CheckArrayExpressionReferToWholeSize(Sema &SemaRef, const Expr *E,
   // format of an array subscript if no colon is used.
   if (isa<ArraySubscriptExpr>(E) || (OASE && OASE->getColonLoc().isInvalid())) {
     if (auto *ATy = dyn_cast<ConstantArrayType>(BaseQTy.getTypePtr()))
-      return (ATy->getSize().getSExtValue() == 1) ? 1 : -1;
+      return ATy->getSize().getSExtValue() != 1;
     // Size can't be evaluated statically.
-    return 0;
+    return false;
   }
 
   assert(OASE && "Expecting array section if not an array subscript.");
@@ -9094,47 +9094,45 @@ static int CheckArrayExpressionReferToWholeSize(Sema &SemaRef, const Expr *E,
   if (LowerBound) {
     llvm::APSInt ConstLowerBound;
     if (!LowerBound->EvaluateAsInt(ConstLowerBound, SemaRef.getASTContext()))
-      return 0; // Can't get the integer value as a constant.
+      return false; // Can't get the integer value as a constant.
     if (ConstLowerBound.getSExtValue())
-      return -1;
+      return true;
   }
 
   // If we don't have a length we covering the whole dimension.
-  if (!Length) {
-    return 1;
-  }
+  if (!Length)
+    return false;
 
   // If the base is a pointer, we don't have a way to get the size of the
   // pointee.
   if (BaseQTy->isPointerType())
-    return 0;
+    return false;
 
   // We can only check if the length is the same as the size of the dimension
   // if we have a constant array.
   auto *CATy = dyn_cast<ConstantArrayType>(BaseQTy.getTypePtr());
   if (!CATy)
-    return 0;
+    return false;
 
   llvm::APSInt ConstLength;
   if (!Length->EvaluateAsInt(ConstLength, SemaRef.getASTContext()))
-    return 0; // Can't get the integer value as a constant.
+    return false; // Can't get the integer value as a constant.
 
-  return (CATy->getSize().getSExtValue() == ConstLength.getSExtValue()) ? 1
-                                                                        : -1;
+  return CATy->getSize().getSExtValue() != ConstLength.getSExtValue();
 }
 
-// Return 1 if it can be proven that the provided array expression (array
-// section or array subscript) specify a single element of the array whose base
-// type is \a BaseQTy. Return -1 if it can be proven it is not and return 0
-// if it is inconclusive.
-static int CheckArrayExpressionReferToUnitySize(Sema &SemaRef, const Expr *E,
-                                                QualType BaseQTy) {
+// Return true if it can be proven that the provided array expression (array
+// section or array subscript) does NOT specify a single element of the array
+// whose base type is \a BaseQTy.
+static int CheckArrayExpressionDoesNotReferToUnitySize(Sema &SemaRef,
+                                                       const Expr *E,
+                                                       QualType BaseQTy) {
   auto *OASE = dyn_cast<OMPArraySectionExpr>(E);
 
   // An array subscript always refer to a single element. Also, an array section
   // assumes the format of an array subscript if no colon is used.
   if (isa<ArraySubscriptExpr>(E) || (OASE && OASE->getColonLoc().isInvalid()))
-    return 1;
+    return false;
 
   assert(OASE && "Expecting array section if not an array subscript.");
   auto *Length = OASE->getLength();
@@ -9144,17 +9142,17 @@ static int CheckArrayExpressionReferToUnitySize(Sema &SemaRef, const Expr *E,
   // is pointer.
   if (!Length) {
     if (auto *ATy = dyn_cast<ConstantArrayType>(BaseQTy.getTypePtr()))
-      return (ATy->getSize().getSExtValue() == 1) ? 1 : -1;
+      return ATy->getSize().getSExtValue() != 1;
     // We cannot assume anything.
-    return 0;
+    return false;
   }
 
   // Check if the length evaluates to 1.
   llvm::APSInt ConstLength;
   if (!Length->EvaluateAsInt(ConstLength, SemaRef.getASTContext()))
-    return 0; // Can't get the integer value as a constant.
+    return false; // Can't get the integer value as a constant.
 
-  return (ConstLength.getSExtValue() == 1) ? 1 : -1;
+  return ConstLength.getSExtValue() != 1;
 }
 
 // Return the expression of the base of the map clause or null if it cannot
@@ -9288,10 +9286,9 @@ static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
       // If we got an array subscript that express the whole dimension we
       // can have any array expressions before. If it only expressing part of
       // the dimension, we can only have unitary-size array expressions.
-      if (CheckArrayExpressionReferToWholeSize(SemaRef, CurE, E->getType()) <
-          0) {
+      if (CheckArrayExpressionDoesNotReferToWholeSize(SemaRef, CurE,
+                                                      E->getType()))
         AllowWholeSizeArraySection = false;
-      }
       continue;
     }
 
@@ -9315,10 +9312,10 @@ static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
         break;
       }
 
-      int ResWhole =
-          CheckArrayExpressionReferToWholeSize(SemaRef, CurE, CurType);
-      int ResUnity =
-          CheckArrayExpressionReferToUnitySize(SemaRef, CurE, CurType);
+      bool NotWhole =
+          CheckArrayExpressionDoesNotReferToWholeSize(SemaRef, CurE, CurType);
+      bool NotUnity =
+          CheckArrayExpressionDoesNotReferToUnitySize(SemaRef, CurE, CurType);
 
       if (AllowWholeSizeArraySection && AllowUnitySizeArraySection) {
         // Any array section is currently allowed.
@@ -9326,10 +9323,10 @@ static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
         // If this array section refers to the whole dimension we can still
         // accept other array sections before this one, except if the base is a
         // pointer. Otherwise, only unitary sections are accepted.
-        if (ResWhole < 0 || IsPointer)
+        if (NotWhole || IsPointer)
           AllowWholeSizeArraySection = false;
-      } else if ((AllowUnitySizeArraySection && ResUnity < 0) ||
-                 (AllowWholeSizeArraySection && ResWhole < 0)) {
+      } else if ((AllowUnitySizeArraySection && NotUnity) ||
+                 (AllowWholeSizeArraySection && NotWhole)) {
         // A unity or whole array section is not allowed and that is not
         // compatible with the properties of the current array section.
         SemaRef.Diag(
