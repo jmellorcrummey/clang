@@ -1033,7 +1033,7 @@ OMPClause *Parser::ParseOpenMPVarListClause(OpenMPDirectiveKind DKind,
             PP.LookAhead(2).is(tok::colon)) {
           MapTypeModifier =
               static_cast<OpenMPMapClauseKind>(getOpenMPSimpleClauseType(
-                  Kind, Tok.is(tok::identifier) ? PP.getSpelling(Tok) : ""));
+                   Kind, Tok.is(tok::identifier) ? PP.getSpelling(Tok) : ""));
           if (MapTypeModifier != OMPC_MAP_always) {
             Diag(Tok, diag::err_omp_unknown_map_type_modifier);
             MapTypeModifier = OMPC_MAP_unknown;

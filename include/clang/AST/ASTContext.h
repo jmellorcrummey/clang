@@ -2259,10 +2259,10 @@ public:
                                      bool Unqualified = false);
   
   QualType mergeObjCGCQualifiers(QualType, QualType);
-
-  bool
-  FunctionTypesMatchOnNSConsumedAttrs(const FunctionProtoType *FromFunctionType,
-                                      const FunctionProtoType *ToFunctionType);
+    
+  bool FunctionTypesMatchOnNSConsumedAttrs(
+         const FunctionProtoType *FromFunctionType,
+         const FunctionProtoType *ToFunctionType);
 
   void ResetObjCLayout(const ObjCContainerDecl *CD);
 

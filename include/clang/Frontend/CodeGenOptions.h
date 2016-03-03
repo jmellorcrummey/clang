@@ -80,9 +80,9 @@ public:
   };
 
   enum ProfileInstrKind {
-    ProfileNoInstr,   // No instrumentation.
-    ProfileClangInstr // Clang instrumentation to generate execution counts
-                      // to use with PGO.
+    ProfileNoInstr,    // No instrumentation.
+    ProfileClangInstr  // Clang instrumentation to generate execution counts
+                       // to use with PGO.
   };
 
   /// The code model to use (-mcmodel).

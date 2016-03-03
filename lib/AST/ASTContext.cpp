@@ -3021,7 +3021,7 @@ ASTContext::getFunctionNoProtoType(QualType ResultTy,
 
   FunctionProtoType::ExtInfo newInfo = Info.withCallingConv(CallConv);
   FunctionNoProtoType *New = new (*this, TypeAlignment)
-      FunctionNoProtoType(ResultTy, Canonical, newInfo);
+    FunctionNoProtoType(ResultTy, Canonical, newInfo);
   Types.push_back(New);
   FunctionNoProtoTypes.InsertNode(New, InsertPos);
   return QualType(New, 0);
@@ -7879,13 +7879,15 @@ QualType ASTContext::mergeTypes(QualType LHS, QualType RHS,
 }
 
 bool ASTContext::FunctionTypesMatchOnNSConsumedAttrs(
-    const FunctionProtoType *FromFunctionType,
-    const FunctionProtoType *ToFunctionType) {
+                   const FunctionProtoType *FromFunctionType,
+                   const FunctionProtoType *ToFunctionType) {
   if (FromFunctionType->hasAnyConsumedParams() !=
       ToFunctionType->hasAnyConsumedParams())
     return false;
-  FunctionProtoType::ExtProtoInfo FromEPI = FromFunctionType->getExtProtoInfo();
-  FunctionProtoType::ExtProtoInfo ToEPI = ToFunctionType->getExtProtoInfo();
+  FunctionProtoType::ExtProtoInfo FromEPI = 
+    FromFunctionType->getExtProtoInfo();
+  FunctionProtoType::ExtProtoInfo ToEPI = 
+    ToFunctionType->getExtProtoInfo();
   if (FromEPI.ConsumedParameters && ToEPI.ConsumedParameters)
     for (unsigned i = 0, n = FromFunctionType->getNumParams(); i != n; ++i) {
       if (FromEPI.ConsumedParameters[i] != ToEPI.ConsumedParameters[i])

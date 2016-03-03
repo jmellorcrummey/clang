@@ -2663,7 +2663,8 @@ StringRef FunctionType::getNameForCallConv(CallingConv CC) {
 FunctionProtoType::FunctionProtoType(QualType result, ArrayRef<QualType> params,
                                      QualType canonical,
                                      const ExtProtoInfo &epi)
-    : FunctionType(FunctionProto, result, canonical, result->isDependentType(),
+    : FunctionType(FunctionProto, result, canonical,
+                   result->isDependentType(),
                    result->isInstantiationDependentType(),
                    result->isVariablyModifiedType(),
                    result->containsUnexpandedParameterPack(), epi.ExtInfo),

@@ -523,8 +523,8 @@ void CXXNameMangler::mangleFunctionEncoding(const FunctionDecl *FD) {
     FD = PrimaryTemplate->getTemplatedDecl();
   }
 
-  mangleBareFunctionType(FD->getType()->getAs<FunctionType>(), MangleReturnType,
-                         FD);
+  mangleBareFunctionType(FD->getType()->getAs<FunctionType>(), 
+                         MangleReturnType, FD);
 }
 
 static const DeclContext *IgnoreLinkageSpecDecls(const DeclContext *DC) {
@@ -1804,7 +1804,7 @@ void CXXNameMangler::mangleQualifiers(Qualifiers Quals) {
     }
     Out << 'U' << ASString.size() << ASString;
   }
-
+  
   StringRef LifetimeName;
   switch (Quals.getObjCLifetime()) {
   // Objective-C ARC Extension:
