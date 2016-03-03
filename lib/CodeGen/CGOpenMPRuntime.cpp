@@ -4330,14 +4330,14 @@ private:
 
         // We need to generate the addresses and sizes if this is the last
         // component, if the component is a pointer or if it is an array section
-        // whose length is not one. In this is a pointer, it becomes the base
-        // address for the following components.
+        // whose length can't be proved to be one. In this is a pointer, it
+        // becomes the base address for the following components.
 
-        // A final array section, is one whose length is not one.
+        // A final array section, is one whose length can't be proved to be one.
         auto IsFinalArraySection = [this](const Expr *E) -> bool {
           auto *OASE = dyn_cast<OMPArraySectionExpr>(E);
 
-          // If is not an array section and therefore not a unity-size one.
+          // It is not an array section and therefore not a unity-size one.
           if (!OASE)
             return false;
 
@@ -4358,7 +4358,7 @@ private:
               return ATy->getSize().getSExtValue() != 1;
             // If we don't have a constant dimension length, we have to consider
             // the current section as having any size, so it is not necessarily
-            // unitary.
+            // unitary. If it happen to be unity size, that's user fault.
             return true;
           }
 
