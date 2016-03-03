@@ -1239,5 +1239,64 @@ __m512i test_mm512_maskz_srai_epi16(__mmask32 __U, __m512i __A) {
   return _mm512_maskz_srai_epi16(__U, __A, 5); 
 }
 
+__m512i test_mm512_srl_epi16(__m512i __A, __m128i __B) {
+  // CHECK-LABEL: @test_mm512_srl_epi16
+  // CHECK: @llvm.x86.avx512.mask.psrl.w.512
+  return _mm512_srl_epi16(__A, __B); 
+}
+
+__m512i test_mm512_mask_srl_epi16(__m512i __W, __mmask32 __U, __m512i __A, __m128i __B) {
+  // CHECK-LABEL: @test_mm512_mask_srl_epi16
+  // CHECK: @llvm.x86.avx512.mask.psrl.w.512
+  return _mm512_mask_srl_epi16(__W, __U, __A, __B); 
+}
+
+__m512i test_mm512_maskz_srl_epi16(__mmask32 __U, __m512i __A, __m128i __B) {
+  // CHECK-LABEL: @test_mm512_maskz_srl_epi16
+  // CHECK: @llvm.x86.avx512.mask.psrl.w.512
+  return _mm512_maskz_srl_epi16(__U, __A, __B); 
+}
+
+__m512i test_mm512_srli_epi16(__m512i __A) {
+  // CHECK-LABEL: @test_mm512_srli_epi16
+  // CHECK: @llvm.x86.avx512.mask.psrl.wi.512
+  return _mm512_srli_epi16(__A, 5); 
+}
+
+__m512i test_mm512_mask_srli_epi16(__m512i __W, __mmask32 __U, __m512i __A) {
+  // CHECK-LABEL: @test_mm512_mask_srli_epi16
+  // CHECK: @llvm.x86.avx512.mask.psrl.wi.512
+  return _mm512_mask_srli_epi16(__W, __U, __A, 5); 
+}
+
+__m512i test_mm512_maskz_srli_epi16(__mmask32 __U, __m512i __A) {
+  // CHECK-LABEL: @test_mm512_maskz_srli_epi16
+  // CHECK: @llvm.x86.avx512.mask.psrl.wi.512
+  return _mm512_maskz_srli_epi16(__U, __A, 5); 
+}
+
+__m512i test_mm512_mask_mov_epi16(__m512i __W, __mmask32 __U, __m512i __A) {
+  // CHECK-LABEL: @test_mm512_mask_mov_epi16
+  // CHECK: @llvm.x86.avx512.mask.movu.w.512
+  return _mm512_mask_mov_epi16(__W, __U, __A); 
+}
+
+__m512i test_mm512_maskz_mov_epi16(__mmask32 __U, __m512i __A) {
+  // CHECK-LABEL: @test_mm512_maskz_mov_epi16
+  // CHECK: @llvm.x86.avx512.mask.movu.w.512
+  return _mm512_maskz_mov_epi16(__U, __A); 
+}
+
+__m512i test_mm512_mask_mov_epi8(__m512i __W, __mmask64 __U, __m512i __A) {
+  // CHECK-LABEL: @test_mm512_mask_mov_epi8
+  // CHECK: @llvm.x86.avx512.mask.movu.b.512
+  return _mm512_mask_mov_epi8(__W, __U, __A); 
+}
+
+__m512i test_mm512_maskz_mov_epi8(__mmask64 __U, __m512i __A) {
+  // CHECK-LABEL: @test_mm512_maskz_mov_epi8
+  // CHECK: @llvm.x86.avx512.mask.movu.b.512
+  return _mm512_maskz_mov_epi8(__U, __A); 
+}
 
 

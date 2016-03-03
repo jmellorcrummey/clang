@@ -623,8 +623,8 @@ def err_opencl_half_declaration : Error<
   "declaring variable of type %0 is not allowed">;
 def err_opencl_half_param : Error<
   "declaring function parameter of type %0 is not allowed; did you forget * ?">;
-def err_opencl_half_return : Error<
-  "declaring function return value of type %0 is not allowed; did you forget * ?">;
+def err_opencl_invalid_return : Error<
+  "declaring function return value of type %0 is not allowed %select{; did you forget * ?|}1">;
 def warn_enum_value_overflow : Warning<"overflow in enumeration value">;
 def warn_pragma_options_align_reset_failed : Warning<
   "#pragma options align=reset failed: %0">,
@@ -2276,6 +2276,20 @@ def warn_objc_collection_literal_element : Warning<
   "object of type %0 is not compatible with "
   "%select{array element type|dictionary key type|dictionary value type}1 %2">,
   InGroup<ObjCLiteralConversion>;
+def err_swift_param_attr_not_swiftcall : Error<
+  "'%0' parameter can only be used with swiftcall calling convention">;
+def err_swift_indirect_result_not_first : Error<
+  "'swift_indirect_result' parameters must be first parameters of function">;
+def err_swift_context_not_before_swift_error_result : Error<
+  "'swift_context' parameter can only be followed by 'swift_error_result' "
+  "parameter">;
+def err_swift_error_result_not_last : Error<
+  "'swift_error_result' parameter must be last parameter of function">;
+def err_swift_error_result_not_after_swift_context : Error<
+  "'swift_error_result' parameter must follow 'swift_context' parameter">;
+def err_swift_abi_parameter_wrong_type : Error<
+  "'%0' parameter must have pointer%select{| to unqualified pointer}1 type; "
+  "type here is %2">;
 
 def err_attribute_argument_is_zero : Error<
   "%0 attribute must be greater than 0">;
@@ -7687,8 +7701,8 @@ def note_illegal_field_declared_here : Note<
   "field of illegal %select{type|pointer type}0 %1 declared here">;
 def err_event_t_global_var : Error<
   "the event_t type cannot be used to declare a program scope variable">;
-def err_event_t_struct_field : Error<
-  "the event_t type cannot be used to declare a structure or union field">;
+def err_opencl_type_struct_or_union_field : Error<
+  "the %0 type cannot be used to declare a structure or union field">;
 def err_event_t_addr_space_qual : Error<
   "the event_t type can only be used with __private address space qualifier">;
 def err_expected_kernel_void_return_type : Error<
@@ -7749,6 +7763,14 @@ def err_opencl_multiple_access_qualifiers : Error<
 // OpenCL Section 6.8.g
 def err_opencl_unknown_type_specifier : Error<
   "OpenCL does not support the '%0' %select{type qualifier|storage class specifier}1">;
+
+// OpenCL v2.0 s6.12.5 Blocks restrictions
+def err_opencl_block_storage_type : Error<
+  "the __block storage type is not permitted">;
+def err_opencl_invalid_block_declaration : Error<
+  "invalid block variable declaration - must be %select{const qualified|initialized}0">;
+def err_opencl_extern_block_declaration : Error<
+  "invalid block variable declaration - using 'extern' storage class is disallowed">;
 
 } // end of sema category
 
@@ -7992,6 +8014,9 @@ def err_omp_parent_cancel_region_nowait : Error<
   "parent region for 'omp %select{cancellation point/cancel}0' construct cannot be nowait">;
 def err_omp_parent_cancel_region_ordered : Error<
   "parent region for 'omp %select{cancellation point/cancel}0' construct cannot be ordered">;
+def err_omp_reduction_wrong_type : Error<"reduction type cannot be %select{qualified with 'const', 'volatile' or 'restrict'|a function|a reference|an array}0 type">;
+def err_omp_wrong_var_in_declare_reduction : Error<"only %select{'omp_priv' or 'omp_orig'|'omp_in' or 'omp_out'}0 variables are allowed in %select{initializer|combiner}0 expression">;
+def err_omp_declare_reduction_redefinition : Error<"redefinition of user-defined reduction for type %0">;
 def err_omp_array_section_use : Error<"OpenMP array section is not allowed here">;
 def err_omp_typecheck_section_value : Error<
   "subscripted value is not an array or pointer">;
