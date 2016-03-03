@@ -2691,6 +2691,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         Builder.CreateCall(Get_num_threads(), {}), Builder.CreateCall(Get_team_num(), {})));
     llvm::Value *args1[] = {threadID, Builder.getInt32(0), const32};
     llvm::Value *LB = Builder.CreateCall(Get_shuffle(VarTy), args1);
+    llvm::Value *LB = Builder.CreateMul(LB, Builder.getInt32(32));
     LB = Builder.CreateSub(threadID, LB);
 
     printf("Setup of LB! Done\n");
@@ -2979,6 +2980,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     llvm::Value *indexValue = Builder.CreateLoad(Private);
     llvm::Value *args2[] = {indexValue, Builder.getInt32(0), const32};
     indexValue = Builder.CreateCall(Get_shuffle(VarTy), args2);
+    indexValue = Builder.CreateMul(indexValue, Builder.getInt32(32));
     indexValue = Builder.CreateSub(
         Builder.CreateSub(Builder.CreateLoad(Private), indexValue), Builder.getInt32(32));
     Builder.CreateCondBr(
