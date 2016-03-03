@@ -3405,7 +3405,8 @@ static void addPGOAndCoverageFlags(Compilation &C, const Driver &D,
 
   if (ProfileUseArg) {
     if (ProfileUseArg->getOption().matches(options::OPT_fprofile_instr_use_EQ))
-      ProfileUseArg->render(Args, CmdArgs);
+      CmdArgs.push_back(Args.MakeArgString(
+          Twine("-fprofile-instrument-use-path=") + ProfileUseArg->getValue()));
     else if ((ProfileUseArg->getOption().matches(
                   options::OPT_fprofile_use_EQ) ||
               ProfileUseArg->getOption().matches(
@@ -3415,7 +3416,7 @@ static void addPGOAndCoverageFlags(Compilation &C, const Driver &D,
       if (Path.empty() || llvm::sys::fs::is_directory(Path))
         llvm::sys::path::append(Path, "default.profdata");
       CmdArgs.push_back(
-          Args.MakeArgString(Twine("-fprofile-instr-use=") + Path));
+          Args.MakeArgString(Twine("-fprofile-instrument-use-path=") + Path));
     }
   }
 

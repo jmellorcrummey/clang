@@ -286,6 +286,14 @@ void Sema::InstantiateAttrs(const MultiLevelTemplateArgumentList &TemplateArgs,
       }
     }
 
+    if (isa<NSConsumedAttr>(TmplAttr) || isa<CFConsumedAttr>(TmplAttr)) {
+      AddNSConsumedAttr(TmplAttr->getRange(), New,
+                        TmplAttr->getSpellingListIndex(),
+                        isa<NSConsumedAttr>(TmplAttr),
+                        /*template instantiation*/ true);
+      continue;
+    }
+
     assert(!TmplAttr->isPackExpansion());
     if (TmplAttr->isLateParsed() && LateAttrs) {
       // Late parsed attributes must be instantiated and attached after the
@@ -331,6 +339,16 @@ static DeclT *getPreviousDeclForInstantiation(DeclT *D) {
 Decl *
 TemplateDeclInstantiator::VisitTranslationUnitDecl(TranslationUnitDecl *D) {
   llvm_unreachable("Translation units cannot be instantiated");
+}
+
+Decl *
+TemplateDeclInstantiator::VisitPragmaCommentDecl(PragmaCommentDecl *D) {
+  llvm_unreachable("pragma comment cannot be instantiated");
+}
+
+Decl *TemplateDeclInstantiator::VisitPragmaDetectMismatchDecl(
+    PragmaDetectMismatchDecl *D) {
+  llvm_unreachable("pragma comment cannot be instantiated");
 }
 
 Decl *
