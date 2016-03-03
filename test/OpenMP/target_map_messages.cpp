@@ -1,4 +1,21 @@
 // RUN: %clang_cc1 -verify -fopenmp -ferror-limit 200 %s
+// RUN: %clang_cc1 -DCCODE -verify -fopenmp -ferror-limit 200 -x c %s
+#ifdef CCODE
+void foo(int arg) {
+  const int n = 0;
+
+  double marr[10][10][10];
+
+  #pragma omp target map(marr[2][0:2][0:2]) // expected-error {{array section does not specify contiguous storage}}
+  {}
+  #pragma omp target map(marr[:][0:][:])
+  {}
+  #pragma omp target map(marr[:][1:][:]) // expected-error {{array section does not specify contiguous storage}}
+  {}
+  #pragma omp target map(marr[:][n:][:])
+  {}
+}
+#else
 template <typename T, int I>
 struct SA {
   static int ss;
@@ -485,4 +502,4 @@ int main(int argc, char **argv) {
   foo();
   return tmain<int, 3>(argc)+tmain<from, 4>(argc); // expected-note {{in instantiation of function template specialization 'tmain<int, 3>' requested here}} expected-note {{in instantiation of function template specialization 'tmain<int, 4>' requested here}}
 }
-
+#endif
