@@ -481,18 +481,23 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
   Opts.Autolink = !Args.hasArg(OPT_fno_autolink);
   Opts.SampleProfileFile = Args.getLastArgValue(OPT_fprofile_sample_use_EQ);
 
-  enum PGOInstrumentor { Unknown, None, Clang };
+  enum PGOInstrumentor { Unknown, None, Clang, LLVM };
   if (Arg *A = Args.getLastArg(OPT_fprofile_instrument_EQ)) {
     StringRef Value = A->getValue();
     PGOInstrumentor Method = llvm::StringSwitch<PGOInstrumentor>(Value)
-                                 .Case("clang", Clang)
                                  .Case("none", None)
+                                 .Case("clang", Clang)
+                                 .Case("llvm", LLVM)
                                  .Default(Unknown);
     switch (Method) {
+    case LLVM:
+      Opts.setProfileInstr(CodeGenOptions::ProfileIRInstr);
+      break;
     case Clang:
       Opts.setProfileInstr(CodeGenOptions::ProfileClangInstr);
       break;
     case None:
+      // Null operation -- The default is ProfileNone.
       break;
     case Unknown:
       Diags.Report(diag::err_drv_invalid_pgo_instrumentor)
@@ -1102,6 +1107,7 @@ static InputKind ParseFrontendArgs(FrontendOptions &Opts, ArgList &Args,
     = Args.getLastArgValue(OPT_foverride_record_layout_EQ);
   Opts.AuxTriple =
       llvm::Triple::normalize(Args.getLastArgValue(OPT_aux_triple));
+  Opts.FindPchSource = Args.getLastArgValue(OPT_find_pch_source_EQ);
 
   if (const Arg *A = Args.getLastArg(OPT_arcmt_check,
                                      OPT_arcmt_modify,

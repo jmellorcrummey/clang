@@ -868,6 +868,8 @@
 // CHECK_CNL_M32: #define __AVX512CD__ 1
 // CHECK_CNL_M32: #define __AVX512DQ__ 1
 // CHECK_CNL_M32: #define __AVX512F__ 1
+// CHECK_CNL_M32: #define __AVX512IFMA__ 1
+// CHECK_CNL_M32: #define __AVX512VBMI__ 1
 // CHECK_CNL_M32: #define __AVX512VL__ 1
 // CHECK_CNL_M32: #define __AVX__ 1
 // CHECK_CNL_M32: #define __BMI2__ 1
@@ -904,6 +906,8 @@
 // CHECK_CNL_M64: #define __AVX512CD__ 1
 // CHECK_CNL_M64: #define __AVX512DQ__ 1
 // CHECK_CNL_M64: #define __AVX512F__ 1
+// CHECK_CNL_M64: #define __AVX512IFMA__ 1
+// CHECK_CNL_M64: #define __AVX512VBMI__ 1
 // CHECK_CNL_M64: #define __AVX512VL__ 1
 // CHECK_CNL_M64: #define __AVX__ 1
 // CHECK_CNL_M64: #define __BMI2__ 1
@@ -1962,3 +1966,17 @@
 // RUN:   | FileCheck %s -check-prefix=CHECK_SYSTEMZ_ZVECTOR
 //
 // CHECK_SYSTEMZ_ZVECTOR: #define __VEC__ 10301
+
+// Begin amdgcn tests ----------------
+//
+// RUN: %clang -march=amdgcn -E -dM %s -o - 2>&1 \
+// RUN:     -target amdgcn-unknown-unknown \
+// RUN:   | FileCheck %s -check-prefix=CHECK_AMDGCN
+// CHECK_AMDGCN: #define __AMDGCN__ 1
+
+// Begin r600 tests ----------------
+//
+// RUN: %clang -march=amdgcn -E -dM %s -o - 2>&1 \
+// RUN:     -target r600-unknown-unknown \
+// RUN:   | FileCheck %s -check-prefix=CHECK_R600
+// CHECK_R600: #define __R600__ 1

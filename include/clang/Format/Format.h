@@ -541,7 +541,7 @@ struct FormatStyle {
   /// \brief The number of spaces before trailing line comments
   /// (``//`` - comments).
   ///
-  /// This does not affect trailing block comments (``/**/`` - comments) as
+  /// This does not affect trailing block comments (``/*`` - comments) as
   /// those commonly have different usage patterns and a number of special
   /// cases.
   unsigned SpacesBeforeTrailingComments;
@@ -730,6 +730,28 @@ tooling::Replacements sortIncludes(const FormatStyle &Style, StringRef Code,
                                    ArrayRef<tooling::Range> Ranges,
                                    StringRef FileName,
                                    unsigned *Cursor = nullptr);
+
+/// \brief Returns the replacements corresponding to applying and formatting
+/// \p Replaces.
+tooling::Replacements formatReplacements(StringRef Code,
+                                         const tooling::Replacements &Replaces,
+                                         const FormatStyle &Style);
+
+/// \brief In addition to applying all replacements in \p Replaces to \p Code,
+/// this function also reformats the changed code after applying replacements.
+///
+/// \pre Replacements must be for the same file and conflict-free.
+///
+/// Replacement applications happen independently of the success of
+/// other applications.
+///
+/// \returns the changed code with all replacements applied and formatted, if
+/// successful. An empty string otherwise.
+///
+/// See also "include/clang/Tooling/Core/Replacements.h".
+std::string applyAllReplacementsAndFormat(StringRef Code,
+                                          const tooling::Replacements &Replaces,
+                                          const FormatStyle &Style);
 
 /// \brief Reformats the given \p Ranges in the file \p ID.
 ///
