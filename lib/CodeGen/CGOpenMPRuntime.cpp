@@ -245,6 +245,71 @@ private:
   StringRef HelperName;
 };
 
+
+static void EmptyCodeGen(CodeGenFunction &) {
+  llvm_unreachable("No codegen for expressions");
+}
+/// \brief API for generation of expressions captured in a innermost OpenMP
+/// region.
+class CGOpenMPInnerExprInfo : public CGOpenMPInlinedRegionInfo {
+public:
+  CGOpenMPInnerExprInfo(CodeGenFunction &CGF, const CapturedStmt &CS)
+      : CGOpenMPInlinedRegionInfo(CGF.CapturedStmtInfo, EmptyCodeGen,
+                                  OMPD_unknown,
+                                  /*HasCancel=*/false),
+        PrivScope(CGF) {
+    // Make sure the globals captured in the provided statement are local by
+    // using the privatization logic. We assume the same variable is not
+    // captured more than once.
+    for (auto &C : CS.captures()) {
+      if (!C.capturesVariable() && !C.capturesVariableByCopy())
+        continue;
+
+      const VarDecl *VD = C.getCapturedVar();
+      if (VD->isLocalVarDeclOrParm())
+        continue;
+
+      DeclRefExpr DRE(const_cast<VarDecl *>(VD),
+                      /*RefersToEnclosingVariableOrCapture=*/false,
+                      VD->getType().getNonReferenceType(), VK_LValue,
+                      SourceLocation());
+      PrivScope.addPrivate(VD, [&CGF, &DRE]() -> Address {
+        return CGF.EmitLValue(&DRE).getAddress();
+      });
+    }
+    (void)PrivScope.Privatize();
+  }
+
+  /// \brief Lookup the captured field decl for a variable.
+  const FieldDecl *lookup(const VarDecl *VD) const override {
+    if (auto *FD = CGOpenMPInlinedRegionInfo::lookup(VD))
+      return FD;
+    return nullptr;
+  }
+
+  /// \brief Emit the captured statement body.
+  void EmitBody(CodeGenFunction &CGF, const Stmt *S) override {
+    llvm_unreachable("No body for expressions");
+  }
+
+  /// \brief Get a variable or parameter for storing global thread id
+  /// inside OpenMP construct.
+  const VarDecl *getThreadIDVariable() const override {
+    llvm_unreachable("No thread id for expressions");
+  }
+
+  /// \brief Get the name of the capture helper.
+  StringRef getHelperName() const override {
+    llvm_unreachable("No helper name for expressions");
+  }
+
+  static bool classof(const CGCapturedStmtInfo *Info) { return false; }
+
+private:
+  /// Private scope to capture global variables.
+  CodeGenFunction::OMPPrivateScope PrivScope;
+};
+
 /// \brief RAII for emitting code of OpenMP constructs.
 class InlinedOpenMPRegionRAII {
   CodeGenFunction &CGF;
