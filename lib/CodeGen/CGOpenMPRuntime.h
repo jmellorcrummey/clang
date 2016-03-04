@@ -169,6 +169,10 @@ protected:
     // arg_num, void** args_base, void **args, size_t *arg_sizes, int32_t
     // *arg_types);
     OMPRTL__tgt_target,
+    // Call to int32_t __tgt_target_teams(int32_t device_id, void *host_ptr,
+    // int32_t arg_num, void** args_base, void **args, size_t *arg_sizes,
+    // int32_t *arg_types, int32_t num_teams, int32_t thread_limit);
+    OMPRTL__tgt_target_teams,
     // Call to void __tgt_register_lib(__tgt_bin_desc *desc);
     OMPRTL__tgt_register_lib,
     // Call to void __tgt_unregister_lib(__tgt_bin_desc *desc);
