@@ -9124,7 +9124,7 @@ static bool CheckArrayExpressionDoesNotReferToWholeSize(Sema &SemaRef,
 // Return true if it can be proven that the provided array expression (array
 // section or array subscript) does NOT specify a single element of the array
 // whose base type is \a BaseQTy.
-static int CheckArrayExpressionDoesNotReferToUnitySize(Sema &SemaRef,
+static bool CheckArrayExpressionDoesNotReferToUnitySize(Sema &SemaRef,
                                                        const Expr *E,
                                                        QualType BaseQTy) {
   auto *OASE = dyn_cast<OMPArraySectionExpr>(E);
