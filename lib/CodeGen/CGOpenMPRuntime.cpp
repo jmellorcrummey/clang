@@ -245,7 +245,6 @@ private:
   StringRef HelperName;
 };
 
-
 static void EmptyCodeGen(CodeGenFunction &) {
   llvm_unreachable("No codegen for expressions");
 }
@@ -418,6 +417,134 @@ enum OpenMPSchedType {
   OMP_ord_runtime = 69,
   OMP_ord_auto = 70,
   OMP_sch_default = OMP_sch_static,
+};
+
+enum OpenMPRTLFunction {
+  /// \brief Call to void __kmpc_fork_call(ident_t *loc, kmp_int32 argc,
+  /// kmpc_micro microtask, ...);
+  OMPRTL__kmpc_fork_call,
+  /// \brief Call to void *__kmpc_threadprivate_cached(ident_t *loc,
+  /// kmp_int32 global_tid, void *data, size_t size, void ***cache);
+  OMPRTL__kmpc_threadprivate_cached,
+  /// \brief Call to void __kmpc_threadprivate_register( ident_t *,
+  /// void *data, kmpc_ctor ctor, kmpc_cctor cctor, kmpc_dtor dtor);
+  OMPRTL__kmpc_threadprivate_register,
+  // Call to __kmpc_int32 kmpc_global_thread_num(ident_t *loc);
+  OMPRTL__kmpc_global_thread_num,
+  // Call to void __kmpc_critical(ident_t *loc, kmp_int32 global_tid,
+  // kmp_critical_name *crit);
+  OMPRTL__kmpc_critical,
+  // Call to void __kmpc_critical_with_hint(ident_t *loc, kmp_int32
+  // global_tid, kmp_critical_name *crit, uintptr_t hint);
+  OMPRTL__kmpc_critical_with_hint,
+  // Call to void __kmpc_end_critical(ident_t *loc, kmp_int32 global_tid,
+  // kmp_critical_name *crit);
+  OMPRTL__kmpc_end_critical,
+  // Call to kmp_int32 __kmpc_cancel_barrier(ident_t *loc, kmp_int32
+  // global_tid);
+  OMPRTL__kmpc_cancel_barrier,
+  // Call to void __kmpc_barrier(ident_t *loc, kmp_int32 global_tid);
+  OMPRTL__kmpc_barrier,
+  // Call to void __kmpc_for_static_fini(ident_t *loc, kmp_int32 global_tid);
+  OMPRTL__kmpc_for_static_fini,
+  // Call to void __kmpc_serialized_parallel(ident_t *loc, kmp_int32
+  // global_tid);
+  OMPRTL__kmpc_serialized_parallel,
+  // Call to void __kmpc_end_serialized_parallel(ident_t *loc, kmp_int32
+  // global_tid);
+  OMPRTL__kmpc_end_serialized_parallel,
+  // Call to void __kmpc_push_num_threads(ident_t *loc, kmp_int32 global_tid,
+  // kmp_int32 num_threads);
+  OMPRTL__kmpc_push_num_threads,
+  // Call to void __kmpc_flush(ident_t *loc);
+  OMPRTL__kmpc_flush,
+  // Call to kmp_int32 __kmpc_master(ident_t *, kmp_int32 global_tid);
+  OMPRTL__kmpc_master,
+  // Call to void __kmpc_end_master(ident_t *, kmp_int32 global_tid);
+  OMPRTL__kmpc_end_master,
+  // Call to kmp_int32 __kmpc_omp_taskyield(ident_t *, kmp_int32 global_tid,
+  // int end_part);
+  OMPRTL__kmpc_omp_taskyield,
+  // Call to kmp_int32 __kmpc_single(ident_t *, kmp_int32 global_tid);
+  OMPRTL__kmpc_single,
+  // Call to void __kmpc_end_single(ident_t *, kmp_int32 global_tid);
+  OMPRTL__kmpc_end_single,
+  // Call to kmp_task_t * __kmpc_omp_task_alloc(ident_t *, kmp_int32 gtid,
+  // kmp_int32 flags, size_t sizeof_kmp_task_t, size_t sizeof_shareds,
+  // kmp_routine_entry_t *task_entry);
+  OMPRTL__kmpc_omp_task_alloc,
+  // Call to kmp_int32 __kmpc_omp_task(ident_t *, kmp_int32 gtid, kmp_task_t *
+  // new_task);
+  OMPRTL__kmpc_omp_task,
+  // Call to void __kmpc_copyprivate(ident_t *loc, kmp_int32 global_tid,
+  // size_t cpy_size, void *cpy_data, void(*cpy_func)(void *, void *),
+  // kmp_int32 didit);
+  OMPRTL__kmpc_copyprivate,
+  // Call to kmp_int32 __kmpc_reduce(ident_t *loc, kmp_int32 global_tid,
+  // kmp_int32 num_vars, size_t reduce_size, void *reduce_data, void
+  // (*reduce_func)(void *lhs_data, void *rhs_data), kmp_critical_name *lck);
+  OMPRTL__kmpc_reduce,
+  // Call to kmp_int32 __kmpc_reduce_nowait(ident_t *loc, kmp_int32
+  // global_tid, kmp_int32 num_vars, size_t reduce_size, void *reduce_data,
+  // void (*reduce_func)(void *lhs_data, void *rhs_data), kmp_critical_name
+  // *lck);
+  OMPRTL__kmpc_reduce_nowait,
+  // Call to void __kmpc_end_reduce(ident_t *loc, kmp_int32 global_tid,
+  // kmp_critical_name *lck);
+  OMPRTL__kmpc_end_reduce,
+  // Call to void __kmpc_end_reduce_nowait(ident_t *loc, kmp_int32 global_tid,
+  // kmp_critical_name *lck);
+  OMPRTL__kmpc_end_reduce_nowait,
+  // Call to void __kmpc_omp_task_begin_if0(ident_t *, kmp_int32 gtid,
+  // kmp_task_t * new_task);
+  OMPRTL__kmpc_omp_task_begin_if0,
+  // Call to void __kmpc_omp_task_complete_if0(ident_t *, kmp_int32 gtid,
+  // kmp_task_t * new_task);
+  OMPRTL__kmpc_omp_task_complete_if0,
+  // Call to void __kmpc_ordered(ident_t *loc, kmp_int32 global_tid);
+  OMPRTL__kmpc_ordered,
+  // Call to void __kmpc_end_ordered(ident_t *loc, kmp_int32 global_tid);
+  OMPRTL__kmpc_end_ordered,
+  // Call to kmp_int32 __kmpc_omp_taskwait(ident_t *loc, kmp_int32
+  // global_tid);
+  OMPRTL__kmpc_omp_taskwait,
+  // Call to void __kmpc_taskgroup(ident_t *loc, kmp_int32 global_tid);
+  OMPRTL__kmpc_taskgroup,
+  // Call to void __kmpc_end_taskgroup(ident_t *loc, kmp_int32 global_tid);
+  OMPRTL__kmpc_end_taskgroup,
+  // Call to void __kmpc_push_proc_bind(ident_t *loc, kmp_int32 global_tid,
+  // int proc_bind);
+  OMPRTL__kmpc_push_proc_bind,
+  // Call to kmp_int32 __kmpc_omp_task_with_deps(ident_t *loc_ref, kmp_int32
+  // gtid, kmp_task_t * new_task, kmp_int32 ndeps, kmp_depend_info_t
+  // *dep_list, kmp_int32 ndeps_noalias, kmp_depend_info_t *noalias_dep_list);
+  OMPRTL__kmpc_omp_task_with_deps,
+  // Call to void __kmpc_omp_wait_deps(ident_t *loc_ref, kmp_int32
+  // gtid, kmp_int32 ndeps, kmp_depend_info_t *dep_list, kmp_int32
+  // ndeps_noalias, kmp_depend_info_t *noalias_dep_list);
+  OMPRTL__kmpc_omp_wait_deps,
+  // Call to kmp_int32 __kmpc_cancellationpoint(ident_t *loc, kmp_int32
+  // global_tid, kmp_int32 cncl_kind);
+  OMPRTL__kmpc_cancellationpoint,
+  // Call to kmp_int32 __kmpc_cancel(ident_t *loc, kmp_int32 global_tid,
+  // kmp_int32 cncl_kind);
+  OMPRTL__kmpc_cancel,
+
+  //
+  // Offloading related calls
+  //
+  // Call to int32_t __tgt_target(int32_t device_id, void *host_ptr, int32_t
+  // arg_num, void** args_base, void **args, size_t *arg_sizes, int32_t
+  // *arg_types);
+  OMPRTL__tgt_target,
+  // Call to int32_t __tgt_target_teams(int32_t device_id, void *host_ptr,
+  // int32_t arg_num, void** args_base, void **args, size_t *arg_sizes,
+  // int32_t *arg_types, int32_t num_teams, int32_t thread_limit);
+  OMPRTL__tgt_target_teams,
+  // Call to void __tgt_register_lib(__tgt_bin_desc *desc);
+  OMPRTL__tgt_register_lib,
+  // Call to void __tgt_unregister_lib(__tgt_bin_desc *desc);
+  OMPRTL__tgt_unregister_lib,
 };
 
 } // anonymous namespace
@@ -3872,26 +3999,44 @@ static void getTargetEntryUniqueInfo(ASTContext &C, SourceLocation Loc,
   LineNum = PLoc.getLine();
 }
 
+void CGOpenMPRuntime::emitTargetOutlinedFunction(
+    const OMPExecutableDirective &D, StringRef ParentName,
+    llvm::Function *&OutlinedFn, llvm::Constant *&OutlinedFnID,
+    bool IsOffloadEntry) {
+  assert(!ParentName.empty() && "Invalid target region parent name!");
+
+  const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
+
+  // Emit target region as a standalone region.
+  auto &&CodeGen = [&CS](CodeGenFunction &CGF) {
+    CGF.EmitStmt(CS.getCapturedStmt());
+  };
+
+  emitTargetOutlinedFunctionHelper(D, ParentName, OutlinedFn, OutlinedFnID,
+                                   IsOffloadEntry, CodeGen);
+}
+
 void CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(
     const OMPExecutableDirective &D, StringRef ParentName,
     llvm::Function *&OutlinedFn, llvm::Constant *&OutlinedFnID,
     bool IsOffloadEntry, const RegionCodeGenTy &CodeGen) {
-  // The name of the entry function is something like:
+  // Create a unique name for the entry function using the source location
+  // information of the current target region. The name will be something like:
   //
   // __omp_offloading_DD_FFFF_PP_lBB
   //
   // where DD_FFFF is an ID unique to the file (device and file IDs), PP is the
-  // mangled name of the function that encloses the target region, BB is the
+  // mangled name of the function that encloses the target region and BB is the
   // line number of the target region.
 
   unsigned DeviceID;
   unsigned FileID;
   unsigned Line;
-  SmallString<256> OutlinedFnName;
   getTargetEntryUniqueInfo(CGM.getContext(), D.getLocStart(), DeviceID, FileID,
                            Line);
+  SmallString<64> EntryFnName;
   {
-    llvm::raw_svector_ostream OS(OutlinedFnName);
+    llvm::raw_svector_ostream OS(EntryFnName);
     OS << "__omp_offloading" << llvm::format("_%x", DeviceID)
        << llvm::format("_%x_", FileID) << ParentName << "_l" << Line;
   }
@@ -3899,7 +4044,7 @@ void CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(
   const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
 
   CodeGenFunction CGF(CGM, true);
-  CGOpenMPTargetRegionInfo CGInfo(CS, CodeGen, OutlinedFnName);
+  CGOpenMPTargetRegionInfo CGInfo(CS, CodeGen, EntryFnName);
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
 
   OutlinedFn = CGF.GenerateOpenMPCapturedStmtFunction(CS);
@@ -3932,23 +4077,6 @@ void CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(
   // Register the information for the entry associated with this target region.
   OffloadEntriesInfoManager.registerTargetRegionEntryInfo(
       DeviceID, FileID, ParentName, Line, OutlinedFn, OutlinedFnID);
-}
-
-void CGOpenMPRuntime::emitTargetOutlinedFunction(
-    const OMPExecutableDirective &D, StringRef ParentName,
-    llvm::Function *&OutlinedFn, llvm::Constant *&OutlinedFnID,
-    bool IsOffloadEntry) {
-  assert(!ParentName.empty() && "Invalid target region parent name!");
-
-  const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
-
-  // Emit target region as a standalone region.
-  auto &&CodeGen = [&CS](CodeGenFunction &CGF) {
-    CGF.EmitStmt(CS.getCapturedStmt());
-  };
-
-  emitTargetOutlinedFunctionHelper(D, ParentName, OutlinedFn, OutlinedFnID,
-                                   IsOffloadEntry, CodeGen);
 }
 
 /// \brief Emit the num_teams clause of an enclosed teams directive at the
