@@ -7618,52 +7618,57 @@ void CodeGenFunction::EmitOMPTeamsDirective(const OMPTeamsDirective &S) {
 void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
 
   printf("======> Inside EmitOMPSimdDirective\n");
-  // If the current OpenMP implementation does not need microtasks for parallel
-  // it has to share data between threads.
-  // FIXME: Maybe create a special hook for SIMD as there may be implementations
-  // that support vectorization in each thread, but still require thread
-  // management by the compiler.
-  if (!CGM.getOpenMPRuntime().requiresMicroTaskForParallel()) {
+  if (this->combinedSimd){
+    printf("======> Inside EmitOMPSimdDirective: This is where we need to jump to Emiting new Inner SIMD LOOP!!!\n");
+    EmitOMPInnerSimdLoopForStmt(S, *this);
+  }else{
+    // If the current OpenMP implementation does not need microtasks for parallel
+    // it has to share data between threads.
+    // FIXME: Maybe create a special hook for SIMD as there may be implementations
+    // that support vectorization in each thread, but still require thread
+    // management by the compiler.
+    if (!CGM.getOpenMPRuntime().requiresMicroTaskForParallel()) {
 
-    printf("======> Inside EmitOMPSimdDirective: Doesn't Require Micro Task\n");
-    bool IsNvptxTarget =
-        CGM.getLangOpts().OpenMPTargetMode &&
-        (CGM.getTarget().getTriple().getArch() == llvm::Triple::nvptx ||
-         CGM.getTarget().getTriple().getArch() == llvm::Triple::nvptx64);
+      printf("======> Inside EmitOMPSimdDirective: Doesn't Require Micro Task\n");
+      bool IsNvptxTarget =
+          CGM.getLangOpts().OpenMPTargetMode &&
+          (CGM.getTarget().getTriple().getArch() == llvm::Triple::nvptx ||
+           CGM.getTarget().getTriple().getArch() == llvm::Triple::nvptx64);
 
-    // If this is a nvptx target we do not support codegen for parallel in
-    // functions that are not entry points.
-    if (IsNvptxTarget) {
-      printf("======> Inside EmitOMPSimdDirective: Is NVPTX\n");
-      CapturedStmt *CS = cast<CapturedStmt>(S.getAssociatedStmt());
-      const DeclContext *DC = CS->getCapturedDecl()->getParent();
-      while (DC) {
-        // If this is in a declare target just emit the captured statement as
-        // is.
-        if (DC->isOMPDeclareTarget()) {
-          EmitStmt(CS->getCapturedStmt());
-          return;
+      // If this is a nvptx target we do not support codegen for parallel in
+      // functions that are not entry points.
+      if (IsNvptxTarget) {
+        printf("======> Inside EmitOMPSimdDirective: Is NVPTX\n");
+        CapturedStmt *CS = cast<CapturedStmt>(S.getAssociatedStmt());
+        const DeclContext *DC = CS->getCapturedDecl()->getParent();
+        while (DC) {
+          // If this is in a declare target just emit the captured statement as
+          // is.
+          if (DC->isOMPDeclareTarget()) {
+            EmitStmt(CS->getCapturedStmt());
+            return;
+          }
+          DC = DC->getParent();
         }
-        DC = DC->getParent();
       }
+
+      OpenMPRegionRAII SharingRegion(
+          *this, S, *cast<CapturedStmt>(S.getAssociatedStmt()), nullptr,
+          OpenMPRegionRAII::OMPRegionType_Shared_Simd);
+
+      InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
+      RunCleanupsScope ExecutedScope(*this);
+      CGPragmaOmpSimd Wrapper(&S);
+      printf("======> Inside EmitOMPSimdDirective: Call to EmitPragmaSimd\n");
+      EmitPragmaSimd(Wrapper);
+    } else {
+      printf("======> Inside EmitOMPSimdDirective: Requires Micro Task\n");
+      InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
+      RunCleanupsScope ExecutedScope(*this);
+      CGPragmaOmpSimd Wrapper(&S);
+      printf("======> Inside EmitOMPSimdDirective: Call to EmitPragmaSimd\n");
+      EmitPragmaSimd(Wrapper);
     }
-
-    OpenMPRegionRAII SharingRegion(
-        *this, S, *cast<CapturedStmt>(S.getAssociatedStmt()), nullptr,
-        OpenMPRegionRAII::OMPRegionType_Shared_Simd);
-
-    InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
-    RunCleanupsScope ExecutedScope(*this);
-    CGPragmaOmpSimd Wrapper(&S);
-    printf("======> Inside EmitOMPSimdDirective: Call to EmitPragmaSimd\n");
-    EmitPragmaSimd(Wrapper);
-  } else {
-    printf("======> Inside EmitOMPSimdDirective: Requires Micro Task\n");
-    InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
-    RunCleanupsScope ExecutedScope(*this);
-    CGPragmaOmpSimd Wrapper(&S);
-    printf("======> Inside EmitOMPSimdDirective: Call to EmitPragmaSimd\n");
-    EmitPragmaSimd(Wrapper);
   }
 }
 

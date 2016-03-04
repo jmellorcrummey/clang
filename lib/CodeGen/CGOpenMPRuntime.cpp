@@ -2638,10 +2638,17 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   }
 
   void
+  EmitOMPInnerSimdLoopForStmt(const OMPExecutableDirective &S,
+                              CodeGenFunction &CGF){
+    EmitOMPInnerSimdLoop(S, CGF,
+                       /*llvm::AllocaInst *Private*/CGF.CombinedOuterLoopIndex,
+                       /*llvm::BasicBlock *OuterLoopBody*/CGF.CombinedJumpBackBlock);
+  }
+
+  void
   EmitOMPInnerSimdLoop(const OMPExecutableDirective &S,
                        CodeGenFunction &CGF,
                        llvm::AllocaInst *Private,
-                       llvm::Value *const32,
                        llvm::BasicBlock *OuterLoopBody){
 
     // Implement a new for loop.
@@ -2660,6 +2667,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         CGF.CGM.getLLVMContext(), ".end.inner.simd.for", CGF.CurFn);
  
     printf("Setup of blocks! Done\n");
+
+    // Before jumping anywhere, include a memfence.
+    Builder.CreateCall(Get_memfence(), {});
 
     // Start populating the basic blocks which perform the init, cond and inc
     // of the combined construct for loop.
@@ -2690,6 +2700,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     llvm::Value *blockLocalThreadID = Builder.CreateCall(Get_thread_num(), {});
     // LB = blockLocalThreadID div WARP32
     blockLocalThreadID = Builder.CreateSExt(blockLocalThreadID, VarTy);
+    llvm::Value *const32 = Builder.getInt32(5); // 2^5
     llvm::Value *LB = Builder.CreateAShr(blockLocalThreadID, const32);
     // LB *= WARP32
     LB = Builder.CreateMul(LB, Builder.getInt32(32));
@@ -3024,7 +3035,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       CodeGenFunction::RunCleanupsScope ThenScope(CGF);
       CGF.EmitStmt(InitExpr);
       {
+        CGF.CombinedOuterLoopIndex = Private;
+        CGF.CombinedJumpBackBlock = AftetInnerPragmaBodyFor;
         CodeGenFunction::RunCleanupsScope BodyScope(CGF);
+        /*
         // Handle the body of the pragma parallel for.
         // It contains a SIMD as a direct descendant.
         //     1. Loop through all the direct descendents and if they are different
@@ -3045,7 +3059,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
                     Builder.CreateCall(Get_memfence(), {});
                     // Gen custom code
                     if ((*ii)->getStmtClass() == Stmt::OMPSimdDirectiveClass){
-                        EmitOMPInnerSimdLoop((cast<OMPSimdDirective>(**ii)), CGF, Private, const32, AftetInnerPragmaBodyFor);
+                        EmitOMPInnerSimdLoop((cast<OMPSimdDirective>(**ii)), CGF, Private, AftetInnerPragmaBodyFor);
                         Builder.SetInsertPoint(AftetInnerPragmaBodyFor);
                     } else {
                         assert(0 && "Generating code for non-simd pragma inside combined construct is not supported\n");
@@ -3054,7 +3068,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
             }
         }
         Builder.CreateCall(Get_syncthreads(), {});
-        //CGF.EmitStmt(Body);
+        */
+        CGF.EmitStmt(Body);
       }
       Builder.CreateBr(IncCombinedFor);
     }
