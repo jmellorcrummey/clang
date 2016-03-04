@@ -2031,11 +2031,17 @@ public:
   void Visit##Class(const Class *C);
 #include "clang/Basic/OpenMPKinds.def"
   void VisitOMPClauseWithPreInit(const OMPClauseWithPreInit *C);
+  void VisitOMPClauseWithPostUpdate(const OMPClauseWithPostUpdate *C);
 };
 
 void OMPClauseEnqueue::VisitOMPClauseWithPreInit(
     const OMPClauseWithPreInit *C) {
   Visitor->AddStmt(C->getPreInitStmt());
+}
+
+void OMPClauseEnqueue::VisitOMPClauseWithPostUpdate(
+    const OMPClauseWithPostUpdate *C) {
+  Visitor->AddStmt(C->getPostUpdateExpr());
 }
 
 void OMPClauseEnqueue::VisitOMPIfClause(const OMPIfClause *C) {
@@ -2152,6 +2158,8 @@ void OMPClauseEnqueue::VisitOMPFirstprivateClause(
 void OMPClauseEnqueue::VisitOMPLastprivateClause(
                                         const OMPLastprivateClause *C) {
   VisitOMPClauseList(C);
+  VisitOMPClauseWithPreInit(C);
+  VisitOMPClauseWithPostUpdate(C);
   for (auto *E : C->private_copies()) {
     Visitor->AddStmt(E);
   }
@@ -2170,6 +2178,8 @@ void OMPClauseEnqueue::VisitOMPSharedClause(const OMPSharedClause *C) {
 }
 void OMPClauseEnqueue::VisitOMPReductionClause(const OMPReductionClause *C) {
   VisitOMPClauseList(C);
+  VisitOMPClauseWithPreInit(C);
+  VisitOMPClauseWithPostUpdate(C);
   for (auto *E : C->privates()) {
     Visitor->AddStmt(E);
   }
@@ -3149,6 +3159,9 @@ clang_parseTranslationUnit_Impl(CXIndex CIdx, const char *source_filename,
   // Configure the diagnostics.
   IntrusiveRefCntPtr<DiagnosticsEngine>
     Diags(CompilerInstance::createDiagnostics(new DiagnosticOptions));
+
+  if (options & CXTranslationUnit_KeepGoing)
+    Diags->setFatalsAsError(true);
 
   // Recover resources if we crash before exiting this function.
   llvm::CrashRecoveryContextCleanupRegistrar<DiagnosticsEngine,
@@ -5571,8 +5584,11 @@ CXCursor clang_getCursorDefinition(CXCursor C) {
   case Decl::ClassScopeFunctionSpecialization:
   case Decl::Import:
   case Decl::OMPThreadPrivate:
+  case Decl::OMPDeclareReduction:
   case Decl::ObjCTypeParam:
   case Decl::BuiltinTemplate:
+  case Decl::PragmaComment:
+  case Decl::PragmaDetectMismatch:
     return C;
 
   // Declaration kinds that don't make any sense here, but are
@@ -7917,3 +7933,10 @@ cxindex::Logger::~Logger() {
     OS << "--------------------------------------------------\n";
   }
 }
+
+#ifdef CLANG_TOOL_EXTRA_BUILD
+// This anchor is used to force the linker to link the clang-tidy plugin.
+extern volatile int ClangTidyPluginAnchorSource;
+static int LLVM_ATTRIBUTE_UNUSED ClangTidyPluginAnchorDestination =
+    ClangTidyPluginAnchorSource;
+#endif

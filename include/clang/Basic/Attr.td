@@ -338,6 +338,11 @@ class TargetSpecificAttr<TargetArch target> {
 /// redeclarations, even when it's written on a parameter.
 class InheritableParamAttr : InheritableAttr;
 
+/// An attribute which changes the ABI rules for a specific parameter.
+class ParameterABIAttr : InheritableParamAttr {
+  let Subjects = SubjectList<[ParmVar]>;
+}
+
 /// An ignored attribute, which we parse but discard with no checking.
 class IgnoredAttr : Attr {
   let Ignored = 1;
@@ -664,7 +669,7 @@ def OpenCLUnrollHint : InheritableAttr {
 
 // This attribute is both a type attribute, and a declaration attribute (for
 // parameter variables).
-def OpenCLImageAccess : Attr {
+def OpenCLAccess : Attr {
   let Spellings = [Keyword<"__read_only">, Keyword<"read_only">,
                    Keyword<"__write_only">, Keyword<"write_only">,
                    Keyword<"__read_write">, Keyword<"read_write">];
@@ -675,7 +680,7 @@ def OpenCLImageAccess : Attr {
                                             Keyword<"read_write">]>,
                    Accessor<"isWriteOnly", [Keyword<"__write_only">,
                                             Keyword<"write_only">]>];
-  let Documentation = [Undocumented];
+  let Documentation = [OpenCLAccessDocs];
 }
 
 def OpenCLPrivateAddressSpace : TypeAttr {
@@ -1333,6 +1338,27 @@ def StdCall : InheritableAttr {
   let Spellings = [GCC<"stdcall">, Keyword<"__stdcall">, Keyword<"_stdcall">];
 //  let Subjects = [Function, ObjCMethod];
   let Documentation = [StdCallDocs];
+}
+
+def SwiftCall : InheritableAttr {
+  let Spellings = [GCC<"swiftcall">];
+//  let Subjects = SubjectList<[Function]>;
+  let Documentation = [SwiftCallDocs];
+}
+
+def SwiftContext : ParameterABIAttr {
+  let Spellings = [GCC<"swift_context">];
+  let Documentation = [SwiftContextDocs];
+}
+
+def SwiftErrorResult : ParameterABIAttr {
+  let Spellings = [GCC<"swift_error_result">];
+  let Documentation = [SwiftErrorResultDocs];
+}
+
+def SwiftIndirectResult : ParameterABIAttr {
+  let Spellings = [GCC<"swift_indirect_result">];
+  let Documentation = [SwiftIndirectResultDocs];
 }
 
 def SysVABI : InheritableAttr {
@@ -2179,6 +2205,13 @@ def CapturedRecord : InheritableAttr {
 }
 
 def OMPThreadPrivateDecl : InheritableAttr {
+  // This attribute has no spellings as it is only ever created implicitly.
+  let Spellings = [];
+  let SemaHandler = 0;
+  let Documentation = [Undocumented];
+}
+
+def OMPCaptureNoInit : InheritableAttr {
   // This attribute has no spellings as it is only ever created implicitly.
   let Spellings = [];
   let SemaHandler = 0;

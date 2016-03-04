@@ -421,6 +421,10 @@ class CXXRecordDecl : public RecordDecl {
     /// constructor which is neither the copy nor move constructor.
     bool HasConstexprNonCopyMoveConstructor : 1;
 
+    /// \brief True if this class has a (possibly implicit) defaulted default
+    /// constructor.
+    bool HasDefaultedDefaultConstructor : 1;
+
     /// \brief True if a defaulted default constructor for this class would
     /// be constexpr.
     bool DefaultedDefaultConstructorIsConstexpr : 1;
@@ -1278,7 +1282,8 @@ public:
   /// per core issue 253.
   bool allowConstDefaultInit() const {
     return !data().HasUninitializedFields ||
-           hasUserProvidedDefaultConstructor();
+           !(data().HasDefaultedDefaultConstructor ||
+             needsImplicitDefaultConstructor());
   }
 
   /// \brief Determine whether this class has a destructor which has no
@@ -1564,6 +1569,14 @@ public:
   /// of the given name within a C++ class hierarchy.
   static bool FindOrdinaryMember(const CXXBaseSpecifier *Specifier,
                                  CXXBasePath &Path, DeclarationName Name);
+
+  /// \brief Base-class lookup callback that determines whether there exists
+  /// an OpenMP declare reduction member with the given name.
+  ///
+  /// This callback can be used with \c lookupInBases() to find members
+  /// of the given name within a C++ class hierarchy.
+  static bool FindOMPReductionMember(const CXXBaseSpecifier *Specifier,
+                                     CXXBasePath &Path, DeclarationName Name);
 
   /// \brief Base-class lookup callback that determines whether there exists
   /// a member with the given name that can be used in a nested-name-specifier.

@@ -623,8 +623,8 @@ def err_opencl_half_declaration : Error<
   "declaring variable of type %0 is not allowed">;
 def err_opencl_half_param : Error<
   "declaring function parameter of type %0 is not allowed; did you forget * ?">;
-def err_opencl_half_return : Error<
-  "declaring function return value of type %0 is not allowed; did you forget * ?">;
+def err_opencl_invalid_return : Error<
+  "declaring function return value of type %0 is not allowed %select{; did you forget * ?|}1">;
 def warn_enum_value_overflow : Warning<"overflow in enumeration value">;
 def warn_pragma_options_align_reset_failed : Warning<
   "#pragma options align=reset failed: %0">,
@@ -2276,6 +2276,20 @@ def warn_objc_collection_literal_element : Warning<
   "object of type %0 is not compatible with "
   "%select{array element type|dictionary key type|dictionary value type}1 %2">,
   InGroup<ObjCLiteralConversion>;
+def err_swift_param_attr_not_swiftcall : Error<
+  "'%0' parameter can only be used with swiftcall calling convention">;
+def err_swift_indirect_result_not_first : Error<
+  "'swift_indirect_result' parameters must be first parameters of function">;
+def err_swift_context_not_before_swift_error_result : Error<
+  "'swift_context' parameter can only be followed by 'swift_error_result' "
+  "parameter">;
+def err_swift_error_result_not_last : Error<
+  "'swift_error_result' parameter must be last parameter of function">;
+def err_swift_error_result_not_after_swift_context : Error<
+  "'swift_error_result' parameter must follow 'swift_context' parameter">;
+def err_swift_abi_parameter_wrong_type : Error<
+  "'%0' parameter must have pointer%select{| to unqualified pointer}1 type; "
+  "type here is %2">;
 
 def err_attribute_argument_is_zero : Error<
   "%0 attribute must be greater than 0">;
@@ -2934,6 +2948,9 @@ def warn_ns_attribute_wrong_return_type : Warning<
   "%0 attribute only applies to %select{functions|methods|properties}1 that "
   "return %select{an Objective-C object|a pointer|a non-retainable pointer}2">,
   InGroup<IgnoredAttributes>;
+def err_ns_attribute_wrong_parameter_type : Error<
+  "%0 attribute only applies to "
+  "%select{Objective-C object|pointer|pointer-to-CF-pointer}1 parameters">;
 def warn_ns_attribute_wrong_parameter_type : Warning<
   "%0 attribute only applies to "
   "%select{Objective-C object|pointer|pointer-to-CF-pointer}1 parameters">,
@@ -7684,8 +7701,8 @@ def note_illegal_field_declared_here : Note<
   "field of illegal %select{type|pointer type}0 %1 declared here">;
 def err_event_t_global_var : Error<
   "the event_t type cannot be used to declare a program scope variable">;
-def err_event_t_struct_field : Error<
-  "the event_t type cannot be used to declare a structure or union field">;
+def err_opencl_type_struct_or_union_field : Error<
+  "the %0 type cannot be used to declare a structure or union field">;
 def err_event_t_addr_space_qual : Error<
   "the event_t type can only be used with __private address space qualifier">;
 def err_expected_kernel_void_return_type : Error<
@@ -7712,6 +7729,18 @@ def err_atomic_init_constant : Error<
   " in the declaration statement in the program scope">;
 def err_opencl_implicit_vector_conversion : Error<
   "implicit conversions between vector types (%0 and %1) are not permitted">;
+def err_opencl_dereferencing : Error<
+  "dereferencing pointer of type %0 is not allowed in OpenCL">;
+def err_opencl_block_proto_variadic : Error<
+  "invalid block prototype, variadic arguments are not allowed in OpenCL">;
+def err_opencl_invalid_type_array : Error<
+  "array of %0 type is invalid in OpenCL">;
+def err_opencl_ternary_with_block : Error<
+  "block type cannot be used as expression in ternary expression in OpenCL">;
+def err_opencl_pointer_to_type : Error<
+  "pointer to type %0 is invalid in OpenCL">;
+def err_opencl_type_can_only_be_used_as_function_parameter : Error <
+  "type %0 can only be used as a function parameter in OpenCL">;
 
 // OpenCL v2.0 s6.13.6 -- Builtin Pipe Functions
 def err_opencl_builtin_pipe_first_arg : Error<
@@ -7723,9 +7752,25 @@ def err_opencl_builtin_pipe_invalid_arg : Error<
 def err_opencl_builtin_pipe_invalid_access_modifier : Error<
   "invalid pipe access modifier (expecting %0)">;
 
+// OpenCL access qualifier
+def err_opencl_invalid_access_qualifier : Error<
+  "access qualifier can only be used for pipe and image type">;
+def err_opencl_invalid_read_write : Error<
+  "access qualifier %0 can not be used for %1 %select{|earlier than OpenCL2.0 version}2">;
+def err_opencl_multiple_access_qualifiers : Error<
+  "multiple access qualifiers">;
+
 // OpenCL Section 6.8.g
 def err_opencl_unknown_type_specifier : Error<
   "OpenCL does not support the '%0' %select{type qualifier|storage class specifier}1">;
+
+// OpenCL v2.0 s6.12.5 Blocks restrictions
+def err_opencl_block_storage_type : Error<
+  "the __block storage type is not permitted">;
+def err_opencl_invalid_block_declaration : Error<
+  "invalid block variable declaration - must be %select{const qualified|initialized}0">;
+def err_opencl_extern_block_declaration : Error<
+  "invalid block variable declaration - using 'extern' storage class is disallowed">;
 
 } // end of sema category
 
@@ -7969,6 +8014,9 @@ def err_omp_parent_cancel_region_nowait : Error<
   "parent region for 'omp %select{cancellation point/cancel}0' construct cannot be nowait">;
 def err_omp_parent_cancel_region_ordered : Error<
   "parent region for 'omp %select{cancellation point/cancel}0' construct cannot be ordered">;
+def err_omp_reduction_wrong_type : Error<"reduction type cannot be %select{qualified with 'const', 'volatile' or 'restrict'|a function|a reference|an array}0 type">;
+def err_omp_wrong_var_in_declare_reduction : Error<"only %select{'omp_priv' or 'omp_orig'|'omp_in' or 'omp_out'}0 variables are allowed in %select{initializer|combiner}0 expression">;
+def err_omp_declare_reduction_redefinition : Error<"redefinition of user-defined reduction for type %0">;
 def err_omp_array_section_use : Error<"OpenMP array section is not allowed here">;
 def err_omp_typecheck_section_value : Error<
   "subscripted value is not an array or pointer">;

@@ -490,9 +490,71 @@ void Clang::AddPreprocessingOptions(Compilation &C, const JobAction &JA,
   // wonky, but we include looking for .gch so we can support seamless
   // replacement into a build system already set up to be generating
   // .gch files.
+  int YcIndex = -1, YuIndex = -1;
+  {
+    int AI = -1;
+    const Arg *YcArg = Args.getLastArg(options::OPT__SLASH_Yc);
+    const Arg *YuArg = Args.getLastArg(options::OPT__SLASH_Yu);
+    for (const Arg *A : Args.filtered(options::OPT_clang_i_Group)) {
+      // Walk the whole i_Group and skip non "-include" flags so that the index
+      // here matches the index in the next loop below.
+      ++AI;
+      if (!A->getOption().matches(options::OPT_include))
+        continue;
+      if (YcArg && strcmp(A->getValue(), YcArg->getValue()) == 0)
+        YcIndex = AI;
+      if (YuArg && strcmp(A->getValue(), YuArg->getValue()) == 0)
+        YuIndex = AI;
+    }
+  }
+  if (isa<PrecompileJobAction>(JA) && YcIndex != -1) {
+    Driver::InputList Inputs;
+    D.BuildInputs(getToolChain(), C.getArgs(), Inputs);
+    assert(Inputs.size() == 1 && "Need one input when building pch");
+    CmdArgs.push_back(Args.MakeArgString(Twine("-find-pch-source=") +
+                                         Inputs[0].second->getValue()));
+  }
+
   bool RenderedImplicitInclude = false;
+  int AI = -1;
   for (const Arg *A : Args.filtered(options::OPT_clang_i_Group)) {
-    if (A->getOption().matches(options::OPT_include)) {
+    ++AI;
+
+    if (getToolChain().getDriver().IsCLMode()) {
+      // In clang-cl mode, /Ycfoo.h means that all code up to a foo.h 
+      // include is compiled into foo.h, and everything after goes into
+      // the .obj file. /Yufoo.h means that all includes prior to and including
+      // foo.h are completely skipped and replaced with a use of the pch file
+      // for foo.h.  (Each flag can have at most one value, multiple /Yc flags
+      // just mean that the last one wins.)  If /Yc and /Yu are both present
+      // and refer to the same file, /Yc wins.
+      // Note that OPT__SLASH_FI gets mapped to OPT_include.
+      // FIXME: The code here assumes that /Yc and /Yu refer to the same file.
+      // cl.exe seems to support both flags with different values, but that
+      // seems strange (which flag does /Fp now refer to?), so don't implement
+      // that until someone needs that.
+      int PchIndex = YcIndex != -1 ? YcIndex : YuIndex;
+      if (PchIndex != -1) {
+        if (isa<PrecompileJobAction>(JA)) {
+          // When building the pch, skip all includes after the pch.
+          assert(YcIndex != -1 && PchIndex == YcIndex);
+          if (AI >= YcIndex)
+            continue;
+        } else {
+          // When using the pch, skip all includes prior to the pch.
+          if (AI < PchIndex)
+            continue;
+          if (AI == PchIndex) {
+            A->claim();
+            CmdArgs.push_back("-include-pch");
+            CmdArgs.push_back(
+                Args.MakeArgString(D.GetClPchPath(C, A->getValue())));
+            continue;
+          }
+        }
+      }
+    } else if (A->getOption().matches(options::OPT_include)) {
+      // Handling of gcc-style gch precompiled headers.
       bool IsFirstImplicitInclude = !RenderedImplicitInclude;
       RenderedImplicitInclude = true;
 
@@ -1005,6 +1067,10 @@ static void getARMTargetFeatures(const ToolChain &TC,
       // No v6M core supports unaligned memory access (v6M ARM ARM A3.2).
       if (Triple.getSubArch() == llvm::Triple::SubArchType::ARMSubArch_v6m)
         D.Diag(diag::err_target_unsupported_unaligned) << "v6m";
+      // v8M Baseline follows on from v6M, so doesn't support unaligned memory
+      // access either.
+      else if (Triple.getSubArch() == llvm::Triple::SubArchType::ARMSubArch_v8m_baseline)
+        D.Diag(diag::err_target_unsupported_unaligned) << "v8m.base";
     } else
       Features.push_back("+strict-align");
   } else {
@@ -2228,11 +2294,14 @@ static bool DecodeAArch64Mcpu(const Driver &D, StringRef Mcpu, StringRef &CPU,
                               std::vector<const char *> &Features) {
   std::pair<StringRef, StringRef> Split = Mcpu.split("+");
   CPU = Split.first;
-  if (CPU == "cyclone" || CPU == "cortex-a53" || CPU == "cortex-a57" ||
+  if (CPU == "cortex-a53" || CPU == "cortex-a57" ||
       CPU == "cortex-a72" || CPU == "cortex-a35" || CPU == "exynos-m1" ||
       CPU == "kryo") {
     Features.push_back("+neon");
     Features.push_back("+crc");
+    Features.push_back("+crypto");
+  } else if (CPU == "cyclone") {
+    Features.push_back("+neon");
     Features.push_back("+crypto");
   } else if (CPU == "generic") {
     Features.push_back("+neon");
@@ -2575,8 +2644,8 @@ static bool ContainsCompileAction(const Action *A) {
   if (isa<CompileJobAction>(A) || isa<BackendJobAction>(A))
     return true;
 
-  for (const auto &Act : *A)
-    if (ContainsCompileAction(Act))
+  for (const auto &AI : A->inputs())
+    if (ContainsCompileAction(AI))
       return true;
 
   return false;
@@ -3056,6 +3125,8 @@ static bool shouldUseFramePointerForTarget(const ArgList &Args,
     switch (Triple.getArch()) {
     case llvm::Triple::x86:
       return !areOptimizationsEnabled(Args);
+    case llvm::Triple::x86_64:
+      return Triple.isOSBinFormatMachO();
     case llvm::Triple::arm:
     case llvm::Triple::thumb:
       // Windows on ARM builds with FPO disabled to aid fast stack walking
@@ -3338,7 +3409,8 @@ static void addPGOAndCoverageFlags(Compilation &C, const Driver &D,
 
   if (ProfileUseArg) {
     if (ProfileUseArg->getOption().matches(options::OPT_fprofile_instr_use_EQ))
-      ProfileUseArg->render(Args, CmdArgs);
+      CmdArgs.push_back(Args.MakeArgString(
+          Twine("-fprofile-instrument-use-path=") + ProfileUseArg->getValue()));
     else if ((ProfileUseArg->getOption().matches(
                   options::OPT_fprofile_use_EQ) ||
               ProfileUseArg->getOption().matches(
@@ -3348,7 +3420,7 @@ static void addPGOAndCoverageFlags(Compilation &C, const Driver &D,
       if (Path.empty() || llvm::sys::fs::is_directory(Path))
         llvm::sys::path::append(Path, "default.profdata");
       CmdArgs.push_back(
-          Args.MakeArgString(Twine("-fprofile-instr-use=") + Path));
+          Args.MakeArgString(Twine("-fprofile-instrument-use-path=") + Path));
     }
   }
 
@@ -3729,6 +3801,17 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                                                        << "-x ir";
     Args.AddLastArg(CmdArgs, options::OPT_fthinlto_index_EQ);
   }
+
+  // Embed-bitcode option.
+  if (C.getDriver().embedBitcodeEnabled() &&
+      (isa<BackendJobAction>(JA) || isa<AssembleJobAction>(JA))) {
+    // Add flags implied by -fembed-bitcode.
+    CmdArgs.push_back("-fembed-bitcode");
+    // Disable all llvm IR level optimizations.
+    CmdArgs.push_back("-disable-llvm-optzns");
+  }
+  if (C.getDriver().embedBitcodeMarkerOnly())
+    CmdArgs.push_back("-fembed-bitcode-marker");
 
   // We normally speed up the clang process a bit by skipping destructors at
   // exit, but when we're generating diagnostics we can rely on some of the
@@ -4224,8 +4307,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   bool EmitCodeView = false;
 
   // Add clang-cl arguments.
+  types::ID InputType = Input.getType();
   if (getToolChain().getDriver().IsCLMode())
-    AddClangCLArgs(Args, CmdArgs, &DebugInfoKind, &EmitCodeView);
+    AddClangCLArgs(Args, InputType, CmdArgs, &DebugInfoKind, &EmitCodeView);
 
   // Pass the linker version in use.
   if (Arg *A = Args.getLastArg(options::OPT_mlinker_version_EQ)) {
@@ -4238,7 +4322,6 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   // Explicitly error on some things we know we don't support and can't just
   // ignore.
-  types::ID InputType = Input.getType();
   if (!Args.hasArg(options::OPT_fallow_unsupported)) {
     Arg *Unsupported;
     if (types::isCXX(InputType) && getToolChain().getTriple().isOSDarwin() &&
@@ -4375,6 +4458,32 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.hasFlag(options::OPT_ffunction_sections,
                    options::OPT_fno_function_sections, UseSeparateSections)) {
     CmdArgs.push_back("-ffunction-sections");
+  }
+
+  if (Args.hasFlag(options::OPT_fwhole_program_vtables,
+                   options::OPT_fno_whole_program_vtables, false)) {
+    if (!D.isUsingLTO())
+      D.Diag(diag::err_drv_argument_only_allowed_with)
+          << "-fwhole-program-vtables"
+          << "-flto";
+    CmdArgs.push_back("-fwhole-program-vtables");
+
+    clang::SmallString<64> Path(D.ResourceDir);
+    llvm::sys::path::append(Path, "vtables_blacklist.txt");
+    if (llvm::sys::fs::exists(Path)) {
+      SmallString<64> BlacklistOpt("-fwhole-program-vtables-blacklist=");
+      BlacklistOpt += Path.str();
+      CmdArgs.push_back(Args.MakeArgString(BlacklistOpt));
+    }
+
+    for (const Arg *A :
+         Args.filtered(options::OPT_fwhole_program_vtables_blacklist_EQ)) {
+      A->claim();
+      if (!llvm::sys::fs::exists(A->getValue()))
+        D.Diag(clang::diag::err_drv_no_such_file) << A->getValue();
+    }
+
+    Args.AddAllArgs(CmdArgs, options::OPT_fwhole_program_vtables_blacklist_EQ);
   }
 
   if (Args.hasFlag(options::OPT_fdata_sections, options::OPT_fno_data_sections,
@@ -5753,6 +5862,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
         getCLFallback()->GetCommand(C, JA, Output, Inputs, Args, LinkingOutput);
     C.addCommand(llvm::make_unique<FallbackCommand>(
         JA, *this, Exec, CmdArgs, Inputs, std::move(CLCommand)));
+  } else if (Args.hasArg(options::OPT__SLASH_fallback) &&
+             isa<PrecompileJobAction>(JA)) {
+    // In /fallback builds, run the main compilation even if the pch generation
+    // fails, so that the main compilation's fallback to cl.exe runs.
+    C.addCommand(llvm::make_unique<ForceSuccessCommand>(JA, *this, Exec,
+                                                        CmdArgs, Inputs));
   } else {
     C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, Inputs));
   }
@@ -5939,12 +6054,16 @@ static EHFlags parseClangCLEHFlags(const Driver &D, const ArgList &Args) {
       switch (EHVal[I]) {
       case 'a':
         EH.Asynch = maybeConsumeDash(EHVal, I);
+        if (EH.Asynch)
+          EH.Synch = false;
         continue;
       case 'c':
         EH.NoUnwindC = maybeConsumeDash(EHVal, I);
         continue;
       case 's':
         EH.Synch = maybeConsumeDash(EHVal, I);
+        if (EH.Synch)
+          EH.Asynch = false;
         continue;
       default:
         break;
@@ -5965,7 +6084,8 @@ static EHFlags parseClangCLEHFlags(const Driver &D, const ArgList &Args) {
   return EH;
 }
 
-void Clang::AddClangCLArgs(const ArgList &Args, ArgStringList &CmdArgs,
+void Clang::AddClangCLArgs(const ArgList &Args, types::ID InputType,
+                           ArgStringList &CmdArgs,
                            codegenoptions::DebugInfoKind *DebugInfoKind,
                            bool *EmitCodeView) const {
   unsigned RTOptionID = options::OPT__SLASH_MT;
@@ -6040,11 +6160,12 @@ void Clang::AddClangCLArgs(const ArgList &Args, ArgStringList &CmdArgs,
   const Driver &D = getToolChain().getDriver();
   EHFlags EH = parseClangCLEHFlags(D, Args);
   if (EH.Synch || EH.Asynch) {
-    CmdArgs.push_back("-fcxx-exceptions");
+    if (types::isCXX(InputType))
+      CmdArgs.push_back("-fcxx-exceptions");
     CmdArgs.push_back("-fexceptions");
-    if (EH.NoUnwindC)
-      CmdArgs.push_back("-fexternc-nounwind");
   }
+  if (types::isCXX(InputType) && EH.Synch && EH.NoUnwindC)
+    CmdArgs.push_back("-fexternc-nounwind");
 
   // /EP should expand to -E -P.
   if (Args.hasArg(options::OPT__SLASH_EP)) {
@@ -7431,6 +7552,15 @@ void darwin::Linker::AddLinkArgs(Compilation &C, const ArgList &Args,
       CmdArgs.push_back("-pie");
     else
       CmdArgs.push_back("-no_pie");
+  }
+  // for embed-bitcode, use -bitcode_bundle in linker command
+  if (C.getDriver().embedBitcodeEnabled() ||
+      C.getDriver().embedBitcodeMarkerOnly()) {
+    // Check if the toolchain supports bitcode build flow.
+    if (MachOTC.SupportsEmbeddedBitcode())
+      CmdArgs.push_back("-bitcode_bundle");
+    else
+      D.Diag(diag::err_drv_bitcode_unsupported_on_toolchain);
   }
 
   Args.AddLastArg(CmdArgs, options::OPT_prebind);

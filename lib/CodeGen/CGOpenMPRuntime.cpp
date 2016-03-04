@@ -1030,6 +1030,24 @@ CGOpenMPRuntime::createRuntimeFunction(unsigned Function) {
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_target");
     break;
   }
+  case OMPRTL__tgt_target_teams: {
+    // Build int32_t __tgt_target_teams(int32_t device_id, void *host_ptr,
+    // int32_t arg_num, void** args_base, void **args, size_t *arg_sizes,
+    // int32_t *arg_types, int32_t num_teams, int32_t thread_limit);
+    llvm::Type *TypeParams[] = {CGM.Int32Ty,
+                                CGM.VoidPtrTy,
+                                CGM.Int32Ty,
+                                CGM.VoidPtrPtrTy,
+                                CGM.VoidPtrPtrTy,
+                                CGM.SizeTy->getPointerTo(),
+                                CGM.Int32Ty->getPointerTo(),
+                                CGM.Int32Ty,
+                                CGM.Int32Ty};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.Int32Ty, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_target_teams");
+    break;
+  }
   case OMPRTL__tgt_register_lib: {
     // Build void __tgt_register_lib(__tgt_bin_desc *desc);
     QualType ParamTy =
@@ -3868,6 +3886,102 @@ void CGOpenMPRuntime::emitTargetOutlinedFunction(
                                    IsOffloadEntry, CodeGen);
 }
 
+/// \brief Emit the num_teams clause of an enclosed teams directive at the
+/// target region scope. If there is no teams directive associated with the
+/// target directive, or if there is no num_teams clause associated with the
+/// enclosed teams directive, return nullptr.
+static llvm::Value *
+emitNumTeamsClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
+                                     CodeGenFunction &CGF,
+                                     const OMPExecutableDirective &D) {
+
+  assert(!CGF.getLangOpts().OpenMPIsDevice && "Clauses associated with the "
+                                              "teams directive expected to be "
+                                              "emitted only for the host!");
+
+  // FIXME: For the moment we do not support combined directives with target and
+  // teams, so we do not expect to get any num_teams clause in the provided
+  // directive. Once we support that, this assertion can be replaced by the
+  // actual emission of the clause expression.
+  assert(D.getSingleClause<OMPNumTeamsClause>() == nullptr &&
+         "Not expecting clause in directive.");
+
+  // If the current target region has a teams region enclosed, we need to get
+  // the number of teams to pass to the runtime function call. This is done
+  // by generating the expression in a inlined region. This is required because
+  // the expression is captured in the enclosing target environment when the
+  // teams directive is not combined with target.
+
+  const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
+
+  // FIXME: Accommodate other combined directives with teams when they become
+  // available.
+  if (auto *TeamsDir = dyn_cast<OMPTeamsDirective>(CS.getCapturedStmt())) {
+    if (auto *NTE = TeamsDir->getSingleClause<OMPNumTeamsClause>()) {
+      CGOpenMPInnerExprInfo CGInfo(CGF, CS);
+      CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
+      llvm::Value *NumTeams = CGF.EmitScalarExpr(NTE->getNumTeams());
+      return CGF.Builder.CreateIntCast(NumTeams, CGF.Int32Ty,
+                                       /*IsSigned=*/true);
+    }
+
+    // If we have an enclosed teams directive but no num_teams clause we use
+    // the default value 0.
+    return CGF.Builder.getInt32(0);
+  }
+
+  // No teams associated with the directive.
+  return nullptr;
+}
+
+/// \brief Emit the thread_limit clause of an enclosed teams directive at the
+/// target region scope. If there is no teams directive associated with the
+/// target directive, or if there is no thread_limit clause associated with the
+/// enclosed teams directive, return nullptr.
+static llvm::Value *
+emitThreadLimitClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
+                                        CodeGenFunction &CGF,
+                                        const OMPExecutableDirective &D) {
+
+  assert(!CGF.getLangOpts().OpenMPIsDevice && "Clauses associated with the "
+                                              "teams directive expected to be "
+                                              "emitted only for the host!");
+
+  // FIXME: For the moment we do not support combined directives with target and
+  // teams, so we do not expect to get any thread_limit clause in the provided
+  // directive. Once we support that, this assertion can be replaced by the
+  // actual emission of the clause expression.
+  assert(D.getSingleClause<OMPThreadLimitClause>() == nullptr &&
+         "Not expecting clause in directive.");
+
+  // If the current target region has a teams region enclosed, we need to get
+  // the thread limit to pass to the runtime function call. This is done
+  // by generating the expression in a inlined region. This is required because
+  // the expression is captured in the enclosing target environment when the
+  // teams directive is not combined with target.
+
+  const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
+
+  // FIXME: Accommodate other combined directives with teams when they become
+  // available.
+  if (auto *TeamsDir = dyn_cast<OMPTeamsDirective>(CS.getCapturedStmt())) {
+    if (auto *TLE = TeamsDir->getSingleClause<OMPThreadLimitClause>()) {
+      CGOpenMPInnerExprInfo CGInfo(CGF, CS);
+      CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
+      llvm::Value *ThreadLimit = CGF.EmitScalarExpr(TLE->getThreadLimit());
+      return CGF.Builder.CreateIntCast(ThreadLimit, CGF.Int32Ty,
+                                       /*IsSigned=*/true);
+    }
+
+    // If we have an enclosed teams directive but no thread_limit clause we use
+    // the default value 0.
+    return CGF.Builder.getInt32(0);
+  }
+
+  // No teams associated with the directive.
+  return nullptr;
+}
+
 void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
                                      const OMPExecutableDirective &D,
                                      llvm::Value *OutlinedFn,
@@ -3996,7 +4110,7 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
   // Fill up the pointer arrays and transfer execution to the device.
   auto &&ThenGen = [this, &Ctx, &BasePointers, &Pointers, &Sizes, &MapTypes,
                     hasVLACaptures, Device, OutlinedFnID, OffloadError,
-                    OffloadErrorQType](CodeGenFunction &CGF) {
+                    OffloadErrorQType, &D](CodeGenFunction &CGF) {
     unsigned PointerNumVal = BasePointers.size();
     llvm::Value *PointerNum = CGF.Builder.getInt32(PointerNumVal);
     llvm::Value *BasePointersArray;
@@ -4136,11 +4250,34 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
     else
       DeviceID = CGF.Builder.getInt32(OMP_DEVICEID_UNDEF);
 
-    llvm::Value *OffloadingArgs[] = {
-        DeviceID,      OutlinedFnID, PointerNum,   BasePointersArray,
-        PointersArray, SizesArray,   MapTypesArray};
-    auto Return = CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL__tgt_target),
-                                      OffloadingArgs);
+    // Return value of the runtime offloading call.
+    llvm::Value *Return;
+
+    auto *NumTeams = emitNumTeamsClauseForTargetDirective(*this, CGF, D);
+    auto *ThreadLimit = emitThreadLimitClauseForTargetDirective(*this, CGF, D);
+
+    // If we have NumTeams defined this means that we have an enclosed teams
+    // region. Therefore we also expect to have ThreadLimit defined. These two
+    // values should be defined in the presence of a teams directive, regardless
+    // of having any clauses associated. If the user is using teams but no
+    // clauses, these two values will be the default that should be passed to
+    // the runtime library - a 32-bit integer with the value zero.
+    if (NumTeams) {
+      assert(ThreadLimit && "Thread limit expression should be available along "
+                            "with number of teams.");
+      llvm::Value *OffloadingArgs[] = {
+          DeviceID,          OutlinedFnID,  PointerNum,
+          BasePointersArray, PointersArray, SizesArray,
+          MapTypesArray,     NumTeams,      ThreadLimit};
+      Return = CGF.EmitRuntimeCall(
+          createRuntimeFunction(OMPRTL__tgt_target_teams), OffloadingArgs);
+    } else {
+      llvm::Value *OffloadingArgs[] = {
+          DeviceID,      OutlinedFnID, PointerNum,   BasePointersArray,
+          PointersArray, SizesArray,   MapTypesArray};
+      Return = CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL__tgt_target),
+                                   OffloadingArgs);
+    }
 
     CGF.EmitStoreOfScalar(Return, OffloadError);
   };

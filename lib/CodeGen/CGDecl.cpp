@@ -21,6 +21,7 @@
 #include "clang/AST/CharUnits.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclObjC.h"
+#include "clang/AST/DeclOpenMP.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/CodeGen/CGFunctionInfo.h"
@@ -71,6 +72,8 @@ void CodeGenFunction::EmitDecl(const Decl &D) {
   case Decl::ObjCImplementation:
   case Decl::ObjCProperty:
   case Decl::ObjCCompatibleAlias:
+  case Decl::PragmaComment:
+  case Decl::PragmaDetectMismatch:
   case Decl::AccessSpec:
   case Decl::LinkageSpec:
   case Decl::ObjCPropertyImpl:
@@ -83,7 +86,11 @@ void CodeGenFunction::EmitDecl(const Decl &D) {
   case Decl::UsingShadow:
   case Decl::ObjCTypeParam:
     llvm_unreachable("Declaration should not be in declstmts!");
-  case Decl::Function:     // void X();
+  case Decl::Function:  // void X();
+  case Decl::Record:    // struct/union/class X;
+  case Decl::Enum:      // enum X;
+  case Decl::EnumConstant: // enum ? { X = ? }
+  case Decl::CXXRecord: // struct/union/class X; [C++]
   case Decl::StaticAssert: // static_assert(X, ""); [C++0x]
   case Decl::Label:        // __label__ x;
   case Decl::Import:
@@ -93,21 +100,13 @@ void CodeGenFunction::EmitDecl(const Decl &D) {
     // None of these decls require codegen support.
     return;
 
-  case Decl::Record:       // struct/union/class X;
-  case Decl::Enum:         // enum X;
-  case Decl::EnumConstant: // enum ? { X = ? }
-  case Decl::CXXRecord:    // struct/union/class X; [C++]
-    if (CGDebugInfo *DI = getDebugInfo())
-      DI->recordDeclarationLexicalScope(D);
-    return;
-
   case Decl::NamespaceAlias:
     if (CGDebugInfo *DI = getDebugInfo())
-      DI->EmitNamespaceAlias(cast<NamespaceAliasDecl>(D));
+        DI->EmitNamespaceAlias(cast<NamespaceAliasDecl>(D));
     return;
   case Decl::Using:          // using X; [C++]
     if (CGDebugInfo *DI = getDebugInfo())
-      DI->EmitUsingDecl(cast<UsingDecl>(D));
+        DI->EmitUsingDecl(cast<UsingDecl>(D));
     return;
   case Decl::UsingDirective: // using namespace X; [C++]
     if (CGDebugInfo *DI = getDebugInfo())
@@ -120,13 +119,13 @@ void CodeGenFunction::EmitDecl(const Decl &D) {
     return EmitVarDecl(VD);
   }
 
+  case Decl::OMPDeclareReduction:
+    return CGM.EmitOMPDeclareReduction(cast<OMPDeclareReductionDecl>(&D));
+
   case Decl::Typedef:      // typedef int X;
   case Decl::TypeAlias: {  // using X = int; [C++0x]
     const TypedefNameDecl &TD = cast<TypedefNameDecl>(D);
     QualType Ty = TD.getUnderlyingType();
-
-    if (CGDebugInfo *DI = getDebugInfo())
-      DI->recordDeclarationLexicalScope(D);
 
     if (Ty->isVariablyModifiedType())
       EmitVariablyModifiedType(Ty);
@@ -1867,3 +1866,7 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, ParamValue Arg,
   if (D.hasAttr<AnnotateAttr>())
     EmitVarAnnotations(&D, DeclPtr.getPointer());
 }
+
+void CodeGenModule::EmitOMPDeclareReduction(
+    const OMPDeclareReductionDecl * /*D*/) {}
+

@@ -21,6 +21,7 @@
 #include "clang/AST/Attr.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
+#include "clang/AST/DeclOpenMP.h"
 #include "clang/AST/GlobalDecl.h"
 #include "clang/AST/Mangle.h"
 #include "clang/Basic/ABI.h"
@@ -488,6 +489,8 @@ private:
   /// maintain this mapping because identifiers may be formed from distinct
   /// MDNodes.
   llvm::DenseMap<QualType, llvm::Metadata *> MetadataIdMap;
+
+  SanitizerBlacklist WholeProgramVTablesBlacklist;
 
 public:
   CodeGenModule(ASTContext &C, const HeaderSearchOptions &headersearchopts,
@@ -1108,9 +1111,15 @@ public:
   /// \param D Threadprivate declaration.
   void EmitOMPThreadPrivateDecl(const OMPThreadPrivateDecl *D);
 
-  /// Returns whether the given record is blacklisted from control flow
-  /// integrity checks.
-  bool IsCFIBlacklistedRecord(const CXXRecordDecl *RD);
+  /// \brief Emit a code for declare reduction construct.
+  void EmitOMPDeclareReduction(const OMPDeclareReductionDecl *D);
+
+  /// Returns whether we need bit sets attached to vtables.
+  bool NeedVTableBitSets();
+
+  /// Returns whether the given record is blacklisted from whole-program
+  /// transformations (i.e. CFI or whole-program vtable optimization).
+  bool IsBitSetBlacklistedRecord(const CXXRecordDecl *RD);
 
   /// Emit bit set entries for the given vtable using the given layout if
   /// vptr CFI is enabled.
