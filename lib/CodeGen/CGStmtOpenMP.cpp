@@ -7622,7 +7622,9 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
     printf("======> Inside EmitOMPSimdDirective: This is where we need to jump to Emiting new Inner SIMD LOOP!!!\n");
     InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
     RunCleanupsScope ExecutedScope(*this);
-    CGM.getOpenMPRuntime().EmitOMPInnerSimdLoopForStmt(S, *this);
+    RunCleanupsScope SIMDForScope(*this);
+    CGPragmaOmpSimd Wrapper(&S);
+    CGM.getOpenMPRuntime().EmitOMPInnerSimdLoopForStmt(dyn_cast<OMPExecutableDirective>(W.getStmt()), *this);
   }else{
     // If the current OpenMP implementation does not need microtasks for parallel
     // it has to share data between threads.

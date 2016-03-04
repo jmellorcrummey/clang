@@ -2277,6 +2277,7 @@ void CodeGenFunction::EmitPragmaSimd(CodeGenFunction::CGPragmaSimdWrapper &W) {
       isa<OMPExecutableDirective>(W.getStmt())
           ? cast<OMPExecutableDirective>(W.getStmt())->clauses()
           : nullptr;
+
   CGM.getOpenMPRuntime().EnterSimdRegion(*this, clauses);
 
   if (W.isOmp()) {
