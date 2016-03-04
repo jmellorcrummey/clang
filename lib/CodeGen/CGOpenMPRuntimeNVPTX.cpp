@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "CGOpenMPRuntimeNVPTX.h"
+#include "CGCleanup.h"
 
 using namespace clang;
 using namespace CodeGen;
