@@ -664,6 +664,25 @@ void ReleaseMe(id arg);
 @end
 #endif
 
+struct SomeStruct {
+  int f;
+};
+@interface ZeroOutStructWithSetter : NSObject
+  @property(assign) struct SomeStruct s;
+@end
+
+@implementation ZeroOutStructWithSetter
+- (void)dealloc {
+  struct SomeStruct zeroedS;
+  zeroedS.f = 0;
+
+  self.s = zeroedS;
+#if NON_ARC
+  [super dealloc];
+#endif
+}
+@end
+
 #if NON_ARC
 @interface ReleaseIvarInArray : NSObject {
   NSObject *_array[3];
@@ -714,3 +733,24 @@ __attribute__((objc_root_class))
 }
 @end
 
+// Warn about calling -dealloc rather than release by mistake.
+
+@interface CallDeallocOnRetainPropIvar : NSObject {
+  NSObject *okToDeallocDirectly;
+}
+
+@property (retain) NSObject *ivar;
+@end
+
+@implementation CallDeallocOnRetainPropIvar
+- (void)dealloc
+{
+#if NON_ARC
+  // Only warn for synthesized ivars.
+  [okToDeallocDirectly dealloc]; // now-warning
+  [_ivar dealloc];  // expected-warning {{'_ivar' should be released rather than deallocated}}
+
+  [super dealloc];
+#endif
+}
+@end

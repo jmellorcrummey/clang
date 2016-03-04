@@ -39,6 +39,8 @@ class Expr;
 class GlobalDecl;
 class OMPExecutableDirective;
 class VarDecl;
+class OMPDeclareReductionDecl;
+class IdentifierInfo;
 
 namespace CodeGen {
 class Address;
@@ -92,7 +94,7 @@ protected:
 private:
   /// \brief Default const ident_t object used for initialization of all other
   /// ident_t objects.
-  llvm::Constant *DefaultOpenMPPSource;
+  llvm::Constant *DefaultOpenMPPSource = nullptr;
   /// \brief Map of flags and corresponding default locations.
   typedef llvm::DenseMap<unsigned, llvm::Value *> OpenMPDefaultLocMapTy;
   OpenMPDefaultLocMapTy OpenMPDefaultLocMap;
@@ -115,6 +117,20 @@ private:
   typedef llvm::DenseMap<llvm::Function *, DebugLocThreadIdTy>
       OpenMPLocThreadIDMapTy;
   OpenMPLocThreadIDMapTy OpenMPLocThreadIDMap;
+  /// Map of UDRs and corresponding combiner/initializer.
+  typedef llvm::DenseMap<const OMPDeclareReductionDecl *,
+                         std::pair<llvm::Function *, llvm::Function *>>
+      UDRMapTy;
+  UDRMapTy UDRMap;
+  /// Map of functions and locally defined UDRs.
+  typedef llvm::DenseMap<llvm::Function *,
+                         SmallVector<const OMPDeclareReductionDecl *, 4>>
+      FunctionUDRMapTy;
+  FunctionUDRMapTy FunctionUDRMap;
+  IdentifierInfo *In = nullptr;
+  IdentifierInfo *Out = nullptr;
+  IdentifierInfo *Priv = nullptr;
+  IdentifierInfo *Orig = nullptr;
   /// \brief Type kmp_critical_name, originally defined as typedef kmp_int32
   /// kmp_critical_name[8];
   llvm::ArrayType *KmpCriticalNameTy;
@@ -126,7 +142,7 @@ private:
   llvm::StringMap<llvm::AssertingVH<llvm::Constant>, llvm::BumpPtrAllocator>
       InternalVars;
   /// \brief Type typedef kmp_int32 (* kmp_routine_entry_t)(kmp_int32, void *);
-  llvm::Type *KmpRoutineEntryPtrTy;
+  llvm::Type *KmpRoutineEntryPtrTy = nullptr;
   QualType KmpRoutineEntryPtrQTy;
   /// \brief Type typedef struct kmp_task {
   ///    void *              shareds; /**< pointer to block of pointers to
@@ -391,6 +407,9 @@ public:
   emitCapturedVars(CodeGenFunction &CGF, const OMPExecutableDirective &S,
                    llvm::SmallVector<llvm::Value *, 16> &CapturedVars);
 
+  /// Emit code for the specified user defined reduction construct.
+  virtual void emitUserDefinedReduction(CodeGenFunction *CGF,
+                                        const OMPDeclareReductionDecl *D);
   /// \brief Emits outlined function for the specified OpenMP parallel directive
   /// \a D. This outlined function has type void(*)(kmp_int32 *ThreadID,
   /// kmp_int32 BoundID, struct context_vars*).
@@ -399,7 +418,7 @@ public:
   /// \param InnermostKind Kind of innermost directive (for simple directives it
   /// is a directive itself, for combined - its innermost directive).
   /// \param CodeGen Code generation sequence for the \a D directive.
-  virtual llvm::Value *emitParallelOutlinedFunction(
+  virtual llvm::Value *emitParallelOrTeamsOutlinedFunction(
       const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
       OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen);
 
@@ -834,6 +853,28 @@ public:
   /// was emitted in the current module and return the function that registers
   /// it.
   virtual llvm::Function *emitRegistrationFunction();
+
+  /// \brief Emits code for teams call of the \a OutlinedFn with
+  /// variables captured in a record which address is stored in \a
+  /// CapturedStruct.
+  /// \param OutlinedFn Outlined function to be run by team masters. Type of
+  /// this function is void(*)(kmp_int32 *, kmp_int32, struct context_vars*).
+  /// \param CapturedVars A pointer to the record with the references to
+  /// variables used in \a OutlinedFn function.
+  ///
+  virtual void emitTeamsCall(CodeGenFunction &CGF,
+                             const OMPExecutableDirective &D,
+                             SourceLocation Loc, llvm::Value *OutlinedFn,
+                             ArrayRef<llvm::Value *> CapturedVars);
+
+  /// \brief Emits call to void __kmpc_push_num_teams(ident_t *loc, kmp_int32
+  /// global_tid, kmp_int32 num_teams, kmp_int32 thread_limit) to generate code
+  /// for num_teams clause.
+  /// \param NumTeams An integer value of teams.
+  /// \param ThreadsLimit An integer value of threads.
+  virtual void emitNumTeamsClause(CodeGenFunction &CGF, llvm::Value *NumTeams,
+                                  llvm::Value *ThreadLimit, SourceLocation Loc);
+
 };
 
 } // namespace CodeGen

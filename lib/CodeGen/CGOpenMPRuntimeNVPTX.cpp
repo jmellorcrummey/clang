@@ -14,6 +14,7 @@
 
 #include "CGOpenMPRuntimeNVPTX.h"
 #include "CGCleanup.h"
+#include "clang/AST/DeclOpenMP.h"
 
 using namespace clang;
 using namespace CodeGen;
