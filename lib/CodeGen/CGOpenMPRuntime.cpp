@@ -1430,7 +1430,7 @@ void CGOpenMPRuntime::ExitTargetLoop(SourceLocation Loc,
     OpenMPDirectiveKind SKind) {
 }
 
-void GOpenMPRuntime::EmitOMPInnerSimdLoopForStmt(const OMPExecutableDirective &S,
+void CGOpenMPRuntime::EmitOMPInnerSimdLoopForStmt(const OMPExecutableDirective &S,
                                  CodeGenFunction &CGF){
 }
 
@@ -2829,9 +2829,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   void
   EmitOMPInnerSimdLoopForStmt(const OMPExecutableDirective &S,
                               CodeGenFunction &CGF){
+    printf("======>> EmitOMPInnerSimdLoopForStmt\n");
     EmitOMPInnerSimdLoop(S, CGF,
-                       /*llvm::AllocaInst *Private*/CGF.CombinedOuterLoopIndex,
-                       /*llvm::BasicBlock *OuterLoopBody*/CGF.CombinedJumpBackBlock);
+        /*llvm::AllocaInst *Private*/CGF.CombinedOuterLoopIndex,
+        /*llvm::BasicBlock *OuterLoopBody*/CGF.CombinedJumpBackBlock);
   }
 
   /// Generate instructions for a combined-SIMD construct.
