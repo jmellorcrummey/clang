@@ -16,6 +16,7 @@
 #define LLVM_CLANG_LIB_CODEGEN_CGOPENMPRUNTIMENVPTX_H
 
 #include "CGOpenMPRuntime.h"
+#include "CodeGenFunction.h"
 #include "clang/AST/StmtOpenMP.h"
 #include "llvm/IR/CallSite.h"
 
@@ -23,7 +24,64 @@ namespace clang {
 namespace CodeGen {
 
 class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
+public:
+  explicit CGOpenMPRuntimeNVPTX(CodeGenModule &CGM);
+
+  /// \brief Complete processing for this module.  Called once per module,
+  /// after all targets are processed.
+  void release() override;
+
 private:
+  /// \brief Creates offloading entry for the provided entry ID \a ID,
+  /// address \a Addr and size \a Size.
+  void createOffloadEntry(llvm::Constant *ID, llvm::Constant *Addr,
+                          uint64_t Size) override;
+
+  enum OpenMPRTLFunctionNVPTX {
+    /// \brief Call to void __kmpc_kernel_init(kmp_int32 omp_handle,
+    /// kmp_int32 thread_limit);
+    OMPRTL_NVPTX__kmpc_kernel_init = OMPRTL_last + 1,
+    // Call to void __kmpc_serialized_parallel(ident_t *loc, kmp_int32
+    // global_tid);
+    OMPRTL_NVPTX__kmpc_serialized_parallel,
+    // Call to void __kmpc_end_serialized_parallel(ident_t *loc, kmp_int32
+    // global_tid);
+    OMPRTL_NVPTX__kmpc_end_serialized_parallel,
+    /// \brief Call to void __kmpc_kernel_prepare_parallel(
+    /// kmp_int32 num_threads, kmp_int32 num_lanes);
+    OMPRTL_NVPTX__kmpc_kernel_prepare_parallel,
+    /// \brief Call to kmp_int32 __kmpc_kernel_parallel(kmp_int32 num_lanes);
+    OMPRTL_NVPTX__kmpc_kernel_parallel,
+    /// \brief Call to void __kmpc_kernel_end_parallel();
+    OMPRTL_NVPTX__kmpc_kernel_end_parallel,
+  };
+
+  /// \brief Returns specified OpenMP runtime function for the current OpenMP
+  /// implementation.
+  /// \param Function OpenMP runtime function.
+  /// \return Specified function.
+  llvm::Constant *createRuntimeFunction(unsigned Function) override;
+
+  /// \brief Emit outlined function for 'target' directive on the NVPTX
+  /// device.
+  /// \param D Directive to emit.
+  /// \param ParentName Name of the function that encloses the target region.
+  /// \param OutlinedFn Outlined function value to be defined by this call.
+  /// \param OutlinedFnID Outlined function ID value to be defined by this call.
+  /// \param IsOffloadEntry True if the outlined function is an offload entry.
+  /// An outlined function may not be an entry if, e.g. the if clause always
+  /// evaluates to false.
+  virtual void emitTargetOutlinedFunction(const OMPExecutableDirective &D,
+                                          StringRef ParentName,
+                                          llvm::Function *&OutlinedFn,
+                                          llvm::Constant *&OutlinedFnID,
+                                          bool IsOffloadEntry) override;
+
+private:
+  ///
+  /// NVPTX calls
+  ///
+
   /// \brief Get the GPU warp size.
   llvm::Value *GetNVPTXWarpSize(CodeGenFunction &CGF) {
     CGBuilderTy &Bld = CGF.Builder;
@@ -60,13 +118,12 @@ private:
         {}, "nvptx_num_threads");
   }
 
-  /// \brief Get barrier #n to synchronize all threads in a block.
+  /// \brief Get barrier to synchronize all threads in a block.
   void GetNVPTXCTABarrier(CodeGenFunction &CGF) {
     CGBuilderTy &Bld = CGF.Builder;
-    llvm::Value *Args[] = {Bld.getInt32(CTA_BARRIER)};
     Bld.CreateCall(llvm::Intrinsic::getDeclaration(
-                       &CGM.getModule(), llvm::Intrinsic::nvvm_barrier_n),
-                   Args);
+                       &CGM.getModule(), llvm::Intrinsic::nvvm_barrier0),
+                   {});
   }
 
   /// \brief Get barrier #n to synchronize selected (multiple of 32) threads in
@@ -79,9 +136,16 @@ private:
                    Args);
   }
 
+  // \brief Synchronize all GPU threads in a block.
+  void SyncCTAThreads(CodeGenFunction &CGF) { GetNVPTXCTABarrier(CGF); }
+
+  ///
+  /// OMP calls
+  ///
+
   /// \brief Get the thread id of the OMP master thread.
   /// The master thread id is the first thread (lane) of the last warp in the
-  /// GPU block.
+  /// GPU block.  Warp size is assumed to be some power of 2.
   /// Thread id is 0 indexed.
   /// E.g: If NumThreads is 33, master id is 32.
   ///      If NumThreads is 64, master id is 32.
@@ -90,7 +154,7 @@ private:
     CGBuilderTy &Bld = CGF.Builder;
     llvm::Value *NumThreads = GetNVPTXNumThreads(CGF);
 
-    // We assume that the warp size is a multiple of 2.
+    // We assume that the warp size is a power of 2.
     llvm::Value *Mask = Bld.CreateSub(GetNVPTXWarpSize(CGF), Bld.getInt32(1));
 
     return Bld.CreateAnd(Bld.CreateSub(NumThreads, Bld.getInt32(1)),
@@ -121,52 +185,14 @@ private:
         GetTeamThreadId(CGF), "global_tid");
   }
 
-  // \brief Synchronize all GPU threads in a block.
-  void SyncCTAThreads(CodeGenFunction &CGF) { GetNVPTXCTABarrier(CGF); }
-
-public:
-  explicit CGOpenMPRuntimeNVPTX(CodeGenModule &CGM);
-
-  /// \brief Complete processing for this module.  Called once per module,
-  /// after all targets are processed.
-  void release() override;
-
-  /// \brief Initialize master-worker control state.
-  void initializeEnvironment();
-
-  /// \brief Finalize master-worker control state after all targets are
-  /// processed.
-  void finalizeEnvironment();
-
-  /// \brief Emit outlined function for 'target' directive on the NVPTX
-  /// device.
-  /// \param D Directive to emit.
-  /// \param ParentName Name of the function that encloses the target region.
-  /// \param OutlinedFn Outlined function value to be defined by this call.
-  /// \param OutlinedFnID Outlined function ID value to be defined by this call.
-  /// \param IsOffloadEntry True if the outlined function is an offload entry.
-  /// An outlined function may not be an entry if, e.g. the if clause always
-  /// evaluates to false.
-  virtual void emitTargetOutlinedFunction(const OMPExecutableDirective &D,
-                                          StringRef ParentName,
-                                          llvm::Function *&OutlinedFn,
-                                          llvm::Constant *&OutlinedFnID,
-                                          bool IsOffloadEntry) override;
-
 private:
-  // Named barriers for synchronization across subsets of CUDA threads.
-  enum BARRIERS {
-    // Synchronize all threads in CTA (master + all workers).
-    CTA_BARRIER = 0,
-    // Synchronize all active worker threads at L1 parallelism.
-    L1_BARRIER = 1
-  };
-
   // NVPTX Address space
   enum ADDRESS_SPACE { GLOBAL_ADDRESS_SPACE = 1, SHARED_ADDRESS_SPACE = 3 };
 
   // Master-worker control state.
+  // Number of requested OMP threads in parallel region.
   llvm::GlobalVariable *ActiveWorkers;
+  // Outlined function for the workers to execute.
   llvm::GlobalVariable *WorkID;
   llvm::GlobalVariable *WorkArgs;
   // Maximum number of captured variables sent to any work function in
@@ -178,41 +204,22 @@ private:
 
   class EntryFunctionState {
   public:
-    const StringRef ParentName;
-    const StringRef EntryFnName;
-    const unsigned DeviceID;
-    const unsigned FileID;
-    const unsigned Line;
-    llvm::Function *OutlinedFn;
-    llvm::Constant *OutlinedFnID;
-    const CapturedStmt &CS;
     llvm::BasicBlock *ExitBB;
 
-    EntryFunctionState(StringRef ParentName, StringRef EntryFnName,
-                       unsigned DeviceID, unsigned FileID, unsigned Line,
-                       llvm::Function *OutlinedFn, llvm::Constant *OutlinedFnID,
-                       const CapturedStmt &CS)
-        : ParentName(ParentName), EntryFnName(EntryFnName), DeviceID(DeviceID),
-          FileID(FileID), Line(Line), OutlinedFn(OutlinedFn),
-          OutlinedFnID(OutlinedFnID), CS(CS), ExitBB(nullptr){};
+    EntryFunctionState() : ExitBB(nullptr){};
   };
 
   class WorkerFunctionState {
   public:
-    CodeGenModule &CGM;
-    const CapturedStmt &CS;
-
     llvm::Function *WorkerFn;
     const CGFunctionInfo *CGFI;
 
-    WorkerFunctionState(CodeGenModule &CGM, StringRef WorkerFnName,
-                        const CapturedStmt &CS)
-        : CGM(CGM), CS(CS), WorkerFn(nullptr), CGFI(nullptr) {
-      createWorkerFunction(WorkerFnName);
+    WorkerFunctionState(CodeGenModule &CGM) : WorkerFn(nullptr), CGFI(nullptr) {
+      createWorkerFunction(CGM);
     };
 
   private:
-    void createWorkerFunction(StringRef WorkerFnName) {
+    void createWorkerFunction(CodeGenModule &CGM) {
       auto &Ctx = CGM.getContext();
 
       // Create an worker function with no arguments.
@@ -220,19 +227,22 @@ private:
       CGFI = &CGM.getTypes().arrangeFreeFunctionDeclaration(
           Ctx.VoidTy, {}, EI, /*isVariadic=*/false);
 
-      WorkerFn = llvm::Function::Create(CGM.getTypes().GetFunctionType(*CGFI),
-                                        llvm::GlobalValue::InternalLinkage,
-                                        WorkerFnName, &CGM.getModule());
+      WorkerFn =
+          llvm::Function::Create(CGM.getTypes().GetFunctionType(*CGFI),
+                                 llvm::GlobalValue::InternalLinkage,
+                                 /* placeholder */ "_worker", &CGM.getModule());
       CGM.SetInternalFunctionAttributes(/*D=*/nullptr, WorkerFn, *CGFI);
       WorkerFn->setLinkage(llvm::GlobalValue::InternalLinkage);
       WorkerFn->addFnAttr(llvm::Attribute::NoInline);
     }
   };
 
-  /// \brief Returns specified OpenMP runtime function for the current OpenMP implementation.
-  /// \param Function OpenMP runtime function.
-  /// \return Specified function.
-  llvm::Constant *createRuntimeFunction(unsigned Function) override;
+  /// \brief Initialize master-worker control state.
+  void initializeEnvironment();
+
+  /// \brief Finalize master-worker control state after all targets are
+  /// processed.
+  void finalizeEnvironment();
 
   /// \brief Start a new target region.
   void enterTarget();
@@ -245,10 +255,6 @@ private:
 
   /// \brief Helper for worker function. Emit body of worker loop.
   void emitWorkerLoop(CodeGenFunction &CGF, WorkerFunctionState &WST);
-
-  /// \brief Emit the target entry function where the master warp and all
-  /// workers start.
-  void emitEntryFunction(EntryFunctionState &EST, WorkerFunctionState &WST);
 
   /// \brief Helper for target entry function. Guide the master and worker
   /// threads to their respective locations.
@@ -268,6 +274,7 @@ private:
   emitCapturedVars(CodeGenFunction &CGF, const OMPExecutableDirective &S,
                    llvm::SmallVector<llvm::Value *, 16> &CapturedVars) override;
 
+public:
   /// \brief Emits code for parallel or serial call of the \a OutlinedFn with
   /// variables captured in a record which address is stored in \a
   /// CapturedStruct.
