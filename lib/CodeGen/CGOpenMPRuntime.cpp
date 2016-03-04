@@ -2823,7 +2823,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       Builder.CreateBr(IncCombinedFor);
     }
     Builder.SetInsertPoint(EndTarget);
-    Builder.CreateBr(OuterLoopBody);
+    //Builder.CreateBr(OuterLoopBody);
   }
 
   void
@@ -2866,8 +2866,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         CGF.CGM.getLLVMContext(), ".cond.combined.simd.for", CGF.CurFn);
     llvm::BasicBlock *BodyCombinedFor = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".body.combined.simd.for", CGF.CurFn);
-    llvm::BasicBlock *AftetInnerPragmaBodyFor = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".after.inner.simd.body.for", CGF.CurFn);
+    //llvm::BasicBlock *AftetInnerPragmaBodyFor = llvm::BasicBlock::Create(
+    //    CGF.CGM.getLLVMContext(), ".after.inner.simd.body.for", CGF.CurFn);
     llvm::BasicBlock *IncCombinedFor = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".inc.combined.simd.for", CGF.CurFn);
     llvm::BasicBlock *ExtraIncCombinedFor = llvm::BasicBlock::Create(
@@ -3042,7 +3042,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       CGF.EmitStmt(InitExpr);
       {
         CGF.CombinedOuterLoopIndex = Private;
-        CGF.CombinedJumpBackBlock = AftetInnerPragmaBodyFor;
+        //CGF.CombinedJumpBackBlock = AftetInnerPragmaBodyFor;
         CodeGenFunction::RunCleanupsScope BodyScope(CGF);
         /*
         // Handle the body of the pragma parallel for.
