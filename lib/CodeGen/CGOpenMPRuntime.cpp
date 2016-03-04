@@ -1414,6 +1414,7 @@ void CGOpenMPRuntime::EnterTargetControlLoop(SourceLocation Loc,
     CodeGenFunction &CGF, StringRef TgtFunName, OpenMPDirectiveKind DKind,
     OpenMPDirectiveKind &SKind, const OMPExecutableDirective &S) {
 }
+
 void CGOpenMPRuntime::EnterTargetLoop(SourceLocation Loc,
     CodeGenFunction &CGF, StringRef TgtFunName, OpenMPDirectiveKind DKind,
     OpenMPDirectiveKind &SKind, const OMPExecutableDirective &S) {
@@ -1427,6 +1428,10 @@ void CGOpenMPRuntime::ExitTargetControlLoop(SourceLocation Loc,
 void CGOpenMPRuntime::ExitTargetLoop(SourceLocation Loc,
     CodeGenFunction &CGF, bool prevIsParallel, StringRef TgtFunName,
     OpenMPDirectiveKind SKind) {
+}
+
+void EmitOMPInnerSimdLoopForStmt(const OMPExecutableDirective &S,
+                                 CodeGenFunction &CGF){
 }
 
 void CGOpenMPRuntime::GenerateNextLabel(CodeGenFunction &CGF,
@@ -2638,14 +2643,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   }
 
   void
-  EmitOMPInnerSimdLoopForStmt(const OMPExecutableDirective &S,
-                              CodeGenFunction &CGF){
-    EmitOMPInnerSimdLoop(S, CGF,
-                       /*llvm::AllocaInst *Private*/CGF.CombinedOuterLoopIndex,
-                       /*llvm::BasicBlock *OuterLoopBody*/CGF.CombinedJumpBackBlock);
-  }
-
-  void
   EmitOMPInnerSimdLoop(const OMPExecutableDirective &S,
                        CodeGenFunction &CGF,
                        llvm::AllocaInst *Private,
@@ -2827,6 +2824,14 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     }
     Builder.SetInsertPoint(EndTarget);
     Builder.CreateBr(OuterLoopBody);
+  }
+
+  void
+  EmitOMPInnerSimdLoopForStmt(const OMPExecutableDirective &S,
+                              CodeGenFunction &CGF){
+    EmitOMPInnerSimdLoop(S, CGF,
+                       /*llvm::AllocaInst *Private*/CGF.CombinedOuterLoopIndex,
+                       /*llvm::BasicBlock *OuterLoopBody*/CGF.CombinedJumpBackBlock);
   }
 
   /// Generate instructions for a combined-SIMD construct.

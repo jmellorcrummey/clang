@@ -642,6 +642,9 @@ public:
       CodeGenFunction &CGF, bool prevIsParallel, StringRef TgtFunName,
       OpenMPDirectiveKind SKind);
 
+  virtual void EmitOMPInnerSimdLoopForStmt(const OMPExecutableDirective &S,
+                                           CodeGenFunction &CGF);
+
   // \brief Function to close an openmp region. Set the labels and generate
   // new switch case
   virtual void GenerateNextLabel(CodeGenFunction &CGF, bool prevIsParallel,
