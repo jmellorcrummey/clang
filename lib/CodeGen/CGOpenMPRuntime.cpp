@@ -2667,7 +2667,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     Builder.SetInsertPoint(StartCombinedFor);
 
     // generating:
-    // for (int j = i mod 32; j < LAYERS; j += 32)
+    // for (int j = threadIdx.x mod 32; j < LAYERS; j += 32)
     Expr *IterVar = nullptr;
     if (const OMPSimdDirective *D =
             dyn_cast<OMPSimdDirective>(&S))
@@ -2686,13 +2686,15 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         Builder.getInt64Ty();
 
     printf("Setup of IterVar and Qty! Done\n");
-    // Get the modulus of the outer loop iteration var by const32
-    llvm::Value *threadID = Builder.CreateAdd(Builder.CreateCall(Get_thread_num(), {}), Builder.CreateMul(
-        Builder.CreateCall(Get_num_threads(), {}), Builder.CreateCall(Get_team_num(), {})));
-    llvm::Value *args1[] = {threadID, Builder.getInt32(0), const32};
-    llvm::Value *LB = Builder.CreateCall(Get_shuffle(VarTy), args1);
-    llvm::Value *LB = Builder.CreateMul(LB, Builder.getInt32(32));
-    LB = Builder.CreateSub(threadID, LB);
+    // Get the modulus of threadIdx.x by const32
+    llvm::Value *blockLocalThreadID = Builder.CreateCall(Get_thread_num(), {});
+    // LB = blockLocalThreadID div WARP32
+    blockLocalThreadID = Builder.CreateSExt(blockLocalThreadID, VarTy);
+    llvm::Value *LB = Builder.CreateAShr(blockLocalThreadID, const32);
+    // LB *= WARP32
+    LB = Builder.CreateMul(LB, Builder.getInt32(32));
+    // Modulo result: LB = blockLocalThreadID - LB
+    LB = Builder.CreateSub(Builder.CreateCall(Get_thread_num(), {}), LB);
 
     printf("Setup of LB! Done\n");
     // Use inner loop upper bound
@@ -2783,9 +2785,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     }
     printf("Setup of Cond! Done\n");
 
-    // FOR INC: tid += const32
+    // FOR INC: tid += WWARP32
     Builder.SetInsertPoint(IncCombinedFor);
-    // Change the 32 to be 32 * K in the chunked case.
     llvm::Value *step = Builder.getInt32(32);
     Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(InnerPrivate), step),
                                           InnerPrivate);
@@ -2882,12 +2883,18 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     llvm::Type *VarTy = TypeSize == 32 ? Builder.getInt32Ty() :
         Builder.getInt64Ty();
 
-    // Hardcode 1 warp per column for now.
-    llvm::Value *LB = Builder.CreateAdd(Builder.CreateCall(Get_thread_num(), {}), Builder.CreateMul(
-        Builder.CreateCall(Get_num_threads(), {}), Builder.CreateCall(Get_team_num(), {})));
+    // Hardcode 1 warp per column for now (WARP32 = 32).
+    // Get the threadID correct. All the threads in the warp must have the ID of the warp master
+    // warpMasterID is block local. To get the global version we need to add blockDim.x * blockId.x
+    llvm::Value *warpMasterID = Builder.CreateCall(Get_thread_num(), {});
+    // warpMasterID = warpMasterID div WARP32
     llvm::Value *const32 = Builder.getInt32(5); // 2^5
-    llvm::Value *args1[] = {LB, Builder.getInt32(0), const32};
-    LB = Builder.CreateCall(Get_shuffle(VarTy), args1);
+    warpMasterID = Builder.CreateSExt(warpMasterID, VarTy);
+    warpMasterID = Builder.CreateAShr(warpMasterID, const32);
+    // warpMasterID *= WARP32
+    warpMasterID = Builder.CreateMul(warpMasterID,  Builder.getInt32(32));
+    llvm::Value *LB = Builder.CreateAdd(warpMasterID, Builder.CreateMul(
+        Builder.CreateCall(Get_num_threads(), {}), Builder.CreateCall(Get_team_num(), {})));
 
     Expr *UBExpr = nullptr;
     if (const OMPTargetTeamsDistributeParallelForDirective *D =
@@ -2970,23 +2977,29 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // FOR INC: tid +=  gridDim.x * blockDim.x
     Builder.SetInsertPoint(IncCombinedFor);
-    //llvm::Value *step = Builder.CreateMul(Builder.CreateCall(Get_num_teams(), {}),
-    //    Builder.CreateCall(Get_num_threads(), {}));
     llvm::Value *step = Builder.getInt32(1);
     Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(Private), step),
                                           Private);
 
-    // Get the modulus of the thread ID by const32 and subtract 32 from it
+    // Get the modulus of the loop index by WARP32 and compare with (WARP32 - 1)
+    // Code Gen:
+    // indexValue = idx
     llvm::Value *indexValue = Builder.CreateLoad(Private);
-    llvm::Value *args2[] = {indexValue, Builder.getInt32(0), const32};
-    indexValue = Builder.CreateCall(Get_shuffle(VarTy), args2);
+    // indexValue = indexValue div WARP32
+    indexValue = Builder.CreateSExt(indexValue, VarTy);
+    indexValue = Builder.CreateAShr(indexValue, const32);
+    // indexValue *= 32
     indexValue = Builder.CreateMul(indexValue, Builder.getInt32(32));
+    // the modulo WARP32 value is: indexValue = threadIdx.x - indexValue
+    // Subtract the remainder we expect: indexValue -= (WARP32 - 1);
     indexValue = Builder.CreateSub(
-        Builder.CreateSub(Builder.CreateLoad(Private), indexValue), Builder.getInt32(32));
+        Builder.CreateSub(Builder.CreateCall(Get_thread_num(), {}), indexValue), Builder.getInt32(31));
+    // Compare the result against 0, if true then add large step and go to for condition else go to for condition.
     Builder.CreateCondBr(
         Builder.CreateICmpNE(indexValue, Builder.getInt32(0)), CondCombinedFor, ExtraIncCombinedFor);
 
     // Create the extra INC block for the adding of the large step.
+    // i += blockDim.x * gridDim.x - WARP32
     Builder.SetInsertPoint(ExtraIncCombinedFor);
     llvm::Value *largeStep = Builder.CreateMul(Builder.CreateCall(Get_num_teams(), {}),
         Builder.CreateCall(Get_num_threads(), {}));
@@ -3040,6 +3053,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
                 }
             }
         }
+        Builder.CreateCall(Get_syncthreads(), {});
         //CGF.EmitStmt(Body);
       }
       Builder.CreateBr(IncCombinedFor);
@@ -3437,6 +3451,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
                            !StmtHasScheduleStaticOne(S, CGF, SKind) &&
                            SIMDinTopBlock(S);
 
+    //applyNestedSimd = false;
     printf("Considering if combined construct is applicable:\n");
     printf("    => SKIND is (OMPD_teams_distribute_parallel_for %d): %d\n", OMPD_teams_distribute_parallel_for, SKind);
     printf("    => schedule(static, 1): %d\n", StmtHasScheduleStaticOne(S, CGF, SKind));
