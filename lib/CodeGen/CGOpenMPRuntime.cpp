@@ -1430,7 +1430,7 @@ void CGOpenMPRuntime::ExitTargetLoop(SourceLocation Loc,
     OpenMPDirectiveKind SKind) {
 }
 
-void EmitOMPInnerSimdLoopForStmt(const OMPExecutableDirective &S,
+void GOpenMPRuntime::EmitOMPInnerSimdLoopForStmt(const OMPExecutableDirective &S,
                                  CodeGenFunction &CGF){
 }
 
