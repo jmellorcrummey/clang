@@ -207,7 +207,7 @@ public:
   /// is a directive itself, for combined - its innermost directive).
   /// \param CodeGen Code generation sequence for the \a D directive.
   llvm::Value *
-  emitParallelOutlinedFunction(const OMPExecutableDirective &D,
+  emitParallelOrTeamsOutlinedFunction(const OMPExecutableDirective &D,
                                const VarDecl *ThreadIDVar,
                                OpenMPDirectiveKind InnermostKind,
                                const RegionCodeGenTy &CodeGen) override;
