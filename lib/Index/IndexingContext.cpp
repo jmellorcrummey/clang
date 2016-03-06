@@ -58,7 +58,12 @@ bool IndexingContext::handleReference(const NamedDecl *D, SourceLocation Loc,
 }
 
 bool IndexingContext::importedModule(const ImportDecl *ImportD) {
-  SourceLocation Loc = ImportD->getLocation();
+  SourceLocation Loc;
+  auto IdLocs = ImportD->getIdentifierLocs();
+  if (!IdLocs.empty())
+    Loc = IdLocs.front();
+  else
+    Loc = ImportD->getLocation();
   SourceManager &SM = Ctx->getSourceManager();
   Loc = SM.getFileLoc(Loc);
   if (Loc.isInvalid())
@@ -85,7 +90,7 @@ bool IndexingContext::importedModule(const ImportDecl *ImportD) {
     }
   }
 
-  SymbolRoleSet Roles{};
+  SymbolRoleSet Roles = (unsigned)SymbolRole::Reference;
   if (ImportD->isImplicit())
     Roles |= (unsigned)SymbolRole::Implicit;
 
@@ -96,6 +101,9 @@ bool IndexingContext::isFunctionLocalDecl(const Decl *D) {
   assert(D);
 
   if (isa<TemplateTemplateParmDecl>(D))
+    return true;
+
+  if (isa<ObjCTypeParamDecl>(D))
     return true;
 
   if (!D->getParentFunctionOrMethod())
@@ -197,10 +205,6 @@ static const Decl *adjustParent(const Decl *Parent) {
       continue;
     if (auto NS = dyn_cast<NamespaceDecl>(Parent)) {
       if (NS->isAnonymousNamespace())
-        continue;
-    } else if (auto EnumD = dyn_cast<EnumDecl>(Parent)) {
-      // Move enumerators under anonymous enum to the enclosing parent.
-      if (EnumD->getDeclName().isEmpty())
         continue;
     } else if (auto RD = dyn_cast<RecordDecl>(Parent)) {
       if (RD->isAnonymousStructOrUnion())
