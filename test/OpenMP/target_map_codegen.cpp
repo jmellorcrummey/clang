@@ -1137,6 +1137,8 @@ void implicit_maps_template_type_capture (int a){
 // CK19: [[SIZE42:@.+]] = private {{.*}}constant [3 x i[[Z]]] [i[[Z]] {{8|4}}, i[[Z]] {{8|4}}, i[[Z]] 104]
 // CK19: [[MTYPE42:@.+]] = private {{.*}}constant [3 x i32] [i32 3, i32 99, i32 99]
 
+// CK19: [[MTYPE43:@.+]] = private {{.*}}constant [1 x i32] [i32 3]
+
 // CK19-LABEL: explicit_maps_single
 void explicit_maps_single (int ii){
   // Map of a scalar.
@@ -2311,6 +2313,33 @@ void explicit_maps_single (int ii){
   {
     mptras[1][2][3]++;
   }
+
+  // Region 43 - the memory is not contiguous for this map - will map the whole last dimension.
+  // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], i[[Z]]* [[GEPS:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE43]]{{.+}})
+  // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+  // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+  // CK19-DAG: [[GEPS]] = getelementptr inbounds {{.+}}[[S:%[^,]+]]
+  //
+  // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+  // CK19-DAG: [[S0:%.+]] = getelementptr inbounds {{.+}}[[S]], i{{.+}} 0, i{{.+}} 0
+
+  // CK19-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+  // CK19-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+  // CK19-DAG: store i[[Z]] [[CSVAL0:%[^,]+]], i[[Z]]* [[S0]]
+  // CK19-DAG: [[CBPVAL0]] = bitcast [11 x [12 x [13 x double]]]* [[VAR0:%.+]] to i8*
+  // CK19-DAG: [[CPVAL0]] = bitcast [13 x double]* [[SEC0:%.+]] to i8*
+  // CK19-DAG: [[SEC0]] = getelementptr {{.+}}[12 x [13 x double]]* [[SEC00:%[^,]+]], i[[Z]] 0, i[[Z]] 0
+  // CK19-DAG: [[SEC00]] = getelementptr {{.+}}[11 x [12 x [13 x double]]]* [[VAR0]], i[[Z]] 0, i[[Z]] 1
+  // CK19-DAG: [[CSVAL0]] = mul nuw i[[Z]] %{{[^,]+}}, 104
+
+  // CK19: call void [[CALL43:@.+]]([11 x [12 x [13 x double]]]* {{[^,]+}})
+  #pragma omp target map(marras[1][:ii][1:])
+  {
+    marras[1][2][3]++;
+  }
+
+
 }
 
 // CK19: define {{.+}}[[CALL00]]
@@ -2356,6 +2385,7 @@ void explicit_maps_single (int ii){
 // CK19: define {{.+}}[[CALL40]]
 // CK19: define {{.+}}[[CALL41]]
 // CK19: define {{.+}}[[CALL42]]
+// CK19: define {{.+}}[[CALL43]]
 
 #endif
 ///==========================================================================///

@@ -2541,9 +2541,8 @@ bool Sema::IsBlockPointerConversion(QualType FromType, QualType ToType,
        // Argument types are too different. Abort.
        return false;
    }
-   if (LangOpts.ObjCAutoRefCount && 
-       !Context.FunctionTypesMatchOnNSConsumedAttrs(FromFunctionType, 
-                                                    ToFunctionType))
+   if (!Context.doFunctionTypesMatchOnExtParameterInfos(FromFunctionType,
+                                                        ToFunctionType))
      return false;
    
    ConvertedType = ToType;
@@ -9132,10 +9131,13 @@ static void DiagnoseBadConversion(Sema &S, OverloadCandidate *Cand,
   if (const PointerType *PTy = TempFromTy->getAs<PointerType>())
     TempFromTy = PTy->getPointeeType();
   if (TempFromTy->isIncompleteType()) {
+    // Emit the generic diagnostic and, optionally, add the hints to it.
     S.Diag(Fn->getLocation(), diag::note_ovl_candidate_bad_conv_incomplete)
       << (unsigned) FnKind << FnDesc
       << (FromExpr ? FromExpr->getSourceRange() : SourceRange())
-      << FromTy << ToTy << (unsigned) isObjectArgument << I+1;
+      << FromTy << ToTy << (unsigned) isObjectArgument << I+1
+      << (unsigned) (Cand->Fix.Kind);
+      
     MaybeEmitInheritedConstructorNote(S, Fn);
     return;
   }
