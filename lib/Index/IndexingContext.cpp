@@ -103,6 +103,9 @@ bool IndexingContext::isFunctionLocalDecl(const Decl *D) {
   if (isa<TemplateTemplateParmDecl>(D))
     return true;
 
+  if (isa<ObjCTypeParamDecl>(D))
+    return true;
+
   if (!D->getParentFunctionOrMethod())
     return false;
 
@@ -202,10 +205,6 @@ static const Decl *adjustParent(const Decl *Parent) {
       continue;
     if (auto NS = dyn_cast<NamespaceDecl>(Parent)) {
       if (NS->isAnonymousNamespace())
-        continue;
-    } else if (auto EnumD = dyn_cast<EnumDecl>(Parent)) {
-      // Move enumerators under anonymous enum to the enclosing parent.
-      if (EnumD->getDeclName().isEmpty())
         continue;
     } else if (auto RD = dyn_cast<RecordDecl>(Parent)) {
       if (RD->isAnonymousStructOrUnion())

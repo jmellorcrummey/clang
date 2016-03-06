@@ -21,6 +21,7 @@
 #include "clang/AST/StmtCXX.h"
 #include "clang/AST/StmtOpenMP.h"
 #include "clang/AST/StmtVisitor.h"
+#include "clang/AST/TypeOrdering.h"
 #include "clang/Basic/OpenMPKinds.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Lex/Preprocessor.h"
@@ -1791,6 +1792,7 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
   case OMPD_flush:
   case OMPD_target_enter_data:
   case OMPD_target_exit_data:
+  case OMPD_declare_reduction:
     llvm_unreachable("OpenMP Directive is not allowed");
   case OMPD_unknown:
     llvm_unreachable("Unknown OpenMP directive");
@@ -3232,6 +3234,7 @@ StmtResult Sema::ActOnOpenMPExecutableDirective(
                                          EndLoc, VarsWithInheritedDSA);
     break;
   case OMPD_threadprivate:
+  case OMPD_declare_reduction:
     llvm_unreachable("OpenMP Directive is not allowed");
   case OMPD_unknown:
     llvm_unreachable("Unknown OpenMP directive");
@@ -9157,12 +9160,12 @@ static bool CheckTypeMappable(SourceLocation SL, SourceRange SR, Sema &SemaRef,
   return true;
 }
 
-/// \brief Return 1 if it can be proven that the provided array expression
-/// (array section or array subscript) specify the whole size of the array whose
-/// base type is \a BaseQTy. Return -1 if it can be proved it is not and return
-/// 0 if it is inconclusive.
-static int CheckArrayExpressionReferToWholeSize(Sema &SemaRef, const Expr *E,
-                                                QualType BaseQTy) {
+/// \brief Return true if it can be proven that the provided array expression
+/// (array section or array subscript) does NOT specify the whole size of the
+/// array whose base type is \a BaseQTy.
+static bool CheckArrayExpressionDoesNotReferToWholeSize(Sema &SemaRef,
+                                                        const Expr *E,
+                                                        QualType BaseQTy) {
   auto *OASE = dyn_cast<OMPArraySectionExpr>(E);
 
   // If this is an array subscript, it refers to the whole size if the size of
@@ -9170,9 +9173,9 @@ static int CheckArrayExpressionReferToWholeSize(Sema &SemaRef, const Expr *E,
   // format of an array subscript if no colon is used.
   if (isa<ArraySubscriptExpr>(E) || (OASE && OASE->getColonLoc().isInvalid())) {
     if (auto *ATy = dyn_cast<ConstantArrayType>(BaseQTy.getTypePtr()))
-      return (ATy->getSize().getSExtValue() == 1) ? 1 : -1;
+      return ATy->getSize().getSExtValue() != 1;
     // Size can't be evaluated statically.
-    return 0;
+    return false;
   }
 
   assert(OASE && "Expecting array section if not an array subscript.");
@@ -9184,47 +9187,45 @@ static int CheckArrayExpressionReferToWholeSize(Sema &SemaRef, const Expr *E,
   if (LowerBound) {
     llvm::APSInt ConstLowerBound;
     if (!LowerBound->EvaluateAsInt(ConstLowerBound, SemaRef.getASTContext()))
-      return 0; // Can't get the integer value as a constant.
+      return false; // Can't get the integer value as a constant.
     if (ConstLowerBound.getSExtValue())
-      return -1;
+      return true;
   }
 
   // If we don't have a length we covering the whole dimension.
-  if (!Length) {
-    return 1;
-  }
+  if (!Length)
+    return false;
 
   // If the base is a pointer, we don't have a way to get the size of the
   // pointee.
   if (BaseQTy->isPointerType())
-    return 0;
+    return false;
 
   // We can only check if the length is the same as the size of the dimension
   // if we have a constant array.
   auto *CATy = dyn_cast<ConstantArrayType>(BaseQTy.getTypePtr());
   if (!CATy)
-    return 0;
+    return false;
 
   llvm::APSInt ConstLength;
   if (!Length->EvaluateAsInt(ConstLength, SemaRef.getASTContext()))
-    return 0; // Can't get the integer value as a constant.
+    return false; // Can't get the integer value as a constant.
 
-  return (CATy->getSize().getSExtValue() == ConstLength.getSExtValue()) ? 1
-                                                                        : -1;
+  return CATy->getSize().getSExtValue() != ConstLength.getSExtValue();
 }
 
-// Return 1 if it can be proven that the provided array expression (array
-// section or array subscript) specify a single element of the array whose base
-// type is \a BaseQTy. Return -1 if it can be proven it is not and return 0
-// if it is inconclusive.
-static int CheckArrayExpressionReferToUnitySize(Sema &SemaRef, const Expr *E,
-                                                QualType BaseQTy) {
+// Return true if it can be proven that the provided array expression (array
+// section or array subscript) does NOT specify a single element of the array
+// whose base type is \a BaseQTy.
+static bool CheckArrayExpressionDoesNotReferToUnitySize(Sema &SemaRef,
+                                                        const Expr *E,
+                                                        QualType BaseQTy) {
   auto *OASE = dyn_cast<OMPArraySectionExpr>(E);
 
   // An array subscript always refer to a single element. Also, an array section
   // assumes the format of an array subscript if no colon is used.
   if (isa<ArraySubscriptExpr>(E) || (OASE && OASE->getColonLoc().isInvalid()))
-    return 1;
+    return false;
 
   assert(OASE && "Expecting array section if not an array subscript.");
   auto *Length = OASE->getLength();
@@ -9234,17 +9235,17 @@ static int CheckArrayExpressionReferToUnitySize(Sema &SemaRef, const Expr *E,
   // is pointer.
   if (!Length) {
     if (auto *ATy = dyn_cast<ConstantArrayType>(BaseQTy.getTypePtr()))
-      return (ATy->getSize().getSExtValue() == 1) ? 1 : -1;
+      return ATy->getSize().getSExtValue() != 1;
     // We cannot assume anything.
-    return 0;
+    return false;
   }
 
   // Check if the length evaluates to 1.
   llvm::APSInt ConstLength;
   if (!Length->EvaluateAsInt(ConstLength, SemaRef.getASTContext()))
-    return 0; // Can't get the integer value as a constant.
+    return false; // Can't get the integer value as a constant.
 
-  return (ConstLength.getSExtValue() == 1) ? 1 : -1;
+  return ConstLength.getSExtValue() != 1;
 }
 
 // Return the expression of the base of the map clause or null if it cannot
@@ -9378,10 +9379,9 @@ static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
       // If we got an array subscript that express the whole dimension we
       // can have any array expressions before. If it only expressing part of
       // the dimension, we can only have unitary-size array expressions.
-      if (CheckArrayExpressionReferToWholeSize(SemaRef, CurE, E->getType()) <
-          0) {
+      if (CheckArrayExpressionDoesNotReferToWholeSize(SemaRef, CurE,
+                                                      E->getType()))
         AllowWholeSizeArraySection = false;
-      }
       continue;
     }
 
@@ -9405,10 +9405,10 @@ static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
         break;
       }
 
-      int ResWhole =
-          CheckArrayExpressionReferToWholeSize(SemaRef, CurE, CurType);
-      int ResUnity =
-          CheckArrayExpressionReferToUnitySize(SemaRef, CurE, CurType);
+      bool NotWhole =
+          CheckArrayExpressionDoesNotReferToWholeSize(SemaRef, CurE, CurType);
+      bool NotUnity =
+          CheckArrayExpressionDoesNotReferToUnitySize(SemaRef, CurE, CurType);
 
       if (AllowWholeSizeArraySection && AllowUnitySizeArraySection) {
         // Any array section is currently allowed.
@@ -9416,10 +9416,10 @@ static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
         // If this array section refers to the whole dimension we can still
         // accept other array sections before this one, except if the base is a
         // pointer. Otherwise, only unitary sections are accepted.
-        if (ResWhole < 0 || IsPointer)
+        if (NotWhole || IsPointer)
           AllowWholeSizeArraySection = false;
-      } else if ((AllowUnitySizeArraySection && ResUnity < 0) ||
-                 (AllowWholeSizeArraySection && ResWhole < 0)) {
+      } else if ((AllowUnitySizeArraySection && NotUnity) ||
+                 (AllowWholeSizeArraySection && NotWhole)) {
         // A unity or whole array section is not allowed and that is not
         // compatible with the properties of the current array section.
         SemaRef.Diag(
@@ -9751,6 +9751,235 @@ Sema::ActOnOpenMPMapClause(OpenMPMapClauseKind MapTypeModifier,
   return OMPMapClause::Create(Context, StartLoc, LParenLoc, EndLoc, Vars,
                               MapTypeModifier, MapType, IsMapTypeImplicit,
                               MapLoc);
+}
+
+QualType Sema::ActOnOpenMPDeclareReductionType(SourceLocation TyLoc,
+                                               TypeResult ParsedType) {
+  assert(ParsedType.isUsable());
+
+  QualType ReductionType = GetTypeFromParser(ParsedType.get());
+  if (ReductionType.isNull())
+    return QualType();
+
+  // [OpenMP 4.0], 2.15 declare reduction Directive, Restrictions, C\C++
+  // A type name in a declare reduction directive cannot be a function type, an
+  // array type, a reference type, or a type qualified with const, volatile or
+  // restrict.
+  if (ReductionType.hasQualifiers()) {
+    Diag(TyLoc, diag::err_omp_reduction_wrong_type) << 0;
+    return QualType();
+  }
+
+  if (ReductionType->isFunctionType()) {
+    Diag(TyLoc, diag::err_omp_reduction_wrong_type) << 1;
+    return QualType();
+  }
+  if (ReductionType->isReferenceType()) {
+    Diag(TyLoc, diag::err_omp_reduction_wrong_type) << 2;
+    return QualType();
+  }
+  if (ReductionType->isArrayType()) {
+    Diag(TyLoc, diag::err_omp_reduction_wrong_type) << 3;
+    return QualType();
+  }
+  return ReductionType;
+}
+
+Sema::DeclGroupPtrTy Sema::ActOnOpenMPDeclareReductionDirectiveStart(
+    Scope *S, DeclContext *DC, DeclarationName Name,
+    ArrayRef<std::pair<QualType, SourceLocation>> ReductionTypes,
+    AccessSpecifier AS, Decl *PrevDeclInScope) {
+  SmallVector<Decl *, 8> Decls;
+  Decls.reserve(ReductionTypes.size());
+
+  LookupResult Lookup(*this, Name, SourceLocation(), LookupOMPReductionName,
+                      ForRedeclaration);
+  // [OpenMP 4.0], 2.15 declare reduction Directive, Restrictions
+  // A reduction-identifier may not be re-declared in the current scope for the
+  // same type or for a type that is compatible according to the base language
+  // rules.
+  llvm::DenseMap<QualType, SourceLocation> PreviousRedeclTypes;
+  OMPDeclareReductionDecl *PrevDRD = nullptr;
+  bool InCompoundScope = true;
+  if (S != nullptr) {
+    // Find previous declaration with the same name not referenced in other
+    // declarations.
+    FunctionScopeInfo *ParentFn = getEnclosingFunction();
+    InCompoundScope =
+        (ParentFn != nullptr) && !ParentFn->CompoundScopes.empty();
+    LookupName(Lookup, S);
+    FilterLookupForScope(Lookup, DC, S, /*ConsiderLinkage=*/false,
+                         /*AllowInlineNamespace=*/false);
+    llvm::DenseMap<OMPDeclareReductionDecl *, bool> UsedAsPrevious;
+    auto Filter = Lookup.makeFilter();
+    while (Filter.hasNext()) {
+      auto *PrevDecl = cast<OMPDeclareReductionDecl>(Filter.next());
+      if (InCompoundScope) {
+        auto I = UsedAsPrevious.find(PrevDecl);
+        if (I == UsedAsPrevious.end())
+          UsedAsPrevious[PrevDecl] = false;
+        if (auto *D = PrevDecl->getPrevDeclInScope())
+          UsedAsPrevious[D] = true;
+      }
+      PreviousRedeclTypes[PrevDecl->getType().getCanonicalType()] =
+          PrevDecl->getLocation();
+    }
+    Filter.done();
+    if (InCompoundScope) {
+      for (auto &PrevData : UsedAsPrevious) {
+        if (!PrevData.second) {
+          PrevDRD = PrevData.first;
+          break;
+        }
+      }
+    }
+  } else if (PrevDeclInScope != nullptr) {
+    auto *PrevDRDInScope = PrevDRD =
+        cast<OMPDeclareReductionDecl>(PrevDeclInScope);
+    do {
+      PreviousRedeclTypes[PrevDRDInScope->getType().getCanonicalType()] =
+          PrevDRDInScope->getLocation();
+      PrevDRDInScope = PrevDRDInScope->getPrevDeclInScope();
+    } while (PrevDRDInScope != nullptr);
+  }
+  for (auto &TyData : ReductionTypes) {
+    auto I = PreviousRedeclTypes.find(TyData.first.getCanonicalType());
+    bool Invalid = false;
+    if (I != PreviousRedeclTypes.end()) {
+      Diag(TyData.second, diag::err_omp_declare_reduction_redefinition)
+          << TyData.first;
+      Diag(I->second, diag::note_previous_definition);
+      Invalid = true;
+    }
+    PreviousRedeclTypes[TyData.first.getCanonicalType()] = TyData.second;
+    auto *DRD = OMPDeclareReductionDecl::Create(Context, DC, TyData.second,
+                                                Name, TyData.first, PrevDRD);
+    DC->addDecl(DRD);
+    DRD->setAccess(AS);
+    Decls.push_back(DRD);
+    if (Invalid)
+      DRD->setInvalidDecl();
+    else
+      PrevDRD = DRD;
+  }
+
+  return DeclGroupPtrTy::make(
+      DeclGroupRef::Create(Context, Decls.begin(), Decls.size()));
+}
+
+void Sema::ActOnOpenMPDeclareReductionCombinerStart(Scope *S, Decl *D) {
+  auto *DRD = cast<OMPDeclareReductionDecl>(D);
+
+  // Enter new function scope.
+  PushFunctionScope();
+  getCurFunction()->setHasBranchProtectedScope();
+  getCurFunction()->setHasOMPDeclareReductionCombiner();
+
+  if (S != nullptr)
+    PushDeclContext(S, DRD);
+  else
+    CurContext = DRD;
+
+  PushExpressionEvaluationContext(PotentiallyEvaluated);
+
+  QualType ReductionType = DRD->getType();
+  // Create 'T omp_in;' implicit param.
+  auto *OmpInParm =
+      ImplicitParamDecl::Create(Context, DRD, D->getLocation(),
+                                &Context.Idents.get("omp_in"), ReductionType);
+  // Create 'T* omp_parm;T omp_out;'. All references to 'omp_out' will
+  // be replaced by '*omp_parm' during codegen. This required because 'omp_out'
+  // uses semantics of argument handles by value, but it should be passed by
+  // reference. C lang does not support references, so pass all parameters as
+  // pointers.
+  // Create 'T omp_out;' variable.
+  auto *OmpOutParm =
+      buildVarDecl(*this, D->getLocation(), ReductionType, "omp_out");
+  if (S != nullptr) {
+    PushOnScopeChains(OmpInParm, S);
+    PushOnScopeChains(OmpOutParm, S);
+  } else {
+    DRD->addDecl(OmpInParm);
+    DRD->addDecl(OmpOutParm);
+  }
+}
+
+void Sema::ActOnOpenMPDeclareReductionCombinerEnd(Decl *D, Expr *Combiner) {
+  auto *DRD = cast<OMPDeclareReductionDecl>(D);
+  DiscardCleanupsInEvaluationContext();
+  PopExpressionEvaluationContext();
+
+  PopDeclContext();
+  PopFunctionScopeInfo();
+
+  if (Combiner != nullptr)
+    DRD->setCombiner(Combiner);
+  else
+    DRD->setInvalidDecl();
+}
+
+void Sema::ActOnOpenMPDeclareReductionInitializerStart(Scope *S, Decl *D) {
+  auto *DRD = cast<OMPDeclareReductionDecl>(D);
+
+  // Enter new function scope.
+  PushFunctionScope();
+  getCurFunction()->setHasBranchProtectedScope();
+
+  if (S != nullptr)
+    PushDeclContext(S, DRD);
+  else
+    CurContext = DRD;
+
+  PushExpressionEvaluationContext(PotentiallyEvaluated);
+
+  QualType ReductionType = DRD->getType();
+  // Create 'T omp_orig;' implicit param.
+  auto *OmpOrigParm =
+      ImplicitParamDecl::Create(Context, DRD, D->getLocation(),
+                                &Context.Idents.get("omp_orig"), ReductionType);
+  // Create 'T* omp_parm;T omp_priv;'. All references to 'omp_priv' will
+  // be replaced by '*omp_parm' during codegen. This required because 'omp_priv'
+  // uses semantics of argument handles by value, but it should be passed by
+  // reference. C lang does not support references, so pass all parameters as
+  // pointers.
+  // Create 'T omp_priv;' variable.
+  auto *OmpPrivParm =
+      buildVarDecl(*this, D->getLocation(), ReductionType, "omp_priv");
+  if (S != nullptr) {
+    PushOnScopeChains(OmpPrivParm, S);
+    PushOnScopeChains(OmpOrigParm, S);
+  } else {
+    DRD->addDecl(OmpPrivParm);
+    DRD->addDecl(OmpOrigParm);
+  }
+}
+
+void Sema::ActOnOpenMPDeclareReductionInitializerEnd(Decl *D,
+                                                     Expr *Initializer) {
+  auto *DRD = cast<OMPDeclareReductionDecl>(D);
+  DiscardCleanupsInEvaluationContext();
+  PopExpressionEvaluationContext();
+
+  PopDeclContext();
+  PopFunctionScopeInfo();
+
+  if (Initializer != nullptr)
+    DRD->setInitializer(Initializer);
+  else
+    DRD->setInvalidDecl();
+}
+
+Sema::DeclGroupPtrTy Sema::ActOnOpenMPDeclareReductionDirectiveEnd(
+    Scope *S, DeclGroupPtrTy DeclReductions, bool IsValid) {
+  for (auto *D : DeclReductions.get()) {
+    if (IsValid) {
+      auto *DRD = cast<OMPDeclareReductionDecl>(D);
+      if (S != nullptr)
+        PushOnScopeChains(DRD, S, /*AddToContext=*/false);
+    } else
+      D->setInvalidDecl();
+  }
+  return DeclReductions;
 }
 
 OMPClause *Sema::ActOnOpenMPNumTeamsClause(Expr *NumTeams, 

@@ -1467,6 +1467,14 @@ DEF_TRAVERSE_DECL(OMPThreadPrivateDecl, {
   }
 })
 
+DEF_TRAVERSE_DECL(OMPDeclareReductionDecl, {
+  TRY_TO(TraverseStmt(D->getCombiner()));
+  if (auto *Initializer = D->getInitializer())
+    TRY_TO(TraverseStmt(Initializer));
+  TRY_TO(TraverseType(D->getType()));
+  return true;
+})
+
 DEF_TRAVERSE_DECL(OMPCapturedExprDecl, { TRY_TO(TraverseVarHelper(D)); })
 
 // A helper method for TemplateDecl's children.
@@ -2525,6 +2533,7 @@ bool RecursiveASTVisitor<Derived>::VisitOMPClauseWithPreInit(
 template <typename Derived>
 bool RecursiveASTVisitor<Derived>::VisitOMPClauseWithPostUpdate(
     OMPClauseWithPostUpdate *Node) {
+  TRY_TO(VisitOMPClauseWithPreInit(Node));
   TRY_TO(TraverseStmt(Node->getPostUpdateExpr()));
   return true;
 }
@@ -2683,7 +2692,6 @@ template <typename Derived>
 bool RecursiveASTVisitor<Derived>::VisitOMPLastprivateClause(
     OMPLastprivateClause *C) {
   TRY_TO(VisitOMPClauseList(C));
-  TRY_TO(VisitOMPClauseWithPreInit(C));
   TRY_TO(VisitOMPClauseWithPostUpdate(C));
   for (auto *E : C->private_copies()) {
     TRY_TO(TraverseStmt(E));
@@ -2770,7 +2778,6 @@ RecursiveASTVisitor<Derived>::VisitOMPReductionClause(OMPReductionClause *C) {
   TRY_TO(TraverseNestedNameSpecifierLoc(C->getQualifierLoc()));
   TRY_TO(TraverseDeclarationNameInfo(C->getNameInfo()));
   TRY_TO(VisitOMPClauseList(C));
-  TRY_TO(VisitOMPClauseWithPreInit(C));
   TRY_TO(VisitOMPClauseWithPostUpdate(C));
   for (auto *E : C->privates()) {
     TRY_TO(TraverseStmt(E));

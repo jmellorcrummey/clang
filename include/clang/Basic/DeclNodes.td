@@ -37,6 +37,7 @@ def Named : Decl<1>;
     def EnumConstant : DDecl<Value>;
     def UnresolvedUsingValue : DDecl<Value>;
     def IndirectField : DDecl<Value>;
+    def OMPDeclareReduction : DDecl<Value>, DeclContext;
     def Declarator : DDecl<Value, 1>;
       def Field : DDecl<Declarator>;
         def ObjCIvar : DDecl<Field>;
