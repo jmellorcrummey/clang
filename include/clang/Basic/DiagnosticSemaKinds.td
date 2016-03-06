@@ -3219,7 +3219,12 @@ def note_ovl_candidate_bad_conv_incomplete : Note<"candidate "
     "function (the implicit move assignment operator)|"
     "constructor (inherited)}0%1 "
     "not viable: cannot convert argument of incomplete type "
-    "%diff{$ to $|to parameter type}2,3">;
+    "%diff{$ to $|to parameter type}2,3 for "
+    "%select{%ordinal5 argument|object argument}4"
+    "%select{|; dereference the argument with *|"
+    "; take the address of the argument with &|"
+    "; remove *|"
+    "; remove &}6">;
 def note_ovl_candidate_bad_list_argument : Note<"candidate "
     "%select{function|function|constructor|"
     "function |function |constructor |"
@@ -7683,8 +7688,8 @@ def err_opencl_ptrptr_kernel_param : Error<
   "kernel parameter cannot be declared as a pointer to a pointer">;
 def err_opencl_private_ptr_kernel_param : Error<
   "kernel parameter cannot be declared as a pointer to the __private address space">;
-def err_opencl_non_kernel_variable : Error<
-  "non-kernel function variable cannot be declared in %0 address space">;
+def err_opencl_function_variable : Error<
+  "%select{non-kernel function|function scope}0 variable cannot be declared in %1 address space">;
 def err_static_function_scope : Error<
   "variables in function scope cannot be declared static">;
 def err_opencl_bitfields : Error<
@@ -7712,7 +7717,7 @@ def err_sampler_argument_required : Error<
 def err_wrong_sampler_addressspace: Error<
   "sampler type cannot be used with the __local and __global address space qualifiers">;
 def err_opencl_global_invalid_addr_space : Error<
-  "program scope variable must reside in %0 address space">;
+  "%select{program scope|static local|extern}0 variable must reside in %1 address space">;
 def err_missing_actual_pipe_type : Error<
   "missing actual type specifier for pipe">;
 def err_reference_pipe_type : Error <
@@ -7746,7 +7751,7 @@ def err_opencl_type_can_only_be_used_as_function_parameter : Error <
 def err_opencl_builtin_pipe_first_arg : Error<
   "first argument to %0 must be a pipe type">;
 def err_opencl_builtin_pipe_arg_num : Error<
-    "invalid number of arguments to function: %0">;
+  "invalid number of arguments to function: %0">;
 def err_opencl_builtin_pipe_invalid_arg : Error<
   "invalid argument type to function %0 (expecting %1)">;
 def err_opencl_builtin_pipe_invalid_access_modifier : Error<

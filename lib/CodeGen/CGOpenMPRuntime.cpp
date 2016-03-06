@@ -537,6 +537,12 @@ enum OpenMPRTLFunction {
   // Call to kmp_int32 __kmpc_cancel(ident_t *loc, kmp_int32 global_tid,
   // kmp_int32 cncl_kind);
   OMPRTL__kmpc_cancel,
+  // Call to void __kmpc_push_num_teams(ident_t *loc, kmp_int32 global_tid,
+  // kmp_int32 num_teams, kmp_int32 thread_limit);
+  OMPRTL__kmpc_push_num_teams,
+  /// \brief Call to void __kmpc_fork_teams(ident_t *loc, kmp_int32 argc,
+  /// kmpc_micro microtask, ...);
+  OMPRTL__kmpc_fork_teams,
 
   //
   // Offloading related calls
@@ -587,8 +593,7 @@ LValue CGOpenMPTaskOutlinedRegionInfo::getThreadIDVariableLValue(
 }
 
 CGOpenMPRuntime::CGOpenMPRuntime(CodeGenModule &CGM)
-    : CGM(CGM), DefaultOpenMPPSource(nullptr), KmpRoutineEntryPtrTy(nullptr),
-      OffloadEntriesInfoManager(CGM) {
+    : CGM(CGM), OffloadEntriesInfoManager(CGM) {
   IdentTy = llvm::StructType::create(
       "ident_t", CGM.Int32Ty /* reserved_1 */, CGM.Int32Ty /* flags */,
       CGM.Int32Ty /* reserved_2 */, CGM.Int32Ty /* reserved_3 */,
@@ -604,6 +609,82 @@ CGOpenMPRuntime::CGOpenMPRuntime(CodeGenModule &CGM)
 
 void CGOpenMPRuntime::clear() {
   InternalVars.clear();
+}
+
+static llvm::Function *
+emitCombinerOrInitializer(CodeGenModule &CGM, QualType Ty,
+                          const Expr *CombinerInitializer, const VarDecl *In,
+                          const VarDecl *Out, bool IsCombiner) {
+  // void .omp_combiner.(Ty *in, Ty *out);
+  auto &C = CGM.getContext();
+  QualType PtrTy = C.getPointerType(Ty).withRestrict();
+  FunctionArgList Args;
+  ImplicitParamDecl OmpInParm(C, /*DC=*/nullptr, In->getLocation(),
+                              /*Id=*/nullptr, PtrTy);
+  ImplicitParamDecl OmpOutParm(C, /*DC=*/nullptr, Out->getLocation(),
+                               /*Id=*/nullptr, PtrTy);
+  Args.push_back(&OmpInParm);
+  Args.push_back(&OmpOutParm);
+  FunctionType::ExtInfo Info;
+  auto &FnInfo =
+      CGM.getTypes().arrangeFreeFunctionDeclaration(C.VoidTy, Args, Info,
+                                                    /*isVariadic=*/false);
+  auto *FnTy = CGM.getTypes().GetFunctionType(FnInfo);
+  auto *Fn = llvm::Function::Create(
+      FnTy, llvm::GlobalValue::InternalLinkage,
+      IsCombiner ? ".omp_combiner." : ".omp_initializer.", &CGM.getModule());
+  CGM.SetInternalFunctionAttributes(/*D=*/nullptr, Fn, FnInfo);
+  CodeGenFunction CGF(CGM);
+  // Map "T omp_in;" variable to "*omp_in_parm" value in all expressions.
+  // Map "T omp_out;" variable to "*omp_out_parm" value in all expressions.
+  CGF.StartFunction(GlobalDecl(), C.VoidTy, Fn, FnInfo, Args);
+  CodeGenFunction::OMPPrivateScope Scope(CGF);
+  Address AddrIn = CGF.GetAddrOfLocalVar(&OmpInParm);
+  Scope.addPrivate(In, [&CGF, AddrIn, PtrTy]() -> Address {
+    return CGF.EmitLoadOfPointerLValue(AddrIn, PtrTy->castAs<PointerType>())
+        .getAddress();
+  });
+  Address AddrOut = CGF.GetAddrOfLocalVar(&OmpOutParm);
+  Scope.addPrivate(Out, [&CGF, AddrOut, PtrTy]() -> Address {
+    return CGF.EmitLoadOfPointerLValue(AddrOut, PtrTy->castAs<PointerType>())
+        .getAddress();
+  });
+  (void)Scope.Privatize();
+  CGF.EmitIgnoredExpr(CombinerInitializer);
+  Scope.ForceCleanup();
+  CGF.FinishFunction();
+  return Fn;
+}
+
+void CGOpenMPRuntime::emitUserDefinedReduction(
+    CodeGenFunction *CGF, const OMPDeclareReductionDecl *D) {
+  if (UDRMap.count(D) > 0)
+    return;
+  auto &C = CGM.getContext();
+  if (!In || !Out) {
+    In = &C.Idents.get("omp_in");
+    Out = &C.Idents.get("omp_out");
+  }
+  llvm::Function *Combiner = emitCombinerOrInitializer(
+      CGM, D->getType(), D->getCombiner(), cast<VarDecl>(D->lookup(In).front()),
+      cast<VarDecl>(D->lookup(Out).front()),
+      /*IsCombiner=*/true);
+  llvm::Function *Initializer = nullptr;
+  if (auto *Init = D->getInitializer()) {
+    if (!Priv || !Orig) {
+      Priv = &C.Idents.get("omp_priv");
+      Orig = &C.Idents.get("omp_orig");
+    }
+    Initializer = emitCombinerOrInitializer(
+        CGM, D->getType(), Init, cast<VarDecl>(D->lookup(Orig).front()),
+        cast<VarDecl>(D->lookup(Priv).front()),
+        /*IsCombiner=*/false);
+  }
+  UDRMap.insert(std::make_pair(D, std::make_pair(Combiner, Initializer)));
+  if (CGF) {
+    auto &Decls = FunctionUDRMap.FindAndConstruct(CGF->CurFn);
+    Decls.second.push_back(D);
+  }
 }
 
 // Layout information for ident_t.
@@ -625,7 +706,7 @@ static Address createIdentFieldGEP(CodeGenFunction &CGF, Address Addr,
   return CGF.Builder.CreateStructGEP(Addr, Field, Offset, Name);
 }
 
-llvm::Value *CGOpenMPRuntime::emitParallelOutlinedFunction(
+llvm::Value *CGOpenMPRuntime::emitParallelOrTeamsOutlinedFunction(
     const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
     OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen) {
   assert(ThreadIDVar->getType()->isPointerType() &&
@@ -795,6 +876,12 @@ void CGOpenMPRuntime::functionFinished(CodeGenFunction &CGF) {
   assert(CGF.CurFn && "No function in current CodeGenFunction.");
   if (OpenMPLocThreadIDMap.count(CGF.CurFn))
     OpenMPLocThreadIDMap.erase(CGF.CurFn);
+  if (FunctionUDRMap.count(CGF.CurFn) > 0) {
+    for(auto *D : FunctionUDRMap[CGF.CurFn]) {
+      UDRMap.erase(D);
+    }
+    FunctionUDRMap.erase(CGF.CurFn);
+  }
 }
 
 llvm::Type *CGOpenMPRuntime::getIdentTyPointerTy() {
@@ -1203,6 +1290,26 @@ CGOpenMPRuntime::createRuntimeFunction(unsigned Function) {
     llvm::FunctionType *FnTy =
         llvm::FunctionType::get(CGM.Int32Ty, TypeParams, /*isVarArg*/ false);
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_cancel");
+    break;
+  }
+  case OMPRTL__kmpc_push_num_teams: {
+    // Build void kmpc_push_num_teams (ident_t loc, kmp_int32 global_tid,
+    // kmp_int32 num_teams, kmp_int32 num_threads)
+    llvm::Type *TypeParams[] = {getIdentTyPointerTy(), CGM.Int32Ty, CGM.Int32Ty,
+        CGM.Int32Ty};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.Int32Ty, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_push_num_teams");
+    break;
+  }
+  case OMPRTL__kmpc_fork_teams: {
+    // Build void __kmpc_fork_teams(ident_t *loc, kmp_int32 argc, kmpc_micro
+    // microtask, ...);
+    llvm::Type *TypeParams[] = {getIdentTyPointerTy(), CGM.Int32Ty,
+                                getKmpc_MicroPointerTy()};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ true);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_fork_teams");
     break;
   }
   case OMPRTL__tgt_target: {
@@ -4603,4 +4710,44 @@ llvm::Function *CGOpenMPRuntime::emitRegistrationFunction() {
   // entity that captures all the information about offloading in the current
   // compilation unit.
   return createOffloadingBinaryDescriptorRegistration();
+}
+
+void CGOpenMPRuntime::emitTeamsCall(CodeGenFunction &CGF,
+                                    const OMPExecutableDirective &D,
+                                    SourceLocation Loc,
+                                    llvm::Value *OutlinedFn,
+                                    ArrayRef<llvm::Value *> CapturedVars) {
+  if (!CGF.HaveInsertPoint())
+    return;
+
+  auto *RTLoc = emitUpdateLocation(CGF, Loc);
+  CodeGenFunction::RunCleanupsScope Scope(CGF);
+
+  // Build call __kmpc_fork_teams(loc, n, microtask, var1, .., varn);
+  llvm::Value *Args[] = {
+      RTLoc,
+      CGF.Builder.getInt32(CapturedVars.size()), // Number of captured vars
+      CGF.Builder.CreateBitCast(OutlinedFn, getKmpc_MicroPointerTy())};
+  llvm::SmallVector<llvm::Value *, 16> RealArgs;
+  RealArgs.append(std::begin(Args), std::end(Args));
+  RealArgs.append(CapturedVars.begin(), CapturedVars.end());
+
+  auto RTLFn = createRuntimeFunction(OMPRTL__kmpc_fork_teams);
+  CGF.EmitRuntimeCall(RTLFn, RealArgs);
+}
+
+void CGOpenMPRuntime::emitNumTeamsClause(CodeGenFunction &CGF,
+                                         llvm::Value *NumTeams,
+                                         llvm::Value *ThreadLimit,
+                                         SourceLocation Loc) {
+  if (!CGF.HaveInsertPoint())
+    return;
+
+  auto *RTLoc = emitUpdateLocation(CGF, Loc);
+
+  // Build call __kmpc_push_num_teamss(&loc, global_tid, num_teams, thread_limit)
+  llvm::Value *PushNumTeamsArgs[] = {
+      RTLoc, getThreadID(CGF, Loc), NumTeams, ThreadLimit};
+  CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL__kmpc_push_num_teams),
+                      PushNumTeamsArgs);
 }
