@@ -2870,8 +2870,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     //    CGF.CGM.getLLVMContext(), ".after.inner.simd.body.for", CGF.CurFn);
     llvm::BasicBlock *IncCombinedFor = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".inc.combined.simd.for", CGF.CurFn);
-    llvm::BasicBlock *ExtraIncCombinedFor = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".extra.inc.combined.simd.for", CGF.CurFn);
+    llvm::BasicBlock *LargeIncCombinedFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".large.inc.combined.simd.for", CGF.CurFn);
+    llvm::BasicBlock *SmallIncCombinedFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".small.inc.combined.simd.for", CGF.CurFn);
     EndTarget = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".end.combined.simd.for.and.target", CGF.CurFn);
 
@@ -2995,8 +2997,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // FOR INC: tid +=  gridDim.x * blockDim.x
     Builder.SetInsertPoint(IncCombinedFor);
     llvm::Value *step = Builder.getInt32(1);
-    Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(Private), step),
-                                          Private);
 
     // Get the modulus of the loop index by WARP32 and compare with (WARP32 - 1)
     // Code Gen:
@@ -3010,18 +3010,24 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // the modulo WARP32 value is: indexValue = threadIdx.x - indexValue
     // Subtract the remainder we expect: indexValue -= (WARP32 - 1);
     indexValue = Builder.CreateSub(
-        Builder.CreateSub(Builder.CreateCall(Get_thread_num(), {}), indexValue), Builder.getInt32(31));
+        Builder.CreateSub(Builder.CreateLoad(Private), indexValue), Builder.getInt32(31));
     // Compare the result against 0, if true then add large step and go to for condition else go to for condition.
     Builder.CreateCondBr(
-        Builder.CreateICmpNE(indexValue, Builder.getInt32(0)), CondCombinedFor, ExtraIncCombinedFor);
+        Builder.CreateICmpNE(indexValue, Builder.getInt32(0)), SmallIncCombinedFor, LargeIncCombinedFor);
 
     // Create the extra INC block for the adding of the large step.
     // i += blockDim.x * gridDim.x - WARP32
-    Builder.SetInsertPoint(ExtraIncCombinedFor);
+    Builder.SetInsertPoint(LargeIncCombinedFor);
     llvm::Value *largeStep = Builder.CreateMul(Builder.CreateCall(Get_num_teams(), {}),
         Builder.CreateCall(Get_num_threads(), {}));
     largeStep = Builder.CreateSub(largeStep, Builder.getInt32(32));
     Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(Private), largeStep),
+                                          Private);
+    Builder.CreateBr(SmallIncCombinedFor);
+
+    // Add the usual incremeent ( += 1 )
+    Builder.SetInsertPoint(SmallIncCombinedFor);
+    Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(Private), step),
                                           Private);
     Builder.CreateBr(CondCombinedFor);
 
