@@ -375,10 +375,6 @@ CGOpenMPRuntime::CreateRuntimeFunction(OpenMPRTLFunction Function) {
   return RTLFn;
 }
 
-#define OPENMPRTL_LOC(SLoc, CGF)    \
-    CreateIntelOpenMPRTLLoc(SLoc, CGF)
-#define OPENMPRTL_THREADNUM(SLoc, CGF)    \
-    CreateOpenMPGlobalThreadNum(SLoc, CGF)
 #define OPENMPRTL_FUNC(name) Get_##name()
 #define OPENMPRTL_ATOMIC_FUNC(QTy, Op) GetAtomicFunc(CGF, QTy, Op)
 #define OPENMPRTL_ATOMIC_FUNC_GENERAL(QTyRes, QTyIn, Aop, Capture, Reverse)    \
@@ -3399,7 +3395,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // PLast
     llvm::AllocaInst *PLast = CGF.CreateTempAlloca(Builder.getInt32Ty(), "last");
     PLast->setAlignment(CGF.CGM.getDataLayout().getPrefTypeAlignment(Builder.getInt32Ty()));
-    InitTempAlloca(PLast, Builder.getInt32(1));
+    CGF.InitTempAlloca(PLast, Builder.getInt32(1));
 
     // PLB
     llvm::AllocaInst *PLB = CGF.CreateTempAlloca(VarTy, "lb");
@@ -3414,9 +3410,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // PSt
     llvm::AllocaInst *PSt = CGF.CreateTempAlloca(VarTy, "st");
     PSt->setAlignment(CGF.CGM.getDataLayout().getPrefTypeAlignment(VarTy));
-    InitTempAlloca(PSt, Builder.getInt32(1));
+    CGF.InitTempAlloca(PSt, Builder.getInt32(1));
 
-    llvm::AllocaInst *Private = CreateMemTemp(QTy, ".idx.");
+    llvm::AllocaInst *Private = CGF.CreateMemTemp(QTy, ".idx.");
     // llvm::Type *IdxTy =
     //    cast<llvm::PointerType>(Private->getType())->getElementType();
     // llvm::BasicBlock *MainBB;
@@ -3474,8 +3470,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     }
 
     // Prepare call
-    llvm::Value *Loc = OPENMPRTL_LOC(S.getLocStart(), CGF);
-    llvm::Value *GTid = OPENMPRTL_THREADNUM(S.getLocStart(), CGF);
+    llvm::Value *Loc = CreateIntelOpenMPRTLLoc(S.getLocStart(), CGF, 0);
+    llvm::Value *GTid = CreateOpenMPGlobalThreadNum(Loc, CGF);
 
     llvm::Value *RealArgs[] = {
         Loc,
