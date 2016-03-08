@@ -301,14 +301,16 @@ class CGOpenMPRuntime {
   /// \brief Emits object of ident_t type with info for source location.
   /// \param Flags Flags for OpenMP location.
   ///
+protected:
   llvm::Value *emitUpdateLocation(CodeGenFunction &CGF, SourceLocation Loc,
                                   unsigned Flags = 0);
 
-  /// \brief Returns pointer to ident_t type.
-  llvm::Type *getIdentTyPointerTy();
-
   /// \brief Returns pointer to kmpc_micro type.
   llvm::Type *getKmpc_MicroPointerTy();
+
+private:
+  /// \brief Returns pointer to ident_t type.
+  llvm::Type *getIdentTyPointerTy();
 
   /// \brief Returns specified OpenMP runtime function.
   /// \param Function OpenMP runtime function.
@@ -851,10 +853,10 @@ public:
   /// \brief Emits call to void __kmpc_push_num_teams(ident_t *loc, kmp_int32
   /// global_tid, kmp_int32 num_teams, kmp_int32 thread_limit) to generate code
   /// for num_teams clause.
-  /// \param NumTeams An integer value of teams.
-  /// \param ThreadLimit An integer value of threads.
-  virtual void emitNumTeamsClause(CodeGenFunction &CGF, llvm::Value *NumTeams,
-                                  llvm::Value *ThreadLimit, SourceLocation Loc);
+  /// \param NumTeams An integer expression of teams.
+  /// \param ThreadLimit An integer expression of threads.
+  virtual void emitNumTeamsClause(CodeGenFunction &CGF, const Expr *NumTeams,
+                                  const Expr *ThreadLimit, SourceLocation Loc);
 
 };
 
