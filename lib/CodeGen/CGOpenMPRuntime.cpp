@@ -375,6 +375,10 @@ CGOpenMPRuntime::CreateRuntimeFunction(OpenMPRTLFunction Function) {
   return RTLFn;
 }
 
+#define OPENMPRTL_LOC(SLoc, CGF)    \
+    CreateIntelOpenMPRTLLoc(SLoc, CGF)
+#define OPENMPRTL_THREADNUM(SLoc, CGF)    \
+    CreateOpenMPGlobalThreadNum(SLoc, CGF)
 #define OPENMPRTL_FUNC(name) Get_##name()
 #define OPENMPRTL_ATOMIC_FUNC(QTy, Op) GetAtomicFunc(CGF, QTy, Op)
 #define OPENMPRTL_ATOMIC_FUNC_GENERAL(QTyRes, QTyIn, Aop, Capture, Reverse)    \
@@ -3376,9 +3380,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       assert(0 && "generating combined construct for an unsupported pragma sequence\n");
 
     UB = CGF.EmitScalarExpr(UBExpr);
-    llvm::AllocaInst *GlobalUBStack = CreateMemTemp(
-            getNewIterEndFromLoopDirective(&S)->getType(), "global.ub.stack");
-    Builder.CreateStore(UB, GlobalUBStack);
+    // llvm::AllocaInst *GlobalUBStack = CreateMemTemp(
+    //         getNewIterEndFromLoopDirective(&S)->getType(), "global.ub.stack");
+    // Builder.CreateStore(UB, GlobalUBStack);
     UB = Builder.CreateIntCast(UB, VarTy, isSigned);
 
     // Loop LB:
@@ -3387,34 +3391,34 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // No chunck is provided.
     llvm::Value *Chunk = llvm::Constant::getNullValue(VarTy);
-    CGM.OpenMPSupport.setScheduleChunkSize(KMP_SCH_DISTRIBUTE_STATIC, 0);
+    CGF.CGM.OpenMPSupport.setScheduleChunkSize(KMP_SCH_DISTRIBUTE_STATIC, 0);
 
     // llvm::BasicBlock *EndBB = createBasicBlock("omp.loop.end");
     // llvm::BasicBlock *OMPLoopBB = 0; // createBasicBlock("omp.loop.begin");
 
     // PLast
-    llvm::AllocaInst *PLast = CreateTempAlloca(Int32Ty, "last");
-    PLast->setAlignment(CGM.getDataLayout().getPrefTypeAlignment(Int32Ty));
+    llvm::AllocaInst *PLast = CGF.CreateTempAlloca(Builder.getInt32Ty(), "last");
+    PLast->setAlignment(CGF.CGM.getDataLayout().getPrefTypeAlignment(Builder.getInt32Ty()));
     InitTempAlloca(PLast, Builder.getInt32(1));
 
     // PLB
-    llvm::AllocaInst *PLB = CreateTempAlloca(VarTy, "lb");
-    PLB->setAlignment(CGM.getDataLayout().getPrefTypeAlignment(VarTy));
+    llvm::AllocaInst *PLB = CGF.CreateTempAlloca(VarTy, "lb");
+    PLB->setAlignment(CGF.CGM.getDataLayout().getPrefTypeAlignment(VarTy));
     Builder.CreateStore(LB, PLB);
 
     // PUB
-    llvm::AllocaInst *PUB = CreateTempAlloca(VarTy, "ub");
-    PUB->setAlignment(CGM.getDataLayout().getPrefTypeAlignment(VarTy));
+    llvm::AllocaInst *PUB = CGF.CreateTempAlloca(VarTy, "ub");
+    PUB->setAlignment(CGF.CGM.getDataLayout().getPrefTypeAlignment(VarTy));
     Builder.CreateStore(UB, PUB);
 
     // PSt
-    llvm::AllocaInst *PSt = CreateTempAlloca(VarTy, "st");
-    PSt->setAlignment(CGM.getDataLayout().getPrefTypeAlignment(VarTy));
+    llvm::AllocaInst *PSt = CGF.CreateTempAlloca(VarTy, "st");
+    PSt->setAlignment(CGF.CGM.getDataLayout().getPrefTypeAlignment(VarTy));
     InitTempAlloca(PSt, Builder.getInt32(1));
 
     llvm::AllocaInst *Private = CreateMemTemp(QTy, ".idx.");
-    llvm::Type *IdxTy =
-        cast<llvm::PointerType>(Private->getType())->getElementType();
+    // llvm::Type *IdxTy =
+    //    cast<llvm::PointerType>(Private->getType())->getElementType();
     // llvm::BasicBlock *MainBB;
     // llvm::BasicBlock *FiniBB = 0;
 
@@ -3432,7 +3436,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     if (const CapturedStmt *CS = dyn_cast_or_null<CapturedStmt>(Body))
       Body = CS->getCapturedStmt();
     const VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(IterVar)->getDecl());
-    CGM.OpenMPSupport.addOpenMPPrivateVar(VD, Private);
+    CGF.CGM.OpenMPSupport.addOpenMPPrivateVar(VD, Private);
     for (unsigned I = 0; I < numCollapsed; ++I) {
       CodeGenFunction::RunCleanupsScope InitScope(CGF);
       const VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(Arr[I])->getDecl());
@@ -3452,12 +3456,12 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       }
       const ForStmt *For = dyn_cast_or_null<ForStmt>(Body);
       Body = For->getBody();
-      if (CGM.OpenMPSupport.getTopOpenMPPrivateVar(VD))
+      if (CGF.CGM.OpenMPSupport.getTopOpenMPPrivateVar(VD))
         continue;
       QualType QTy = Arr[I]->getType();
       llvm::AllocaInst *Private =
-          CGF.CreateMemTemp(QTy, CGM.getMangledName(VD) + ".private.");
-      CGM.OpenMPSupport.addOpenMPPrivateVar(VD, Private);
+          CGF.CreateMemTemp(QTy, CGF.CGM.getMangledName(VD) + ".private.");
+      CGF.CGM.OpenMPSupport.addOpenMPPrivateVar(VD, Private);
       llvm::BasicBlock *PrecondBB = llvm::BasicBlock::Create(
               CGF.CGM.getLLVMContext(), "omp.loop.precond");
       if (isa<DeclStmt>(For->getInit()))
@@ -3484,13 +3488,13 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         Builder.getInt32(1),
         Chunk};
     if (TypeSize == 32 && isSigned)
-      EmitRuntimeCall(OPENMPRTL_FUNC(for_static_init_4), RealArgs);
+      CGF.EmitRuntimeCall(OPENMPRTL_FUNC(for_static_init_4), RealArgs);
     else if (TypeSize == 32 && !isSigned)
-      EmitRuntimeCall(OPENMPRTL_FUNC(for_static_init_4u), RealArgs);
+      CGF.EmitRuntimeCall(OPENMPRTL_FUNC(for_static_init_4u), RealArgs);
     else if (TypeSize == 64 && isSigned)
-      EmitRuntimeCall(OPENMPRTL_FUNC(for_static_init_8), RealArgs);
+      CGF.EmitRuntimeCall(OPENMPRTL_FUNC(for_static_init_8), RealArgs);
     else
-      EmitRuntimeCall(OPENMPRTL_FUNC(for_static_init_8u), RealArgs);
+      CGF.EmitRuntimeCall(OPENMPRTL_FUNC(for_static_init_8u), RealArgs);
 
     // OMPLoopBB = createBasicBlock("omp.loop.begin");
     // EmitBlock(OMPLoopBB);
@@ -3580,19 +3584,19 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     if (!CudaThreadsInParallel)
       CudaThreadsInParallel =
-          CGM.getModule().getGlobalVariable(CudaThreadsInParallelName);
+          CGF.CGM.getModule().getGlobalVariable(CudaThreadsInParallelName);
     if (!SimdNumLanes)
-      SimdNumLanes = CGM.getModule().getGlobalVariable(SimdNumLanesName);
+      SimdNumLanes = CGF.CGM.getModule().getGlobalVariable(SimdNumLanesName);
 
     if (!CudaThreadsInParallel)
       CudaThreadsInParallel = new llvm::GlobalVariable(
-          CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
+          CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
           llvm::Constant::getNullValue(VarTy), CudaThreadsInParallelName, 0,
           llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
 
     if (!SimdNumLanes)
       SimdNumLanes = new llvm::GlobalVariable(
-          CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
+          CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
           llvm::Constant::getNullValue(VarTy), SimdNumLanesName, 0,
           llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
 
@@ -3600,10 +3604,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // team-master sets the initial value for SimdNumLanes
     llvm::BasicBlock *MasterInit = llvm::BasicBlock::Create(
-        CGM.getLLVMContext(), ".master.init.", CGF.CurFn);
+        CGF.CGM.getLLVMContext(), ".master.init.", CGF.CurFn);
 
     llvm::BasicBlock *NonMasterInit = llvm::BasicBlock::Create(
-        CGM.getLLVMContext(), ".nonmaster.init.", CGF.CurFn);
+        CGF.CGM.getLLVMContext(), ".nonmaster.init.", CGF.CurFn);
 
     llvm::Value *IsTeamMaster1 =
         Bld.CreateICmpEQ(Bld.CreateCall(Get_thread_num(), {}),
