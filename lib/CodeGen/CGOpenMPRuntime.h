@@ -301,7 +301,6 @@ class CGOpenMPRuntime {
   /// \brief Emits object of ident_t type with info for source location.
   /// \param Flags Flags for OpenMP location.
   ///
-protected:
   llvm::Value *emitUpdateLocation(CodeGenFunction &CGF, SourceLocation Loc,
                                   unsigned Flags = 0);
 
