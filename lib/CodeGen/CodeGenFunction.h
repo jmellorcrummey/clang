@@ -131,8 +131,8 @@ public:
   /// different level of parallelism (threads, warps, blocks)
   bool combined = false;
   bool combinedSimd = false;
+  bool useSharedMemory = false;
   llvm::AllocaInst *CombinedOuterLoopIndex;
-  llvm::BasicBlock *CombinedJumpBackBlock;
 
   CodeGenModule &CGM;  // Per-module state.
   const TargetInfo &Target;

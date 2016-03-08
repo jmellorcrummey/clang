@@ -7618,7 +7618,7 @@ void CodeGenFunction::EmitOMPTeamsDirective(const OMPTeamsDirective &S) {
 void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
 
   printf("======> Inside EmitOMPSimdDirective\n");
-  if (this->combinedSimd){
+  if (this->combinedSimd && !this->useSharedMemory){
     printf("======> Inside EmitOMPSimdDirective: This is where we need to jump to Emiting new Inner SIMD LOOP!!!\n");
     //InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
     //RunCleanupsScope ExecutedScope(*this);
