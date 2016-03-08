@@ -304,7 +304,6 @@ class CGOpenMPRuntime {
   llvm::Value *emitUpdateLocation(CodeGenFunction &CGF, SourceLocation Loc,
                                   unsigned Flags = 0);
 
-private:
   /// \brief Returns pointer to ident_t type.
   llvm::Type *getIdentTyPointerTy();
 
