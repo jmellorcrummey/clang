@@ -304,12 +304,12 @@ class CGOpenMPRuntime {
   llvm::Value *emitUpdateLocation(CodeGenFunction &CGF, SourceLocation Loc,
                                   unsigned Flags = 0);
 
-  /// \brief Returns pointer to kmpc_micro type.
-  llvm::Type *getKmpc_MicroPointerTy();
-
 private:
   /// \brief Returns pointer to ident_t type.
   llvm::Type *getIdentTyPointerTy();
+
+  /// \brief Returns pointer to kmpc_micro type.
+  llvm::Type *getKmpc_MicroPointerTy();
 
   /// \brief Returns specified OpenMP runtime function.
   /// \param Function OpenMP runtime function.
