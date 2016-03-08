@@ -27,8 +27,8 @@ public:
   /// \brief This function ought to emit, in the general case, a call to
   // the openmp runtime kmpc_push_num_teams. In NVPTX backend it is not needed
   // as these numbers are obtained through the PTX grid and block configuration.
-   /// \param NumTeams An integer value of teams.
-   /// \param ThreadLimit An integer value of threads.
+  /// \param NumTeams An integer expression of teams.
+  /// \param ThreadLimit An integer expression of threads.
   virtual void emitNumTeamsClause(CodeGenFunction &CGF, const Expr *NumTeams,
                                   const Expr *ThreadLimit, SourceLocation Loc);
 
