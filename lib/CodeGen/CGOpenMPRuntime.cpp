@@ -3611,6 +3611,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     char CudaThreadsInParallelName[] = "__omptgt__CudaThreadsInParallel";
     char SimdNumLanesName[] = "__omptgt__SimdNumLanes";
     char OmpNumThreadsName[] = "__omptgt__OmpNumThreads";
+    char ExecuteSimdName[] = "__omptgt_ExecuteSimd";
 
     if (!CudaThreadsInParallel)
       CudaThreadsInParallel =
