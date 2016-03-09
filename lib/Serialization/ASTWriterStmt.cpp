@@ -1930,6 +1930,7 @@ void OMPClauseWriter::VisitOMPReductionClause(OMPReductionClause *C) {
 
 void OMPClauseWriter::VisitOMPLinearClause(OMPLinearClause *C) {
   Record.push_back(C->varlist_size());
+  VisitOMPClauseWithPostUpdate(C);
   Writer->Writer.AddSourceLocation(C->getLParenLoc(), Record);
   Writer->Writer.AddSourceLocation(C->getColonLoc(), Record);
   Record.push_back(C->getModifier());
@@ -2095,7 +2096,8 @@ void ASTStmtWriter::VisitOMPLoopDirective(OMPLoopDirective *D) {
   Writer.AddStmt(D->getInit());
   Writer.AddStmt(D->getInc());
   if (isOpenMPWorksharingDirective(D->getDirectiveKind()) ||
-      isOpenMPTaskLoopDirective(D->getDirectiveKind())) {
+      isOpenMPTaskLoopDirective(D->getDirectiveKind()) ||
+      isOpenMPDistributeDirective(D->getDirectiveKind())) {
     Writer.AddStmt(D->getIsLastIterVariable());
     Writer.AddStmt(D->getLowerBoundVariable());
     Writer.AddStmt(D->getUpperBoundVariable());
