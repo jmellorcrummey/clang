@@ -398,7 +398,6 @@ private:
 public:
   explicit CGOpenMPRuntime(CodeGenModule &CGM);
   virtual ~CGOpenMPRuntime() {}
-  virtual void release();
   virtual void clear();
 
   /// \brief Emits captured variables for the outlined function for the

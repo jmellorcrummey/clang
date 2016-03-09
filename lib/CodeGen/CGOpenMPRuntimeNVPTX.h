@@ -78,16 +78,6 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // Private state and methods.
   //
 
-  // Master-worker control state.
-  // Number of requested OMP threads in parallel region.
-  llvm::GlobalVariable *ActiveWorkers;
-  // Outlined function for the workers to execute.
-  llvm::GlobalVariable *WorkID;
-  llvm::GlobalVariable *WorkArgs;
-  // Maximum number of captured variables sent to any work function in
-  // this compilation unit.
-  size_t MaxWorkArgs;
-
   // Pointers to outlined function work for workers.
   llvm::SmallVector<llvm::Function *, 16> Work;
 
@@ -108,19 +98,6 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   private:
     void createWorkerFunction(CodeGenModule &CGM);
   };
-
-  /// \brief Initialize master-worker control state.
-  void initializeEnvironment();
-
-  /// \brief Finalize master-worker control state after all targets are
-  /// processed.
-  void finalizeEnvironment();
-
-  /// \brief Start a new target region.
-  void enterTarget();
-
-  /// \brief Close the current target region.
-  void exitTarget();
 
   /// \brief Emit the worker function for the current target region.
   void emitWorkerFunction(WorkerFunctionState &WST);
@@ -178,10 +155,6 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
 
 public:
   explicit CGOpenMPRuntimeNVPTX(CodeGenModule &CGM);
-
-  /// \brief Complete processing for this module.  Called once per module,
-  /// after all targets are processed.
-  void release() override;
 
   /// \brief Emits code for parallel or serial call of the \a OutlinedFn with
   /// variables captured in a record which address is stored in \a

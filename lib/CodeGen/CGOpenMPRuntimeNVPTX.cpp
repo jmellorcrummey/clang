@@ -124,6 +124,8 @@ enum OpenMPRTLFunctionNVPTX {
   /// \brief Call to void __kmpc_kernel_init(kmp_int32 omp_handle,
   /// kmp_int32 thread_limit);
   OMPRTL_NVPTX__kmpc_kernel_init,
+  /// \brief Call to void __kmpc_kernel_deinit();
+  OMPRTL_NVPTX__kmpc_kernel_deinit,
   // Call to void __kmpc_serialized_parallel(ident_t *loc, kmp_int32
   // global_tid);
   OMPRTL_NVPTX__kmpc_serialized_parallel,
@@ -131,9 +133,10 @@ enum OpenMPRTLFunctionNVPTX {
   // global_tid);
   OMPRTL_NVPTX__kmpc_end_serialized_parallel,
   /// \brief Call to void __kmpc_kernel_prepare_parallel(
-  /// kmp_int32 num_threads, kmp_int32 num_lanes);
+  /// void *outlined_function, void **args, kmp_int32 nArgs);
   OMPRTL_NVPTX__kmpc_kernel_prepare_parallel,
-  /// \brief Call to kmp_int32 __kmpc_kernel_parallel(kmp_int32 num_lanes);
+  /// \brief Call to void __kmpc_kernel_parallel(
+  /// void **outlined_function, void **args);
   OMPRTL_NVPTX__kmpc_kernel_parallel,
   /// \brief Call to void __kmpc_kernel_end_parallel();
   OMPRTL_NVPTX__kmpc_kernel_end_parallel,
@@ -166,66 +169,6 @@ void CGOpenMPRuntimeNVPTX::WorkerFunctionState::createWorkerFunction(
   CGM.SetInternalFunctionAttributes(/*D=*/nullptr, WorkerFn, *CGFI);
   WorkerFn->setLinkage(llvm::GlobalValue::InternalLinkage);
   WorkerFn->addFnAttr(llvm::Attribute::NoInline);
-}
-
-void CGOpenMPRuntimeNVPTX::initializeEnvironment() {
-  //
-  // Initialize master-worker control state in shared memory.
-  //
-
-  auto DL = CGM.getDataLayout();
-  ActiveWorkers = new llvm::GlobalVariable(
-      CGM.getModule(), CGM.Int32Ty, /*isConstant=*/false,
-      llvm::GlobalValue::CommonLinkage,
-      llvm::Constant::getNullValue(CGM.Int32Ty), "__omp_num_threads", 0,
-      llvm::GlobalVariable::NotThreadLocal, ADDRESS_SPACE_SHARED);
-  ActiveWorkers->setAlignment(DL.getPrefTypeAlignment(CGM.Int32Ty));
-
-  WorkID = new llvm::GlobalVariable(
-      CGM.getModule(), CGM.Int64Ty, /*isConstant=*/false,
-      llvm::GlobalValue::CommonLinkage,
-      llvm::Constant::getNullValue(CGM.Int64Ty), "__tgt_work_id", 0,
-      llvm::GlobalVariable::NotThreadLocal, ADDRESS_SPACE_SHARED);
-  WorkID->setAlignment(DL.getPrefTypeAlignment(CGM.Int64Ty));
-
-  // Arguments to work function.
-  // This variable will be replaced once the actual size is determined,
-  // after parsing all target regions.
-  llvm::ArrayType *ArgsTy = llvm::ArrayType::get(CGM.IntPtrTy, 0);
-  WorkArgs = new llvm::GlobalVariable(
-      CGM.getModule(), ArgsTy, /*isConstant=*/false,
-      llvm::GlobalValue::InternalLinkage, llvm::Constant::getNullValue(ArgsTy),
-      Twine("__scratch_work_args"), 0, llvm::GlobalVariable::NotThreadLocal,
-      ADDRESS_SPACE_SHARED);
-  WorkArgs->setAlignment(DL.getPrefTypeAlignment(CGM.IntPtrTy));
-}
-
-void CGOpenMPRuntimeNVPTX::finalizeEnvironment() {
-  // Update the size of the work_args structure based on the maximum number
-  // of captured variables seen in this compilation unit so far.
-  auto DL = CGM.getDataLayout();
-  llvm::ArrayType *ArgsTy = llvm::ArrayType::get(CGM.IntPtrTy, MaxWorkArgs);
-  llvm::GlobalVariable *FinalWorkArgs = new llvm::GlobalVariable(
-      CGM.getModule(), ArgsTy, false, llvm::GlobalValue::CommonLinkage,
-      llvm::Constant::getNullValue(ArgsTy), Twine("__tgt_work_args"), 0,
-      llvm::GlobalVariable::NotThreadLocal, ADDRESS_SPACE_SHARED);
-  FinalWorkArgs->setAlignment(DL.getPrefTypeAlignment(CGM.IntPtrTy));
-
-  // Replace uses manually since the type has changed (size of array).
-  // The original reference will be optimized out.
-  while (!WorkArgs->use_empty()) {
-    auto &U = *WorkArgs->use_begin();
-    // Must handle Constants specially, we cannot call replaceUsesOfWith on a
-    // constant because they are uniqued.
-    if (llvm::Constant *C = dyn_cast<llvm::Constant>(U.getUser())) {
-      if (!isa<llvm::GlobalValue>(C)) {
-        C->handleOperandChange(WorkArgs, FinalWorkArgs);
-        continue;
-      }
-    }
-
-    U.set(FinalWorkArgs);
-  }
 }
 
 void CGOpenMPRuntimeNVPTX::emitWorkerFunction(WorkerFunctionState &WST) {
@@ -263,39 +206,40 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
   CGF.EmitBlock(AwaitBB);
   // Wait for parallel work
   SyncCTAThreads(CGF);
-  // On termination condition (workid == 0), exit loop.
+
+  Address WorkFn = CGF.CreateTempAlloca(
+      CGF.Int8PtrTy, CharUnits::fromQuantity(8), /*Name*/ "work_fn");
+  Address WorkArgs = CGF.CreateTempAlloca(
+      CGF.Int8PtrTy, CharUnits::fromQuantity(8), /*Name*/ "work_args");
+  llvm::Value *Args[] = {WorkFn.getPointer(), WorkArgs.getPointer()};
+  llvm::Value *IsActive = CGF.EmitRuntimeCall(
+      createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_parallel), Args,
+      "is_active");
+
+  // On termination condition (workfn == 0), exit loop.
   llvm::Value *ShouldTerminate = Bld.CreateICmpEQ(
-      Bld.CreateAlignedLoad(WorkID, WorkID->getAlignment()),
-      llvm::Constant::getNullValue(WorkID->getType()->getElementType()),
+      Bld.CreateLoad(WorkFn), llvm::Constant::getNullValue(CGF.Int8PtrTy),
       "should_terminate");
   Bld.CreateCondBr(ShouldTerminate, ExitBB, SelectWorkersBB);
 
   // Activate requested workers.
   CGF.EmitBlock(SelectWorkersBB);
-  llvm::Value *ThreadID = GetNVPTXThreadID(CGF);
-  llvm::Value *ActiveThread = Bld.CreateICmpSLT(
-      ThreadID,
-      Bld.CreateAlignedLoad(ActiveWorkers, ActiveWorkers->getAlignment()),
-      "active_thread");
-  Bld.CreateCondBr(ActiveThread, ExecuteBB, BarrierBB);
+  Bld.CreateCondBr(IsActive, ExecuteBB, BarrierBB);
 
   // Signal start of parallel region.
   CGF.EmitBlock(ExecuteBB);
-  llvm::Value *Args[] = {/*SimdNumLanes=*/Bld.getInt32(1)};
-  CGF.EmitRuntimeCall(
-      createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_parallel), Args);
 
   // Process work items: outlined parallel functions.
   for (auto W : Work) {
     // Try to match this outlined function.
-    auto ID = Bld.CreatePtrToInt(W, WorkID->getType()->getElementType());
-    llvm::Value *WorkIDMatch =
-        Bld.CreateICmpEQ(Bld.CreateAlignedLoad(WorkID, WorkID->getAlignment()),
-                         ID, "work_match");
+    auto ID = Bld.CreatePtrToInt(W, CGM.Int64Ty);
+    ID = Bld.CreateIntToPtr(ID, CGM.Int8PtrTy);
+    llvm::Value *WorkFnMatch =
+        Bld.CreateICmpEQ(Bld.CreateLoad(WorkFn), ID, "work_match");
 
     llvm::BasicBlock *ExecuteFNBB = CGF.createBasicBlock(".execute.fn");
     llvm::BasicBlock *CheckNextBB = CGF.createBasicBlock(".check.next");
-    Bld.CreateCondBr(WorkIDMatch, ExecuteFNBB, CheckNextBB);
+    Bld.CreateCondBr(WorkFnMatch, ExecuteFNBB, CheckNextBB);
 
     // Execute this outlined function.
     CGF.EmitBlock(ExecuteFNBB);
@@ -312,7 +256,7 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
     // argument, i.e., the capture structure.
     auto Fn = cast<llvm::Function>(W);
     auto CaptureType = std::next(std::next(Fn->arg_begin()))->getType();
-    auto Capture = Bld.CreateAddrSpaceCast(WorkArgs, CaptureType);
+    auto Capture = Bld.CreateBitCast(Bld.CreateLoad(WorkArgs), CaptureType);
     FnArgs.push_back(Capture);
 
     // Insert call to work function.
@@ -390,15 +334,13 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
 
 void CGOpenMPRuntimeNVPTX::emitEntryFooter(CodeGenFunction &CGF,
                                            EntryFunctionState &EST) {
-  CGBuilderTy &Bld = CGF.Builder;
   llvm::BasicBlock *TerminateBB = CGF.createBasicBlock(".termination.notifier");
   CGF.EmitBranch(TerminateBB);
 
   CGF.EmitBlock(TerminateBB);
   // Signal termination condition.
-  Bld.CreateAlignedStore(
-      llvm::Constant::getNullValue(WorkID->getType()->getElementType()), WorkID,
-      WorkID->getAlignment());
+  CGF.EmitRuntimeCall(
+      createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_deinit), None);
   // Barrier to terminate worker threads.
   SyncCTAThreads(CGF);
   // Master thread jumps to exit point.
@@ -424,6 +366,13 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_init");
     break;
   }
+  case OMPRTL_NVPTX__kmpc_kernel_deinit: {
+    // Build void __kmpc_kernel_deinit();
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, {}, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_deinit");
+    break;
+  }
   case OMPRTL_NVPTX__kmpc_serialized_parallel: {
     // Build void __kmpc_serialized_parallel(ident_t *loc, kmp_int32
     // global_tid);
@@ -444,18 +393,20 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
   }
   case OMPRTL_NVPTX__kmpc_kernel_prepare_parallel: {
     /// Build void __kmpc_kernel_prepare_parallel(
-    /// kmp_int32 num_threads, kmp_int32 num_lanes);
-    llvm::Type *TypeParams[] = {CGM.Int32Ty, CGM.Int32Ty};
+    /// void *outlined_function, void **args, kmp_int32 nArgs);
+    llvm::Type *TypeParams[] = {CGM.Int8PtrTy, CGM.Int8PtrPtrTy, CGM.Int32Ty};
     llvm::FunctionType *FnTy =
-        llvm::FunctionType::get(CGM.Int32Ty, TypeParams, /*isVarArg*/ false);
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_prepare_parallel");
     break;
   }
   case OMPRTL_NVPTX__kmpc_kernel_parallel: {
-    /// Build void __kmpc_kernel_parallel(kmp_int32 num_lanes);
-    llvm::Type *TypeParams[] = {CGM.Int32Ty};
+    /// Build bool __kmpc_kernel_parallel(
+    /// void **outlined_function, void **args);
+    llvm::Type *TypeParams[] = {CGM.Int8PtrPtrTy, CGM.Int8PtrPtrTy};
     llvm::FunctionType *FnTy =
-        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+        llvm::FunctionType::get(llvm::Type::getInt1Ty(CGM.getLLVMContext()),
+                                TypeParams, /*isVarArg*/ false);
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_parallel");
     break;
   }
@@ -517,8 +468,6 @@ void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
 
   const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
 
-  enterTarget();
-
   EntryFunctionState EST;
   WorkerFunctionState WST(CGM);
 
@@ -538,20 +487,7 @@ void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
   // region's entry function.
   WST.WorkerFn->setName(OutlinedFn->getName() + "_worker");
 
-  exitTarget();
-
   return;
-}
-
-void CGOpenMPRuntimeNVPTX::enterTarget() {
-  // Nothing here for the moment.
-}
-
-void CGOpenMPRuntimeNVPTX::exitTarget() { Work.clear(); }
-
-void CGOpenMPRuntimeNVPTX::release() {
-  // Called once per module, after target processing.
-  finalizeEnvironment();
 }
 
 namespace {
@@ -701,34 +637,33 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
   auto &&ThenGen = [this, Fn, CapturedVars](CodeGenFunction &CGF) {
     CGBuilderTy &Bld = CGF.Builder;
 
-    // Prepare # of threads in parallel region based on number requested
-    // by user and request for SIMD.
-    llvm::Value *Args[] = {GetNumWorkers(CGF),
-                           /*SimdNumLanes=*/Bld.getInt32(1)};
-    llvm::Value *ParallelThreads = CGF.EmitRuntimeCall(
+    auto Capture = CapturedVars.front();
+    auto CaptureType = Capture->getType()->getArrayElementType();
+    auto ID = Bld.CreatePtrToInt(Fn, CGM.Int64Ty);
+    ID = Bld.CreateIntToPtr(ID, CGM.Int8PtrTy);
+
+    // Prepare for parallel region.  Indicate the outlined function and request
+    // a buffer to place its arguments.
+    Address WorkArgs = CGF.CreateTempAlloca(
+        CGF.Int8PtrTy, CharUnits::fromQuantity(8), /*Name*/ "work_args");
+    llvm::Value *Args[] = {
+        ID, WorkArgs.getPointer(),
+        /*nArgs=*/Bld.getInt32(CaptureType->getStructNumElements())};
+    CGF.EmitRuntimeCall(
         createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_prepare_parallel),
         Args);
-
-    // Set number of workers to activate.
-    Bld.CreateAlignedStore(ParallelThreads, ActiveWorkers,
-                           ActiveWorkers->getAlignment());
 
     // Copy variables in the capture buffer to the shared workargs structure for
     // use by the workers.  The extraneous capture buffer will be optimized out
     // by llvm.
-    auto Capture = CapturedVars.front();
-    auto CaptureType = Capture->getType()->getArrayElementType();
-    auto WorkArgsPtr = Bld.CreateAddrSpaceCast(WorkArgs, Capture->getType());
+    auto WorkArgsPtr =
+        Bld.CreateBitCast(Bld.CreateLoad(WorkArgs), Capture->getType());
     for (unsigned idx = 0; idx < CaptureType->getStructNumElements(); idx++) {
       auto Src = Bld.CreateConstInBoundsGEP2_32(CaptureType, Capture, 0, idx);
       auto Dst =
           Bld.CreateConstInBoundsGEP2_32(CaptureType, WorkArgsPtr, 0, idx);
       Bld.CreateDefaultAlignedStore(Bld.CreateDefaultAlignedLoad(Src), Dst);
     }
-
-    // Indicate parallel function to execute.
-    auto ID = Bld.CreatePtrToInt(Fn, WorkID->getType()->getElementType());
-    Bld.CreateAlignedStore(ID, WorkID, WorkID->getAlignment());
 
     // Activate workers.
     SyncCTAThreads(CGF);
@@ -738,8 +673,6 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
 
     // Remember for post-processing in worker loop.
     Work.push_back(Fn);
-    MaxWorkArgs =
-        std::max(MaxWorkArgs, (size_t)CaptureType->getStructNumElements());
   };
   auto &&ElseGen = [this, Fn, CapturedVars, RTLoc, Loc](CodeGenFunction &CGF) {
     auto DL = CGM.getDataLayout();
@@ -800,11 +733,7 @@ bool CGOpenMPRuntimeNVPTX::requiresBarrier(const OMPLoopDirective &S) const {
 }
 
 CGOpenMPRuntimeNVPTX::CGOpenMPRuntimeNVPTX(CodeGenModule &CGM)
-    : CGOpenMPRuntime(CGM), ActiveWorkers(nullptr), WorkID(nullptr),
-      WorkArgs(nullptr), MaxWorkArgs(0) {
+    : CGOpenMPRuntime(CGM) {
   if (!CGM.getLangOpts().OpenMPIsDevice)
     llvm_unreachable("OpenMP NVPTX can only handle device code.");
-
-  // Called once per module during initialization.
-  initializeEnvironment();
 }
