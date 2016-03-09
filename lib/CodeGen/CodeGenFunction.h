@@ -133,6 +133,9 @@ public:
   bool combinedSimd = false;
   bool useSharedMemory = false;
   llvm::AllocaInst *CombinedOuterLoopIndex;
+  llvm::BasicBlock *SyncAfterCombinedBlock;
+  llvm::BasicBlock *SyncAfterSimdBlock;
+  llvm::BasicBlock *EndRegionS1;
 
   CodeGenModule &CGM;  // Per-module state.
   const TargetInfo &Target;
