@@ -3706,7 +3706,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // Since this operaiton is happening for all threads then each group of 32 threads will receive the
     // same OMP thread ID. We must be careful to exclude the threads non-warp master threads from
     // executing S1.
-    llvm::Value *globalTid = Builder.CreateAdd(Bld.CreateCall(Get_thread_num(), {}), Bld.CreateMul(
+    llvm::Value *globalTid = Bld.CreateAdd(Bld.CreateCall(Get_thread_num(), {}), Bld.CreateMul(
         Bld.CreateCall(Get_num_threads(), {}), Bld.CreateCall(Get_team_num(), {})));
     Bld.CreateStore(globalTid, CudaGlobalThreadId);
 
