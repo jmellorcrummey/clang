@@ -20,52 +20,51 @@ using namespace clang;
 using namespace CodeGen;
 
 /// \brief Get the GPU warp size.
-llvm::Value *CGOpenMPRuntimeNVPTX::GetNVPTXWarpSize(CodeGenFunction &CGF) {
+llvm::Value *CGOpenMPRuntimeNVPTX::getNVPTXWarpSize(CodeGenFunction &CGF) {
   CGBuilderTy &Bld = CGF.Builder;
   return Bld.CreateCall(
       llvm::Intrinsic::getDeclaration(
           &CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_warpsize),
-      {}, "nvptx_warp_size");
+      llvm::None, "nvptx_warp_size");
 }
 
 /// \brief Get the id of the current thread on the GPU.
-llvm::Value *CGOpenMPRuntimeNVPTX::GetNVPTXThreadID(CodeGenFunction &CGF) {
+llvm::Value *CGOpenMPRuntimeNVPTX::getNVPTXThreadID(CodeGenFunction &CGF) {
   CGBuilderTy &Bld = CGF.Builder;
   return Bld.CreateCall(
       llvm::Intrinsic::getDeclaration(
           &CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_tid_x),
-      {}, "nvptx_tid");
+      llvm::None, "nvptx_tid");
 }
 
 /// \brief Get the id of the current block on the GPU.
-llvm::Value *CGOpenMPRuntimeNVPTX::GetNVPTXBlockID(CodeGenFunction &CGF) {
+llvm::Value *CGOpenMPRuntimeNVPTX::getNVPTXBlockID(CodeGenFunction &CGF) {
   CGBuilderTy &Bld = CGF.Builder;
   return Bld.CreateCall(
       llvm::Intrinsic::getDeclaration(
           &CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_ctaid_x),
-      {}, "nvptx_block_id");
+      llvm::None, "nvptx_block_id");
 }
 
 // \brief Get the maximum number of threads in a block of the GPU.
-llvm::Value *CGOpenMPRuntimeNVPTX::GetNVPTXNumThreads(CodeGenFunction &CGF) {
+llvm::Value *CGOpenMPRuntimeNVPTX::getNVPTXNumThreads(CodeGenFunction &CGF) {
   CGBuilderTy &Bld = CGF.Builder;
   return Bld.CreateCall(
       llvm::Intrinsic::getDeclaration(
           &CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_x),
-      {}, "nvptx_num_threads");
+      llvm::None, "nvptx_num_threads");
 }
 
 /// \brief Get barrier to synchronize all threads in a block.
-void CGOpenMPRuntimeNVPTX::GetNVPTXCTABarrier(CodeGenFunction &CGF) {
+void CGOpenMPRuntimeNVPTX::getNVPTXCTABarrier(CodeGenFunction &CGF) {
   CGBuilderTy &Bld = CGF.Builder;
   Bld.CreateCall(llvm::Intrinsic::getDeclaration(
-                     &CGM.getModule(), llvm::Intrinsic::nvvm_barrier0),
-                 {});
+      &CGM.getModule(), llvm::Intrinsic::nvvm_barrier0));
 }
 
 /// \brief Get barrier #n to synchronize selected (multiple of 32) threads in
 /// a block.
-void CGOpenMPRuntimeNVPTX::GetNVPTXBarrier(CodeGenFunction &CGF, int ID,
+void CGOpenMPRuntimeNVPTX::getNVPTXBarrier(CodeGenFunction &CGF, int ID,
                                            int NumThreads) {
   CGBuilderTy &Bld = CGF.Builder;
   llvm::Value *Args[] = {Bld.getInt32(ID), Bld.getInt32(NumThreads)};
@@ -75,8 +74,8 @@ void CGOpenMPRuntimeNVPTX::GetNVPTXBarrier(CodeGenFunction &CGF, int ID,
 }
 
 // \brief Synchronize all GPU threads in a block.
-void CGOpenMPRuntimeNVPTX::SyncCTAThreads(CodeGenFunction &CGF) {
-  GetNVPTXCTABarrier(CGF);
+void CGOpenMPRuntimeNVPTX::syncCTAThreads(CodeGenFunction &CGF) {
+  getNVPTXCTABarrier(CGF);
 }
 
 /// \brief Get the thread id of the OMP master thread.
@@ -86,12 +85,12 @@ void CGOpenMPRuntimeNVPTX::SyncCTAThreads(CodeGenFunction &CGF) {
 /// E.g: If NumThreads is 33, master id is 32.
 ///      If NumThreads is 64, master id is 32.
 ///      If NumThreads is 1024, master id is 992.
-llvm::Value *CGOpenMPRuntimeNVPTX::GetMasterThreadID(CodeGenFunction &CGF) {
+llvm::Value *CGOpenMPRuntimeNVPTX::getMasterThreadID(CodeGenFunction &CGF) {
   CGBuilderTy &Bld = CGF.Builder;
-  llvm::Value *NumThreads = GetNVPTXNumThreads(CGF);
+  llvm::Value *NumThreads = getNVPTXNumThreads(CGF);
 
   // We assume that the warp size is a power of 2.
-  llvm::Value *Mask = Bld.CreateSub(GetNVPTXWarpSize(CGF), Bld.getInt32(1));
+  llvm::Value *Mask = Bld.CreateSub(getNVPTXWarpSize(CGF), Bld.getInt32(1));
 
   return Bld.CreateAnd(Bld.CreateSub(NumThreads, Bld.getInt32(1)),
                        Bld.CreateNot(Mask), "master_tid");
@@ -99,24 +98,24 @@ llvm::Value *CGOpenMPRuntimeNVPTX::GetMasterThreadID(CodeGenFunction &CGF) {
 
 /// \brief Get number of OMP workers for parallel region after subtracting
 /// the master warp.
-llvm::Value *CGOpenMPRuntimeNVPTX::GetNumWorkers(CodeGenFunction &CGF) {
+llvm::Value *CGOpenMPRuntimeNVPTX::getNumWorkers(CodeGenFunction &CGF) {
   CGBuilderTy &Bld = CGF.Builder;
-  return Bld.CreateAdd(GetMasterThreadID(CGF), Bld.getInt32(0), "num_workers");
+  return Bld.CreateAdd(getMasterThreadID(CGF), Bld.getInt32(0), "num_workers");
 }
 
 /// \brief Get thread id in team.
 /// FIXME: Remove the expensive remainder operation.
-llvm::Value *CGOpenMPRuntimeNVPTX::GetTeamThreadId(CodeGenFunction &CGF) {
+llvm::Value *CGOpenMPRuntimeNVPTX::getTeamThreadId(CodeGenFunction &CGF) {
   CGBuilderTy &Bld = CGF.Builder;
-  return Bld.CreateURem(GetNVPTXThreadID(CGF), GetMasterThreadID(CGF),
+  return Bld.CreateURem(getNVPTXThreadID(CGF), getMasterThreadID(CGF),
                         "team_tid");
 }
 
 /// \brief Get global thread id.
-llvm::Value *CGOpenMPRuntimeNVPTX::GetGlobalThreadId(CodeGenFunction &CGF) {
+llvm::Value *CGOpenMPRuntimeNVPTX::getGlobalThreadId(CodeGenFunction &CGF) {
   CGBuilderTy &Bld = CGF.Builder;
-  return Bld.CreateAdd(Bld.CreateMul(GetNVPTXBlockID(CGF), GetNumWorkers(CGF)),
-                       GetTeamThreadId(CGF), "global_tid");
+  return Bld.CreateAdd(Bld.CreateMul(getNVPTXBlockID(CGF), getNumWorkers(CGF)),
+                       getTeamThreadId(CGF), "global_tid");
 }
 
 namespace {
@@ -146,7 +145,7 @@ enum OpenMPRTLFunctionNVPTX {
 enum ADDRESS_SPACE {
   ADDRESS_SPACE_SHARED = 3,
 };
-} // anonymous namespace
+} // namespace
 
 CGOpenMPRuntimeNVPTX::WorkerFunctionState::WorkerFunctionState(
     CodeGenModule &CGM)
@@ -156,12 +155,8 @@ CGOpenMPRuntimeNVPTX::WorkerFunctionState::WorkerFunctionState(
 
 void CGOpenMPRuntimeNVPTX::WorkerFunctionState::createWorkerFunction(
     CodeGenModule &CGM) {
-  auto &Ctx = CGM.getContext();
-
   // Create an worker function with no arguments.
-  FunctionType::ExtInfo EI;
-  CGFI = &CGM.getTypes().arrangeFreeFunctionDeclaration(Ctx.VoidTy, {}, EI,
-                                                        /*isVariadic=*/false);
+  CGFI = &CGM.getTypes().arrangeNullaryFunction();
 
   WorkerFn = llvm::Function::Create(
       CGM.getTypes().GetFunctionType(*CGFI), llvm::GlobalValue::InternalLinkage,
@@ -205,7 +200,7 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
   // Workers wait for work from master.
   CGF.EmitBlock(AwaitBB);
   // Wait for parallel work
-  SyncCTAThreads(CGF);
+  syncCTAThreads(CGF);
 
   Address WorkFn = CGF.CreateTempAlloca(
       CGF.Int8PtrTy, CharUnits::fromQuantity(8), /*Name*/ "work_fn");
@@ -277,7 +272,7 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
   // All active and inactive workers wait at a barrier after parallel region.
   CGF.EmitBlock(BarrierBB);
   // Barrier after parallel region.
-  SyncCTAThreads(CGF);
+  syncCTAThreads(CGF);
   CGF.EmitBranch(AwaitBB);
 
   // Exit target region.
@@ -291,9 +286,9 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
   CGBuilderTy &Bld = CGF.Builder;
 
   // Get the master thread id.
-  llvm::Value *MasterID = GetMasterThreadID(CGF);
+  llvm::Value *MasterID = getMasterThreadID(CGF);
   // Current thread's identifier.
-  llvm::Value *ThreadID = GetNVPTXThreadID(CGF);
+  llvm::Value *ThreadID = getNVPTXThreadID(CGF);
 
   // Setup BBs in entry function.
   llvm::BasicBlock *WorkerCheckBB = CGF.createBasicBlock(".check.for.worker");
@@ -319,7 +314,7 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
     WorkerVars.push_back(&I);
   }
 
-  CGF.EmitCallOrInvoke(WST.WorkerFn, {});
+  CGF.EmitCallOrInvoke(WST.WorkerFn, llvm::None);
   CGF.EmitBranch(EST.ExitBB);
 
   // Only master thread executes subsequent serial code.
@@ -327,7 +322,7 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
 
   // First action in sequential region:
   // Initialize the state of the OpenMP runtime library on the GPU.
-  llvm::Value *Args[] = {Bld.getInt32(/*OmpHandle=*/0), GetNVPTXThreadID(CGF)};
+  llvm::Value *Args[] = {Bld.getInt32(/*OmpHandle=*/0), getNVPTXThreadID(CGF)};
   CGF.EmitRuntimeCall(
       createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_init), Args);
 }
@@ -342,7 +337,7 @@ void CGOpenMPRuntimeNVPTX::emitEntryFooter(CodeGenFunction &CGF,
   CGF.EmitRuntimeCall(
       createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_deinit), None);
   // Barrier to terminate worker threads.
-  SyncCTAThreads(CGF);
+  syncCTAThreads(CGF);
   // Master thread jumps to exit point.
   CGF.EmitBranch(EST.ExitBB);
 
@@ -424,7 +419,7 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
 llvm::Value *CGOpenMPRuntimeNVPTX::getThreadID(CodeGenFunction &CGF,
                                                SourceLocation Loc) {
   assert(CGF.CurFn && "No function in current CodeGenFunction.");
-  return GetGlobalThreadId(CGF);
+  return getGlobalThreadId(CGF);
 }
 
 void CGOpenMPRuntimeNVPTX::emitCapturedVars(
@@ -666,10 +661,10 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
     }
 
     // Activate workers.
-    SyncCTAThreads(CGF);
+    syncCTAThreads(CGF);
 
     // Barrier at end of parallel region.
-    SyncCTAThreads(CGF);
+    syncCTAThreads(CGF);
 
     // Remember for post-processing in worker loop.
     Work.push_back(Fn);
