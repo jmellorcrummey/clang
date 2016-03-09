@@ -3638,6 +3638,17 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     Bld.CreateStore(llvm::Constant::getNullValue(VarTy), CudaThreadsInParallel);
 
+    // disable simd unless some control flow path takes a thread to it
+    if (!ExecuteSimd) {
+      llvm::Type *StaticBoolArray = llvm::ArrayType::get(Bld.getInt1Ty(),
+        MAX_THREADS_IN_BLOCK/WARP_SIZE);
+      ExecuteSimd = new llvm::GlobalVariable(
+        CGM.getModule(), StaticBoolArray, false,
+        llvm::GlobalValue::CommonLinkage,
+        llvm::Constant::getNullValue(StaticBoolArray), ExecuteSimdName, 0,
+        llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+    }
+
     // team-master sets the initial value for SimdNumLanes
     llvm::BasicBlock *MasterInit = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".master.init.", CGF.CurFn);
