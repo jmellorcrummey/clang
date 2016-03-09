@@ -3701,6 +3701,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // Each thread does this.
     // So now Each Thread will know its lane ID (for the SIMD following)
     printf(" Compute SimdLaneNum\n");
+    SimdLaneNum = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "SimdLaneNum");
     Bld.CreateStore(Bld.CreateAnd(Bld.CreateCall(Get_thread_num(), {}),
                                   Bld.CreateSub(Bld.CreateLoad(SimdNumLanes),
                                                 Bld.getInt32(1))),
@@ -3714,12 +3715,14 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     llvm::Value *globalTid = Bld.CreateAdd(Bld.CreateCall(Get_thread_num(), {}), Bld.CreateMul(
         Bld.CreateCall(Get_num_threads(), {}), Bld.CreateCall(Get_team_num(), {})));
     printf(" Compute globalTid\n");
+    CudaGlobalThreadId = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "CudaGlobalThreadId");
     Bld.CreateStore(globalTid, CudaGlobalThreadId);
 
     // Get the div of the globalTid with the size of a warp.
     llvm::Value *ompTid = Bld.CreateSExt(globalTid, VarTy);
     ompTid = Bld.CreateAShr(ompTid, const32);
     printf(" Compute OmpTid\n");
+    OmpThreadNum = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "OmpThreadNum");
     Bld.CreateStore(ompTid, OmpThreadNum);
 
     // Lane ID: each thread has a lane ID which is between 0 and 31.
@@ -3728,6 +3731,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // already in use and no actual SIMD-ization is going to happen.
     llvm::Value *LaneID = Bld.CreateSub(globalTid, Bld.CreateMul(OmpThreadNum, Bld.getInt32(32)));
     printf(" Compute SimdLocalLaneId\n");
+    SimdLocalLaneId = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "SimdLocalLaneId");
     Bld.CreateStore(LaneID, SimdLocalLaneId);
 
     // ============= Finished the Preamble of the Loop Nest ==============
