@@ -4598,6 +4598,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // create new basic block for next region, get a new label for it
     // and add it to the switch
+    printf("======> Inside ExitSimdRegion: Create Next Region\n");
     const std::string NextRegionName =
         (OMPRegionTypesStack.back() == OMP_Parallel)
              ? ".after.simd.in.parallel"
@@ -4631,6 +4632,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       Bld.CreateBr(SynchronizeAndNextState);
     }
 
+    printf("======> Inside ExitSimdRegion: Generate branch to sync\n");
     if (CGF.combinedSimd) {
       // This may need to be moved potentially
       // We want to sync at the end of the SIMD.
@@ -4645,6 +4647,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       Bld.CreateBr(NextRegionBlock);
     }
 
+    printf("======> Inside ExitSimdRegion: Start Next region block\n");
     // start inserting new region statements into next switch case
     Bld.SetInsertPoint(NextRegionBlock);
 
@@ -4668,6 +4671,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     }
 
     if (NestedInParallel) {
+      printf("======> Inside ExitSimdRegion: In nested parallel\n");
       // closely nested in parallel, weed out non openmp threads
       NextRegion = llvm::BasicBlock::Create(CGM.getLLVMContext(),
                                            ".par.reg.code", CGF.CurFn);
@@ -4682,6 +4686,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
             CGF.SyncAfterCombinedBlock, NextRegion);
       }
     } else {
+      printf("======> Inside ExitSimdRegion: WE SHOULD NOT BE HERE\n");
       // going back to team-master only region: exclude all threads execpt
       // master
       NextRegion = llvm::BasicBlock::Create(CGM.getLLVMContext(),
@@ -4693,6 +4698,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
           SynchronizeAndNextState, NextRegion);
     }
 
+    printf("======> Inside ExitSimdRegion: Start NextRegion\n");
     Bld.SetInsertPoint(NextRegion);
 
     // at this point we exit a simd and we have to de-activate any following
