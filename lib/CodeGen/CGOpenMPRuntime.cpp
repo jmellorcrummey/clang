@@ -4670,7 +4670,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       OMPRegionTypesStack.push_back(PopRegion);
     }
 
-    if (NestedInParallel) {
+    if (NestedInParallel || CGF.combinedSimd) {
       printf("======> Inside ExitSimdRegion: In nested parallel\n");
       // closely nested in parallel, weed out non openmp threads
       NextRegion = llvm::BasicBlock::Create(CGM.getLLVMContext(),
