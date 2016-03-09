@@ -3328,6 +3328,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     CGF.CGM.OpenMPSupport.setOrdered(false);
     CGF.CGM.OpenMPSupport.setDistribute(true);
 
+    printf(" In Combined Nest region\n");
+
     // Implement a new for loop.
     CGBuilderTy &Builder = CGF.Builder;
 
@@ -3386,6 +3388,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // Init LB
     llvm::Value *LB = 0;
 
+    printf(" In Combined Nest region: Set LB\n");
     if (StmtHasScheduleStaticOne){
       // Init LB with what would be the value in the combined construct case.
       LB = Builder.CreateLoad(OmpThreadNum);
@@ -3656,6 +3659,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // Bld.CreateStore(Bld.getInt32(32), SimdNumLanes);
     Bld.CreateStore(Bld.CreateCall(Get_num_threads(), {}), SimdNumLanes);
 
+    printf(" Compute NumWarps\n");
     // Use all cuda threads as lanes - parallel regions will change this
     // ASSUMPTION: thread_limit must be divisible by 32
     llvm::Value *const32 = Bld.getInt32(5); // 2^5
@@ -3696,6 +3700,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // Each thread does this.
     // So now Each Thread will know its lane ID (for the SIMD following)
+    printf(" Compute SimdLaneNum\n");
     Bld.CreateStore(Bld.CreateAnd(Bld.CreateCall(Get_thread_num(), {}),
                                   Bld.CreateSub(Bld.CreateLoad(SimdNumLanes),
                                                 Bld.getInt32(1))),
@@ -3708,11 +3713,13 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // executing S1.
     llvm::Value *globalTid = Bld.CreateAdd(Bld.CreateCall(Get_thread_num(), {}), Bld.CreateMul(
         Bld.CreateCall(Get_num_threads(), {}), Bld.CreateCall(Get_team_num(), {})));
+    printf(" Compute globalTid\n");
     Bld.CreateStore(globalTid, CudaGlobalThreadId);
 
     // Get the div of the globalTid with the size of a warp.
     llvm::Value *ompTid = Bld.CreateSExt(globalTid, VarTy);
     ompTid = Bld.CreateAShr(ompTid, const32);
+    printf(" Compute OmpTid\n");
     Bld.CreateStore(ompTid, OmpThreadNum);
 
     // Lane ID: each thread has a lane ID which is between 0 and 31.
@@ -3720,6 +3727,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // When SimdNumLanes is 1 then it SHOULD mean that all threads are
     // already in use and no actual SIMD-ization is going to happen.
     llvm::Value *LaneID = Bld.CreateSub(globalTid, Bld.CreateMul(OmpThreadNum, Bld.getInt32(32)));
+    printf(" Compute SimdLocalLaneId\n");
     Bld.CreateStore(LaneID, SimdLocalLaneId);
 
     // ============= Finished the Preamble of the Loop Nest ==============
@@ -3730,6 +3738,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // Ideally we would have our own way of generating the code so that
     // we do not depend on the RTL
+
+    printf(" Enter Combined Nest region\n");
 
     EmitOMPCombinedNestDirectiveLoop(DKind, SKind, S, CGF, TgtFunName,
                                      StmtHasScheduleStaticOne);
