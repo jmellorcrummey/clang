@@ -29,26 +29,26 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   //
 
   /// \brief Get the GPU warp size.
-  llvm::Value *GetNVPTXWarpSize(CodeGenFunction &CGF);
+  llvm::Value *getNVPTXWarpSize(CodeGenFunction &CGF);
 
   /// \brief Get the id of the current thread on the GPU.
-  llvm::Value *GetNVPTXThreadID(CodeGenFunction &CGF);
+  llvm::Value *getNVPTXThreadID(CodeGenFunction &CGF);
 
   /// \brief Get the id of the current block on the GPU.
-  llvm::Value *GetNVPTXBlockID(CodeGenFunction &CGF);
+  llvm::Value *getNVPTXBlockID(CodeGenFunction &CGF);
 
   // \brief Get the maximum number of threads in a block of the GPU.
-  llvm::Value *GetNVPTXNumThreads(CodeGenFunction &CGF);
+  llvm::Value *getNVPTXNumThreads(CodeGenFunction &CGF);
 
   /// \brief Get barrier to synchronize all threads in a block.
-  void GetNVPTXCTABarrier(CodeGenFunction &CGF);
+  void getNVPTXCTABarrier(CodeGenFunction &CGF);
 
   /// \brief Get barrier #n to synchronize selected (multiple of 32) threads in
   /// a block.
-  void GetNVPTXBarrier(CodeGenFunction &CGF, int ID, int NumThreads);
+  void getNVPTXBarrier(CodeGenFunction &CGF, int ID, int NumThreads);
 
   // \brief Synchronize all GPU threads in a block.
-  void SyncCTAThreads(CodeGenFunction &CGF);
+  void syncCTAThreads(CodeGenFunction &CGF);
 
   //
   // OMP calls.
@@ -61,18 +61,18 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   /// E.g: If NumThreads is 33, master id is 32.
   ///      If NumThreads is 64, master id is 32.
   ///      If NumThreads is 1024, master id is 992.
-  llvm::Value *GetMasterThreadID(CodeGenFunction &CGF);
+  llvm::Value *getMasterThreadID(CodeGenFunction &CGF);
 
   /// \brief Get number of OMP workers for parallel region after subtracting
   /// the master warp.
-  llvm::Value *GetNumWorkers(CodeGenFunction &CGF);
+  llvm::Value *getNumWorkers(CodeGenFunction &CGF);
 
   /// \brief Get thread id in team.
   /// FIXME: Remove the expensive remainder operation.
-  llvm::Value *GetTeamThreadId(CodeGenFunction &CGF);
+  llvm::Value *getTeamThreadId(CodeGenFunction &CGF);
 
   /// \brief Get global thread id.
-  llvm::Value *GetGlobalThreadId(CodeGenFunction &CGF);
+  llvm::Value *getGlobalThreadId(CodeGenFunction &CGF);
 
   //
   // Private state and methods.

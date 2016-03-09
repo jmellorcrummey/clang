@@ -67,12 +67,12 @@ protected:
   /// \param CodeGen Lambda codegen specific to an accelerator device.
   /// An oulined function may not be an entry if, e.g. the if clause always
   /// evaluates to false.
-  void emitTargetOutlinedFunctionHelper(const OMPExecutableDirective &D,
-                                        StringRef ParentName,
-                                        llvm::Function *&OutlinedFn,
-                                        llvm::Constant *&OutlinedFnID,
-                                        bool IsOffloadEntry,
-                                        const RegionCodeGenTy &CodeGen);
+  virtual void emitTargetOutlinedFunctionHelper(const OMPExecutableDirective &D,
+                                                StringRef ParentName,
+                                                llvm::Function *&OutlinedFn,
+                                                llvm::Constant *&OutlinedFnID,
+                                                bool IsOffloadEntry,
+                                                const RegionCodeGenTy &CodeGen);
 
   /// \brief Emits object of ident_t type with info for source location.
   /// \param Flags Flags for OpenMP location.
