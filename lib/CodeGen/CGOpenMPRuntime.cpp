@@ -4631,6 +4631,20 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       Bld.CreateBr(SynchronizeAndNextState);
     }
 
+    if (CGF.combinedSimd) {
+      // This may need to be moved potentially
+      // We want to sync at the end of the SIMD.
+      Bld.CreateBr(CGF.SyncAfterSimdBlock);
+      Bld.SetInsertPoint(CGF.SyncAfterSimdBlock);
+      Bld.CreateCall(Get_syncthreads(), {});
+      // llvm::Value *isNotLaneMaster = Bld.CreateICmpNE(Bld.CreateLoad(SimdLocalLaneId), Bld.getInt32(0));
+      // llvm::BasicBlock *StartPostSimdRegion = llvm::BasicBlock::Create(
+      //   CGM.getLLVMContext(), ".start.post.simd.region", CGF.CurFn);
+      // Bld.CreateCondBr(isNotLaneMaster, CGF.SyncAfterCombinedBlock, StartPostSimdRegion);
+      // Bld.SetInsertPoint(StartPostSimdRegion);
+      Bld.CreateBr(NextRegionBlock);
+    }
+
     // start inserting new region statements into next switch case
     Bld.SetInsertPoint(NextRegionBlock);
 
@@ -4673,15 +4687,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       NextRegion = llvm::BasicBlock::Create(CGM.getLLVMContext(),
                                            ".seq.reg.code", CGF.CurFn);
 
-      if (!CGF.combinedSimd){
-        Bld.CreateCondBr(
-            Bld.CreateICmpNE(Bld.CreateCall(Get_thread_num(), {}), Bld.getInt32(0)),
-            SynchronizeAndNextState, NextRegion);
-      } else {
-        Bld.CreateCondBr(
-            Bld.CreateICmpNE(Bld.CreateCall(Get_thread_num(), {}), Bld.getInt32(0)),
-            CGF.SyncAfterCombinedBlock, NextRegion);
-      }
+      // Can not happen for combinedSimd
+      Bld.CreateCondBr(
+          Bld.CreateICmpNE(Bld.CreateCall(Get_thread_num(), {}), Bld.getInt32(0)),
+          SynchronizeAndNextState, NextRegion);
     }
 
     Bld.SetInsertPoint(NextRegion);
@@ -4703,19 +4712,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // restore last iteration value into LoopCount variable because
     // the explicit SIMD increment is NumLanes-strided
     Bld.CreateStore(Bld.CreateLoad(LoopCount), LoopIndex);
-
-    if (CGF.combinedSimd) {
-      // This may need to be moved potentially
-      // We want to sync at the end of the SIMD.
-      Bld.CreateBr(CGF.SyncAfterSimdBlock);
-      Bld.SetInsertPoint(CGF.SyncAfterSimdBlock);
-      Bld.CreateCall(Get_syncthreads(), {});
-      llvm::Value *isNotLaneMaster = Bld.CreateICmpNE(Bld.CreateLoad(SimdLocalLaneId), Bld.getInt32(0));
-      llvm::BasicBlock *StartPostSimdRegion = llvm::BasicBlock::Create(
-        CGM.getLLVMContext(), ".start.post.simd.region", CGF.CurFn);
-      Bld.CreateCondBr(isNotLaneMaster, CGF.SyncAfterCombinedBlock, StartPostSimdRegion);
-      Bld.SetInsertPoint(StartPostSimdRegion);
-    }
   }
 
   // called when entering a workshare region
