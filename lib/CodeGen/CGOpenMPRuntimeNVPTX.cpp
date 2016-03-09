@@ -48,6 +48,10 @@ void CGOpenMPRuntimeNVPTX::emitTeamsCall(CodeGenFunction &CGF,
                                     llvm::Value *OutlinedFn,
                                     ArrayRef<llvm::Value *> CapturedVars) {
 
-  // just emit the statements in the teams region, no need for outlining
-  CGF.EmitStmt(cast<CapturedStmt>(D.getAssociatedStmt())->getCapturedStmt());
+  // just emit the statements in the teams region inlined
+  auto &&CodeGen = [&D](CodeGenFunction &CGF) {
+    CGF.EmitStmt(cast<CapturedStmt>(D.getAssociatedStmt())->getCapturedStmt());
+  };
+
+  emitInlinedDirective(CGF, OMPD_teams, CodeGen);
 }
