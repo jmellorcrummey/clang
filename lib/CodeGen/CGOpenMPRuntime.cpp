@@ -3571,7 +3571,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         llvm::Value *isLaneIdZero = Builder.CreateICmpNE(Builder.CreateLoad(SimdLocalLaneId),
                                                          Builder.getInt32(0));
         Builder.CreateCondBr(isLaneIdZero, StartRegionS1, CGF.EndRegionS1);
-        SetInsertPoint(StartRegionS1);
+        Builder.SetInsertPoint(StartRegionS1);
         CGF.EmitStmt(Body);
       }
       // After Emiting the body I need to create the sync point.
@@ -3658,9 +3658,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // Use all cuda threads as lanes - parallel regions will change this
     // ASSUMPTION: thread_limit must be divisible by 32
-    llvm::Value *const32 = Builder.getInt32(5); // 2^5
-    llvm::Value *NumWarps = Builder.CreateSExt(Bld.CreateCall(Get_num_threads(), {}), VarTy);
-    NumWarps = Builder.CreateAShr(NumWarps, const32);
+    llvm::Value *const32 = Bld.getInt32(5); // 2^5
+    llvm::Value *NumWarps = Bld.CreateSExt(Bld.CreateCall(Get_num_threads(), {}), VarTy);
+    NumWarps = Bld.CreateAShr(NumWarps, const32);
     Bld.CreateStore(NumWarps, OmpNumThreads);
 
     // More code gen for team master
@@ -3706,13 +3706,13 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // Since this operaiton is happening for all threads then each group of 32 threads will receive the
     // same OMP thread ID. We must be careful to exclude the threads non-warp master threads from
     // executing S1.
-    llvm::Value *globalTid = Builder.CreateAdd(Builder.CreateCall(Get_thread_num(), {}), Builder.CreateMul(
-        Builder.CreateCall(Get_num_threads(), {}), Builder.CreateCall(Get_team_num(), {})));
+    llvm::Value *globalTid = Builder.CreateAdd(Bld.CreateCall(Get_thread_num(), {}), Bld.CreateMul(
+        Bld.CreateCall(Get_num_threads(), {}), Bld.CreateCall(Get_team_num(), {})));
     Bld.CreateStore(globalTid, CudaGlobalThreadId);
 
     // Get the div of the globalTid with the size of a warp.
-    llvm::Value *ompTid = Builder.CreateSExt(globalTid, VarTy);
-    ompTid = Builder.CreateAShr(ompTid, const32);
+    llvm::Value *ompTid = Bld.CreateSExt(globalTid, VarTy);
+    ompTid = Bld.CreateAShr(ompTid, const32);
     Bld.CreateStore(ompTid, OmpThreadNum);
 
     // Lane ID: each thread has a lane ID which is between 0 and 31.
@@ -4676,7 +4676,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // the explicit SIMD increment is NumLanes-strided
     Bld.CreateStore(Bld.CreateLoad(LoopCount), LoopIndex);
 
-    if (combinedSimd) {
+    if (CGF.combinedSimd) {
       // This may need to be moved potentially
       // We want to sync at the end of the SIMD.
       Bld.CreateBr(CGF.SyncAfterSimdBlock);
