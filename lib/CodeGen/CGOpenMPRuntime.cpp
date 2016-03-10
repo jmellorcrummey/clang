@@ -3677,7 +3677,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // Use all cuda threads as lanes - parallel regions will change this
     // ASSUMPTION: thread_limit must be divisible by 32
     llvm::Value *const32 = Bld.getInt32(5); // 2^5
-    llvm::Value *NumWarps = Bld.CreateSExt(Bld.CreateCall(Get_num_threads(), {}), VarTy);
+    llvm::Value *NumWarps = Bld.CreateCall(Get_num_threads(), {});
     NumWarps = Bld.CreateAShr(NumWarps, const32);
     Bld.CreateStore(NumWarps, OmpNumThreads);
 
@@ -3733,8 +3733,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     Bld.CreateStore(globalTid, CudaGlobalThreadId);
 
     // Get the div of the globalTid with the size of a warp.
-    llvm::Value *ompTid = Bld.CreateSExt(globalTid, VarTy);
-    ompTid = Bld.CreateAShr(ompTid, const32);
+    // llvm::Value *ompTid = Bld.CreateSExt(globalTid, VarTy);
+    llvm::Value *ompTid = Bld.CreateAShr(globalTid, const32);
     printf(" Compute OmpTid\n");
     OmpThreadNum = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "OmpThreadNum");
     Bld.CreateStore(ompTid, OmpThreadNum);
