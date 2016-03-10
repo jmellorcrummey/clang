@@ -3571,9 +3571,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         // have to keep up to date the loop index.
 
         // Only allow warp masters to executes S1.
-        llvm::Value *isLaneIdZero = Builder.CreateICmpNE(Builder.CreateLoad(SimdLocalLaneId),
-                                                         Builder.getInt32(0));
-        Builder.CreateCondBr(isLaneIdZero, StartRegionS1, CGF.EndRegionS1);
+        llvm::Value *isNotLaneIdZero = Builder.CreateICmpNE(Builder.CreateLoad(SimdLocalLaneId),
+                                                            Builder.getInt32(0));
+        Builder.CreateCondBr(isNotLaneIdZero, CGF.EndRegionS1, StartRegionS1);
         Builder.SetInsertPoint(StartRegionS1);
         CGF.EmitStmt(Body);
       }
@@ -3581,7 +3581,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       // Don't sync or anything, just go ahead computing the INC
       // with all threads!
       Builder.CreateBr(CGF.SyncAfterCombinedBlock);
-      //Builder.SetInsertPoint(CGF.SyncAfterCombinedBlock);
+      Builder.SetInsertPoint(CGF.SyncAfterCombinedBlock);
       //Builder.CreateCall(Get_syncthreads(), {});
       Builder.CreateBr(IncCombinedFor);
     }
