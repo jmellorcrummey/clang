@@ -3672,8 +3672,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     Bld.SetInsertPoint(MasterInit);
 
     // Use all CUDA threads but in batches of 32
-    // Bld.CreateStore(Bld.getInt32(32), SimdNumLanes);
-    Bld.CreateStore(Bld.CreateCall(Get_num_threads(), {}), SimdNumLanes);
+    Bld.CreateStore(Bld.getInt32(32), SimdNumLanes);
+    //Bld.CreateStore(Bld.CreateCall(Get_num_threads(), {}), SimdNumLanes);
 
     printf(" Compute NumWarps\n");
     // Use all cuda threads as lanes - parallel regions will change this
@@ -3776,7 +3776,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     EmitOMPCombinedNestDirectiveLoop(DKind, SKind, S, CGF, TgtFunName,
                                      StmtHasScheduleStaticOne);
 
-
     // ============= Exit parallel region ==============
 
     // Decrement the nesting level
@@ -3791,6 +3790,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // we need to inspect the previous layer to understand what type
     // of end we need
     PopParallelRegion();
+
+    SetNumSimdLanesPerTargetRegion(32);
 
     //Call previous method, the one used in the control loop.
     //Try to avoid the jumps back to control loop code blocks.
