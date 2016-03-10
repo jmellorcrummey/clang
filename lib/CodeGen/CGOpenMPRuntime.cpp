@@ -3620,6 +3620,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
           CGF.CGM.getModule().getGlobalVariable(CudaThreadsInParallelName);
     if (!SimdNumLanes)
       SimdNumLanes = CGF.CGM.getModule().getGlobalVariable(SimdNumLanesName);
+    if (!OmpNumThreads)
+      OmpNumThreads = CGF.CGM.getModule().getGlobalVariable(OmpNumThreads);
 
     if (!CudaThreadsInParallel)
       CudaThreadsInParallel = new llvm::GlobalVariable(
@@ -3683,15 +3685,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // More code gen for team master
     llvm::Value *OmpHandle = &CGF.CurFn->getArgumentList().back();
-
-    // Add global for thread_limit that is kept updated by the CUDA offloading
-    // RTL (one per kernel)
-    // init to value (0) that will provoke default being used
-    // this needs to happen for both combined constructs and control loop cases
-    ThreadLimitGlobal = new llvm::GlobalVariable(
-        CGF.CGM.getModule(), Bld.getInt32Ty(), false,
-        llvm::GlobalValue::ExternalLinkage, Bld.getInt32(0),
-        TgtFunName + Twine("_thread_limit"));
 
     // first thing of sequential region:
     // initialize the state of the OpenMP rt library on the GPU
@@ -3981,17 +3974,17 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     } else if (applyNestedSimd){
       // Set a flag to true to mark the use of a simfplified Code Gen path
       CGF.combinedSimd = true;
+
+      ThreadLimitGlobal = new llvm::GlobalVariable(
+            CGF.CGM.getModule(), Bld.getInt32Ty(), false,
+            llvm::GlobalValue::ExternalLinkage, Bld.getInt32(0),
+            TgtFunName + Twine("_thread_limit"));
       
       // Choose a different code gen path if shared memory need not be used.
       if (!CGF.useSharedMemory){
         // If the directives contain a reduction clause then we insert appropriate
         // code before the main loop.
         const OMPClause *reduction_C = StmtHasReductionClause(S, CGF, SKind);
-
-        ThreadLimitGlobal = new llvm::GlobalVariable(
-            CGF.CGM.getModule(), Bld.getInt32Ty(), false,
-            llvm::GlobalValue::ExternalLinkage, Bld.getInt32(0),
-            TgtFunName + Twine("_thread_limit"));
 
         // Emit combined construct code.
         EmitOMPCombinedSimdDirectiveLoop(DKind, SKind, S, CGF, TgtFunName, reduction_C);
