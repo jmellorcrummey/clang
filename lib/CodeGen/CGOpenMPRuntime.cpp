@@ -3749,9 +3749,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     OMPRegionTypesStack.push_back(OMP_Parallel);
 
-    // clear up the data structure that will be used to determine the
-    // optimal amount of simd lanes to be used in this region
-    SimdAndWorksharingNesting.reset();
+    // // clear up the data structure that will be used to determine the
+    // // optimal amount of simd lanes to be used in this region
+    // SimdAndWorksharingNesting.reset();
 
     // TO DO: figure out the value that goes in here.
     // Bld.CreateStore(PrepareParallel, CudaThreadsInParallel);
@@ -3791,7 +3791,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // of end we need
     PopParallelRegion();
 
-    SetNumSimdLanesPerTargetRegion(32);
+    // SetNumSimdLanesPerTargetRegion(32);
 
     //Call previous method, the one used in the control loop.
     //Try to avoid the jumps back to control loop code blocks.
