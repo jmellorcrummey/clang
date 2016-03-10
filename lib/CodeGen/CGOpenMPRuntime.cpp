@@ -3672,8 +3672,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     Bld.SetInsertPoint(MasterInit);
 
     // Use all CUDA threads but in batches of 32
-    Bld.CreateStore(Bld.getInt32(32), SimdNumLanes);
-    //Bld.CreateStore(Bld.CreateCall(Get_num_threads(), {}), SimdNumLanes);
+    // Bld.CreateStore(Bld.getInt32(32), SimdNumLanes);
+    Bld.CreateStore(Bld.CreateCall(Get_num_threads(), {}), SimdNumLanes);
 
     printf(" Compute NumWarps\n");
     // Use all cuda threads as lanes - parallel regions will change this
@@ -3744,6 +3744,11 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     Bld.CreateStore(LaneID, SimdLocalLaneId);
 
     // ============= Finished the Preamble of the Loop Nest ==============
+
+    // CodeGen for clauses (task init).
+    for (ArrayRef<OMPClause *>::iterator I = S.clauses().begin(), E =
+         S.clauses().end(); I != E; ++I)
+      CGF.EmitInitOMPClause(*(*I), S);
 
     // Handle the existence of the parallel for
 
@@ -4053,10 +4058,17 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // of lanes to be used and thus set a global variable that communicates
     // to the RTL on the host the exact number of CUDA threads to launch
     // This is constant at runtime
+    if (!CGF.combinedSimd) {
     new llvm::GlobalVariable(CGF.CGM.getModule(), Bld.getInt8Ty(), true,
                              llvm::GlobalValue::ExternalLinkage,
                              Bld.getInt8(GetNumSimdLanesPerTargetRegion()),
                              TgtFunName + Twine("_simd_info"));
+    } else {
+    new llvm::GlobalVariable(CGF.CGM.getModule(), Bld.getInt8Ty(), true,
+                             llvm::GlobalValue::ExternalLinkage,
+                             Bld.getInt8(32),
+                             TgtFunName + Twine("_simd_info"));
+    }
   }
 
   // For NVTPX the control loop is generated when a target construct is found
@@ -4509,7 +4521,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       // Insert memfence here.
       Bld.CreateBr(CGF.EndRegionS1);
       Bld.SetInsertPoint(CGF.EndRegionS1);
-      Bld.CreateCall(Get_memfence());
+      //Bld.CreateCall(Get_memfence());
+      Bld.CreateCall(Get_syncthreads());
       Bld.CreateBr(NextRegionBlock);
     }
 
