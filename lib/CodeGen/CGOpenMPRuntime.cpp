@@ -3578,9 +3578,11 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         CGF.EmitStmt(Body);
       }
       // After Emiting the body I need to create the sync point.
+      // Don't sync or anything, just go ahead computing the INC
+      // with all threads!
       Builder.CreateBr(CGF.SyncAfterCombinedBlock);
-      Builder.SetInsertPoint(CGF.SyncAfterCombinedBlock);
-      Builder.CreateCall(Get_syncthreads(), {});
+      //Builder.SetInsertPoint(CGF.SyncAfterCombinedBlock);
+      //Builder.CreateCall(Get_syncthreads(), {});
       Builder.CreateBr(IncCombinedFor);
     }
 
