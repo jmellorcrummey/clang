@@ -3621,7 +3621,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     if (!SimdNumLanes)
       SimdNumLanes = CGF.CGM.getModule().getGlobalVariable(SimdNumLanesName);
     if (!OmpNumThreads)
-      OmpNumThreads = CGF.CGM.getModule().getGlobalVariable(OmpNumThreads);
+      OmpNumThreads = CGF.CGM.getModule().getGlobalVariable(OmpNumThreadsName);
 
     if (!CudaThreadsInParallel)
       CudaThreadsInParallel = new llvm::GlobalVariable(
@@ -3745,6 +3745,26 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // ============= Finished the Preamble of the Loop Nest ==============
 
+    // Handle the existence of the parallel for
+
+    OMPRegionTypesStack.push_back(OMP_Parallel);
+
+    // clear up the data structure that will be used to determine the
+    // optimal amount of simd lanes to be used in this region
+    SimdAndWorksharingNesting.reset();
+
+    // TO DO: figure out the value that goes in here.
+    // Bld.CreateStore(PrepareParallel, CudaThreadsInParallel);
+
+    // Increment the nesting level
+    Bld.CreateStore(
+       Bld.CreateAdd(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
+       ParallelNesting);
+
+    PushNewParallelRegion(true);
+
+    // ============= Finished setting up parallel region ==============
+
     // Call the function which generates the code for the outer loop.
     // Inside this function resolve the body of the outer loop
     // which contains the SIMD pragma.
@@ -3753,9 +3773,24 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // we do not depend on the RTL
 
     printf(" Enter Combined Nest region\n");
-
     EmitOMPCombinedNestDirectiveLoop(DKind, SKind, S, CGF, TgtFunName,
                                      StmtHasScheduleStaticOne);
+
+
+    // ============= Exit parallel region ==============
+
+    // Decrement the nesting level
+    Bld.CreateStore(
+       Bld.CreateSub(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
+       ParallelNesting);
+
+    assert((OMPRegionTypesStack.back() == OMP_Parallel) &&
+          "Exiting a parallel region does not match stack state");
+    OMPRegionTypesStack.pop_back();
+
+    // we need to inspect the previous layer to understand what type
+    // of end we need
+    PopParallelRegion();
 
     //Call previous method, the one used in the control loop.
     //Try to avoid the jumps back to control loop code blocks.
@@ -4367,14 +4402,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   // TODO: integrate within GenerateNextLabel function
   void EnterSimdRegion(CodeGenFunction &CGF, ArrayRef<OMPClause *> Clauses) {
 
-    // if (CGF.combinedSimd){
-    //   // Insert memfence here.
-    //   Bld.CreateBr(CGF.EndRegionS1);
-    //   Bld.SetInsertPoint(CGF.EndRegionS1);
-    //   Bld.CreateCall(Get_memfence());
-    //   return;
-    // }
-
     printf("======> Inside EnterSimdRegion\n");
     // record that we hit a simd region both in the stack of pragmas and
     // in the bit vector used to calculate optimal number of lanes
@@ -4402,11 +4429,11 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         }
 
     // 2. no nesting worksharing constructs allowed
-//    if (InWorksharing()) {
-//      SerializeSimd = true;
-//      CGOpenMPRuntime::EnterSimdRegion(CGF, Clauses);
-//      return;
-//    }
+    // if (InWorksharing()) {
+    //   SerializeSimd = true;
+    //   CGOpenMPRuntime::EnterSimdRegion(CGF, Clauses);
+    //   return;
+    // }
 
     printf("======> Inside EnterSimdRegion 2\n");
     // can only use 32 lanes if there is no reduction clause
