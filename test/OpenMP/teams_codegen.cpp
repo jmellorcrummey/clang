@@ -26,6 +26,7 @@ int teams_argument_global_local(int a){
   #pragma omp target
   #pragma omp teams
   {
+    Gbla = comp;
     ++comp;
   }
 
@@ -339,4 +340,90 @@ int main (int argc, char **argv) {
 // CK5-NEXT: }
 
 #endif // CK5
+
+// Test target codegen - host bc file has to be created first.
+// RUN: %clang_cc1 -DCK5 -verify -fopenmp -x c++ -triple powerpc64le-unknown-unknown -omptargets=powerpc64le-ibm-linux-gnu -emit-llvm-bc %s -o %t-ppc-host.bc
+// RUN: %clang_cc1 -DCK5 -verify -fopenmp -x c++ -triple powerpc64le-unknown-unknown -omptargets=powerpc64le-ibm-linux-gnu -emit-llvm %s -fopenmp-is-device -omp-host-ir-file-path %t-ppc-host.bc -o - | FileCheck %s --check-prefix CK5 --check-prefix CK5-64
+// RUN: %clang_cc1 -DCK5 -fopenmp -x c++ -std=c++11 -triple powerpc64le-unknown-unknown -omptargets=powerpc64le-ibm-linux-gnu -emit-pch -fopenmp-is-device -omp-host-ir-file-path %t-ppc-host.bc -o %t %s
+// RUN: %clang_cc1 -DCK5 -fopenmp -x c++ -triple powerpc64le-unknown-unknown -omptargets=powerpc64le-ibm-linux-gnu -std=c++11 -fopenmp-is-device -omp-host-ir-file-path %t-ppc-host.bc -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s --check-prefix CK5 --check-prefix CK5-64
+// RUN: %clang_cc1 -DCK5 -verify -fopenmp -x c++ -triple i386-unknown-unknown -omptargets=i386-pc-linux-gnu -emit-llvm-bc %s -o %t-x86-host.bc
+// RUN: %clang_cc1 -DCK5 -verify -fopenmp -x c++ -triple i386-unknown-unknown -omptargets=i386-pc-linux-gnu -emit-llvm %s -fopenmp-is-device -omp-host-ir-file-path %t-x86-host.bc -o - | FileCheck %s --check-prefix CK5 --check-prefix CK5-32
+// RUN: %clang_cc1 -DCK5 -fopenmp -x c++ -std=c++11 -triple i386-unknown-unknown -omptargets=i386-pc-linux-gnu -emit-pch -fopenmp-is-device -omp-host-ir-file-path %t-x86-host.bc -o %t %s
+// RUN: %clang_cc1 -DCK5 -fopenmp -x c++ -triple i386-unknown-unknown -omptargets=i386-pc-linux-gnu -std=c++11 -fopenmp-is-device -omp-host-ir-file-path %t-x86-host.bc -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s --check-prefix CK5 --check-prefix CK5-32
+
+// expected-no-diagnostics
+#ifdef CK6
+
+// CK6-DAG: %ident_t = type { i32, i32, i32, i32, i8* }
+// CK6-DAG: [[STR:@.+]] = private unnamed_addr constant [23 x i8] c";unknown;unknown;0;0;;\00"
+// CK6-DAG: [[DEF_LOC_0:@.+]] = private unnamed_addr constant %ident_t { i32 0, i32 2, i32 0, i32 0, i8* getelementptr inbounds ([23 x i8], [23 x i8]* [[STR]], i32 0, i32 0) }
+// CK6-DEBUG-DAG: [[LOC1:@.+]] = private unnamed_addr constant [{{.+}} x i8] c";{{.*}}teams_codegen.cpp;main;[[@LINE+14]];9;;\00"
+// CK6-DEBUG-DAG: [[LOC2:@.+]] = private unnamed_addr constant [{{.+}} x i8] c";{{.*}}teams_codegen.cpp;tmain;[[@LINE+7]];9;;\00"
+
+int Gbla;
+long long Gblb;
+int &Gblc = Gbla;
+
+template <typename T>
+int tmain(T argc) {
+  int a = 10;
+  int b = 5;
+#pragma omp target
+#pragma omp teams num_teams(a) thread_limit(b)
+  {
+    Gblb = argc;
+    argc = 0;
+  }
+  return 0;
+}
+
+int main (int argc, char **argv) {
+  int a = 20;
+  int b = 5;
+#pragma omp target
+#pragma omp teams num_teams(a) thread_limit(b)
+  {
+  argc = 0;
+  }
+  return tmain(argv);
+}
+
+// CK6:  define {{.*}}void @{{[^,]+}}(i{{.+}} [[AP:%.+]], i{{.+}} [[BP:%.+]], i{{.+}} [[ARGC:.+]])
+// CK6:  [[AADDR:%.+]] = alloca i{{.+}}
+// CK6:  [[BADDR:%.+]] = alloca i{{.+}}
+// CK6:  [[ARGCADDR:%.+]] = alloca i{{.+}}
+// CK6:  [[GBL_TH_NUM:%.+]] = call i32 @__kmpc_global_thread_num(%ident_t* [[DEF_LOC_0]])
+// CK6:  store i{{.+}} [[AP]], i{{.+}}* [[AADDR]]
+// CK6:  store i{{.+}} [[BP]], i{{.+}}* [[BADDR]]
+// CK6:  store i{{.+}} [[ARGC]], i{{.+}}* [[ARGCADDR]]
+// CK6-64:  [[ACONV:%.+]] = bitcast i64* [[AADDR]] to i32*
+// CK6-64:  [[BCONV:%.+]] = bitcast i64* [[BADDR]] to i32*
+// CK6-64:  [[CONV:%.+]] = bitcast i64* [[ARGCADDR]] to i32*
+// CK6-64:  [[ACONVVAL:%.+]] = load i32, i32* [[ACONV]]
+// CK6-64:  [[BCONVVAL:%.+]] = load i32, i32* [[BCONV]]
+// CK6-32:  [[ACONVVAL:%.+]] = load i32, i32* [[AADDR]]
+// CK6-32:  [[BCONVVAL:%.+]] = load i32, i32* [[BADDR]]
+// CK6:  {{.+}} = call i32 @__kmpc_push_num_teams(%ident_t* [[DEF_LOC_0]], i32 [[GBL_TH_NUM]], i32 [[ACONVVAL]], i32 [[BCONVVAL]])
+// CK6-64:  call void (%ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_teams(%ident_t* [[DEF_LOC_0]], i32 1, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, i32*)* @.omp_outlined. to void (i32*, i32*, ...)*), i32* [[CONV]])
+// CK6-32:  call void (%ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_teams(%ident_t* [[DEF_LOC_0]], i32 1, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, i32*)* @.omp_outlined. to void (i32*, i32*, ...)*), i32* [[ARGCADDR]])
+
+// CK6:  define {{.*}}void @{{[^,]+}}(i{{.+}} dereferenceable({{.+}}) [[AP:%.+]], i{{.+}} dereferenceable({{.+}}) [[BP:%.+]], i{{.+}} dereferenceable({{.+}}) [[ARGC:%.+]])
+// CK6:  [[AADDR:%.+]] = alloca i{{.+}}
+// CK6:  [[BADDR:%.+]] = alloca i{{.+}}
+// CK6:  [[ARGCADDR:%.+]] = alloca i{{.+}}
+// CK6:  [[GBL_TH_NUM:%.+]] = call i32 @__kmpc_global_thread_num(%ident_t* [[DEF_LOC_0]])
+// CK6:  store i{{.+}} [[AP]], i{{.+}}* [[AADDR]]
+// CK6:  store i{{.+}} [[BP]], i{{.+}}* [[BADDR]]
+// CK6:  store i{{.+}} [[ARGC]], i{{.+}}* [[ARGCADDR]]
+// CK6:  [[A_ADDR_VAL:%.+]] = load i32*, i32** [[AADDR]]
+// CK6:  [[B_ADDR_VAL:%.+]] = load i32*, i32** [[BADDR]]
+// CK6:  [[ARGC_ADDR_VAL:%.+]] = load i{{.+}}, i{{.+}}* [[ARGCADDR]]
+// CK6:  [[A_VAL:%.+]] = load i32, i32* [[A_ADDR_VAL]]
+// CK6:  [[B_VAL:%.+]] = load i32, i32* [[B_ADDR_VAL]]
+// CK6:  {{.+}} = call i32 @__kmpc_push_num_teams(%ident_t* [[DEF_LOC_0]], i32 [[GBL_TH_NUM]], i32 [[A_VAL]], i32 [[B_VAL]])
+// CK6:  call void (%ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_teams(%ident_t* [[DEF_LOC_0]], i32 1, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, i{{.+}})* @.omp_outlined.{{.+}} to void (i32*, i32*, ...)*), i{{.+}} [[ARGC_ADDR_VAL]])
+// CK6:  ret void
+// CK6-NEXT: }
+
+#endif // CK6
 #endif
