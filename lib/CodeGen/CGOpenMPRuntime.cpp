@@ -3575,7 +3575,47 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
                                                             Builder.getInt32(0));
         Builder.CreateCondBr(isNotLaneIdZero, CGF.EndRegionS1, StartRegionS1);
         Builder.SetInsertPoint(StartRegionS1);
+
+        // ============= Enter parallel region =============
+
+        // Handle the existence of the parallel for
+
+        OMPRegionTypesStack.push_back(OMP_Parallel);
+
+        // // clear up the data structure that will be used to determine the
+        // // optimal amount of simd lanes to be used in this region
+        // SimdAndWorksharingNesting.reset();
+
+        // TO DO: figure out the value that goes in here.
+        // Bld.CreateStore(PrepareParallel, CudaThreadsInParallel);
+
+        // Increment the nesting level
+        Bld.CreateStore(
+           Bld.CreateAdd(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
+           ParallelNesting);
+
+        PushNewParallelRegion(true);
+
+        // Emit Body
         CGF.EmitStmt(Body);
+
+        // ============= Exit parallel region ==============
+
+        // Decrement the nesting level
+        Bld.CreateStore(
+           Bld.CreateSub(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
+           ParallelNesting);
+
+        assert((OMPRegionTypesStack.back() == OMP_Parallel) &&
+              "Exiting a parallel region does not match stack state");
+        OMPRegionTypesStack.pop_back();
+
+        // we need to inspect the previous layer to understand what type
+        // of end we need
+        PopParallelRegion();
+
+        // SetNumSimdLanesPerTargetRegion(32);
+
       }
       // After Emiting the body I need to create the sync point.
       // Don't sync or anything, just go ahead computing the INC
@@ -3750,24 +3790,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // ============= Finished the Preamble of the Loop Nest ==============
 
-    // Handle the existence of the parallel for
-
-    OMPRegionTypesStack.push_back(OMP_Parallel);
-
-    // // clear up the data structure that will be used to determine the
-    // // optimal amount of simd lanes to be used in this region
-    // SimdAndWorksharingNesting.reset();
-
-    // TO DO: figure out the value that goes in here.
-    // Bld.CreateStore(PrepareParallel, CudaThreadsInParallel);
-
-    // Increment the nesting level
-    Bld.CreateStore(
-       Bld.CreateAdd(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
-       ParallelNesting);
-
-    PushNewParallelRegion(true);
-
     // ============= Finished setting up parallel region ==============
 
     // Call the function which generates the code for the outer loop.
@@ -3780,23 +3802,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     printf(" Enter Combined Nest region\n");
     EmitOMPCombinedNestDirectiveLoop(DKind, SKind, S, CGF, TgtFunName,
                                      StmtHasScheduleStaticOne);
-
-    // ============= Exit parallel region ==============
-
-    // Decrement the nesting level
-    Bld.CreateStore(
-       Bld.CreateSub(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
-       ParallelNesting);
-
-    assert((OMPRegionTypesStack.back() == OMP_Parallel) &&
-          "Exiting a parallel region does not match stack state");
-    OMPRegionTypesStack.pop_back();
-
-    // we need to inspect the previous layer to understand what type
-    // of end we need
-    PopParallelRegion();
-
-    // SetNumSimdLanesPerTargetRegion(32);
 
     //Call previous method, the one used in the control loop.
     //Try to avoid the jumps back to control loop code blocks.
