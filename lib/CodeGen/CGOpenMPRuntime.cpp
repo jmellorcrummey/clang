@@ -425,6 +425,9 @@ enum OpenMPSchedType {
   OMP_ord_runtime = 69,
   OMP_ord_auto = 70,
   OMP_sch_default = OMP_sch_static,
+  /// \brief dist_schedule types
+  OMP_dist_sch_static_chunked = 91,
+  OMP_dist_sch_static = 92,
 };
 
 enum OpenMPRTLFunction {
@@ -631,10 +634,8 @@ emitCombinerOrInitializer(CodeGenModule &CGM, QualType Ty,
                                /*Id=*/nullptr, PtrTy);
   Args.push_back(&OmpInParm);
   Args.push_back(&OmpOutParm);
-  FunctionType::ExtInfo Info;
   auto &FnInfo =
-      CGM.getTypes().arrangeFreeFunctionDeclaration(C.VoidTy, Args, Info,
-                                                    /*isVariadic=*/false);
+      CGM.getTypes().arrangeBuiltinFunctionDeclaration(C.VoidTy, Args);
   auto *FnTy = CGM.getTypes().GetFunctionType(FnInfo);
   auto *Fn = llvm::Function::Create(
       FnTy, llvm::GlobalValue::InternalLinkage,
@@ -1562,9 +1563,8 @@ llvm::Function *CGOpenMPRuntime::emitThreadPrivateVarDefinition(
                             /*Id=*/nullptr, CGM.getContext().VoidPtrTy);
       Args.push_back(&Dst);
 
-      auto &FI = CGM.getTypes().arrangeFreeFunctionDeclaration(
-          CGM.getContext().VoidPtrTy, Args, FunctionType::ExtInfo(),
-          /*isVariadic=*/false);
+      auto &FI = CGM.getTypes().arrangeBuiltinFunctionDeclaration(
+          CGM.getContext().VoidPtrTy, Args);
       auto FTy = CGM.getTypes().GetFunctionType(FI);
       auto Fn = CGM.CreateGlobalInitOrDestructFunction(
           FTy, ".__kmpc_global_ctor_.", FI, Loc);
@@ -1594,9 +1594,8 @@ llvm::Function *CGOpenMPRuntime::emitThreadPrivateVarDefinition(
                             /*Id=*/nullptr, CGM.getContext().VoidPtrTy);
       Args.push_back(&Dst);
 
-      auto &FI = CGM.getTypes().arrangeFreeFunctionDeclaration(
-          CGM.getContext().VoidTy, Args, FunctionType::ExtInfo(),
-          /*isVariadic=*/false);
+      auto &FI = CGM.getTypes().arrangeBuiltinFunctionDeclaration(
+          CGM.getContext().VoidTy, Args);
       auto FTy = CGM.getTypes().GetFunctionType(FI);
       auto Fn = CGM.CreateGlobalInitOrDestructFunction(
           FTy, ".__kmpc_global_dtor_.", FI, Loc);
@@ -1968,9 +1967,7 @@ static llvm::Value *emitCopyprivateCopyFunction(
                            C.VoidPtrTy);
   Args.push_back(&LHSArg);
   Args.push_back(&RHSArg);
-  FunctionType::ExtInfo EI;
-  auto &CGFI = CGM.getTypes().arrangeFreeFunctionDeclaration(
-      C.VoidTy, Args, EI, /*isVariadic=*/false);
+  auto &CGFI = CGM.getTypes().arrangeBuiltinFunctionDeclaration(C.VoidTy, Args);
   auto *Fn = llvm::Function::Create(
       CGM.getTypes().GetFunctionType(CGFI), llvm::GlobalValue::InternalLinkage,
       ".omp.copyprivate.copy_func", &CGM.getModule());
@@ -2182,11 +2179,25 @@ static OpenMPSchedType getRuntimeSchedule(OpenMPScheduleClauseKind ScheduleKind,
   llvm_unreachable("Unexpected runtime schedule");
 }
 
+/// \brief Map the OpenMP distribute schedule to the runtime enumeration.
+static OpenMPSchedType
+getRuntimeSchedule(OpenMPDistScheduleClauseKind ScheduleKind, bool Chunked) {
+  // only static is allowed for dist_schedule
+  return Chunked ? OMP_dist_sch_static_chunked : OMP_dist_sch_static;
+}
+
 bool CGOpenMPRuntime::isStaticNonchunked(OpenMPScheduleClauseKind ScheduleKind,
                                          bool Chunked) const {
   auto Schedule = getRuntimeSchedule(ScheduleKind, Chunked, /*Ordered=*/false);
   return Schedule == OMP_sch_static;
 }
+
+bool CGOpenMPRuntime::isStaticNonchunked(
+    OpenMPDistScheduleClauseKind ScheduleKind, bool Chunked) const {
+  auto Schedule = getRuntimeSchedule(ScheduleKind, Chunked);
+  return Schedule == OMP_dist_sch_static;
+}
+
 
 bool CGOpenMPRuntime::isDynamic(OpenMPScheduleClauseKind ScheduleKind) const {
   auto Schedule =
@@ -2228,6 +2239,55 @@ void CGOpenMPRuntime::emitForDispatchInit(CodeGenFunction &CGF,
   CGF.EmitRuntimeCall(createDispatchInitFunction(IVSize, IVSigned), Args);
 }
 
+static void emitForStaticInitCall(CodeGenFunction &CGF,
+                                  SourceLocation Loc,
+                                  llvm::Value * UpdateLocation,
+                                  llvm::Value * ThreadId,
+                                  llvm::Constant * ForStaticInitFunction,
+                                  OpenMPSchedType Schedule,
+                                  unsigned IVSize, bool IVSigned, bool Ordered,
+                                  Address IL, Address LB, Address UB,
+                                  Address ST, llvm::Value *Chunk) {
+  if (!CGF.HaveInsertPoint())
+     return;
+
+   assert(!Ordered);
+   assert(Schedule == OMP_sch_static || Schedule == OMP_sch_static_chunked ||
+          Schedule == OMP_ord_static || Schedule == OMP_ord_static_chunked ||
+          Schedule == OMP_dist_sch_static ||
+          Schedule == OMP_dist_sch_static_chunked);
+
+   // Call __kmpc_for_static_init(
+   //          ident_t *loc, kmp_int32 tid, kmp_int32 schedtype,
+   //          kmp_int32 *p_lastiter, kmp_int[32|64] *p_lower,
+   //          kmp_int[32|64] *p_upper, kmp_int[32|64] *p_stride,
+   //          kmp_int[32|64] incr, kmp_int[32|64] chunk);
+   if (Chunk == nullptr) {
+     assert((Schedule == OMP_sch_static || Schedule == OMP_ord_static ||
+             Schedule == OMP_dist_sch_static) &&
+            "expected static non-chunked schedule");
+     // If the Chunk was not specified in the clause - use default value 1.
+       Chunk = CGF.Builder.getIntN(IVSize, 1);
+   } else {
+     assert((Schedule == OMP_sch_static_chunked ||
+             Schedule == OMP_ord_static_chunked ||
+             Schedule == OMP_dist_sch_static_chunked) &&
+            "expected static chunked schedule");
+   }
+   llvm::Value *Args[] = {
+     UpdateLocation,
+     ThreadId,
+     CGF.Builder.getInt32(Schedule), // Schedule type
+     IL.getPointer(),                // &isLastIter
+     LB.getPointer(),                // &LB
+     UB.getPointer(),                // &UB
+     ST.getPointer(),                // &Stride
+     CGF.Builder.getIntN(IVSize, 1), // Incr
+     Chunk                           // Chunk
+   };
+   CGF.EmitRuntimeCall(ForStaticInitFunction, Args);
+}
+
 void CGOpenMPRuntime::emitForStaticInit(CodeGenFunction &CGF,
                                         SourceLocation Loc,
                                         OpenMPScheduleClauseKind ScheduleKind,
@@ -2235,41 +2295,27 @@ void CGOpenMPRuntime::emitForStaticInit(CodeGenFunction &CGF,
                                         bool Ordered, Address IL, Address LB,
                                         Address UB, Address ST,
                                         llvm::Value *Chunk) {
-  if (!CGF.HaveInsertPoint())
-    return;
-  OpenMPSchedType Schedule =
-    getRuntimeSchedule(ScheduleKind, Chunk != nullptr, Ordered);
-  assert(!Ordered);
-  assert(Schedule == OMP_sch_static || Schedule == OMP_sch_static_chunked ||
-         Schedule == OMP_ord_static || Schedule == OMP_ord_static_chunked);
+  OpenMPSchedType ScheduleNum = getRuntimeSchedule(ScheduleKind, Chunk != nullptr,
+                                                   Ordered);
+  auto *UpdatedLocation = emitUpdateLocation(CGF, Loc);
+  auto *ThreadId = getThreadID(CGF, Loc);
+  auto *StaticInitFunction = createForStaticInitFunction(IVSize, IVSigned);
+  emitForStaticInitCall(CGF, Loc, UpdatedLocation, ThreadId, StaticInitFunction,
+      ScheduleNum, IVSize, IVSigned, Ordered, IL, LB, UB, ST, Chunk);
+}
 
-  // Call __kmpc_for_static_init(
-  //          ident_t *loc, kmp_int32 tid, kmp_int32 schedtype,
-  //          kmp_int32 *p_lastiter, kmp_int[32|64] *p_lower,
-  //          kmp_int[32|64] *p_upper, kmp_int[32|64] *p_stride,
-  //          kmp_int[32|64] incr, kmp_int[32|64] chunk);
-  if (Chunk == nullptr) {
-    assert((Schedule == OMP_sch_static || Schedule == OMP_ord_static) &&
-           "expected static non-chunked schedule");
-    // If the Chunk was not specified in the clause - use default value 1.
-      Chunk = CGF.Builder.getIntN(IVSize, 1);
-  } else {
-    assert((Schedule == OMP_sch_static_chunked ||
-            Schedule == OMP_ord_static_chunked) &&
-           "expected static chunked schedule");
-  }
-  llvm::Value *Args[] = {
-      emitUpdateLocation(CGF, Loc),
-      getThreadID(CGF, Loc),
-      CGF.Builder.getInt32(Schedule), // Schedule type
-      IL.getPointer(),                // &isLastIter
-      LB.getPointer(),                // &LB
-      UB.getPointer(),                // &UB
-      ST.getPointer(),                // &Stride
-      CGF.Builder.getIntN(IVSize, 1), // Incr
-      Chunk                           // Chunk
-  };
-  CGF.EmitRuntimeCall(createForStaticInitFunction(IVSize, IVSigned), Args);
+void CGOpenMPRuntime::emitDistributeStaticInit(CodeGenFunction &CGF,
+    SourceLocation Loc, OpenMPDistScheduleClauseKind SchedKind,
+    unsigned IVSize, bool IVSigned,
+    bool Ordered, Address IL, Address LB,
+    Address UB, Address ST,
+    llvm::Value *Chunk) {
+  OpenMPSchedType ScheduleNum = getRuntimeSchedule(SchedKind, Chunk != nullptr);
+  auto *UpdatedLocation = emitUpdateLocation(CGF, Loc);
+  auto *ThreadId = getThreadID(CGF, Loc);
+  auto *StaticInitFunction = createForStaticInitFunction(IVSize, IVSigned);
+  emitForStaticInitCall(CGF, Loc, UpdatedLocation, ThreadId, StaticInitFunction,
+      ScheduleNum, IVSize, IVSigned, Ordered, IL, LB, UB, ST, Chunk);
 }
 
 void CGOpenMPRuntime::emitForStaticFinish(CodeGenFunction &CGF,
@@ -2472,9 +2518,7 @@ createOffloadingBinaryDescriptorFunction(CodeGenModule &CGM, StringRef Name,
 
   CodeGenFunction CGF(CGM);
   GlobalDecl();
-  auto &FI = CGM.getTypes().arrangeFreeFunctionDeclaration(
-      C.VoidTy, Args, FunctionType::ExtInfo(),
-      /*isVariadic=*/false);
+  auto &FI = CGM.getTypes().arrangeBuiltinFunctionDeclaration(C.VoidTy, Args);
   auto FTy = CGM.getTypes().GetFunctionType(FI);
   auto *Fn =
       CGM.CreateGlobalInitOrDestructFunction(FTy, Name, FI, SourceLocation());
@@ -2952,10 +2996,8 @@ emitProxyTaskFunction(CodeGenModule &CGM, SourceLocation Loc,
                                 KmpTaskTWithPrivatesPtrQTy.withRestrict());
   Args.push_back(&GtidArg);
   Args.push_back(&TaskTypeArg);
-  FunctionType::ExtInfo Info;
   auto &TaskEntryFnInfo =
-      CGM.getTypes().arrangeFreeFunctionDeclaration(KmpInt32Ty, Args, Info,
-                                                    /*isVariadic=*/false);
+      CGM.getTypes().arrangeBuiltinFunctionDeclaration(KmpInt32Ty, Args);
   auto *TaskEntryTy = CGM.getTypes().GetFunctionType(TaskEntryFnInfo);
   auto *TaskEntry =
       llvm::Function::Create(TaskEntryTy, llvm::GlobalValue::InternalLinkage,
@@ -3022,8 +3064,7 @@ static llvm::Value *emitDestructorsFunction(CodeGenModule &CGM,
   Args.push_back(&TaskTypeArg);
   FunctionType::ExtInfo Info;
   auto &DestructorFnInfo =
-      CGM.getTypes().arrangeFreeFunctionDeclaration(KmpInt32Ty, Args, Info,
-                                                    /*isVariadic=*/false);
+      CGM.getTypes().arrangeBuiltinFunctionDeclaration(KmpInt32Ty, Args);
   auto *DestructorFnTy = CGM.getTypes().GetFunctionType(DestructorFnInfo);
   auto *DestructorFn =
       llvm::Function::Create(DestructorFnTy, llvm::GlobalValue::InternalLinkage,
@@ -3097,10 +3138,8 @@ emitTaskPrivateMappingFunction(CodeGenModule &CGM, SourceLocation Loc,
     PrivateVarsPos[VD] = Counter;
     ++Counter;
   }
-  FunctionType::ExtInfo Info;
   auto &TaskPrivatesMapFnInfo =
-      CGM.getTypes().arrangeFreeFunctionDeclaration(C.VoidTy, Args, Info,
-                                                    /*isVariadic=*/false);
+      CGM.getTypes().arrangeBuiltinFunctionDeclaration(C.VoidTy, Args);
   auto *TaskPrivatesMapTy =
       CGM.getTypes().GetFunctionType(TaskPrivatesMapFnInfo);
   auto *TaskPrivatesMap = llvm::Function::Create(
@@ -3607,9 +3646,7 @@ static llvm::Value *emitReductionFunction(CodeGenModule &CGM,
                            C.VoidPtrTy);
   Args.push_back(&LHSArg);
   Args.push_back(&RHSArg);
-  FunctionType::ExtInfo EI;
-  auto &CGFI = CGM.getTypes().arrangeFreeFunctionDeclaration(
-      C.VoidTy, Args, EI, /*isVariadic=*/false);
+  auto &CGFI = CGM.getTypes().arrangeBuiltinFunctionDeclaration(C.VoidTy, Args);
   auto *Fn = llvm::Function::Create(
       CGM.getTypes().GetFunctionType(CGFI), llvm::GlobalValue::InternalLinkage,
       ".omp.reduction.reduction_func", &CGM.getModule());
