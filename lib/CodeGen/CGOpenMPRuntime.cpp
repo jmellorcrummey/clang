@@ -4751,8 +4751,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     llvm::Value *ExecuteSimdPtr = Bld.CreateGEP(ExecuteSimd, SimdGEPIdxs);
     Bld.CreateStore(Bld.getInt1(false), ExecuteSimdPtr);
 
-    restore last iteration value into LoopCount variable because
-    the explicit SIMD increment is NumLanes-strided
+    //restore last iteration value into LoopCount variable because
+    //the explicit SIMD increment is NumLanes-strided
     Bld.CreateStore(Bld.CreateLoad(LoopCount), LoopIndex);
   }
 
