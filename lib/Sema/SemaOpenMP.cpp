@@ -9333,8 +9333,7 @@ static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E) {
   bool AllowUnitySizeArraySection = true;
   bool AllowWholeSizeArraySection = true;
 
-  for (bool IsRightMostExpression = true; !RelevantExpr;
-       IsRightMostExpression = false) {
+  while (!RelevantExpr) {
     E = E->IgnoreParenImpCasts();
 
     if (auto *CurE = dyn_cast<DeclRefExpr>(E)) {
