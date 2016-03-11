@@ -3570,12 +3570,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         // We allow all threads to run the parallel loop since they
         // have to keep up to date the loop index.
 
-        // Only allow warp masters to executes S1.
-        llvm::Value *isNotLaneIdZero = Builder.CreateICmpNE(Builder.CreateLoad(SimdLocalLaneId),
-                                                            Builder.getInt32(0));
-        Builder.CreateCondBr(isNotLaneIdZero, CGF.EndRegionS1, StartRegionS1);
-        Builder.SetInsertPoint(StartRegionS1);
-
         // ============= Enter parallel region =============
 
         // Handle the existence of the parallel for
@@ -3584,16 +3578,62 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
         // // clear up the data structure that will be used to determine the
         // // optimal amount of simd lanes to be used in this region
-        // SimdAndWorksharingNesting.reset();
+        SimdAndWorksharingNesting.reset();
 
         // TO DO: figure out the value that goes in here.
         // Bld.CreateStore(PrepareParallel, CudaThreadsInParallel);
+        Builder.CreateStore(Builder.CreateCall(Get_num_threads(), {}), CudaThreadsInParallel);
 
         // Increment the nesting level
-        Bld.CreateStore(
-           Bld.CreateAdd(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
+        Builder.CreateStore(
+           Builder.CreateAdd(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
            ParallelNesting);
 
+        // Only allow warp masters to executes S1.
+        llvm::Value *isNotLaneIdZero = Builder.CreateICmpNE(Builder.CreateLoad(SimdLocalLaneId),
+                                                            Builder.getInt32(0));
+        Builder.CreateCondBr(isNotLaneIdZero, CGF.EndRegionS1, StartRegionS1);
+        Builder.SetInsertPoint(StartRegionS1);
+
+        // ============= Sequential region =================
+
+        llvm::Value *OmpHandle = &CGF.CurFn->getArgumentList().back();
+
+        // Add global for thread_limit that is kept updated by the CUDA offloading
+        // RTL (one per kernel)
+        // init to value (0) that will provoke default being used
+        // this needs to happen for both combined constructs and control loop cases
+        //ThreadLimitGlobal = new llvm::GlobalVariable(
+        //   CGF.CGM.getModule(), Builder.getInt32Ty(), false,
+        //   llvm::GlobalValue::ExternalLinkage, Builder.getInt32(0),
+        //   TgtFunName + Twine("_thread_limit"));
+
+        // first thing of sequential region:
+        // initialize the state of the OpenMP rt library on the GPU
+        // and pass thread limit global content to initialize thread_limit_var ICV
+        llvm::Value *InitArg[] = {OmpHandle,
+          Builder.CreateLoad(ThreadLimitGlobal)};
+        CGF.EmitRuntimeCall(OPENMPRTL_FUNC(kernel_init), makeArrayRef(InitArg));
+
+        // ============= Enter parallel region =============
+/*
+        // Handle the existence of the parallel for
+
+        OMPRegionTypesStack.push_back(OMP_Parallel);
+
+        // // clear up the data structure that will be used to determine the
+        // // optimal amount of simd lanes to be used in this region
+        SimdAndWorksharingNesting.reset();
+
+        // TO DO: figure out the value that goes in here.
+        // Bld.CreateStore(PrepareParallel, CudaThreadsInParallel);
+        Builder.CreateStore(Builder.CreateCall(Get_num_threads(), {}), CudaThreadsInParallel);
+
+        // Increment the nesting level
+        Builder.CreateStore(
+           Builder.CreateAdd(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
+           ParallelNesting);
+*/
         PushNewParallelRegion(true);
 
         // Emit Body
@@ -3602,8 +3642,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         // ============= Exit parallel region ==============
 
         // Decrement the nesting level
-        Bld.CreateStore(
-           Bld.CreateSub(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
+        Builder.CreateStore(
+           Builder.CreateSub(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
            ParallelNesting);
 
         assert((OMPRegionTypesStack.back() == OMP_Parallel) &&
@@ -3728,22 +3768,20 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     NumWarps = Bld.CreateAShr(NumWarps, const32);
     Bld.CreateStore(NumWarps, OmpNumThreads);
 
+    // Carry on with the rest of threads (the non-team-master ones)
+    Bld.CreateBr(NonMasterInit);
+    Bld.SetInsertPoint(NonMasterInit);
+    Bld.CreateCall(Get_syncthreads(), {});
+
     // More code gen for team master
-    llvm::Value *OmpHandle = &CGF.CurFn->getArgumentList().back();
+    //llvm::Value *OmpHandle = &CGF.CurFn->getArgumentList().back();
 
     // first thing of sequential region:
     // initialize the state of the OpenMP rt library on the GPU
     // and pass thread limit global content to initialize thread_limit_var ICV
-    llvm::Value *InitArg[] = {OmpHandle,
-      Bld.CreateLoad(ThreadLimitGlobal)};
-    CGF.EmitRuntimeCall(OPENMPRTL_FUNC(kernel_init), makeArrayRef(InitArg));
-
-    // Carry on with the rest of threads (the non-team-master ones)
-    Bld.CreateBr(NonMasterInit);
-
-    // Sync all threads in the team
-    Bld.SetInsertPoint(NonMasterInit);
-    Bld.CreateCall(Get_syncthreads(), {});
+    //llvm::Value *InitArg[] = {OmpHandle,
+    //  Bld.CreateLoad(ThreadLimitGlobal)};
+    //CGF.EmitRuntimeCall(OPENMPRTL_FUNC(kernel_init), makeArrayRef(InitArg));
 
     // set initial simd lane num, which could be changed later on
     // depending on safelen and num_threads clauses
@@ -3790,8 +3828,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // ============= Finished the Preamble of the Loop Nest ==============
 
-    // ============= Finished setting up parallel region ==============
-
     // Call the function which generates the code for the outer loop.
     // Inside this function resolve the body of the outer loop
     // which contains the SIMD pragma.
@@ -3803,9 +3839,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     EmitOMPCombinedNestDirectiveLoop(DKind, SKind, S, CGF, TgtFunName,
                                      StmtHasScheduleStaticOne);
 
-    //Call previous method, the one used in the control loop.
-    //Try to avoid the jumps back to control loop code blocks.
-    //CGF.EmitOMPDirectiveWithLoop(DKind, SKind, S)
+    // Call previous method, the one used in the control loop.
+    // Try to avoid the jumps back to control loop code blocks.
+    // CGF.EmitOMPDirectiveWithLoop(DKind, SKind, S)
 
     // To finish the region we have to call the Exit function after the
     // switch loop handling the control loop pragma combination is skipped.
