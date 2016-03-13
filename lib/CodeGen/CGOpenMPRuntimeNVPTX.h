@@ -99,6 +99,11 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
     void createWorkerFunction(CodeGenModule &CGM);
   };
 
+  // State information to track orphaned directives.
+  bool IsOrphaned;
+  // Track parallel nesting level.
+  int ParallelNestingLevel;
+
   /// \brief Emit the worker function for the current target region.
   void emitWorkerFunction(WorkerFunctionState &WST);
 
@@ -152,6 +157,26 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
                                   llvm::Function *&OutlinedFn,
                                   llvm::Constant *&OutlinedFnID,
                                   bool IsOffloadEntry) override;
+
+  // \brief Initialize state on entry to a target region.
+  void enterTarget();
+
+  // \brief Reset state on exit from a target region.
+  void exitTarget();
+
+  // \brief Test if a construct is always encountered at nesting level 0.
+  bool InL0();
+
+  // \brief Test if a construct is always encountered at nesting level 1.
+  bool InL1();
+
+  // \brief Test if a construct is always encountered at nesting level 1 or
+  // higher.
+  bool InL1Plus();
+
+  // \brief Test if the nesting level at which a construct is encountered is
+  // indeterminate.  This happens for orphaned parallel directives.
+  bool IndeterminateLevel();
 
 public:
   explicit CGOpenMPRuntimeNVPTX(CodeGenModule &CGM);
