@@ -3597,7 +3597,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
         // ============= Sequential region =================
 
-        llvm::Value *OmpHandle = &CGF.CurFn->getArgumentList().back();
+        // llvm::Value *OmpHandle = &CGF.CurFn->getArgumentList().back();
 
         // Add global for thread_limit that is kept updated by the CUDA offloading
         // RTL (one per kernel)
@@ -3611,9 +3611,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         // first thing of sequential region:
         // initialize the state of the OpenMP rt library on the GPU
         // and pass thread limit global content to initialize thread_limit_var ICV
-        llvm::Value *InitArg[] = {OmpHandle,
-          Builder.CreateLoad(ThreadLimitGlobal)};
-        CGF.EmitRuntimeCall(OPENMPRTL_FUNC(kernel_init), makeArrayRef(InitArg));
+        // llvm::Value *InitArg[] = {OmpHandle,
+        //   Builder.CreateLoad(ThreadLimitGlobal)};
+        // CGF.EmitRuntimeCall(OPENMPRTL_FUNC(kernel_init), makeArrayRef(InitArg));
 
         // ============= Enter parallel region =============
 /*
@@ -4787,7 +4787,11 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       SimdGEPIdxs.push_back(Bld.getInt32(0));
     } else {
       // simd in parallel region: lane master is warp master
-      SimdGEPIdxs.push_back(Bld.CreateCall(Get_omp_get_thread_num(), {}));
+      if (!CGF.combinedSimd){
+        SimdGEPIdxs.push_back(Bld.CreateCall(Get_omp_get_thread_num(), {}));
+      } else {
+        SimdGEPIdxs.push_back(Bld.CreateLoad(OmpThreadNum));
+      }
     }
     llvm::Value *ExecuteSimdPtr = Bld.CreateGEP(ExecuteSimd, SimdGEPIdxs);
     Bld.CreateStore(Bld.getInt1(false), ExecuteSimdPtr);
