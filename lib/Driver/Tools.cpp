@@ -3565,7 +3565,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // CUDA compilation may have multiple inputs (source file + results of
   // device-side compilations). All other jobs are expected to have exactly one
   // input.
-  bool IsCuda = types::isCuda(Input.getType());
+  bool IsCuda = JA.isOffloading(Action::OFFLOAD_CUDA);
   assert((IsCuda || Inputs.size() == 1) && "Unable to handle multiple inputs.");
 
   // Invoke ourselves in -cc1 mode.
@@ -3583,13 +3583,13 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     // particular compilation pass we're constructing here. For now we
     // can check which toolchain we're using and pick the other one to
     // extract the triple.
-    if (&getToolChain() ==
-        C.getSingleOffloadDeviceToolChain<Action::OFFLOAD_CUDA>())
+    if (JA.isDeviceOffloading(Action::OFFLOAD_CUDA))
       AuxToolChain = C.getOffloadingHostToolChain();
-    else if (&getToolChain() == C.getOffloadingHostToolChain())
+    else {
+      assert(C.isOffloadingHostKind(Action::OFFLOAD_CUDA) &&
+             "Expecting CUDA host toolchain.");
       AuxToolChain = C.getSingleOffloadDeviceToolChain<Action::OFFLOAD_CUDA>();
-    else
-      llvm_unreachable("Can't figure out CUDA compilation mode.");
+    }
     assert(AuxToolChain != nullptr && "No aux toolchain.");
     CmdArgs.push_back("-aux-triple");
     CmdArgs.push_back(Args.MakeArgString(AuxToolChain->getTriple().str()));
@@ -10883,10 +10883,9 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
       static_cast<const toolchains::CudaToolChain &>(getToolChain());
   assert(TC.getTriple().isNVPTX() && "Wrong platform");
 
-  std::vector<std::string> gpu_archs =
-      Args.getAllArgValues(options::OPT_march_EQ);
-  assert(gpu_archs.size() == 1 && "Exactly one GPU Arch required for ptxas.");
-  const std::string& gpu_arch = gpu_archs[0];
+  // Obtain architecture from the action.
+  const char *gpu_arch = JA.getOffloadingArch();
+  assert(gpu_arch && "Device action expected to have an architecture.");
 
   ArgStringList CmdArgs;
   CmdArgs.push_back(TC.getTriple().isArch64Bit() ? "-m64" : "-m32");
@@ -10960,12 +10959,19 @@ void NVPTX::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   CmdArgs.push_back(Args.MakeArgString(Output.getFilename()));
 
   for (const auto& II : Inputs) {
-    auto* A = cast<const CudaDeviceAction>(II.getAction());
+    auto *A = II.getAction();
+    assert(A->getInputs().size() == 1 &&
+           "Device offload action is expected to have a single input");
+    const char *gpu_arch = A->getOffloadingArch();
+    assert(gpu_arch &&
+           "Device action expected to have associated a GPU architecture!");
+
     // We need to pass an Arch of the form "sm_XX" for cubin files and
     // "compute_XX" for ptx.
-    const char *Arch = (II.getType() == types::TY_PP_Asm)
-                           ? A->getComputeArchName()
-                           : A->getGpuArchName();
+    const char *Arch =
+        (II.getType() == types::TY_PP_Asm)
+            ? toolchains::CudaToolChain::GpuArchToComputeName(gpu_arch)
+            : gpu_arch;
     CmdArgs.push_back(Args.MakeArgString(llvm::Twine("--image=profile=") +
                                          Arch + ",file=" + II.getFilename()));
   }

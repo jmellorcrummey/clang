@@ -12,6 +12,7 @@
 
 #include "clang/Driver/Types.h"
 #include "clang/Driver/Util.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 
 namespace llvm {
@@ -25,6 +26,8 @@ namespace opt {
 
 namespace clang {
 namespace driver {
+
+class ToolChain;
 
 /// Action - Represent an abstract compilation step to perform.
 ///
@@ -49,8 +52,7 @@ public:
   enum ActionClass {
     InputClass = 0,
     BindArchClass,
-    CudaDeviceClass,
-    CudaHostClass,
+    OffloadClass,
     PreprocessJobClass,
     PrecompileJobClass,
     AnalyzeJobClass,
@@ -70,10 +72,6 @@ public:
 
   // The offloading kind determines if this action is binded to a particular
   // programming model. Each entry reserves one bit.
-  //
-  // FIXME: This is currently used to indicate that toolchains are used in a
-  // given programming as well, but will be used here as well once a generic
-  // offloading action is implemented.
   enum OffloadKind {
     OFFLOAD_None = 0x00,
     OFFLOAD_CUDA = 0x01,
@@ -90,13 +88,24 @@ private:
   ActionList Inputs;
 
 protected:
+  /// Offload information. It has to be mutable as it needs to be adjusted if
+  /// actions are integrated.
+  /// \brief Multiple programming models may be supported simultaneously by the
+  /// same host. Therefore, the host offloading kind is a combination of kinds.
+  mutable unsigned OffloadingHostKind;
+  /// \brief Offloading kind of the device.
+  mutable OffloadKind OffloadingDeviceKind;
+  /// \brief The Offloading architecture associated with this action.
+  mutable const char *OffloadingArch;
+
   Action(ActionClass Kind, types::ID Type) : Action(Kind, ActionList(), Type) {}
   Action(ActionClass Kind, Action *Input, types::ID Type)
       : Action(Kind, ActionList({Input}), Type) {}
   Action(ActionClass Kind, Action *Input)
       : Action(Kind, ActionList({Input}), Input->getType()) {}
   Action(ActionClass Kind, const ActionList &Inputs, types::ID Type)
-      : Kind(Kind), Type(Type), Inputs(Inputs) {}
+      : Kind(Kind), Type(Type), Inputs(Inputs), OffloadingHostKind(0u),
+        OffloadingDeviceKind(OFFLOAD_None), OffloadingArch(nullptr) {}
 
 public:
   virtual ~Action();
@@ -118,6 +127,36 @@ public:
   input_const_iterator input_end() const { return Inputs.end(); }
   input_const_range inputs() const {
     return input_const_range(input_begin(), input_end());
+  }
+
+  std::string getOffloadingKindPrefix() const;
+  std::string getOffloadingFileNamePrefix(const ToolChain *TC) const;
+
+  /// \brief Set the device offload info of this action and propagate it to its
+  /// dependences.
+  void propagateDeviceOffloadInfo(OffloadKind OKind, const char *OArch) const;
+  /// \brief Append the host offload info of this action and propagate it to its
+  /// dependences.
+  void propagateHostOffloadInfo(unsigned OKinds, const char *OArch) const;
+  /// \brief Set the offload info of this action to be the same as the provided
+  /// action, and propagate it to its dependences.
+  void propagateOffloadInfo(const Action *A) const;
+
+  unsigned getOffloadingHostKinds() const { return OffloadingHostKind; }
+  OffloadKind getOffloadingDeviceKind() const { return OffloadingDeviceKind; }
+  const char *getOffloadingArch() const { return OffloadingArch; }
+
+  /// \brief Check if this action have any offload kinds. Note that host offload
+  /// kinds are only set if the action is a dependence to an host offload
+  /// action.
+  bool isHostOffloading(OffloadKind OKind) const {
+    return OffloadingHostKind & OKind;
+  }
+  bool isDeviceOffloading(OffloadKind OKind) const {
+    return OffloadingDeviceKind == OKind;
+  }
+  bool isOffloading(OffloadKind OKind) const {
+    return isHostOffloading(OKind) || isDeviceOffloading(OKind);
   }
 };
 
@@ -151,43 +190,102 @@ public:
   }
 };
 
-class CudaDeviceAction : public Action {
+/// \brief An offload action combines host or/and device actions according to
+/// the programming model implementation needs and propagates the offloading
+/// kind to its dependences.
+class OffloadAction : public Action {
   virtual void anchor();
-  /// GPU architecture to bind.  Always of the form /sm_\d+/ or null (when the
-  /// action applies to multiple architectures).
-  const char *GpuArchName;
-  /// True when action results are not consumed by the host action (e.g when
-  /// -fsyntax-only or --cuda-device-only options are used).
-  bool AtTopLevel;
+public:
+  /// \brief Type used to communicate device actions. It associates bound
+  /// architecture, toolchain, and offload kind to each action.
+  class DeviceDependences {
+  public:
+    typedef SmallVector<const ToolChain *, 3> ToolChainList;
+    typedef SmallVector<const char *, 3> BoundArchList;
+    typedef SmallVector<OffloadKind, 3> OffloadKindList;
+
+  private:
+    /// \brief The dependence action.
+    ActionList AL;
+    /// \brief The offloading toolchains that should be used with the action.
+    SmallVector<const ToolChain *, 3> TCL;
+    /// \brief The architectures that should be used with this action.
+    SmallVector<const char *, 3> BAL;
+    /// \brief The offload kind of each dependence.
+    SmallVector<OffloadKind, 3> KL;
+
+  public:
+    /// \brief Add a action along with the associated toolchain, bound arch, and
+    /// offload kind.
+    void add(Action *A, const ToolChain *TC, const char *BoundArch,
+             OffloadKind OKind);
+
+    /// \brief Get each of the individual arrays.
+    const ActionList &getActions() const { return AL; };
+    const ToolChainList &getToolChains() const { return TCL; };
+    const BoundArchList &getBoundArchs() const { return BAL; };
+    const OffloadKindList &getOffloadKinds() const { return KL; };
+  };
+
+  /// \brief Type used to communicate host actions. It associates bound
+  /// architecture, toolchain, and offload kinds to each action.
+  class HostDependence {
+    /// \brief The dependence action.
+    Action *A;
+    /// \brief The offloading toolchain that should be used with the action.
+    const ToolChain *TC;
+    /// \brief The architectures that should be used with this action.
+    const char *BoundArch;
+    /// \brief The offload kind of each dependence.
+    unsigned OffloadKinds;
+
+  public:
+    HostDependence(Action *A, const ToolChain *TC, const char *BoundArch,
+                   const unsigned OffloadKinds)
+        : A(A), TC(TC), BoundArch(BoundArch), OffloadKinds(OffloadKinds){};
+    /// \brief Constructor version that obtains the offload kinds from the
+    /// device dependencies.
+    HostDependence(Action *A, const ToolChain *TC, const char *BoundArch,
+                   const DeviceDependences &DDeps);
+    Action *getAction() const { return A; };
+    const ToolChain *getToolChain() const { return TC; };
+    const char *getBoundArch() const { return BoundArch; };
+    unsigned getOffloadKinds() const { return OffloadKinds; };
+  };
+
+  typedef llvm::function_ref<void(Action *, const ToolChain *, const char *)>
+      OffloadActionWorkTy;
+
+private:
+  /// \brief The offloading toolchain that should be used with the action.
+  const ToolChain *HostTC;
+
+  /// \brief The tool chains associated with the list of actions.
+  DeviceDependences::ToolChainList DevToolChains;
 
 public:
-  CudaDeviceAction(Action *Input, const char *ArchName, bool AtTopLevel);
+  OffloadAction(const HostDependence &HDep);
+  OffloadAction(const DeviceDependences &DDeps, types::ID Ty);
+  OffloadAction(const HostDependence &HDep, const DeviceDependences &DDeps);
 
-  const char *getGpuArchName() const { return GpuArchName; }
+  /// \brief Execute the work specified in \a Work on the host dependence.
+  void doOnHostDependence(const OffloadActionWorkTy &Work) const;
 
-  /// Gets the compute_XX that corresponds to getGpuArchName().  Returns null
-  /// when getGpuArchName() is null.
-  const char *getComputeArchName() const;
+  /// \brief Execute the work specified in \a Work on each device dependence.
+  void doOnEachDeviceDependence(const OffloadActionWorkTy &Work) const;
 
-  bool isAtTopLevel() const { return AtTopLevel; }
+  /// \brief Execute the work specified in \a Work on each dependence.
+  void doOnEachDependence(const OffloadActionWorkTy &Work) const;
 
-  static bool IsValidGpuArchName(llvm::StringRef ArchName);
+  /// \brief Return the host dependence of this action, or null if we don't have
+  /// any.
+  Action *getHostDependence() const;
 
-  static bool classof(const Action *A) {
-    return A->getKind() == CudaDeviceClass;
-  }
-};
+  /// \brief Return the single device dependence of this action, or null if we
+  /// don't have one or we have more than one.
+  Action *getSingleDeviceDependence() const;
 
-class CudaHostAction : public Action {
-  virtual void anchor();
-  ActionList DeviceActions;
-
-public:
-  CudaHostAction(Action *Input, const ActionList &DeviceActions);
-
-  const ActionList &getDeviceActions() const { return DeviceActions; }
-
-  static bool classof(const Action *A) { return A->getKind() == CudaHostClass; }
+  static bool classof(const Action *A) { return A->getKind() == OffloadClass; }
 };
 
 class JobAction : public Action {

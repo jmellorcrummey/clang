@@ -415,12 +415,11 @@ public:
   /// \param BoundArch - The bound architecture. 
   /// \param AtTopLevel - Whether this is a "top-level" action.
   /// \param MultipleArchs - Whether multiple -arch options were supplied.
-  const char *GetNamedOutputPath(Compilation &C,
-                                 const JobAction &JA,
-                                 const char *BaseInput,
-                                 const char *BoundArch,
-                                 bool AtTopLevel,
-                                 bool MultipleArchs) const;
+  /// \param TC - Toolchain associated with the output.
+  const char *GetNamedOutputPath(Compilation &C, const JobAction &JA,
+                                 const char *BaseInput, const char *BoundArch,
+                                 bool AtTopLevel, bool MultipleArchs,
+                                 const ToolChain *TC) const;
 
   /// GetTemporaryPath - Return the pathname of a temporary file to use 
   /// as part of compilation; the file will have the given prefix and suffix.
