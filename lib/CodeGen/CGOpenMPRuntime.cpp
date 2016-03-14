@@ -3582,7 +3582,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
         // TO DO: figure out the value that goes in here.
         // Bld.CreateStore(PrepareParallel, CudaThreadsInParallel);
-        Builder.CreateStore(Builder.CreateLoad(OmpNumThreads), CudaThreadsInParallel);
+        // Builder.CreateStore(Builder.CreateLoad(OmpNumThreads), CudaThreadsInParallel);
 
         // Increment the nesting level
         Builder.CreateStore(
@@ -3697,24 +3697,24 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "ParallelNesting");
     Bld.CreateStore(Bld.getInt32(0), ParallelNesting);
 
-    char CudaThreadsInParallelName[] = "__omptgt__CudaThreadsInParallel";
+    //char CudaThreadsInParallelName[] = "__omptgt__CudaThreadsInParallel";
     char SimdNumLanesName[] = "__omptgt__SimdNumLanes";
     char OmpNumThreadsName[] = "__omptgt__OmpNumThreads";
     char ExecuteSimdName[] = "__omptgt_ExecuteSimd";
 
-    if (!CudaThreadsInParallel)
-      CudaThreadsInParallel =
-          CGF.CGM.getModule().getGlobalVariable(CudaThreadsInParallelName);
+    //if (!CudaThreadsInParallel)
+    //  CudaThreadsInParallel =
+    //      CGF.CGM.getModule().getGlobalVariable(CudaThreadsInParallelName);
     if (!SimdNumLanes)
       SimdNumLanes = CGF.CGM.getModule().getGlobalVariable(SimdNumLanesName);
     if (!OmpNumThreads)
       OmpNumThreads = CGF.CGM.getModule().getGlobalVariable(OmpNumThreadsName);
 
-    if (!CudaThreadsInParallel)
-      CudaThreadsInParallel = new llvm::GlobalVariable(
-          CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
-          llvm::Constant::getNullValue(VarTy), CudaThreadsInParallelName, 0,
-          llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+    //if (!CudaThreadsInParallel)
+    //  CudaThreadsInParallel = new llvm::GlobalVariable(
+    //      CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
+    //      llvm::Constant::getNullValue(VarTy), CudaThreadsInParallelName, 0,
+    //      llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
 
     if (!SimdNumLanes)
       SimdNumLanes = new llvm::GlobalVariable(
@@ -3728,7 +3728,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
           llvm::Constant::getNullValue(VarTy), OmpNumThreadsName, 0,
           llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
 
-    Bld.CreateStore(llvm::Constant::getNullValue(VarTy), CudaThreadsInParallel);
+    //Bld.CreateStore(llvm::Constant::getNullValue(VarTy), CudaThreadsInParallel);
 
     // disable simd unless some control flow path takes a thread to it
     if (!ExecuteSimd) {
