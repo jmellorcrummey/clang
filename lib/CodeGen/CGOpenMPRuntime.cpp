@@ -3589,6 +3589,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
            Builder.CreateAdd(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
            ParallelNesting);
 
+        //PushNewParallelRegion(true);
+
         // Only allow warp masters to executes S1.
         llvm::Value *isNotLaneIdZero = Builder.CreateICmpNE(Builder.CreateLoad(SimdLocalLaneId),
                                                             Builder.getInt32(0));
@@ -3647,22 +3649,22 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
            ParallelNesting);
 
         assert((OMPRegionTypesStack.back() == OMP_Parallel) &&
-              "Exiting a parallel region does not match stack state");
+               "Exiting a parallel region does not match stack state");
         OMPRegionTypesStack.pop_back();
 
         // we need to inspect the previous layer to understand what type
         // of end we need
         PopParallelRegion();
 
-        // SetNumSimdLanesPerTargetRegion(32);
-
+        SetNumSimdLanesPerTargetRegion(32);
       }
       // After Emiting the body I need to create the sync point.
       // Don't sync or anything, just go ahead computing the INC
       // with all threads!
+
       Builder.CreateBr(CGF.SyncAfterCombinedBlock);
       Builder.SetInsertPoint(CGF.SyncAfterCombinedBlock);
-      //Builder.CreateCall(Get_syncthreads(), {});
+      // Builder.CreateCall(Get_syncthreads(), {});
       Builder.CreateBr(IncCombinedFor);
     }
 
@@ -3757,8 +3759,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     Bld.SetInsertPoint(MasterInit);
 
     // Use all CUDA threads but in batches of 32
-    // Bld.CreateStore(Bld.getInt32(32), SimdNumLanes);
-    Bld.CreateStore(Bld.CreateCall(Get_num_threads(), {}), SimdNumLanes);
+    Bld.CreateStore(Bld.getInt32(32), SimdNumLanes);
+    //Bld.CreateStore(Bld.CreateCall(Get_num_threads(), {}), SimdNumLanes);
 
     printf(" Compute NumWarps\n");
     // Use all cuda threads as lanes - parallel regions will change this
@@ -4562,8 +4564,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       // Insert memfence here.
       Bld.CreateBr(CGF.EndRegionS1);
       Bld.SetInsertPoint(CGF.EndRegionS1);
-      //Bld.CreateCall(Get_memfence());
-      Bld.CreateCall(Get_syncthreads());
+      Bld.CreateCall(Get_memfence());
+      //Bld.CreateCall(Get_syncthreads());
       Bld.CreateBr(NextRegionBlock);
     }
 
@@ -4715,7 +4717,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       // We want to sync at the end of the SIMD.
       Bld.CreateBr(CGF.SyncAfterSimdBlock);
       Bld.SetInsertPoint(CGF.SyncAfterSimdBlock);
-      Bld.CreateCall(Get_syncthreads(), {});
+      //Bld.CreateCall(Get_syncthreads(), {});
       // llvm::Value *isNotLaneMaster = Bld.CreateICmpNE(Bld.CreateLoad(SimdLocalLaneId), Bld.getInt32(0));
       // llvm::BasicBlock *StartPostSimdRegion = llvm::BasicBlock::Create(
       //   CGM.getLLVMContext(), ".start.post.simd.region", CGF.CurFn);
