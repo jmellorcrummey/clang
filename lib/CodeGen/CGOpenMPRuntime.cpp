@@ -3570,27 +3570,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         // We allow all threads to run the parallel loop since they
         // have to keep up to date the loop index.
 
-        // ============= Enter parallel region =============
-
-        // Handle the existence of the parallel for
-
-        OMPRegionTypesStack.push_back(OMP_Parallel);
-
-        // // clear up the data structure that will be used to determine the
-        // // optimal amount of simd lanes to be used in this region
-        SimdAndWorksharingNesting.reset();
-
-        // TO DO: figure out the value that goes in here.
-        // Bld.CreateStore(PrepareParallel, CudaThreadsInParallel);
-        // Builder.CreateStore(Builder.CreateLoad(OmpNumThreads), CudaThreadsInParallel);
-
-        // Increment the nesting level
-        Builder.CreateStore(
-           Builder.CreateAdd(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
-           ParallelNesting);
-
-        //PushNewParallelRegion(true);
-
         // Only allow warp masters to executes S1.
         llvm::Value *isNotLaneIdZero = Builder.CreateICmpNE(Builder.CreateLoad(SimdLocalLaneId),
                                                             Builder.getInt32(0));
@@ -3640,23 +3619,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
         // Emit Body
         CGF.EmitStmt(Body);
-
-        // ============= Exit parallel region ==============
-
-        // Decrement the nesting level
-        Builder.CreateStore(
-           Builder.CreateSub(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
-           ParallelNesting);
-
-        assert((OMPRegionTypesStack.back() == OMP_Parallel) &&
-               "Exiting a parallel region does not match stack state");
-        OMPRegionTypesStack.pop_back();
-
-        // we need to inspect the previous layer to understand what type
-        // of end we need
-        PopParallelRegion();
-
-        SetNumSimdLanesPerTargetRegion(32);
       }
       // After Emiting the body I need to create the sync point.
       // Don't sync or anything, just go ahead computing the INC
@@ -3830,6 +3792,27 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // ============= Finished the Preamble of the Loop Nest ==============
 
+    // ============= Enter parallel region =============
+
+    // Handle the existence of the parallel for
+
+    OMPRegionTypesStack.push_back(OMP_Parallel);
+
+    // // clear up the data structure that will be used to determine the
+    // // optimal amount of simd lanes to be used in this region
+    SimdAndWorksharingNesting.reset();
+
+    // TO DO: figure out the value that goes in here.
+    // Bld.CreateStore(PrepareParallel, CudaThreadsInParallel);
+    // Builder.CreateStore(Builder.CreateLoad(OmpNumThreads), CudaThreadsInParallel);
+
+    // Increment the nesting level
+    Builder.CreateStore(
+       Builder.CreateAdd(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
+       ParallelNesting);
+
+    //PushNewParallelRegion(true);
+
     // Call the function which generates the code for the outer loop.
     // Inside this function resolve the body of the outer loop
     // which contains the SIMD pragma.
@@ -3840,6 +3823,23 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     printf(" Enter Combined Nest region\n");
     EmitOMPCombinedNestDirectiveLoop(DKind, SKind, S, CGF, TgtFunName,
                                      StmtHasScheduleStaticOne);
+
+    // ============= Exit parallel region ==============
+
+    // Decrement the nesting level
+    Builder.CreateStore(
+       Builder.CreateSub(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
+       ParallelNesting);
+
+    assert((OMPRegionTypesStack.back() == OMP_Parallel) &&
+           "Exiting a parallel region does not match stack state");
+    OMPRegionTypesStack.pop_back();
+
+    // we need to inspect the previous layer to understand what type
+    // of end we need
+    PopParallelRegion();
+
+    SetNumSimdLanesPerTargetRegion(32);
 
     // Call previous method, the one used in the control loop.
     // Try to avoid the jumps back to control loop code blocks.
