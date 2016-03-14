@@ -3583,10 +3583,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     // particular compilation pass we're constructing here. For now we
     // can check which toolchain we're using and pick the other one to
     // extract the triple.
-    if (&getToolChain() == C.getCudaDeviceToolChain())
-      AuxToolChain = C.getCudaHostToolChain();
-    else if (&getToolChain() == C.getCudaHostToolChain())
-      AuxToolChain = C.getCudaDeviceToolChain();
+    if (&getToolChain() ==
+        C.getSingleOffloadDeviceToolChain<Action::OFFLOAD_CUDA>())
+      AuxToolChain = C.getOffloadingHostToolChain();
+    else if (&getToolChain() == C.getOffloadingHostToolChain())
+      AuxToolChain = C.getSingleOffloadDeviceToolChain<Action::OFFLOAD_CUDA>();
     else
       llvm_unreachable("Can't figure out CUDA compilation mode.");
     assert(AuxToolChain != nullptr && "No aux toolchain.");

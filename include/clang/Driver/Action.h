@@ -68,6 +68,17 @@ public:
     JobClassLast=VerifyPCHJobClass
   };
 
+  // The offloading kind determines if this action is binded to a particular
+  // programming model. Each entry reserves one bit.
+  //
+  // FIXME: This is currently used to indicate that toolchains are used in a
+  // given programming as well, but will be used here as well once a generic
+  // offloading action is implemented.
+  enum OffloadKind {
+    OFFLOAD_None = 0x00,
+    OFFLOAD_CUDA = 0x01,
+  };
+
   static const char *getClassName(ActionClass AC);
 
 private:

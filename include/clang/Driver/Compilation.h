@@ -38,8 +38,17 @@ class Compilation {
   /// The default tool chain.
   const ToolChain &DefaultToolChain;
 
-  const ToolChain *CudaHostToolChain;
-  const ToolChain *CudaDeviceToolChain;
+  /// The tool chain of the offload host.
+  const ToolChain *OffloadHostToolChain;
+
+  /// The host offload kinds, it will be a mask of all the programming models
+  /// the host has to support.
+  unsigned OffloadHostKinds;
+
+  /// Array with the toolchains of offloading devices in the order they were
+  /// requested by the user.
+  typedef std::pair<const ToolChain *, Action::OffloadKind> OffloadToolChainTy;
+  SmallVector<OffloadToolChainTy, 4> OrderedOffloadingToolchains;
 
   /// The original (untranslated) input argument list.
   llvm::opt::InputArgList *Args;
@@ -89,16 +98,73 @@ public:
   const Driver &getDriver() const { return TheDriver; }
 
   const ToolChain &getDefaultToolChain() const { return DefaultToolChain; }
-  const ToolChain *getCudaHostToolChain() const { return CudaHostToolChain; }
-  const ToolChain *getCudaDeviceToolChain() const {
-    return CudaDeviceToolChain;
+  const ToolChain *getOffloadingHostToolChain() const {
+    return OffloadHostToolChain;
+  }
+  unsigned isOffloadingHostKind(Action::OffloadKind Kind) const {
+    return OffloadHostKinds & Kind;
   }
 
-  void setCudaHostToolChain(const ToolChain *HostToolChain) {
-    CudaHostToolChain = HostToolChain;
+  /// Iterator that visits device toolchains of a given kind.
+  template <Action::OffloadKind Kind>
+  class specific_offload_kind_iterator
+      : public llvm::iterator_adaptor_base<
+            specific_offload_kind_iterator<Kind>,
+            ArrayRef<OffloadToolChainTy>::const_iterator,
+            std::forward_iterator_tag, OffloadToolChainTy, ptrdiff_t,
+            OffloadToolChainTy, OffloadToolChainTy> {
+    ArrayRef<OffloadToolChainTy>::const_iterator End;
+
+    void SkipKinds() {
+      while (this->I != End && this->I->second != Kind)
+        ++this->I;
+    }
+
+  public:
+    explicit specific_offload_kind_iterator(ArrayRef<OffloadToolChainTy> TCs)
+        : specific_offload_kind_iterator::iterator_adaptor_base(TCs.begin()),
+          End(TCs.end()) {
+      SkipKinds();
+    }
+
+    const ToolChain *operator*() const { return this->I->first; }
+    const ToolChain *operator->() const { return **this; }
+
+    specific_offload_kind_iterator &operator++() {
+      ++this->I;
+      SkipKinds();
+      return *this;
+    }
+  };
+
+  template <Action::OffloadKind Kind>
+  llvm::iterator_range<specific_offload_kind_iterator<Kind>>
+  getOffloadDeviceToolChains() const {
+    return {specific_offload_kind_iterator<Kind>(OrderedOffloadingToolchains),
+            specific_offload_kind_iterator<Kind>(
+                llvm::makeArrayRef(OrderedOffloadingToolchains.end(), 0))};
   }
-  void setCudaDeviceToolChain(const ToolChain *DeviceToolChain) {
-    CudaDeviceToolChain = DeviceToolChain;
+
+  // Return an offload device toolchain of the provided kind. Only one is
+  // expected to exist. If we can't match any toolchain, return nullptr.
+  template <Action::OffloadKind Kind>
+  const ToolChain *getSingleOffloadDeviceToolChain() const {
+    auto TCs = getOffloadDeviceToolChains<Kind>();
+
+    if (TCs.begin() != TCs.end()) {
+      assert(std::next(TCs.begin()) == TCs.end() &&
+             "More than one tool chain of the this kind exist.");
+      return *TCs.begin();
+    }
+    return nullptr;
+  }
+
+  void addOffloadDeviceToolChain(const ToolChain *DeviceToolChain,
+                                 Action::OffloadKind OffloadKind) {
+    // Update the host offload kind to also contain this kind.
+    OffloadHostKinds |= OffloadKind;
+    OrderedOffloadingToolchains.push_back(
+        std::make_pair(DeviceToolChain, OffloadKind));
   }
 
   const llvm::opt::InputArgList &getInputArgs() const { return *Args; }
