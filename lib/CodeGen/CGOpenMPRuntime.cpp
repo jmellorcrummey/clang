@@ -3582,7 +3582,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
         // TO DO: figure out the value that goes in here.
         // Bld.CreateStore(PrepareParallel, CudaThreadsInParallel);
-        Builder.CreateStore(Builder.CreateCall(Get_num_threads(), {}), CudaThreadsInParallel);
+        Builder.CreateStore(Builder.CreateLoad(OmpNumThreads), CudaThreadsInParallel);
 
         // Increment the nesting level
         Builder.CreateStore(
