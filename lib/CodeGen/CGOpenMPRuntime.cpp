@@ -3807,8 +3807,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // Builder.CreateStore(Builder.CreateLoad(OmpNumThreads), CudaThreadsInParallel);
 
     // Increment the nesting level
-    Builder.CreateStore(
-       Builder.CreateAdd(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
+    Bld.CreateStore(
+       Bld.CreateAdd(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
        ParallelNesting);
 
     //PushNewParallelRegion(true);
@@ -3827,8 +3827,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // ============= Exit parallel region ==============
 
     // Decrement the nesting level
-    Builder.CreateStore(
-       Builder.CreateSub(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
+    Bld.CreateStore(
+       Bld.CreateSub(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
        ParallelNesting);
 
     assert((OMPRegionTypesStack.back() == OMP_Parallel) &&
