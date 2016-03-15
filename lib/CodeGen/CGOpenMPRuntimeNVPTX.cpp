@@ -140,7 +140,7 @@ enum OpenMPRTLFunctionNVPTX {
   /// \brief Call to void __kmpc_kernel_end_parallel();
   OMPRTL_NVPTX__kmpc_kernel_end_parallel,
   /// \brief Call to bool __kmpc_kernel_convergent_parallel(
-  /// bool *IsFinal, kmpc_int32 *LaneSource, kmpc_int32 NumThreadsClause);
+  /// bool *IsFinal, kmpc_int32 *LaneSource);
   OMPRTL_NVPTX__kmpc_kernel_convergent_parallel,
   /// \brief Call to void __kmpc_kernel_end_convergent_parallel();
   OMPRTL_NVPTX__kmpc_kernel_end_convergent_parallel,
@@ -419,9 +419,8 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
   }
   case OMPRTL_NVPTX__kmpc_kernel_convergent_parallel: {
     /// \brief Call to bool __kmpc_kernel_convergent_parallel(
-    /// bool *IsFinal, kmpc_int32 *LaneSource, kmpc_int32 NumThreadsClause);
-    llvm::Type *TypeParams[] = {CGM.Int8PtrTy, CGM.Int32Ty->getPointerTo(),
-                                CGM.Int32Ty};
+    /// bool *IsFinal, kmpc_int32 *LaneSource);
+    llvm::Type *TypeParams[] = {CGM.Int8PtrTy, CGM.Int32Ty->getPointerTo()};
     llvm::FunctionType *FnTy =
         llvm::FunctionType::get(llvm::Type::getInt1Ty(CGM.getLLVMContext()),
                                 TypeParams, /*isVarArg*/ false);
@@ -744,12 +743,8 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
     Address WorkSource =
         CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
                              /*Name*/ "work_source");
-    Address NumThreadsClause =
-        CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
-                             /*Name*/ "num_threads_clause");
     CGF.InitTempAlloca(IsFinal, Bld.getInt8(/*C*/ 0));
     CGF.InitTempAlloca(WorkSource, Bld.getInt32(/*C*/ -1));
-    CGF.InitTempAlloca(NumThreadsClause, Bld.getInt32(/*C*/ 32));
 
     llvm::BasicBlock *DoBodyBB = CGF.createBasicBlock(".do.body");
     llvm::BasicBlock *ExecuteBB = CGF.createBasicBlock(".do.body.execute");
@@ -758,8 +753,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
 
     CGF.EmitBranch(DoBodyBB);
     CGF.EmitBlock(DoBodyBB);
-    llvm::Value *Args[] = {IsFinal.getPointer(), WorkSource.getPointer(),
-                           Bld.CreateLoad(NumThreadsClause)};
+    llvm::Value *Args[] = {IsFinal.getPointer(), WorkSource.getPointer()};
     llvm::Value *IsActive =
         CGF.EmitRuntimeCall(createNVPTXRuntimeFunction(
                                 OMPRTL_NVPTX__kmpc_kernel_convergent_parallel),
