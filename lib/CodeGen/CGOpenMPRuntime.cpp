@@ -3459,68 +3459,55 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     }
 
     if (!StmtHasScheduleStaticOne){
-      // // Prepare call
+      // Start computing the new LB and UB for each thread.
+      llvm::Value *LoopSize = Builder.CreateSub(UB, LB);
+      LoopSize = Builder.CreateAdd(LoopSize, Builder.getInt32(1));
 
-      // // Init Loop LB:
-      // LB = llvm::Constant::getNullValue(VarTy);
+      // Compute Chunk Size
+      llvm::Value *chunk = Builder.CreateUDiv(LoopSize,
+                                              Builder.CreateLoad(OmpNumThreads));
 
-      // llvm::SourceLocation *Loc = CreateIntelOpenMPRTLLoc(S.getLocStart(), CGF, 0);
-      // llvm::Value *GTid = CreateOpenMPGlobalThreadNum(Loc, CGF);
+      // Leftover
+      llvm::Value *Remainder = Builder.CreateSub(LoopSize,
+          Builder.CreateMul(chunk, Builder.CreateLoad(OmpNumThreads)));
 
-      // llvm::Value *Chunk;
-      // Chunk = = llvm::Constant::getNullValue(VarTy);
-      // // Schedule is always static
-      // CGF.CGM.OpenMPSupport.setScheduleChunkSize(KMP_SCH_DISTRIBUTE_STATIC, 0);
+      // Add the leftover to the LB
+      // lb += leftover
+      LB = Builder.CreateAdd(LB, Remainder);
 
-      // // PLast
-      // llvm::AllocaInst *PLast = CGF.CreateTempAlloca(Builder.getInt32Ty(), "last");
-      // PLast->setAlignment(CGF.CGM.getDataLayout().getPrefTypeAlignment(Builder.getInt32Ty()));
-      // CGF.InitTempAlloca(PLast, Builder.getInt32(1));
+      // if OMP thread ID is less than Remainder then the chunk needs to have
+      // one extra entry
+      llvm::BasicBlock *AddOneToChunk = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".add.one.to.chunk.combined.nest.simd.for", CGF.CurFn);
+      llvm::BasicBlock *AfterAddOneToChunk = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".continue.start.combined.nest.simd.for", CGF.CurFn);
 
-      // // PLB
-      // llvm::AllocaInst *PLB = CGF.CreateTempAlloca(VarTy, "lb");
-      // PLB->setAlignment(CGF.CGM.getDataLayout().getPrefTypeAlignment(VarTy));
-      // Builder.CreateStore(LB, PLB);
+      llvm::Value *AddOne = Builder.CreateICmpULT(Builder.CreateLoad(OmpThreadNum),
+                                                  Remainder);
+      Builder.CreateCondBr(AddOne, AddOneToChunk, AfterAddOneToChunk);
 
-      // // PUB
-      // llvm::AllocaInst *PUB = CGF.CreateTempAlloca(VarTy, "ub");
-      // PUB->setAlignment(CGF.CGM.getDataLayout().getPrefTypeAlignment(VarTy));
-      // Builder.CreateStore(UB, PUB);
+      Builder.SetInsertPoint(AddOneToChunk);
 
-      // // PSt
-      // llvm::AllocaInst *PSt = CGF.CreateTempAlloca(VarTy, "st");
-      // PSt->setAlignment(CGF.CGM.getDataLayout().getPrefTypeAlignment(VarTy));
-      // CGF.InitTempAlloca(PSt, Builder.getInt32(1));
+      // Add one to chunk: chunk++
+      chunk = Builder.CreateAdd(chunk, Builder.getInt32(1));
 
-      // llvm::Value *RealArgs[] = {
-      //     Loc,
-      //     GTid,
-      //     Builder.getInt32(KMP_SCH_DISTRIBUTE_STATIC),
-      //     PLast,
-      //     PLB,
-      //     PUB,
-      //     PSt,
-      //     Builder.getInt32(1),
-      //     Chunk};
-      // if (TypeSize == 32 && isSigned)
-      //   CGF.EmitRuntimeCall(OPENMPRTL_FUNC(for_static_init_4), RealArgs);
-      // else if (TypeSize == 32 && !isSigned)
-      //   CGF.EmitRuntimeCall(OPENMPRTL_FUNC(for_static_init_4u), RealArgs);
-      // else if (TypeSize == 64 && isSigned)
-      //   CGF.EmitRuntimeCall(OPENMPRTL_FUNC(for_static_init_8), RealArgs);
-      // else
-      //   CGF.EmitRuntimeCall(OPENMPRTL_FUNC(for_static_init_8u), RealArgs);
+      // In the case of the larger chunk we need to subtract back what we added
+      // so that we avoid explicitely writing an else case.
+      // lb -= leftover;
+      LB = Builder.CreateSub(LB, Remainder);
+      Builder.CreateBr(AfterAddOneToChunk);
 
-      // // Update private with the value of the LB
-      // LB = Builder.CreateLoad(PLB);
-      // Builder.CreateStore(LB, Private);
-      // UB = Builder.CreateLoad(PUB);
-      // // Builder.CreateStore(LB, Private);
-    } else {
-      // Update private with the value of the LB
-      Builder.CreateStore(LB, Private);
+      Builder.SetInsertPoint(AfterAddOneToChunk);
+
+      // all threads do: lb = lb + entityId * chunk;
+      LB = Builder.CreateAdd(LB, Builder.CreateMul(Builder.CreateLoad(OmpThreadNum), chunk));
+
+      // ub = lb + chunk - 1
+      UB = Builder.CreateAdd(LB, Builder.CreateSub(chunk, Builder.getInt32(1)));
     }
 
+    // Update private with the value of the LB
+    Builder.CreateStore(LB, Private);
     Builder.CreateBr(CondCombinedFor);
 
     // FOR COND: tid <= N
