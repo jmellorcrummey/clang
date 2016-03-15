@@ -134,11 +134,16 @@ enum OpenMPRTLFunctionNVPTX {
   /// \brief Call to void __kmpc_kernel_prepare_parallel(
   /// void *outlined_function, void **args, kmp_int32 nArgs);
   OMPRTL_NVPTX__kmpc_kernel_prepare_parallel,
-  /// \brief Call to void __kmpc_kernel_parallel(
+  /// \brief Call to bool __kmpc_kernel_parallel(
   /// void **outlined_function, void **args);
   OMPRTL_NVPTX__kmpc_kernel_parallel,
   /// \brief Call to void __kmpc_kernel_end_parallel();
   OMPRTL_NVPTX__kmpc_kernel_end_parallel,
+  /// \brief Call to bool __kmpc_kernel_convergent_parallel(
+  /// bool *IsFinal, kmpc_int32 *LaneSource);
+  OMPRTL_NVPTX__kmpc_kernel_convergent_parallel,
+  /// \brief Call to void __kmpc_kernel_end_convergent_parallel();
+  OMPRTL_NVPTX__kmpc_kernel_end_convergent_parallel,
 };
 
 // NVPTX Address space
@@ -412,6 +417,25 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_end_parallel");
     break;
   }
+  case OMPRTL_NVPTX__kmpc_kernel_convergent_parallel: {
+    /// \brief Call to bool __kmpc_kernel_convergent_parallel(
+    /// bool *IsFinal, kmpc_int32 *LaneSource);
+    llvm::Type *TypeParams[] = {CGM.Int8PtrTy, CGM.Int32Ty->getPointerTo()};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(llvm::Type::getInt1Ty(CGM.getLLVMContext()),
+                                TypeParams, /*isVarArg*/ false);
+    RTLFn =
+        CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_convergent_parallel");
+    break;
+  }
+  case OMPRTL_NVPTX__kmpc_kernel_end_convergent_parallel: {
+    /// Build void __kmpc_kernel_end_convergent_parallel();
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, {}, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy,
+                                      "__kmpc_kernel_end_convergent_parallel");
+    break;
+  }
   }
   return RTLFn;
 }
@@ -483,6 +507,17 @@ void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
   WST.WorkerFn->setName(OutlinedFn->getName() + "_worker");
 
   return;
+}
+
+void CGOpenMPRuntimeNVPTX::enterTarget() {
+  IsOrphaned = false;
+  ParallelNestingLevel = 0;
+}
+
+void CGOpenMPRuntimeNVPTX::exitTarget() {
+  IsOrphaned = true;
+  ParallelNestingLevel = 0;
+  Work.clear();
 }
 
 namespace {
@@ -597,6 +632,20 @@ void CGOpenMPRegionInfo::EmitBody(CodeGenFunction &CGF, const Stmt * /*S*/) {
   CGF.EHStack.popTerminate();
 }
 
+namespace {
+class ParallelNestingLevelRAII {
+private:
+  int &ParallelNestingLevel;
+
+public:
+  ParallelNestingLevelRAII(int &ParallelNestingLevel)
+      : ParallelNestingLevel(ParallelNestingLevel) {
+    ParallelNestingLevel++;
+  }
+  ~ParallelNestingLevelRAII() { ParallelNestingLevel--; }
+};
+} // namespace
+
 llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
     const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
     OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen) {
@@ -614,10 +663,25 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
   CGOpenMPOutlinedRegionInfo CGInfo(*CS, ThreadIDVar, CodeGen, InnermostKind,
                                     HasCancel);
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
+  ParallelNestingLevelRAII NestingRAII(ParallelNestingLevel);
   // The outlined function takes as arguments the global_tid, bound_tid,
   // and a capture structure created from the captured variables.
   return CGF.GenerateCapturedStmtFunction(*CS);
 }
+
+bool CGOpenMPRuntimeNVPTX::InL0() {
+  return !IsOrphaned && ParallelNestingLevel == 0;
+}
+
+bool CGOpenMPRuntimeNVPTX::InL1() {
+  return !IsOrphaned && ParallelNestingLevel == 1;
+}
+
+bool CGOpenMPRuntimeNVPTX::InL1Plus() {
+  return !IsOrphaned && ParallelNestingLevel >= 1;
+}
+
+bool CGOpenMPRuntimeNVPTX::IndeterminateLevel() { return IsOrphaned; }
 
 void CGOpenMPRuntimeNVPTX::emitParallelCall(
     CodeGenFunction &CGF, SourceLocation Loc, llvm::Value *OutlinedFn,
@@ -629,7 +693,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
   Fn->addFnAttr(llvm::Attribute::AlwaysInline);
   Fn->setLinkage(llvm::GlobalValue::InternalLinkage);
   auto *RTLoc = emitUpdateLocation(CGF, Loc);
-  auto &&ThenGen = [this, Fn, CapturedVars](CodeGenFunction &CGF) {
+  auto &&L0ParallelGen = [this, Fn, CapturedVars](CodeGenFunction &CGF) {
     CGBuilderTy &Bld = CGF.Builder;
 
     auto Capture = CapturedVars.front();
@@ -668,6 +732,69 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
 
     // Remember for post-processing in worker loop.
     Work.push_back(Fn);
+  };
+  auto &&L1ParallelGen = [this, Fn, CapturedVars, RTLoc,
+                          Loc](CodeGenFunction &CGF) {
+    CGBuilderTy &Bld = CGF.Builder;
+
+    Address IsFinal =
+        CGF.CreateTempAlloca(CGF.Int8Ty, CharUnits::fromQuantity(1),
+                             /*Name*/ "is_final");
+    Address WorkSource =
+        CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
+                             /*Name*/ "work_source");
+    CGF.InitTempAlloca(IsFinal, Bld.getInt8(/*C*/ 0));
+    CGF.InitTempAlloca(WorkSource, Bld.getInt32(/*C*/ -1));
+
+    llvm::BasicBlock *DoBodyBB = CGF.createBasicBlock(".do.body");
+    llvm::BasicBlock *ExecuteBB = CGF.createBasicBlock(".do.body.execute");
+    llvm::BasicBlock *DoCondBB = CGF.createBasicBlock(".do.cond");
+    llvm::BasicBlock *DoEndBB = CGF.createBasicBlock(".do.end");
+
+    CGF.EmitBranch(DoBodyBB);
+    CGF.EmitBlock(DoBodyBB);
+    llvm::Value *Args[] = {IsFinal.getPointer(), WorkSource.getPointer()};
+    llvm::Value *IsActive =
+        CGF.EmitRuntimeCall(createNVPTXRuntimeFunction(
+                                OMPRTL_NVPTX__kmpc_kernel_convergent_parallel),
+                            Args);
+    Bld.CreateCondBr(IsActive, ExecuteBB, DoCondBB);
+
+    CGF.EmitBlock(ExecuteBB);
+    // OutlinedFn(&GTid, &zero, CapturedStruct);
+    auto ThreadIDAddr = emitThreadIDAddress(CGF, Loc);
+    Address ZeroAddr =
+        CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
+                             /*Name*/ ".zero.addr");
+    CGF.InitTempAlloca(ZeroAddr, CGF.Builder.getInt32(/*C*/ 0));
+    llvm::SmallVector<llvm::Value *, 16> OutlinedFnArgs;
+    OutlinedFnArgs.push_back(ThreadIDAddr.getPointer());
+    OutlinedFnArgs.push_back(ZeroAddr.getPointer());
+    OutlinedFnArgs.append(CapturedVars.begin(), CapturedVars.end());
+    CGF.EmitCallOrInvoke(Fn, OutlinedFnArgs);
+    CGF.EmitRuntimeCall(createNVPTXRuntimeFunction(
+                            OMPRTL_NVPTX__kmpc_kernel_end_convergent_parallel),
+                        ArrayRef<llvm::Value *>());
+    CGF.EmitBranch(DoCondBB);
+
+    CGF.EmitBlock(DoCondBB);
+    llvm::Value *IsDone = Bld.CreateICmpEQ(Bld.CreateLoad(IsFinal),
+                                           Bld.getInt8(/*C*/ 1), "is_done");
+    Bld.CreateCondBr(IsDone, DoEndBB, DoBodyBB);
+
+    CGF.EmitBlock(DoEndBB);
+  };
+  auto &&IndeterminateParallelGen = [](CodeGenFunction &CGF) {
+    // TODO: add general case.
+  };
+  auto &&ThenGen = [this, L0ParallelGen, L1ParallelGen,
+                    IndeterminateParallelGen](CodeGenFunction &CGF) {
+    if (InL0())
+      L0ParallelGen(CGF);
+    else if (InL1Plus())
+      L1ParallelGen(CGF);
+    else
+      IndeterminateParallelGen(CGF);
   };
   auto &&ElseGen = [this, Fn, CapturedVars, RTLoc, Loc](CodeGenFunction &CGF) {
     auto DL = CGM.getDataLayout();
@@ -728,7 +855,7 @@ bool CGOpenMPRuntimeNVPTX::requiresBarrier(const OMPLoopDirective &S) const {
 }
 
 CGOpenMPRuntimeNVPTX::CGOpenMPRuntimeNVPTX(CodeGenModule &CGM)
-    : CGOpenMPRuntime(CGM) {
+    : CGOpenMPRuntime(CGM), IsOrphaned(false), ParallelNestingLevel(0) {
   if (!CGM.getLangOpts().OpenMPIsDevice)
     llvm_unreachable("OpenMP NVPTX can only handle device code.");
 }
