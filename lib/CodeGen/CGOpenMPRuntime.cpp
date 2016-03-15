@@ -2318,6 +2318,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
   // Simd local lane ID
   llvm::AllocaInst *SimdLocalLaneId;
+  
+  // Outer loop limits
+  llvm::AllocaInst *OuterLB;
+  llvm::AllocaInst *OuterUB;
 
   llvm::SwitchInst *ControlSwitch;
 
@@ -3336,6 +3340,14 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // Set the names of the basic block tags
     llvm::BasicBlock *StartCombinedFor = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".start.combined.nest.simd.for", CGF.CurFn);
+    llvm::BasicBlock *AddOneToChunk;
+    llvm::BasicBlock *AfterAddOneToChunk;
+    if (!StmtHasScheduleStaticOne){
+      AddOneToChunk = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".add.one.to.chunk.combined.nest.simd.for", CGF.CurFn);
+      AfterAddOneToChunk = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".continue.start.combined.nest.simd.for", CGF.CurFn);
+    }
     llvm::BasicBlock *CondCombinedFor = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".cond.combined.nest.simd.for", CGF.CurFn);
     llvm::BasicBlock *BodyCombinedFor = llvm::BasicBlock::Create(
@@ -3386,7 +3398,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // Loop UB:
 
     // Init LB
-    llvm::Value *LB = 0;
+    llvm::Value *LB = Builder.getInt32(0);
 
     printf(" In Combined Nest region: Set LB\n");
     if (StmtHasScheduleStaticOne){
@@ -3463,6 +3475,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       llvm::Value *LoopSize = Builder.CreateSub(UB, LB);
       LoopSize = Builder.CreateAdd(LoopSize, Builder.getInt32(1));
 
+      printf("Set LB and UB for nochunk\n");
       // Compute Chunk Size
       llvm::Value *chunk = Builder.CreateUDiv(LoopSize,
                                               Builder.CreateLoad(OmpNumThreads));
@@ -3474,14 +3487,14 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       // Add the leftover to the LB
       // lb += leftover
       LB = Builder.CreateAdd(LB, Remainder);
+      LB = Builder.CreateAdd(LB, Builder.CreateMul(Builder.CreateLoad(OmpThreadNum), chunk));
+      Builder.CreateStore(LB, OuterLB);
+
+      UB = Builder.CreateAdd(LB, Builder.CreateSub(chunk, Builder.getInt32(1)));
+      Builder.CreateStore(UB, OuterUB);
 
       // if OMP thread ID is less than Remainder then the chunk needs to have
       // one extra entry
-      llvm::BasicBlock *AddOneToChunk = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".add.one.to.chunk.combined.nest.simd.for", CGF.CurFn);
-      llvm::BasicBlock *AfterAddOneToChunk = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".continue.start.combined.nest.simd.for", CGF.CurFn);
-
       llvm::Value *AddOne = Builder.CreateICmpULT(Builder.CreateLoad(OmpThreadNum),
                                                   Remainder);
       Builder.CreateCondBr(AddOne, AddOneToChunk, AfterAddOneToChunk);
@@ -3489,23 +3502,36 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       Builder.SetInsertPoint(AddOneToChunk);
 
       // Add one to chunk: chunk++
-      chunk = Builder.CreateAdd(chunk, Builder.getInt32(1));
+      //chunk = Builder.CreateAdd(chunk, Builder.getInt32(1));
+
+      llvm::Value *NewLB = Builder.CreateAdd(Builder.CreateLoad(OmpThreadNum),
+                                             Builder.CreateLoad(OuterLB));
+      Builder.CreateStore(NewLB, OuterLB);
+
+      llvm::Value *NewUB = Builder.CreateAdd(Builder.CreateLoad(OuterUB),
+                                             Builder.getInt32(1));
+      Builder.CreateStore(NewUB, OuterUB);
 
       // In the case of the larger chunk we need to subtract back what we added
       // so that we avoid explicitely writing an else case.
       // lb -= leftover;
-      LB = Builder.CreateSub(LB, Remainder);
       Builder.CreateBr(AfterAddOneToChunk);
 
       Builder.SetInsertPoint(AfterAddOneToChunk);
+      Builder.CreateCall(Get_memfence(), {});
+      //chunk = Builder.CreateAdd(chunk, ChunkIncrement);
+      //LB = Builder.CreateSub(LB, LBDecrement);
 
       // all threads do: lb = lb + entityId * chunk;
-      LB = Builder.CreateAdd(LB, Builder.CreateMul(Builder.CreateLoad(OmpThreadNum), chunk));
+      //LB = Builder.CreateAdd(LB, Builder.CreateMul(Builder.CreateLoad(OmpThreadNum), chunk));
+      LB = Builder.CreateLoad(OuterLB);
 
       // ub = lb + chunk - 1
-      UB = Builder.CreateAdd(LB, Builder.CreateSub(chunk, Builder.getInt32(1)));
+      //UB = Builder.CreateAdd(LB, Builder.CreateSub(chunk, Builder.getInt32(1)));
+      UB = Builder.CreateLoad(OuterUB);
     }
 
+    printf("Finished!\n");
     // Update private with the value of the LB
     Builder.CreateStore(LB, Private);
     Builder.CreateBr(CondCombinedFor);
@@ -3776,6 +3802,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     printf(" Compute SimdLocalLaneId\n");
     SimdLocalLaneId = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "SimdLocalLaneId");
     Bld.CreateStore(LaneID, SimdLocalLaneId);
+
+    // Set up variables for UB and LB
+    OuterLB = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "OuterLB");
+    OuterUB = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "OuterUB");
 
     // ============= Finished the Preamble of the Loop Nest ==============
 
@@ -5436,6 +5466,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
      OmpThreadNum = 0;
      CudaGlobalThreadId = 0;
      SimdLocalLaneId = 0;
+     OuterLB = 0;
+     OuterUB = 0;
      NextState = 0;
      ControlStateIndex = 0;
      SynchronizeAndNextState = 0;
@@ -5489,7 +5521,7 @@ public:
          ParallelNesting(0), NextState(0), ControlState(0),
          ControlStateIndex(0), CudaThreadsInParallel(0), SimdNumLanes(0), OmpNumThreads(0),
          SimdLaneNum(0), OmpThreadNum(0), ControlSwitch(0), SimdHasReduction(false),
-         ThreadLimitGlobal(0), CudaGlobalThreadId(0), SimdLocalLaneId(0) {
+         ThreadLimitGlobal(0), CudaGlobalThreadId(0), SimdLocalLaneId(0), OuterLB(0), OuterUB(0) {
 
      SimdAndWorksharingNesting.resize(EXPECTED_WS_NESTS);
 
