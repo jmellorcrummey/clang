@@ -5074,11 +5074,10 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
           CurMapTypes.push_back(OpenMPMapClauseHandler::OMP_MAP_TO |
                                 OpenMPMapClauseHandler::OMP_MAP_FROM);
         } else if (CI->capturesVariableByCopy()) {
-          CurMapTypes.push_back(OpenMPMapClauseHandler::OMP_MAP_PRIVATE_VAL);
           if (!RI->getType()->isAnyPointerType()) {
             // If the field is not a pointer, we need to save the actual value
-            // and
-            // load it as a void pointer.
+            // and load it as a void pointer.
+            CurMapTypes.push_back(OpenMPMapClauseHandler::OMP_MAP_PRIVATE_VAL);
             auto DstAddr = CGF.CreateMemTemp(
                 Ctx.getUIntPtrType(),
                 Twine(CI->getCapturedVar()->getName()) + ".casted");
@@ -5097,11 +5096,17 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
             CurBasePointers.push_back(
                 CGF.EmitLoadOfLValue(DstLV, SourceLocation()).getScalarVal());
             CurPointers.push_back(CurBasePointers.back());
+
+            // Get the size of the type to be used in the map.
+            CurSizes.push_back(CGF.getTypeSize(RI->getType()));
           } else {
+            // Pointers are implicitly mapped with a zero size and no flags
+            // (other than first map that is added for all implicit maps).
+            CurMapTypes.push_back(0u);
             CurBasePointers.push_back(*CV);
             CurPointers.push_back(*CV);
+            CurSizes.push_back(llvm::Constant::getNullValue(CGM.SizeTy));
           }
-          CurSizes.push_back(CGF.getTypeSize(RI->getType()));
         } else {
           assert(CI->capturesVariable() && "Expected captured reference.");
           CurBasePointers.push_back(*CV);
