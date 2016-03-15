@@ -161,10 +161,15 @@ OffloadAction::OffloadAction(const HostDependence &HDep,
                                              HDep.getBoundArch());
 
   // Add device inputs and propagate info to the device actions.
-  getInputs().append(DDeps.getActions().begin(), DDeps.getActions().end());
-  for (unsigned i = 0; i < DDeps.getActions().size(); ++i)
-    DDeps.getActions()[i]->propagateDeviceOffloadInfo(
-        DDeps.getOffloadKinds()[i], DDeps.getBoundArchs()[i]);
+  for (unsigned i = 0; i < DDeps.getActions().size(); ++i) {
+    auto *A = DDeps.getActions()[i];
+    // Skip actions of empty dependences.
+    if (!A)
+      continue;
+    getInputs().push_back(A);
+    A->propagateDeviceOffloadInfo(DDeps.getOffloadKinds()[i],
+                                  DDeps.getBoundArchs()[i]);
+  }
 }
 
 void OffloadAction::doOnHostDependence(const OffloadActionWorkTy &Work) const {
