@@ -117,6 +117,7 @@ int main (int argc, char **argv) {
 
 #endif // CK2
 
+// Activate when D18110 is merged
 // Test target codegen - host bc file has to be created first.
 // RXUN: %clang_cc1 -DCK3 -verify -fopenmp -x c++ -triple powerpc64le-unknown-unknown -omptargets=nvptx64-nvidia-cuda -emit-llvm-bc %s -o %t-ppc-host.bc
 // RXUN: %clang_cc1 -DCK3 -verify -fopenmp -x c++ -triple nvptx64-unknown-unknown -omptargets=nvptx64-nvidia-cuda -emit-llvm %s -fopenmp-is-device -fomp-host-ir-file-path %t-ppc-host.bc -o - | FileCheck %s --check-prefix CK3 --check-prefix CK3-64
