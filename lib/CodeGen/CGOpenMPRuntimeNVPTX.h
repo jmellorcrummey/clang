@@ -29,8 +29,8 @@ public:
   // as these numbers are obtained through the PTX grid and block configuration.
   /// \param NumTeams An integer expression of teams.
   /// \param ThreadLimit An integer expression of threads.
-  virtual void emitNumTeamsClause(CodeGenFunction &CGF, const Expr *NumTeams,
-                                  const Expr *ThreadLimit, SourceLocation Loc);
+  void emitNumTeamsClause(CodeGenFunction &CGF, const Expr *NumTeams,
+                          const Expr *ThreadLimit, SourceLocation Loc) override;
 
   /// \brief Emits inlined function for the specified OpenMP parallel
   //  directive but an inlined function for teams.
@@ -41,9 +41,10 @@ public:
   /// \param InnermostKind Kind of innermost directive (for simple directives it
   /// is a directive itself, for combined - its innermost directive).
   /// \param CodeGen Code generation sequence for the \a D directive.
-  virtual llvm::Value *emitParallelOrTeamsOutlinedFunction(
+  llvm::Value *emitParallelOrTeamsOutlinedFunction(
       const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
-      OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen);
+      OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen)
+        override;
 
   /// \brief Emits code for teams call of the \a OutlinedFn with
   /// variables captured in a record which address is stored in \a
@@ -53,10 +54,9 @@ public:
   /// \param CapturedVars A pointer to the record with the references to
   /// variables used in \a OutlinedFn function.
   ///
-  virtual void emitTeamsCall(CodeGenFunction &CGF,
-                             const OMPExecutableDirective &D,
-                             SourceLocation Loc, llvm::Value *OutlinedFn,
-                             ArrayRef<llvm::Value *> CapturedVars);
+  void emitTeamsCall(CodeGenFunction &CGF, const OMPExecutableDirective &D,
+                     SourceLocation Loc, llvm::Value *OutlinedFn,
+                     ArrayRef<llvm::Value *> CapturedVars) override;
 
 };
 
