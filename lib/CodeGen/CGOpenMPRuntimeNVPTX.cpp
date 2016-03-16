@@ -140,15 +140,20 @@ enum OpenMPRTLFunctionNVPTX {
   /// \brief Call to void __kmpc_kernel_end_parallel();
   OMPRTL_NVPTX__kmpc_kernel_end_parallel,
   /// \brief Call to bool __kmpc_kernel_convergent_parallel(
-  /// bool *IsFinal, kmpc_int32 *LaneSource);
+  /// void *buffer, bool *IsFinal, kmpc_int32 *LaneSource);
   OMPRTL_NVPTX__kmpc_kernel_convergent_parallel,
-  /// \brief Call to void __kmpc_kernel_end_convergent_parallel();
+  /// \brief Call to void __kmpc_kernel_end_convergent_parallel(
+  /// void *buffer);
   OMPRTL_NVPTX__kmpc_kernel_end_convergent_parallel,
 };
 
 // NVPTX Address space
 enum ADDRESS_SPACE {
   ADDRESS_SPACE_SHARED = 3,
+};
+
+enum STATE_SIZE {
+  TASK_STATE_SIZE = 48,
 };
 } // namespace
 
@@ -420,7 +425,8 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
   case OMPRTL_NVPTX__kmpc_kernel_convergent_parallel: {
     /// \brief Call to bool __kmpc_kernel_convergent_parallel(
     /// bool *IsFinal, kmpc_int32 *LaneSource);
-    llvm::Type *TypeParams[] = {CGM.Int8PtrTy, CGM.Int32Ty->getPointerTo()};
+    llvm::Type *TypeParams[] = {CGM.Int8PtrTy, CGM.Int8PtrTy,
+                                CGM.Int32Ty->getPointerTo()};
     llvm::FunctionType *FnTy =
         llvm::FunctionType::get(llvm::Type::getInt1Ty(CGM.getLLVMContext()),
                                 TypeParams, /*isVarArg*/ false);
@@ -430,8 +436,9 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
   }
   case OMPRTL_NVPTX__kmpc_kernel_end_convergent_parallel: {
     /// Build void __kmpc_kernel_end_convergent_parallel();
+    llvm::Type *TypeParams[] = {CGM.Int8PtrTy};
     llvm::FunctionType *FnTy =
-        llvm::FunctionType::get(CGM.VoidTy, {}, /*isVarArg*/ false);
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
     RTLFn = CGM.CreateRuntimeFunction(FnTy,
                                       "__kmpc_kernel_end_convergent_parallel");
     break;
@@ -736,6 +743,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
   auto &&L1ParallelGen = [this, Fn, CapturedVars, RTLoc,
                           Loc](CodeGenFunction &CGF) {
     CGBuilderTy &Bld = CGF.Builder;
+    clang::ASTContext &Ctx = CGF.getContext();
 
     Address IsFinal =
         CGF.CreateTempAlloca(CGF.Int8Ty, CharUnits::fromQuantity(1),
@@ -743,8 +751,14 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
     Address WorkSource =
         CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
                              /*Name*/ "work_source");
-    CGF.InitTempAlloca(IsFinal, Bld.getInt8(/*C*/ 0));
-    CGF.InitTempAlloca(WorkSource, Bld.getInt32(/*C*/ -1));
+    llvm::APInt TaskBufferSize(/*numBits=*/32, TASK_STATE_SIZE);
+    auto TaskBufferTy = Ctx.getConstantArrayType(
+        Ctx.CharTy, TaskBufferSize, ArrayType::Normal, /*IndexTypeQuals=*/0);
+    auto TaskState = CGF.CreateMemTemp(TaskBufferTy, CharUnits::fromQuantity(8),
+                                       /*Name=*/"task_state")
+                         .getPointer();
+    CGF.InitTempAlloca(IsFinal, Bld.getInt8(/*C=*/0));
+    CGF.InitTempAlloca(WorkSource, Bld.getInt32(/*C=*/-1));
 
     llvm::BasicBlock *DoBodyBB = CGF.createBasicBlock(".do.body");
     llvm::BasicBlock *ExecuteBB = CGF.createBasicBlock(".do.body.execute");
@@ -753,7 +767,11 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
 
     CGF.EmitBranch(DoBodyBB);
     CGF.EmitBlock(DoBodyBB);
-    llvm::Value *Args[] = {IsFinal.getPointer(), WorkSource.getPointer()};
+    auto ArrayDecay = Bld.CreateConstInBoundsGEP2_32(
+        llvm::ArrayType::get(CGM.Int8Ty, TASK_STATE_SIZE), TaskState,
+        /*Idx0=*/0, /*Idx1=*/0);
+    llvm::Value *Args[] = {ArrayDecay, IsFinal.getPointer(),
+                           WorkSource.getPointer()};
     llvm::Value *IsActive =
         CGF.EmitRuntimeCall(createNVPTXRuntimeFunction(
                                 OMPRTL_NVPTX__kmpc_kernel_convergent_parallel),
@@ -772,14 +790,18 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
     OutlinedFnArgs.push_back(ZeroAddr.getPointer());
     OutlinedFnArgs.append(CapturedVars.begin(), CapturedVars.end());
     CGF.EmitCallOrInvoke(Fn, OutlinedFnArgs);
+    ArrayDecay = Bld.CreateConstInBoundsGEP2_32(
+        llvm::ArrayType::get(CGM.Int8Ty, TASK_STATE_SIZE), TaskState,
+        /*Idx0=*/0, /*Idx1=*/0);
+    llvm::Value *EndArgs[] = {ArrayDecay};
     CGF.EmitRuntimeCall(createNVPTXRuntimeFunction(
                             OMPRTL_NVPTX__kmpc_kernel_end_convergent_parallel),
-                        ArrayRef<llvm::Value *>());
+                        EndArgs);
     CGF.EmitBranch(DoCondBB);
 
     CGF.EmitBlock(DoCondBB);
     llvm::Value *IsDone = Bld.CreateICmpEQ(Bld.CreateLoad(IsFinal),
-                                           Bld.getInt8(/*C*/ 1), "is_done");
+                                           Bld.getInt8(/*C=*/1), "is_done");
     Bld.CreateCondBr(IsDone, DoEndBB, DoBodyBB);
 
     CGF.EmitBlock(DoEndBB);
