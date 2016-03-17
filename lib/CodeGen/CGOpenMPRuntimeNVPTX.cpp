@@ -697,7 +697,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
     return;
   llvm::Function *Fn = cast<llvm::Function>(OutlinedFn);
   // Force inline this outlined function at its call site.
-  Fn->addFnAttr(llvm::Attribute::AlwaysInline);
+  // Fn->addFnAttr(llvm::Attribute::AlwaysInline);
   Fn->setLinkage(llvm::GlobalValue::InternalLinkage);
   auto *RTLoc = emitUpdateLocation(CGF, Loc);
   auto &&L0ParallelGen = [this, Fn, CapturedVars](CodeGenFunction &CGF) {
