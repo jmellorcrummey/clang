@@ -4095,6 +4095,8 @@ public:
     case CC_X86VectorCall:
     case CC_IntelOclBicc:
     case CC_X86_64Win64:
+    case CC_PreserveMost:
+    case CC_PreserveAll:
       return CCCR_OK;
     default:
       return CCCR_Warning;
@@ -5545,6 +5547,8 @@ public:
     switch (CC) {
     case CC_C:
     case CC_Swift:
+    case CC_PreserveMost:
+    case CC_PreserveAll:
       return CCCR_OK;
     default:
       return CCCR_Warning;
@@ -6031,7 +6035,9 @@ public:
     CK_NIAGARA,
     CK_NIAGARA2,
     CK_NIAGARA3,
-    CK_NIAGARA4
+    CK_NIAGARA4,
+    CK_MYRIAD2_1,
+    CK_MYRIAD2_2
   } CPU = CK_GENERIC;
 
   enum CPUGeneration {
@@ -6050,6 +6056,8 @@ public:
     case CK_SPARCLITE86X:
     case CK_SPARCLET:
     case CK_TSC701:
+    case CK_MYRIAD2_1:
+    case CK_MYRIAD2_2:
       return CG_V8;
     case CK_V9:
     case CK_ULTRASPARC:
@@ -6080,6 +6088,9 @@ public:
         .Case("niagara2", CK_NIAGARA2)
         .Case("niagara3", CK_NIAGARA3)
         .Case("niagara4", CK_NIAGARA4)
+        .Case("myriad2", CK_MYRIAD2_1)
+        .Case("myriad2.1", CK_MYRIAD2_1)
+        .Case("myriad2.2", CK_MYRIAD2_2)
         .Default(CK_GENERIC);
   }
 
@@ -6176,6 +6187,20 @@ public:
         Builder.defineMacro("__sparc_v9__");
       }
       break;
+    }
+    if (getTriple().getVendor() == llvm::Triple::Myriad) {
+      switch (CPU) {
+      case CK_MYRIAD2_1:
+        Builder.defineMacro("__myriad2", "1");
+        Builder.defineMacro("__myriad2__", "1");
+        break;
+      case CK_MYRIAD2_2:
+        Builder.defineMacro("__myriad2", "2");
+        Builder.defineMacro("__myriad2__", "2");
+        break;
+      default:
+        break;
+      }
     }
   }
 };

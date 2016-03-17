@@ -521,7 +521,7 @@ void Clang::AddPreprocessingOptions(Compilation &C, const JobAction &JA,
     ++AI;
 
     if (getToolChain().getDriver().IsCLMode()) {
-      // In clang-cl mode, /Ycfoo.h means that all code up to a foo.h 
+      // In clang-cl mode, /Ycfoo.h means that all code up to a foo.h
       // include is compiled into foo.h, and everything after goes into
       // the .obj file. /Yufoo.h means that all includes prior to and including
       // foo.h are completely skipped and replaced with a use of the pch file
@@ -5392,6 +5392,18 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                      /*default*/ types::isCXX(InputType)))
       CmdArgs.push_back("-fobjc-arc-exceptions");
 
+  }
+
+  // Allow the user to control whether messages can be converted to runtime
+  // functions.
+  if (types::isObjC(InputType)) {
+    auto *Arg = Args.getLastArg(
+        options::OPT_fobjc_convert_messages_to_runtime_calls,
+        options::OPT_fno_objc_convert_messages_to_runtime_calls);
+    if (Arg &&
+        Arg->getOption().matches(
+            options::OPT_fno_objc_convert_messages_to_runtime_calls))
+      CmdArgs.push_back("-fno-objc-convert-messages-to-runtime-calls");
   }
 
   // -fobjc-infer-related-result-type is the default, except in the Objective-C
@@ -10643,7 +10655,6 @@ void tools::SHAVE::Compiler::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-S");
     CmdArgs.push_back("-fno-exceptions"); // Always do this even if unspecified.
   }
-  CmdArgs.push_back("-mcpu=myriad2");
   CmdArgs.push_back("-DMYRIAD2");
 
   // Append all -I, -iquote, -isystem paths, defines/undefines,
@@ -10653,7 +10664,8 @@ void tools::SHAVE::Compiler::ConstructJob(Compilation &C, const JobAction &JA,
                             options::OPT_std_EQ, options::OPT_D, options::OPT_U,
                             options::OPT_f_Group, options::OPT_f_clang_Group,
                             options::OPT_g_Group, options::OPT_M_Group,
-                            options::OPT_O_Group, options::OPT_W_Group});
+                            options::OPT_O_Group, options::OPT_W_Group,
+                            options::OPT_mcpu_EQ});
 
   // If we're producing a dependency file, and assembly is the final action,
   // then the name of the target in the dependency file should be the '.o'
@@ -10693,7 +10705,10 @@ void tools::SHAVE::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
   assert(Output.getType() == types::TY_Object);
 
   CmdArgs.push_back("-no6thSlotCompression");
-  CmdArgs.push_back("-cv:myriad2"); // Chip Version
+  const Arg *CPUArg = Args.getLastArg(options::OPT_mcpu_EQ);
+  if (CPUArg)
+    CmdArgs.push_back(
+        Args.MakeArgString("-cv:" + StringRef(CPUArg->getValue())));
   CmdArgs.push_back("-noSPrefixing");
   CmdArgs.push_back("-a"); // Mystery option.
   Args.AddAllArgValues(CmdArgs, options::OPT_Wa_COMMA, options::OPT_Xassembler);
