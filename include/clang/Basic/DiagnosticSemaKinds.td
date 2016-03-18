@@ -7942,7 +7942,10 @@ def warn_omp_loop_64_bit_var : Warning<
   "OpenMP loop iteration variable cannot have more than 64 bits size and will be narrowed">,
   InGroup<OpenMPLoopForm>;
 def err_omp_unknown_reduction_identifier : Error<
-  "incorrect reduction identifier, expected one of '+', '-', '*', '&', '|', '^', '&&', '||', 'min' or 'max'">;
+  "incorrect reduction identifier, expected one of '+', '-', '*', '&', '|', '^', "
+  "'&&', '||', 'min' or 'max' or declare reduction for type %0">;
+def err_omp_not_resolved_reduction_identifier : Error<
+  "unable to resolve declare reduction construct for type %0">;
 def err_omp_reduction_ref_type_arg : Error<
   "argument of OpenMP clause 'reduction' must reference the same object in all threads">;
 def err_omp_clause_not_arithmetic_type_arg : Error<
@@ -8130,6 +8133,8 @@ def err_omp_schedule_nonmonotonic_ordered : Error<
   "'schedule' clause with 'nonmonotonic' modifier cannot be specified if an 'ordered' clause is specified">;
 def err_omp_ordered_simd : Error<
   "'ordered' clause with a parameter can not be specified in '#pragma omp %0' directive">;
+def err_omp_variable_in_map_and_dsa : Error<
+  "%0 variable cannot be in a map clause in '#pragma omp %1' directive">; 
 } // end of OpenMP category
 
 let CategoryName = "Related Result Type Issue" in {
