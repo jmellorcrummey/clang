@@ -24,31 +24,57 @@ namespace clang {
 namespace CodeGen {
 
 class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
+  // Data Sharing related calls.
+
+  // \brief Return the address where the parallelism level is kept in shared
+  // memory for the current thread. It is assumed we have up to 992 parallel
+  // worker threads.
+  //
+  // FIXME: Make this value reside in a descriptor whose size is decided at
+  // runtime (extern shared memory). This can be used for the other thread
+  // specific state as well.
+  LValue getParallelismLevelLValue(CodeGenFunction &CGF) const;
+
+  // \brief Return an integer with the parallelism level. Zero means that the
+  // current region is not enclosed in a parallel/simd region. The current level
+  // is kept in a shared memory array.
+  llvm::Value *getParallelismLevel(CodeGenFunction &CGF) const;
+
+  // \brief Increase the value of parallelism level for the current thread.
+  void increaseParallelismLevel(CodeGenFunction &CGF) const;
+
+  // \brief Decrease the value of parallelism level for the current thread.
+  void decreaseParallelismLevel(CodeGenFunction &CGF) const;
+
+  // \brief Initialize with zero the value of parallelism level for the current
+  // thread.
+  void initializeParallelismLevel(CodeGenFunction &CGF) const;
+
   //
   // NVPTX calls.
   //
 
   /// \brief Get the GPU warp size.
-  llvm::Value *getNVPTXWarpSize(CodeGenFunction &CGF);
+  llvm::Value *getNVPTXWarpSize(CodeGenFunction &CGF) const;
 
   /// \brief Get the id of the current thread on the GPU.
-  llvm::Value *getNVPTXThreadID(CodeGenFunction &CGF);
+  llvm::Value *getNVPTXThreadID(CodeGenFunction &CGF) const;
 
   /// \brief Get the id of the current block on the GPU.
-  llvm::Value *getNVPTXBlockID(CodeGenFunction &CGF);
+  llvm::Value *getNVPTXBlockID(CodeGenFunction &CGF) const;
 
   // \brief Get the maximum number of threads in a block of the GPU.
-  llvm::Value *getNVPTXNumThreads(CodeGenFunction &CGF);
+  llvm::Value *getNVPTXNumThreads(CodeGenFunction &CGF) const;
 
   /// \brief Get barrier to synchronize all threads in a block.
-  void getNVPTXCTABarrier(CodeGenFunction &CGF);
+  void getNVPTXCTABarrier(CodeGenFunction &CGF) const;
 
   /// \brief Get barrier #n to synchronize selected (multiple of 32) threads in
   /// a block.
-  void getNVPTXBarrier(CodeGenFunction &CGF, int ID, int NumThreads);
+  void getNVPTXBarrier(CodeGenFunction &CGF, int ID, int NumThreads) const;
 
   // \brief Synchronize all GPU threads in a block.
-  void syncCTAThreads(CodeGenFunction &CGF);
+  void syncCTAThreads(CodeGenFunction &CGF) const;
 
   //
   // OMP calls.
@@ -158,11 +184,25 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
                                   llvm::Constant *&OutlinedFnID,
                                   bool IsOffloadEntry) override;
 
-  // \brief Initialize state on entry to a target region.
-  void enterTarget();
+  /// \brief Emit the code that each thread requires to execute when it
+  /// encounters one of the three possible parallelism level. This also emits
+  /// the required data sharing code for each level.
+  /// \param Level0 Code to emit by the master thread when it encounters a
+  /// parallel region.
+  /// \param Level1 Code to emit by a worker thread when it encounters a
+  /// parallel region.
+  /// \param Sequential Code to emit by a worker thread when the parallel region
+  /// is to be computed sequentially.
+  void emitParallelismLevelCode(CodeGenFunction &CGF,
+                                const RegionCodeGenTy &Level0,
+                                const RegionCodeGenTy &Level1,
+                                const RegionCodeGenTy &Sequential);
 
-  // \brief Reset state on exit from a target region.
-  void exitTarget();
+  //  // \brief Initialize state on entry to a target region.
+  //  void enterTarget();
+  //
+  //  // \brief Reset state on exit from a target region.
+  //  void exitTarget();
 
   // \brief Test if a construct is always encountered at nesting level 0.
   bool InL0();
