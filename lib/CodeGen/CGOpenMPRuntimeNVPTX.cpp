@@ -216,10 +216,15 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
       CGF.Int8PtrTy, CharUnits::fromQuantity(8), /*Name*/ "work_fn");
   Address WorkArgs = CGF.CreateTempAlloca(
       CGF.Int8PtrTy, CharUnits::fromQuantity(8), /*Name*/ "work_args");
+  Address ExecStatus =
+        CGF.CreateTempAlloca(CGF.Int8Ty, CharUnits::fromQuantity(1),
+                             /*Name*/ "exec_status");
+  CGF.InitTempAlloca(ExecStatus, Bld.getInt8(/*C=*/0));
+
   llvm::Value *Args[] = {WorkFn.getPointer(), WorkArgs.getPointer()};
-  llvm::Value *IsActive = CGF.EmitRuntimeCall(
-      createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_parallel), Args,
-      "is_active");
+  llvm::Value *Ret = CGF.EmitRuntimeCall(
+      createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_parallel), Args);
+  Bld.CreateStore(Bld.CreateZExt(Ret, CGF.Int8Ty), ExecStatus);
 
   // On termination condition (workfn == 0), exit loop.
   llvm::Value *ShouldTerminate = Bld.CreateICmpEQ(
@@ -229,6 +234,8 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
 
   // Activate requested workers.
   CGF.EmitBlock(SelectWorkersBB);
+  llvm::Value *IsActive =
+      Bld.CreateICmpNE(Bld.CreateLoad(ExecStatus), Bld.getInt8(0), "is_active");
   Bld.CreateCondBr(IsActive, ExecuteBB, BarrierBB);
 
   // Signal start of parallel region.
