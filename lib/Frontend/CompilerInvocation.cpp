@@ -707,9 +707,6 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
     }
   }
 
-  if (Args.hasArg(OPT_fno_objc_convert_messages_to_runtime_calls))
-    Opts.ObjCConvertMessagesToRuntimeCalls = 0;
-
   Opts.EmulatedTLS =
       Args.hasFlag(OPT_femulated_tls, OPT_fno_emulated_tls, false);
 
@@ -2383,8 +2380,8 @@ createVFSFromCompilerInvocation(const CompilerInvocation &CI,
       return IntrusiveRefCntPtr<vfs::FileSystem>();
     }
 
-    IntrusiveRefCntPtr<vfs::FileSystem> FS =
-        vfs::getVFSFromYAML(std::move(Buffer.get()), /*DiagHandler*/ nullptr);
+    IntrusiveRefCntPtr<vfs::FileSystem> FS = vfs::getVFSFromYAML(
+        std::move(Buffer.get()), /*DiagHandler*/ nullptr, File);
     if (!FS.get()) {
       Diags.Report(diag::err_invalid_vfs_overlay) << File;
       return IntrusiveRefCntPtr<vfs::FileSystem>();
