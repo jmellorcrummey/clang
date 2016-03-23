@@ -52,12 +52,14 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // thread.
   void initializeParallelismLevel(CodeGenFunction &CGF) const;
 
-  // \brief Type of the data sharing master slot. By default the size is zero meaning that the data size is to be determined.
+  // \brief Type of the data sharing master slot. By default the size is zero
+  // meaning that the data size is to be determined.
   QualType DataSharingMasterSlotQtyFixedSize;
   QualType DataSharingMasterSlotQtyIncomplete;
   QualType getDataSharingMasterSlotQty(bool UseFixedDataSize = false);
 
-  // \brief Type of the data sharing worker warp slot. By default the size is zero meaning that the data size is to be determined.
+  // \brief Type of the data sharing worker warp slot. By default the size is
+  // zero meaning that the data size is to be determined.
   QualType DataSharingWorkerWarpSlotQtyFixedSize;
   QualType DataSharingWorkerWarpSlotQtyIncomplete;
   QualType getDataSharingWorkerWarpSlotQty(bool UseFixedDataSize = false);
@@ -70,13 +72,16 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   LValue getSharedDataRootSlotLValue(CodeGenFunction &CGF, bool IsMaster);
 
   // \brief Return the address where the address of the current slot is stored.
-  LValue getSharedDataSlotPointerAddrLValue(CodeGenFunction &CGF, bool IsMaster);
+  LValue getSharedDataSlotPointerAddrLValue(CodeGenFunction &CGF,
+                                            bool IsMaster);
 
   // \brief Return the address of the current data sharing slot.
   LValue getSharedDataSlotPointerLValue(CodeGenFunction &CGF, bool IsMaster);
 
-  // \brief Return the address where the address of the current stack pointer (in the current slot) is stored.
-  LValue getSharedDataStackPointerAddrLValue(CodeGenFunction &CGF, bool IsMaster);
+  // \brief Return the address where the address of the current stack pointer
+  // (in the current slot) is stored.
+  LValue getSharedDataStackPointerAddrLValue(CodeGenFunction &CGF,
+                                             bool IsMaster);
 
   // \brief Return the address of the current data stack pointer.
   LValue getSharedDataStackPointerLValue(CodeGenFunction &CGF, bool IsMaster);
@@ -109,10 +114,12 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // \brief Get the number of active threads in a warp.
   llvm::Value *getNVPTXWarpActiveNumThreads(CodeGenFunction &CGF);
 
-  // \brief Get the ID of the thread among the current active threads in the warp.
+  // \brief Get the ID of the thread among the current active threads in the
+  // warp.
   llvm::Value *getNVPTXWarpActiveThreadID(CodeGenFunction &CGF);
 
-  // \brief Get a conditional that is set to true if the thread is the master of the active threads in the warp.
+  // \brief Get a conditional that is set to true if the thread is the master of
+  // the active threads in the warp.
   llvm::Value *getNVPTXIsWarpActiveMaster(CodeGenFunction &CGF);
 
   /// \brief Get barrier to synchronize all threads in a block.
@@ -295,9 +302,9 @@ public:
   /// \param CodeGen Code generation sequence for the \a D directive.
   llvm::Value *
   emitParallelOrTeamsOutlinedFunction(const OMPExecutableDirective &D,
-                               const VarDecl *ThreadIDVar,
-                               OpenMPDirectiveKind InnermostKind,
-                               const RegionCodeGenTy &CodeGen) override;
+                                      const VarDecl *ThreadIDVar,
+                                      OpenMPDirectiveKind InnermostKind,
+                                      const RegionCodeGenTy &CodeGen) override;
 
   /// \brief Check if we should generate code as if \a ScheduleKind is static
   /// with a chunk size of 1.
