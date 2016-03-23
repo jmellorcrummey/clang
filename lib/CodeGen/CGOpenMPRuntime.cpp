@@ -3962,7 +3962,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     for (Stmt::const_child_iterator ii = S.child_begin(), ie = S.child_end();
          ii != ie; ++ii) {
       if (*ii){
-        printf("Visit top Stmt (%d)\n", isa<OMPSimdDirective>(*ii));
+        //printf("Visit top Stmt (%d)\n", isa<OMPSimdDirective>(*ii));
         if (isSimdDirective(**ii)){
            hasSimdPragma++;
            continue;
@@ -4045,15 +4045,17 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // in case we need to choose (currently on the nested loop nest with parallel for
     // on the outer loop and inner SIMD loop uses this flag).
     CGF.useSharedMemory = true;
+    //applyNestedSimd = false;
+    //applyCombinedConstruct = false;
 
     //applyNestedSimd = false;
     printf("Considering if combined construct is applicable:\n");
-    printf("    => SKIND is (OMPD_teams_distribute_parallel_for %d): %d\n", OMPD_teams_distribute_parallel_for, SKind);
-    printf("    => schedule(static, 1): %d\n", StmtHasScheduleStaticOne(S, CGF, SKind));
-    printf("    => Has other OMP pragmas inside. StmtHasOMPPragmas(S, CGF): %d\n", StmtHasOMPPragmas(S, CGF));
+    //printf("    => SKIND is (OMPD_teams_distribute_parallel_for %d): %d\n", OMPD_teams_distribute_parallel_for, SKind);
+    //printf("    => schedule(static, 1): %d\n", StmtHasScheduleStaticOne(S, CGF, SKind));
+    //printf("    => Has other OMP pragmas inside. StmtHasOMPPragmas(S, CGF): %d\n", StmtHasOMPPragmas(S, CGF));
     printf("             => Apply combined: %d\n", applyCombinedConstruct);
     printf("Conditions for nested construct with SIMD inside:\n");
-    printf("    => Has SIMD pragma inside (not in subblock): %d\n", SIMDinTopBlock(S));
+    //printf("    => Has SIMD pragma inside (not in subblock): %d\n", SIMDinTopBlock(S));
     printf("             => Apply nested parallelism: %d\n", applyNestedSimd);
     printf("End\n");
 
@@ -4734,7 +4736,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       // We want to sync at the end of the SIMD.
       Bld.CreateBr(CGF.SyncAfterSimdBlock);
       Bld.SetInsertPoint(CGF.SyncAfterSimdBlock);
-      //Bld.CreateCall(Get_syncthreads(), {});
+      if (CGF.useSharedMemory){
+         Bld.CreateCall(Get_syncthreads(), {});
+      }
       // llvm::Value *isNotLaneMaster = Bld.CreateICmpNE(Bld.CreateLoad(SimdLocalLaneId), Bld.getInt32(0));
       // llvm::BasicBlock *StartPostSimdRegion = llvm::BasicBlock::Create(
       //   CGM.getLLVMContext(), ".start.post.simd.region", CGF.CurFn);
