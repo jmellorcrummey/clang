@@ -46,6 +46,8 @@ enum OpenMPRTLFunctionNVPTX {
   /// \brief Call to void __kmpc_kernel_end_convergent_parallel(
   /// void *buffer);
   OMPRTL_NVPTX__kmpc_kernel_end_convergent_parallel,
+  /// \brief Call to int32_t __kmpc_warp_active_thread_mask();
+  OMPRTL_NVPTX__kmpc_warp_active_thread_mask,
 };
 
 // NVPTX Address space
@@ -56,6 +58,21 @@ enum ADDRESS_SPACE {
 enum STATE_SIZE {
   TASK_STATE_SIZE = 48,
 };
+
+enum DATA_SHARING_SIZES {
+  // The maximum number of workers in a kernel.
+  DS_Max_Worker_Threads = 992,
+  // The size reserved for data in a shared memory slot.
+  DS_Slot_Size = 4,
+  // The maximum number of threads in a worker warp.
+  DS_Max_Worker_Warp_Size = 32,
+  // The number of bits required to represent the maximum number of threads in a
+  // warp.
+  DS_Max_Worker_Warp_Size_Log2 = 5,
+  // The slot size that should be reserved for a working warp.
+  DS_Worker_Warp_Slot_Size = DS_Max_Worker_Warp_Size * DS_Slot_Size,
+};
+
 } // namespace
 
 // \brief Return the address where the parallelism level is kept in shared
@@ -68,15 +85,15 @@ LValue
 CGOpenMPRuntimeNVPTX::getParallelismLevelLValue(CodeGenFunction &CGF) const {
   auto &M = CGM.getModule();
 
-  llvm::GlobalVariable *Gbl = M.getGlobalVariable(
-      "__openmp_nvptx_parallelism_levels", /*AllowInternal=*/true);
+  const char *Name = "__openmp_nvptx_parallelism_levels";
+  llvm::GlobalVariable *Gbl = M.getGlobalVariable(Name);
 
   if (!Gbl) {
-    auto *Ty = llvm::ArrayType::get(CGM.Int32Ty, /*NumElements=*/992);
+    auto *Ty = llvm::ArrayType::get(CGM.Int32Ty, DS_Max_Worker_Threads);
     Gbl = new llvm::GlobalVariable(
         M, Ty,
         /*isConstant=*/false, llvm::GlobalVariable::CommonLinkage,
-        llvm::Constant::getNullValue(Ty), "__openmp_nvptx_parallelism_levels",
+        llvm::Constant::getNullValue(Ty), Name,
         /*InsertBefore=*/nullptr, llvm::GlobalVariable::NotThreadLocal,
         ADDRESS_SPACE_SHARED);
   }
@@ -124,6 +141,327 @@ void CGOpenMPRuntimeNVPTX::initializeParallelismLevel(
   CGF.EmitStoreOfScalar(llvm::Constant::getNullValue(CGM.Int32Ty), Addr);
 }
 
+static FieldDecl *addFieldToRecordDecl(ASTContext &C, DeclContext *DC,
+                                       QualType FieldTy) {
+  auto *Field = FieldDecl::Create(
+      C, DC, SourceLocation(), SourceLocation(), /*Id=*/nullptr, FieldTy,
+      C.getTrivialTypeSourceInfo(FieldTy, SourceLocation()),
+      /*BW=*/nullptr, /*Mutable=*/false, /*InitStyle=*/ICIS_NoInit);
+  Field->setAccess(AS_public);
+  DC->addDecl(Field);
+  return Field;
+}
+
+// \brief Type of the data sharing master slot.
+QualType
+CGOpenMPRuntimeNVPTX::getDataSharingMasterSlotQty(bool UseFixedDataSize) {
+  //  struct MasterSlot {
+  //    uintptr_t Next;
+  //    uintptr_t Size;
+  //    char Data[]( or [DS_Slot_Size]);
+  //  };
+
+  if (UseFixedDataSize) {
+    const char *Name = "__openmp_nvptx_data_sharing_master_slot_ty";
+    if (DataSharingMasterSlotQtyFixedSize.isNull()) {
+      ASTContext &C = CGM.getContext();
+      auto *RD = C.buildImplicitRecord(Name);
+      RD->startDefinition();
+      addFieldToRecordDecl(C, RD, C.getUIntPtrType());
+      addFieldToRecordDecl(C, RD, C.getUIntPtrType());
+      llvm::APInt NumElems(C.getTypeSize(C.getUIntPtrType()), DS_Slot_Size);
+      QualType DataTy = C.getConstantArrayType(
+          C.CharTy, NumElems, ArrayType::Normal, /*IndexTypeQuals=*/0);
+      addFieldToRecordDecl(C, RD, DataTy);
+      RD->completeDefinition();
+      DataSharingMasterSlotQtyFixedSize = C.getRecordType(RD);
+    }
+    return DataSharingMasterSlotQtyFixedSize;
+  }
+
+  const char *Name = "__openmp_nvptx_data_sharing_master_slot_inc_ty";
+  if (DataSharingMasterSlotQtyIncomplete.isNull()) {
+    ASTContext &C = CGM.getContext();
+    auto *RD = C.buildImplicitRecord(Name);
+    RD->startDefinition();
+    addFieldToRecordDecl(C, RD, C.getUIntPtrType());
+    addFieldToRecordDecl(C, RD, C.getUIntPtrType());
+    QualType DataTy = C.getIncompleteArrayType(C.CharTy, ArrayType::Normal,
+                                               /*IndexTypeQuals=*/0);
+    addFieldToRecordDecl(C, RD, DataTy);
+    RD->completeDefinition();
+    DataSharingMasterSlotQtyIncomplete = C.getRecordType(RD);
+  }
+  return DataSharingMasterSlotQtyIncomplete;
+}
+
+// \brief Type of the data sharing worker warp slot.
+QualType
+CGOpenMPRuntimeNVPTX::getDataSharingWorkerWarpSlotQty(bool UseFixedDataSize) {
+  //  struct WorkerWarpSlot {
+  //    uintptr_t Next;
+  //    uintptr_t Size;
+  //    char Data[] ( or [DS_Worker_Warp_Slot_Size]);
+  //  };
+
+  if (UseFixedDataSize) {
+    const char *Name = "__openmp_nvptx_data_sharing_worker_warp_slot_ty";
+    if (DataSharingWorkerWarpSlotQtyFixedSize.isNull()) {
+      ASTContext &C = CGM.getContext();
+      auto *RD = C.buildImplicitRecord(Name);
+      RD->startDefinition();
+      addFieldToRecordDecl(C, RD, C.getUIntPtrType());
+      addFieldToRecordDecl(C, RD, C.getUIntPtrType());
+      llvm::APInt NumElems(C.getTypeSize(C.getUIntPtrType()),
+                           DS_Worker_Warp_Slot_Size);
+      QualType DataTy = C.getConstantArrayType(
+          C.CharTy, NumElems, ArrayType::Normal, /*IndexTypeQuals=*/0);
+      addFieldToRecordDecl(C, RD, DataTy);
+      RD->completeDefinition();
+      DataSharingWorkerWarpSlotQtyFixedSize = C.getRecordType(RD);
+    }
+    return DataSharingWorkerWarpSlotQtyFixedSize;
+  }
+
+  const char *Name = "__openmp_nvptx_data_sharing_worker_warp_slot_inc_ty";
+  if (DataSharingWorkerWarpSlotQtyIncomplete.isNull()) {
+    ASTContext &C = CGM.getContext();
+    auto *RD = C.buildImplicitRecord(Name);
+    RD->startDefinition();
+    addFieldToRecordDecl(C, RD, C.getUIntPtrType());
+    addFieldToRecordDecl(C, RD, C.getUIntPtrType());
+    QualType DataTy = C.getIncompleteArrayType(C.CharTy, ArrayType::Normal,
+                                               /*IndexTypeQuals=*/0);
+    addFieldToRecordDecl(C, RD, DataTy);
+    RD->completeDefinition();
+    DataSharingWorkerWarpSlotQtyIncomplete = C.getRecordType(RD);
+  }
+  return DataSharingWorkerWarpSlotQtyIncomplete;
+}
+
+// \brief Type of the data sharing root slot.
+QualType CGOpenMPRuntimeNVPTX::getDataSharingRootSlotQty() {
+  // The type of the global with the root slots:
+  //  struct Slots {
+  //    MasterSlot MS;
+  //    WorkerWarpSlot WS[DS_Max_Worker_Threads/DS_Max_Worker_Warp_Size];
+  // };
+  if (DataSharingRootSlotQty.isNull()) {
+    ASTContext &C = CGM.getContext();
+    auto *RD = C.buildImplicitRecord("__openmp_nvptx_data_sharing_ty");
+    RD->startDefinition();
+    addFieldToRecordDecl(C, RD,
+                         getDataSharingMasterSlotQty(/*UseFixedSize=*/true));
+    llvm::APInt NumElems(C.getTypeSize(C.getUIntPtrType()),
+                         DS_Max_Worker_Threads / DS_Max_Worker_Warp_Size);
+    addFieldToRecordDecl(
+        C, RD, C.getConstantArrayType(
+                   getDataSharingWorkerWarpSlotQty(/*UseFixedSize=*/true),
+                   NumElems, ArrayType::Normal, /*IndexTypeQuals=*/0));
+    RD->completeDefinition();
+    DataSharingRootSlotQty = C.getRecordType(RD);
+  }
+  return DataSharingRootSlotQty;
+}
+
+// \brief Return address of the initial slot that is used to share data.
+LValue CGOpenMPRuntimeNVPTX::getSharedDataRootSlotLValue(CodeGenFunction &CGF,
+                                                         bool IsMaster) {
+  auto &M = CGM.getModule();
+
+  const char *Name = "__openmp_nvptx_shared_data_slots";
+  llvm::GlobalVariable *Gbl = M.getGlobalVariable(Name);
+
+  if (!Gbl) {
+    auto *Ty = CGF.getTypes().ConvertTypeForMem(getDataSharingRootSlotQty());
+    Gbl = new llvm::GlobalVariable(
+        M, Ty,
+        /*isConstant=*/false, llvm::GlobalVariable::CommonLinkage,
+        llvm::Constant::getNullValue(Ty), Name,
+        /*InsertBefore=*/nullptr, llvm::GlobalVariable::NotThreadLocal);
+  }
+
+  // Return the master slot if the flag is set, otherwise get the right worker
+  // slots.
+  if (IsMaster) {
+    llvm::Value *Idx[] = {llvm::Constant::getNullValue(CGM.Int32Ty),
+                          llvm::Constant::getNullValue(CGM.Int32Ty)};
+    llvm::Value *AddrVal = CGF.Builder.CreateInBoundsGEP(Gbl, Idx);
+    return CGF.MakeNaturalAlignAddrLValue(
+        AddrVal, getDataSharingMasterSlotQty(/*UseFixedSize=*/true));
+  }
+
+  auto *WarpID = getNVPTXWarpID(CGF);
+  llvm::Value *Idx[] = {llvm::Constant::getNullValue(CGM.Int32Ty),
+                        /*WS=*/CGF.Builder.getInt32(1), WarpID};
+  llvm::Value *AddrVal = CGF.Builder.CreateInBoundsGEP(Gbl, Idx);
+  return CGF.MakeNaturalAlignAddrLValue(
+      AddrVal, getDataSharingWorkerWarpSlotQty(/*UseFixedSize=*/true));
+}
+
+// \brief Return the address where the address of the current slot is stored.
+LValue
+CGOpenMPRuntimeNVPTX::getSharedDataSlotPointerAddrLValue(CodeGenFunction &CGF,
+                                                         bool IsMaster) {
+  auto &M = CGM.getModule();
+  auto &C = CGM.getContext();
+
+  if (IsMaster) {
+    const char *Name = "__openmp_nvptx_shared_data_current_master_slot_pointer";
+    auto QTy = C.getPointerType(getDataSharingMasterSlotQty());
+    llvm::GlobalVariable *Gbl = M.getGlobalVariable(Name);
+
+    if (!Gbl) {
+      auto *Ty = CGF.getTypes().ConvertTypeForMem(QTy);
+      Gbl = new llvm::GlobalVariable(
+          M, Ty,
+          /*isConstant=*/false, llvm::GlobalVariable::CommonLinkage,
+          llvm::Constant::getNullValue(Ty), Name,
+          /*InsertBefore=*/nullptr, llvm::GlobalVariable::NotThreadLocal,
+          ADDRESS_SPACE_SHARED);
+    }
+    return CGF.MakeNaturalAlignAddrLValue(Gbl, QTy);
+  }
+
+  const char *Name =
+      "__openmp_nvptx_shared_data_current_worker_warp_slot_pointers";
+  auto QTy = C.getPointerType(getDataSharingWorkerWarpSlotQty());
+  llvm::GlobalVariable *Gbl = M.getGlobalVariable(Name);
+
+  if (!Gbl) {
+    auto *ElemTy = CGF.getTypes().ConvertTypeForMem(QTy);
+    auto *Ty = llvm::ArrayType::get(ElemTy, DS_Max_Worker_Threads /
+                                                DS_Max_Worker_Warp_Size);
+    Gbl = new llvm::GlobalVariable(
+        M, Ty,
+        /*isConstant=*/false, llvm::GlobalVariable::CommonLinkage,
+        llvm::Constant::getNullValue(Ty), Name,
+        /*InsertBefore=*/nullptr, llvm::GlobalVariable::NotThreadLocal,
+        ADDRESS_SPACE_SHARED);
+  }
+
+  llvm::Value *Idx[] = {llvm::Constant::getNullValue(CGM.Int32Ty),
+                        getNVPTXWarpID(CGF)};
+  auto *AddrVal = CGF.Builder.CreateInBoundsGEP(Gbl, Idx);
+  return CGF.MakeNaturalAlignAddrLValue(AddrVal, QTy);
+}
+
+// \brief Return the address of the current data sharing slot.
+LValue
+CGOpenMPRuntimeNVPTX::getSharedDataSlotPointerLValue(CodeGenFunction &CGF,
+                                                     bool IsMaster) {
+  auto AddrLValue = getSharedDataSlotPointerAddrLValue(CGF, IsMaster);
+  auto *Val = CGF.EmitLoadOfLValue(AddrLValue, SourceLocation()).getScalarVal();
+  auto QTy = IsMaster ? getDataSharingMasterSlotQty()
+                      : getDataSharingWorkerWarpSlotQty();
+  return CGF.MakeNaturalAlignAddrLValue(Val, QTy);
+}
+
+// \brief Return the address where the address of the current stack pointer (in
+// the current slot) is stored.
+LValue
+CGOpenMPRuntimeNVPTX::getSharedDataStackPointerAddrLValue(CodeGenFunction &CGF,
+                                                          bool IsMaster) {
+  auto &M = CGM.getModule();
+  auto &C = CGM.getContext();
+
+  if (IsMaster) {
+    const char *Name =
+        "__openmp_nvptx_shared_data_current_master_stack_pointer";
+    llvm::GlobalVariable *Gbl = M.getGlobalVariable(Name);
+
+    if (!Gbl) {
+      Gbl = new llvm::GlobalVariable(
+          M, CGF.VoidPtrTy,
+          /*isConstant=*/false, llvm::GlobalVariable::CommonLinkage,
+          llvm::Constant::getNullValue(CGF.VoidPtrTy), Name,
+          /*InsertBefore=*/nullptr, llvm::GlobalVariable::NotThreadLocal,
+          ADDRESS_SPACE_SHARED);
+    }
+    return CGF.MakeNaturalAlignAddrLValue(Gbl, C.VoidPtrTy);
+  }
+
+  const char *Name =
+      "__openmp_nvptx_shared_data_current_worker_warp_stack_pointers";
+  llvm::GlobalVariable *Gbl = M.getGlobalVariable(Name);
+
+  if (!Gbl) {
+    auto *ElemTy = CGF.VoidPtrTy;
+    auto *Ty = llvm::ArrayType::get(ElemTy, DS_Max_Worker_Threads /
+                                                DS_Max_Worker_Warp_Size);
+    Gbl = new llvm::GlobalVariable(
+        M, Ty,
+        /*isConstant=*/false, llvm::GlobalVariable::CommonLinkage,
+        llvm::Constant::getNullValue(Ty), Name,
+        /*InsertBefore=*/nullptr, llvm::GlobalVariable::NotThreadLocal,
+        ADDRESS_SPACE_SHARED);
+  }
+
+  llvm::Value *Idx[] = {llvm::Constant::getNullValue(CGM.Int32Ty),
+                        getNVPTXWarpID(CGF)};
+  auto *AddrVal = CGF.Builder.CreateInBoundsGEP(Gbl, Idx);
+  return CGF.MakeNaturalAlignAddrLValue(AddrVal, C.VoidPtrTy);
+}
+
+// \brief Return the address of the current data stack pointer.
+LValue
+CGOpenMPRuntimeNVPTX::getSharedDataStackPointerLValue(CodeGenFunction &CGF,
+                                                      bool IsMaster) {
+  auto AddrLValue = getSharedDataSlotPointerAddrLValue(CGF, IsMaster);
+  auto *Val = CGF.EmitLoadOfLValue(AddrLValue, SourceLocation()).getScalarVal();
+  return CGF.MakeNaturalAlignAddrLValue(Val, CGF.getContext().VoidTy);
+}
+
+// \brief Initialize the data sharing slots and pointers.
+void CGOpenMPRuntimeNVPTX::initializeSharedData(CodeGenFunction &CGF,
+                                                bool IsMaster) {
+  // We initialized the slot and stack pointer in shared memory with their
+  // initial values. Also, we initialize the slots with the initial size.
+
+  auto &Bld = CGF.Builder;
+  auto &Ctx = CGF.getContext();
+
+  // If this is not the OpenMP master thread, make sure that only the warp
+  // master does the initialization.
+  llvm::BasicBlock *EndBB = CGF.createBasicBlock("after_shared_data_init");
+  ;
+  if (!IsMaster) {
+    auto *IsWarpMaster = getNVPTXIsWarpActiveMaster(CGF);
+    llvm::BasicBlock *InitBB = CGF.createBasicBlock("shared_data_init");
+    Bld.CreateCondBr(IsWarpMaster, InitBB, EndBB);
+    CGF.EmitBlock(InitBB);
+  }
+
+  // Initialize the size.
+  auto SlotLV = getSharedDataRootSlotLValue(CGF, IsMaster);
+
+  llvm::Value *Idx[] = {llvm::Constant::getNullValue(CGM.Int32Ty),
+                        /*Size=*/Bld.getInt32(1)};
+  auto *SizeAddr = Bld.CreateGEP(SlotLV.getPointer(), Idx);
+  auto SizeLV = CGF.MakeNaturalAlignAddrLValue(SizeAddr, Ctx.getUIntPtrType());
+  CGF.EmitStoreOfScalar(
+      llvm::ConstantInt::get(CGF.IntPtrTy, IsMaster ? DS_Slot_Size
+                                                    : DS_Worker_Warp_Slot_Size),
+      SizeLV);
+
+  // Initialize the slot and stack pointers.
+  auto SlotPtrLV = getSharedDataSlotPointerAddrLValue(CGF, IsMaster);
+  auto SlotPtrQTy =
+      Ctx.getPointerType(IsMaster ? getDataSharingMasterSlotQty()
+                                  : getDataSharingWorkerWarpSlotQty());
+  auto *SlotPtrTy = CGF.getTypes().ConvertTypeForMem(SlotPtrQTy);
+  auto SlotPtr = Bld.CreateBitCast(SlotLV.getAddress(), SlotPtrTy);
+  CGF.EmitStoreOfScalar(SlotPtr.getPointer(), SlotPtrLV);
+
+  auto StackPtrLV = getSharedDataStackPointerAddrLValue(CGF, IsMaster);
+  llvm::Value *Idx2[] = {Bld.getInt32(0), /*Data=*/Bld.getInt32(2),
+                         Bld.getInt32(0)};
+  auto *StackPtr = Bld.CreateInBoundsGEP(SlotLV.getPointer(), Idx2);
+  CGF.EmitStoreOfScalar(StackPtr, StackPtrLV);
+
+  CGF.EmitBlock(EndBB);
+}
+
 /// \brief Get the GPU warp size.
 llvm::Value *
 CGOpenMPRuntimeNVPTX::getNVPTXWarpSize(CodeGenFunction &CGF) const {
@@ -153,6 +491,13 @@ llvm::Value *CGOpenMPRuntimeNVPTX::getNVPTXBlockID(CodeGenFunction &CGF) const {
       llvm::None, "nvptx_block_id");
 }
 
+/// \brief Get the id of the warp in the block.
+llvm::Value *CGOpenMPRuntimeNVPTX::getNVPTXWarpID(CodeGenFunction &CGF) const {
+  CGBuilderTy &Bld = CGF.Builder;
+  return Bld.CreateAShr(getNVPTXThreadID(CGF), DS_Max_Worker_Warp_Size_Log2,
+                        "nvptx_warp_id");
+}
+
 // \brief Get the maximum number of threads in a block of the GPU.
 llvm::Value *
 CGOpenMPRuntimeNVPTX::getNVPTXNumThreads(CodeGenFunction &CGF) const {
@@ -161,6 +506,49 @@ CGOpenMPRuntimeNVPTX::getNVPTXNumThreads(CodeGenFunction &CGF) const {
       llvm::Intrinsic::getDeclaration(
           &CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_x),
       llvm::None, "nvptx_num_threads");
+}
+
+// \brief Get a 32 bit mask, whose bits set to 1 represent the active threads.
+llvm::Value *
+CGOpenMPRuntimeNVPTX::getNVPTXWarpActiveThreadsMask(CodeGenFunction &CGF) {
+  return CGF.EmitRuntimeCall(
+      createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_warp_active_thread_mask),
+      None, "warp_active_thread_mask");
+}
+
+// \brief Get the number of active threads in a warp.
+llvm::Value *
+CGOpenMPRuntimeNVPTX::getNVPTXWarpActiveNumThreads(CodeGenFunction &CGF) {
+  CGBuilderTy &Bld = CGF.Builder;
+  return Bld.CreateCall(llvm::Intrinsic::getDeclaration(
+                            &CGM.getModule(), llvm::Intrinsic::nvvm_popc_i),
+                        getNVPTXWarpActiveThreadsMask(CGF),
+                        "warp_active_num_threads");
+}
+
+// \brief Get the ID of the thread among the current active threads in the warp.
+llvm::Value *
+CGOpenMPRuntimeNVPTX::getNVPTXWarpActiveThreadID(CodeGenFunction &CGF) {
+  CGBuilderTy &Bld = CGF.Builder;
+
+  // The active thread Id can be computed as the number of bits in the active
+  // mask to the right of the current thread:
+  // popc( Mask << (32 - threadID) );
+  auto *Mask = getNVPTXWarpActiveThreadsMask(CGF);
+  auto *ShNum = Bld.CreateSub(Bld.getInt32(32), getNVPTXThreadID(CGF));
+  auto *Sh = Bld.CreateShl(Mask, ShNum);
+  return Bld.CreateCall(llvm::Intrinsic::getDeclaration(
+                            &CGM.getModule(), llvm::Intrinsic::nvvm_popc_i),
+                        Sh, "warp_active_thread_id");
+}
+
+// \brief Get a conditional that is set to true if the thread is the master of
+// the active threads in the warp.
+llvm::Value *
+CGOpenMPRuntimeNVPTX::getNVPTXIsWarpActiveMaster(CodeGenFunction &CGF) {
+  CGBuilderTy &Bld = CGF.Builder;
+  return Bld.CreateICmpEQ(getNVPTXWarpActiveThreadID(CGF), Bld.getInt32(0),
+                          "is_warp_active_master");
 }
 
 /// \brief Get barrier to synchronize all threads in a block.
@@ -389,6 +777,7 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
   // ... and send to worker loop, awaiting parallel invocation.
   CGF.EmitBlock(WorkerBB);
   initializeParallelismLevel(CGF);
+  initializeSharedData(CGF, /*IsMaster=*/false);
   llvm::SmallVector<llvm::Value *, 16> WorkerVars;
   for (auto &I : CGF.CurFn->args()) {
     WorkerVars.push_back(&I);
@@ -399,6 +788,7 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
 
   // Only master thread executes subsequent serial code.
   CGF.EmitBlock(MasterBB);
+  initializeSharedData(CGF, /*IsMaster=*/true);
 
   // First action in sequential region:
   // Initialize the state of the OpenMP runtime library on the GPU.
@@ -513,6 +903,13 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
                                       "__kmpc_kernel_end_convergent_parallel");
     break;
   }
+  case OMPRTL_NVPTX__kmpc_warp_active_thread_mask: {
+    /// Build void __kmpc_warp_active_thread_mask();
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.Int32Ty, None, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_warp_active_thread_mask");
+    break;
+  }
   }
   return RTLFn;
 }
@@ -589,7 +986,6 @@ void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
   // region's entry function.
   WST.WorkerFn->setName(OutlinedFn->getName() + "_worker");
 
-  CGM.getModule().dump();
   return;
 }
 
@@ -790,7 +1186,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelismLevelCode(
   // we have function in a target region.
   bool OnlyInL0 = InL0();
   bool OnlyInL1 = InL1();
-  bool OnlySequential = !InL0() && !InL1();
+  bool OnlySequential = !IsOrphaned && !InL0() && !InL1();
 
   // Emit runtime checks if we cannot prove this code is reached only at a
   // certain parallelism level.
@@ -867,7 +1263,6 @@ void CGOpenMPRuntimeNVPTX::emitParallelismLevelCode(
   // Do we need to emit sequential code?
   if (!OnlyInL0 && !OnlyInL1) {
     llvm::BasicBlock *SeqBB = CGF.createBasicBlock(".sequential.parallel");
-    llvm::BasicBlock *AfterBB = CGF.createBasicBlock(".after.parallel");
 
     // Do we need runtime checks
     if (!OnlySequential) {

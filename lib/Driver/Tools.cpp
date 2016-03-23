@@ -281,7 +281,8 @@ static void AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
 /// \brief Add OpenMP linker script arguments at the end of the argument list
 /// so that the fat binary is built by embedding each of the device images into
 /// the host. The device images are the last inputs, one for each device and
-/// come in the same order the triples are passed through the fomptargets option.
+/// come in the same order the triples are passed through the fomptargets
+/// option.
 /// The linker script also defines a few symbols required by the code generation
 /// so that the images can be easily retrieved at runtime by the offloading
 /// library. This should be used in tool chains that support linker scripts.

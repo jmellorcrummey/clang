@@ -541,7 +541,7 @@ public:
   virtual bool isStaticNonchunked(OpenMPDistScheduleClauseKind ScheduleKind,
                                   bool Chunked) const;
 
-	/// \brief Check if we should generate code as if \a ScheduleKind is static
+  /// \brief Check if we should generate code as if \a ScheduleKind is static
   /// with a chunk size of 1.
   /// \param ScheduleKind Schedule Kind specified in the 'schedule' clause.
   /// \param Chunk size.
