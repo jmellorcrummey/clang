@@ -277,22 +277,16 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
 public:
   explicit CGOpenMPRuntimeNVPTX(CodeGenModule &CGM);
 
-  /// \brief Emits code for parallel or serial call of the \a OutlinedFn with
-  /// variables captured in a record which address is stored in \a
-  /// CapturedStruct.
-  /// \param OutlinedFn Outlined function to be run in parallel threads. Type of
-  /// this function is void(*)(kmp_int32 *, kmp_int32, struct context_vars*).
-  /// \param CapturedVars A pointer to the record with the references to
-  /// variables used in \a OutlinedFn function.
-  /// \param IfCond Condition in the associated 'if' clause, if it was
-  /// specified, nullptr otherwise.
-  ///
-  void emitParallelCall(CodeGenFunction &CGF, SourceLocation Loc,
-                        llvm::Value *OutlinedFn,
-                        ArrayRef<llvm::Value *> CapturedVars,
-                        const Expr *IfCond) override;
+ /// \brief This function ought to emit, in the general case, a call to
+  // the openmp runtime kmpc_push_num_teams. In NVPTX backend it is not needed
+  // as these numbers are obtained through the PTX grid and block configuration.
+  /// \param NumTeams An integer expression of teams.
+  /// \param ThreadLimit An integer expression of threads.
+  void emitNumTeamsClause(CodeGenFunction &CGF, const Expr *NumTeams,
+                          const Expr *ThreadLimit, SourceLocation Loc) override;
 
-  /// \brief Emits outlined function for the specified OpenMP parallel directive
+  /// \brief Emits inlined function for the specified OpenMP parallel
+  //  directive but an inlined function for teams.
   /// \a D. This outlined function has type void(*)(kmp_int32 *ThreadID,
   /// kmp_int32 BoundID, struct context_vars*).
   /// \param D OpenMP directive.
@@ -300,26 +294,22 @@ public:
   /// \param InnermostKind Kind of innermost directive (for simple directives it
   /// is a directive itself, for combined - its innermost directive).
   /// \param CodeGen Code generation sequence for the \a D directive.
-  llvm::Value *
-  emitParallelOrTeamsOutlinedFunction(const OMPExecutableDirective &D,
-                                      const VarDecl *ThreadIDVar,
-                                      OpenMPDirectiveKind InnermostKind,
-                                      const RegionCodeGenTy &CodeGen) override;
+  llvm::Value *emitParallelOrTeamsOutlinedFunction(
+      const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
+      OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen)
+        override;
 
-  /// \brief Check if we should generate code as if \a ScheduleKind is static
-  /// with a chunk size of 1.
-  /// \param ScheduleKind Schedule Kind specified in the 'schedule' clause.
-  /// \param Chunk size.
+  /// \brief Emits code for teams call of the \a OutlinedFn with
+  /// variables captured in a record which address is stored in \a
+  /// CapturedStruct.
+  /// \param OutlinedFn Outlined function to be run by team masters. Type of
+  /// this function is void(*)(kmp_int32 *, kmp_int32, struct context_vars*).
+  /// \param CapturedVars A pointer to the record with the references to
+  /// variables used in \a OutlinedFn function.
   ///
-  bool generateCoalescedSchedule(OpenMPScheduleClauseKind ScheduleKind,
-                                 bool ChunkSizeOne,
-                                 bool ordered) const override;
-
-  /// \brief Check if we must always generate a barrier at the end of a
-  /// particular construct regardless of the presence of a nowait clause.
-  /// This may occur when a particular offload device does not support
-  /// concurrent execution of certain directive and clause combinations.
-  bool requiresBarrier(const OMPLoopDirective &S) const override;
+  void emitTeamsCall(CodeGenFunction &CGF, const OMPExecutableDirective &D,
+                     SourceLocation Loc, llvm::Value *OutlinedFn,
+                     ArrayRef<llvm::Value *> CapturedVars) override;
 };
 
 } // CodeGen namespace.
