@@ -1133,30 +1133,37 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
     OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen) {
   assert(ThreadIDVar->getType()->isPointerType() &&
          "thread id variable must be of type kmp_int32 *");
-  const CapturedStmt *CS = cast<CapturedStmt>(D.getAssociatedStmt());
-  CodeGenFunction CGF(CGM, true);
-  bool HasCancel = false;
-  if (auto *OPD = dyn_cast<OMPParallelDirective>(&D))
-    HasCancel = OPD->hasCancel();
-  else if (auto *OPSD = dyn_cast<OMPParallelSectionsDirective>(&D))
-    HasCancel = OPSD->hasCancel();
-  else if (auto *OPFD = dyn_cast<OMPParallelForDirective>(&D))
-    HasCancel = OPFD->hasCancel();
 
-  // Include updates in runtime parallelism level.
-  auto &&CodeGenWithDataSharing = [this, &CodeGen](CodeGenFunction &CGF) {
-    increaseParallelismLevel(CGF);
-    CodeGen(CGF);
-    decreaseParallelismLevel(CGF);
-  };
+  llvm::Function *OutlinedFun = nullptr;
+  if (isa<OMPTeamsDirective>(D)) {
+    // no outlining happening for teams
+  } else {
+    const CapturedStmt *CS = cast<CapturedStmt>(D.getAssociatedStmt());
+    CodeGenFunction CGF(CGM, true);
+    bool HasCancel = false;
+    if (auto *OPD = dyn_cast<OMPParallelDirective>(&D))
+      HasCancel = OPD->hasCancel();
+    else if (auto *OPSD = dyn_cast<OMPParallelSectionsDirective>(&D))
+      HasCancel = OPSD->hasCancel();
+    else if (auto *OPFD = dyn_cast<OMPParallelForDirective>(&D))
+      HasCancel = OPFD->hasCancel();
 
-  CGOpenMPOutlinedRegionInfo CGInfo(*CS, ThreadIDVar, CodeGenWithDataSharing,
-                                    InnermostKind, HasCancel);
-  CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
-  ParallelNestingLevelRAII NestingRAII(ParallelNestingLevel);
-  // The outlined function takes as arguments the global_tid, bound_tid,
-  // and a capture structure created from the captured variables.
-  return CGF.GenerateCapturedStmtFunction(*CS);
+    // Include updates in runtime parallelism level.
+    auto &&CodeGenWithDataSharing = [this, &CodeGen](CodeGenFunction &CGF) {
+      increaseParallelismLevel(CGF);
+      CodeGen(CGF);
+      decreaseParallelismLevel(CGF);
+    };
+
+    CGOpenMPOutlinedRegionInfo CGInfo(*CS, ThreadIDVar, CodeGenWithDataSharing,
+                                      InnermostKind, HasCancel);
+    CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
+    ParallelNestingLevelRAII NestingRAII(ParallelNestingLevel);
+    // The outlined function takes as arguments the global_tid, bound_tid,
+    // and a capture structure created from the captured variables.
+    OutlinedFun = CGF.GenerateCapturedStmtFunction(*CS);
+  }
+  return OutlinedFun;
 }
 
 bool CGOpenMPRuntimeNVPTX::InL0() {
@@ -1468,25 +1475,10 @@ CGOpenMPRuntimeNVPTX::CGOpenMPRuntimeNVPTX(CodeGenModule &CGM)
     llvm_unreachable("OpenMP NVPTX can only handle device code.");
 }
 
-
 void CGOpenMPRuntimeNVPTX::emitNumTeamsClause(CodeGenFunction &CGF,
                                               const Expr *NumTeams,
                                               const Expr *ThreadLimit,
                                               SourceLocation Loc) {}
-
-llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
-    const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
-    OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen) {
-
-  llvm::Function *OutlinedFun = nullptr;
-  if (isa<OMPTeamsDirective>(D)) {
-    // no outlining happening for teams
-  } else
-    llvm_unreachable("parallel directive is not yet supported for nvptx "
-        "backend.");
-
-  return OutlinedFun;
-}
 
 void CGOpenMPRuntimeNVPTX::emitTeamsCall(CodeGenFunction &CGF,
                                     const OMPExecutableDirective &D,
