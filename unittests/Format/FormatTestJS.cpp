@@ -125,6 +125,10 @@ TEST_F(FormatTestJS, ReservedWords) {
   verifyFormat("x.class.struct = 1;");
   verifyFormat("x.case = 1;");
   verifyFormat("x.interface = 1;");
+  verifyFormat("x.of() = 1;");
+  verifyFormat("x.in() = 1;");
+  verifyFormat("x.let() = 1;");
+  verifyFormat("x.var() = 1;");
   verifyFormat("x = {\n"
                "  a: 12,\n"
                "  interface: 1,\n"
@@ -841,6 +845,14 @@ TEST_F(FormatTestJS, TypeAnnotations) {
   verifyFormat("function someFunc(args: string[]):\n"
                "    {longReturnValue: string[]} {}",
                getGoogleJSStyleWithColumns(60));
+}
+
+TEST_F(FormatTestJS, UnionIntersectionTypes) {
+  verifyFormat("let x: A|B = A | B;");
+  verifyFormat("let x: A&B|C = A & B;");
+  verifyFormat("let x: Foo<A|B> = new Foo<A|B>();");
+  verifyFormat("function(x: A|B): C&D {}");
+  verifyFormat("function(x: A|B = A | B): C&D {}");
 }
 
 TEST_F(FormatTestJS, ClassDeclarations) {
