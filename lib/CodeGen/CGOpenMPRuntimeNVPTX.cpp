@@ -568,8 +568,14 @@ void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
   WorkerFunctionState WST(CGM);
 
   // Emit target region as a standalone region.
-  auto &&CodeGen = [&EST, &WST, &CS, this](CodeGenFunction &CGF) {
+  auto &&CodeGen = [&EST, &WST, &CS, this, &D](CodeGenFunction &CGF) {
     emitEntryHeader(CGF, EST, WST);
+
+    CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
+    (void)CGF.EmitOMPFirstprivateClause(D, PrivateScope);
+    CGF.EmitOMPPrivateClause(D, PrivateScope);
+    (void)PrivateScope.Privatize();
+
     CGF.EmitStmt(CS.getCapturedStmt());
     emitEntryFooter(CGF, EST);
   };
