@@ -3673,7 +3673,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // Don't use the blocking startegy unless schedule(static,1)
     if (!StmtHasScheduleStaticOne and CGF.useBlocking){
-      printf("Warning: Blocking was disabled due to lack of schedule(static,1)")
+      printf("Warning: Blocking was disabled due to lack of schedule(static,1)");
       CGF.useBlocking = false;
     }
 
