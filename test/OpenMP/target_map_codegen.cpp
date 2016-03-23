@@ -3985,5 +3985,96 @@ int explicit_maps_struct_fields(int a){
 // CK24: define {{.+}}[[CALL23]]
 // CK24: define {{.+}}[[CALL24]]
 #endif
+///==========================================================================///
+// RUN: %clang_cc1 -DCK25 -std=c++11 -verify -fopenmp -fomptargets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -emit-llvm %s -o - | FileCheck %s --check-prefix CK25 --check-prefix CK25-64
+// RUN: %clang_cc1 -DCK25 -std=c++11 -fopenmp -fomptargets=powerpc64le-ibm-linux-gnu -x c++ -std=c++11 -triple powerpc64le-unknown-unknown -emit-pch -o %t %s
+// RUN: %clang_cc1 -fopenmp -std=c++11 -fomptargets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -std=c++11 -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s  --check-prefix CK25 --check-prefix CK25-64
+// RUN: %clang_cc1 -DCK25 -std=c++11 -verify -fopenmp -fomptargets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -emit-llvm %s -o - | FileCheck %s  --check-prefix CK25 --check-prefix CK25-32
+// RUN: %clang_cc1 -DCK25 -std=c++11 -fopenmp -fomptargets=i386-pc-linux-gnu -x c++ -std=c++11 -triple i386-unknown-unknown -emit-pch -o %t %s
+// RUN: %clang_cc1 -fopenmp -std=c++11 -fomptargets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -std=c++11 -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s  --check-prefix CK25 --check-prefix CK25-32
+#ifdef CK25
+// CK25: [[ST:%.+]] = type { i32, float }
+// CK25: [[CA00:%.+]] = type { [[ST]]* }
+// CK25: [[CA01:%.+]] = type { i32* }
 
+// CK25: [[SIZE00:@.+]] = private {{.*}}constant [1 x i[[Z:64|32]]] [i[[Z:64|32]] 4]
+// CK25: [[MTYPE00:@.+]] = private {{.*}}constant [1 x i32] [i32 1]
+
+// CK25: [[SIZE01:@.+]] = private {{.*}}constant [1 x i[[Z]]] [i[[Z]] 4]
+// CK25: [[MTYPE01:@.+]] = private {{.*}}constant [1 x i32] [i32 1]
+
+// CK25-LABEL: explicit_maps_with_inner_lambda
+
+template <int X, typename T>
+struct CC {
+  T A;
+  float B;
+
+  int foo(T arg) {
+    // Region 00
+    // CK25-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[SIZE00]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE00]]{{.+}})
+    // CK25-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+    // CK25-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+
+    // CK25-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+    // CK25-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+    // CK25-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+    // CK25-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+    // CK25-DAG: [[CBPVAL0]] = bitcast [[ST]]* [[VAR0:%.+]] to i8*
+    // CK25-DAG: [[CPVAL0]] = bitcast i32* [[SEC0:%.+]] to i8*
+    // CK25-DAG: [[SEC0]] = getelementptr {{.*}}[[ST]]* [[VAR0:%.+]], i{{.+}} 0, i{{.+}} 0
+
+    // CK25: call void [[CALL00:@.+]]([[ST]]* {{[^,]+}})
+    #pragma omp target map(to:A)
+    {
+      [&]() {
+        A += 1;
+      }();
+    }
+
+    // Region 01
+    // CK25-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 1, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[SIZE01]], {{.+}}getelementptr {{.+}}[1 x i{{.+}}]* [[MTYPE01]]{{.+}})
+    // CK25-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
+    // CK25-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
+
+    // CK25-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
+    // CK25-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
+    // CK25-DAG: store i8* [[CBPVAL0:%[^,]+]], i8** [[BP0]]
+    // CK25-DAG: store i8* [[CPVAL0:%[^,]+]], i8** [[P0]]
+    // CK25-DAG: [[CBPVAL0]] = bitcast i32* [[VAR0:%.+]] to i8*
+    // CK25-DAG: [[CPVAL0]] = bitcast i32* [[VAR0]] to i8*
+
+    // CK25: call void [[CALL01:@.+]](i32* {{[^,]+}})
+    #pragma omp target map(to:arg)
+    {
+      [&]() {
+        arg += 1;
+      }();
+    }
+
+    return A+arg;
+  }
+};
+
+int explicit_maps_with_inner_lambda(int a){
+  CC<123,int> c;
+  return c.foo(a);
+}
+
+// CK25: define {{.+}}[[CALL00]]([[ST]]* [[VAL:%.+]])
+// CK25: store [[ST]]* [[VAL]], [[ST]]** [[VALADDR:%[^,]+]],
+// CK25: [[VAL1:%.+]] = load [[ST]]*, [[ST]]** [[VALADDR]],
+// CK25: [[VALADDR1:%.+]] = getelementptr inbounds [[CA00]], [[CA00]]* [[CA:%[^,]+]], i32 0, i32 0
+// CK25: store [[ST]]* [[VAL1]], [[ST]]** [[VALADDR1]],
+// CK25: call void {{.*}}[[LAMBDA:@.+]]{{.*}}([[CA00]]* [[CA]])
+
+// CK25: define {{.+}}[[LAMBDA]]
+
+// CK25: define {{.+}}[[CALL01]](i32* {{.*}}[[VAL:%.+]])
+// CK25: store i32* [[VAL]], i32** [[VALADDR:%[^,]+]],
+// CK25: [[VAL1:%.+]] = load i32*, i32** [[VALADDR]],
+// CK25: [[VALADDR1:%.+]] = getelementptr inbounds [[CA01]], [[CA01]]* [[CA:%[^,]+]], i32 0, i32 0
+// CK25: store i32* [[VAL1]], i32** [[VALADDR1]],
+// CK25: call void {{.*}}[[LAMBDA]]{{.*}}([[CA01]]* [[CA]])
+#endif
 #endif
