@@ -3998,10 +3998,10 @@ int explicit_maps_struct_fields(int a){
 // CK25: [[CA01:%.+]] = type { i32* }
 
 // CK25: [[SIZE00:@.+]] = private {{.*}}constant [1 x i[[Z:64|32]]] [i[[Z:64|32]] 4]
-// CK25: [[MTYPE00:@.+]] = private {{.*}}constant [1 x i32] [i32 1]
+// CK25: [[MTYPE00:@.+]] = private {{.*}}constant [1 x i32] [i32 33]
 
 // CK25: [[SIZE01:@.+]] = private {{.*}}constant [1 x i[[Z]]] [i[[Z]] 4]
-// CK25: [[MTYPE01:@.+]] = private {{.*}}constant [1 x i32] [i32 1]
+// CK25: [[MTYPE01:@.+]] = private {{.*}}constant [1 x i32] [i32 33]
 
 // CK25-LABEL: explicit_maps_with_inner_lambda
 
