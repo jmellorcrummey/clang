@@ -2711,9 +2711,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     printf("Setup of IterVar and Qty! Done\n");
     
     llvm::Value *LB;
-    // if (CGF.useBlocking){
-    //   LB = Builder.CreateCall(Get_thread_num(), {});
-    // }
 
     // Get the modulus of threadIdx.x by const32
     llvm::Value *blockLocalThreadID = Builder.CreateCall(Get_thread_num(), {});
@@ -2818,10 +2815,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // FOR INC: tid += WARP32
     Builder.SetInsertPoint(IncCombinedFor);
     llvm::Value *step = Builder.getInt32(32);
-    // if (CGF.useBlocking){
-    //   // FOR INC: tid += blockDim.x
-    //   step = Builder.CreateCall(Get_num_threads(), {});
-    // }
     Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(InnerPrivate), step),
                                           InnerPrivate);
     Builder.CreateBr(CondCombinedFor);
@@ -3385,6 +3378,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     if (const OMPTargetTeamsDistributeParallelForDirective *D =
             dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S))
       IterVar = D->getNewIterVar();
+    else if (const OMPTargetTeamsDistributeDirective *D =
+            dyn_cast<OMPTargetTeamsDistributeDirective>(&S))
+      IterVar = D->getNewIterVar();
     else
       assert(0 && "generating combined construct for an unsupported pragma sequence\n");
 
@@ -3412,7 +3408,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     printf(" In Combined Nest region: Set LB\n");
     if (StmtHasScheduleStaticOne){
-      if (CGF.useBlocking){
+      if (CGF.distributedParallel){
         // If we use a blocking strategy then we need to have one block per
         // outer iteration. Init LB to current block ID.
         LB = Builder.CreateCall(Get_team_num(), {});
@@ -3426,6 +3422,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     Expr *UBExpr = nullptr;
     if (const OMPTargetTeamsDistributeParallelForDirective *D =
             dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S))
+      UBExpr = D->getNewIterEnd();
+    else if (const OMPTargetTeamsDistributeDirective *D =
+            dyn_cast<OMPTargetTeamsDistributeDirective>(&S))
       UBExpr = D->getNewIterEnd();
     else
       assert(0 && "generating combined construct for an unsupported pragma sequence\n");
@@ -3441,6 +3440,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     unsigned numCollapsed = 0;
     if (const OMPTargetTeamsDistributeParallelForDirective *D =
             dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S)) {
+      Arr = D->getCounters();
+      numCollapsed = D->getCollapsedNumber();
+    } else if (const OMPTargetTeamsDistributeDirective *D =
+            dyn_cast<OMPTargetTeamsDistributeDirective>(&S)){
       Arr = D->getCounters();
       numCollapsed = D->getCollapsedNumber();
     } else {
@@ -3567,7 +3570,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     llvm::Value *step = Builder.getInt32(1);
 
     if (StmtHasScheduleStaticOne){
-      if (CGF.useBlocking){
+      if (CGF.distributedParallel){
         // tid += gridDim.x
         step = Builder.CreateCall(Get_num_teams(), {});
       } else {
@@ -3589,6 +3592,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     if (const OMPTargetTeamsDistributeParallelForDirective *D =
         dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S))
       InitExpr = D->getInit();
+    else if (const OMPTargetTeamsDistributeDirective *D =
+            dyn_cast<OMPTargetTeamsDistributeDirective>(&S))
+      InitExpr = D->getInit();
     else
       assert(0 && "generating combined construct for an unsupported pragma sequence\n");
 
@@ -3604,7 +3610,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         // have to keep up to date the loop index.
 
         llvm::Value *isNotExecutingS1;
-        if (CGF.useBlocking){
+        if (CGF.distributedParallel){
           // Only allow the block master to executes S1.
           isNotExecutingS1 = Builder.CreateICmpNE(Builder.CreateCall(Get_thread_num(), {}),
                                                   Builder.getInt32(0));
@@ -3653,7 +3659,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
            Builder.CreateAdd(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
            ParallelNesting);
 */
-        PushNewParallelRegion(true);
+        if (CGF.combinedSimd){
+          PushNewParallelRegion(true);
+        }
 
         // Emit Body
         CGF.EmitStmt(Body);
@@ -3682,9 +3690,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
                                     bool StmtHasScheduleStaticOne) {
 
     // Don't use the blocking startegy unless schedule(static,1)
-    if (!StmtHasScheduleStaticOne and CGF.useBlocking){
+    if (!StmtHasScheduleStaticOne and CGF.distributedParallel){
       printf("Warning: Blocking was disabled due to lack of schedule(static,1)");
-      CGF.useBlocking = false;
     }
 
     CGBuilderTy &Bld = CGF.Builder;
@@ -3703,131 +3710,119 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "ParallelNesting");
     Bld.CreateStore(Bld.getInt32(0), ParallelNesting);
 
-    //char CudaThreadsInParallelName[] = "__omptgt__CudaThreadsInParallel";
-    char SimdNumLanesName[] = "__omptgt__SimdNumLanes";
-    char OmpNumThreadsName[] = "__omptgt__OmpNumThreads";
-    char ExecuteSimdName[] = "__omptgt_ExecuteSimd";
+    if (CGF.combinedSimd){
+        // SIMD related variables, this is for the case when the inner loop
+        // is a SIMD pragma.
+        char OmpNumThreadsName[] = "__omptgt__OmpNumThreads";
+        char SimdNumLanesName[] = "__omptgt__SimdNumLanes";
+        char ExecuteSimdName[] = "__omptgt_ExecuteSimd";
 
-    //if (!CudaThreadsInParallel)
-    //  CudaThreadsInParallel =
-    //      CGF.CGM.getModule().getGlobalVariable(CudaThreadsInParallelName);
-    if (!SimdNumLanes)
-      SimdNumLanes = CGF.CGM.getModule().getGlobalVariable(SimdNumLanesName);
-    if (!OmpNumThreads)
-      OmpNumThreads = CGF.CGM.getModule().getGlobalVariable(OmpNumThreadsName);
+        if (!SimdNumLanes)
+          SimdNumLanes = CGF.CGM.getModule().getGlobalVariable(SimdNumLanesName);
+        if (!OmpNumThreads)
+          OmpNumThreads = CGF.CGM.getModule().getGlobalVariable(OmpNumThreadsName);
 
-    if (!SimdNumLanes)
-      SimdNumLanes = new llvm::GlobalVariable(
-          CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
-          llvm::Constant::getNullValue(VarTy), SimdNumLanesName, 0,
-          llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+        if (!SimdNumLanes)
+          SimdNumLanes = new llvm::GlobalVariable(
+              CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
+              llvm::Constant::getNullValue(VarTy), SimdNumLanesName, 0,
+              llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+        if (!OmpNumThreads)
+          OmpNumThreads = new llvm::GlobalVariable(
+              CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
+              llvm::Constant::getNullValue(VarTy), OmpNumThreadsName, 0,
+              llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
 
-    if (!OmpNumThreads)
-      OmpNumThreads = new llvm::GlobalVariable(
-          CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
-          llvm::Constant::getNullValue(VarTy), OmpNumThreadsName, 0,
-          llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+        // disable simd unless some control flow path takes a thread to it
+        if (!ExecuteSimd) {
+          llvm::Type *StaticBoolArray = llvm::ArrayType::get(Bld.getInt1Ty(),
+            MAX_THREADS_IN_BLOCK/WARP_SIZE);
+          ExecuteSimd = new llvm::GlobalVariable(
+            CGM.getModule(), StaticBoolArray, false,
+            llvm::GlobalValue::CommonLinkage,
+            llvm::Constant::getNullValue(StaticBoolArray), ExecuteSimdName, 0,
+            llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+        }
 
-    // disable simd unless some control flow path takes a thread to it
-    if (!ExecuteSimd) {
-      llvm::Type *StaticBoolArray = llvm::ArrayType::get(Bld.getInt1Ty(),
-        MAX_THREADS_IN_BLOCK/WARP_SIZE);
-      ExecuteSimd = new llvm::GlobalVariable(
-        CGM.getModule(), StaticBoolArray, false,
-        llvm::GlobalValue::CommonLinkage,
-        llvm::Constant::getNullValue(StaticBoolArray), ExecuteSimdName, 0,
-        llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+        // team-master sets the initial value for SimdNumLanes
+        llvm::BasicBlock *MasterInit = llvm::BasicBlock::Create(
+            CGF.CGM.getLLVMContext(), ".master.init.", CGF.CurFn);
+
+        llvm::BasicBlock *NonMasterInit = llvm::BasicBlock::Create(
+            CGF.CGM.getLLVMContext(), ".nonmaster.init.", CGF.CurFn);
+
+        llvm::Value *IsTeamMaster1 =
+            Bld.CreateICmpEQ(Bld.CreateCall(Get_thread_num(), {}),
+                             Bld.getInt32(MASTER_ID), "IsTeamMaster");
+
+        Bld.CreateCondBr(IsTeamMaster1, MasterInit, NonMasterInit);
+
+        // Perform in this block, all the work which a thread master
+        // should do.
+        Bld.SetInsertPoint(MasterInit);
+
+
+        // For inner SIMD pragma only
+        // Use all CUDA threads but in batches of 32
+        Bld.CreateStore(Bld.getInt32(32), SimdNumLanes);
+
+        printf("Compute OmpNumThreads\n");
+        // Use all cuda threads as lanes - parallel regions will change this
+        // ASSUMPTION: thread_limit must be divisible by 32
+        llvm::Value *const32 = Bld.getInt32(5); // 2^5
+        llvm::Value *NumWarps = Bld.CreateCall(Get_num_threads(), {});
+        NumWarps = Bld.CreateAShr(NumWarps, const32);
+        Bld.CreateStore(NumWarps, OmpNumThreads);
+
+
+        // Carry on with the rest of threads (the non-team-master ones)
+        Bld.CreateBr(NonMasterInit);
+        Bld.SetInsertPoint(NonMasterInit);
+        Bld.CreateCall(Get_syncthreads(), {});
+
+        // set initial simd lane num, which could be changed later on
+        // depending on safelen and num_threads clauses
+        // This performs an AND between the CUDA threadID and the SimdNumLanes to
+        // get: threadIdx.x mod SimdNumLanes
+
+        // Each thread does this.
+        // So now Each Thread will know its lane ID (for the SIMD following)
+        printf(" Compute SimdLaneNum\n");
+        SimdLaneNum = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "SimdLaneNum");
+        Bld.CreateStore(Bld.CreateAnd(Bld.CreateCall(Get_thread_num(), {}),
+                                      Bld.CreateSub(Bld.CreateLoad(SimdNumLanes),
+                                                    Bld.getInt32(1))),
+                        SimdLaneNum);
+
+        // Calculate the OMP thread ID of this CUDA thread
+        // The OMP thread number is a zero based numbering of threads which will be active in S1.
+        // Since this operaiton is happening for all threads then each group of 32 threads will receive the
+        // same OMP thread ID. We must be careful to exclude the threads non-warp master threads from
+        // executing S1.
+        llvm::Value *globalTid = Bld.CreateAdd(Bld.CreateCall(Get_thread_num(), {}), Bld.CreateMul(
+            Bld.CreateCall(Get_num_threads(), {}), Bld.CreateCall(Get_team_num(), {})));
+        printf(" Compute globalTid\n");
+        CudaGlobalThreadId = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "CudaGlobalThreadId");
+        Bld.CreateStore(globalTid, CudaGlobalThreadId);
+
+        // Get the div of the globalTid with the size of a warp.
+        // llvm::Value *ompTid = Bld.CreateSExt(globalTid, VarTy);
+        llvm::Value *ompTid = Bld.CreateAShr(globalTid, const32);
+        printf(" Compute OmpTid\n");
+        OmpThreadNum = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "OmpThreadNum");
+        Bld.CreateStore(ompTid, OmpThreadNum);
+
+        // Lane ID: each thread has a lane ID which is between 0 and 31.
+        // SimdNumLanes should be 32 to indicate that a SIMD is used.
+        // When SimdNumLanes is 1 then it SHOULD mean that all threads are
+        // already in use and no actual SIMD-ization is going to happen.
+        llvm::Value *LaneID = Bld.CreateSub(globalTid,
+                                            Bld.CreateMul(Bld.CreateLoad(OmpThreadNum),
+                                            Bld.getInt32(32)));
+        printf(" Compute SimdLocalLaneId\n");
+        SimdLocalLaneId = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "SimdLocalLaneId");
+        Bld.CreateStore(LaneID, SimdLocalLaneId);
     }
-
-    // team-master sets the initial value for SimdNumLanes
-    llvm::BasicBlock *MasterInit = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".master.init.", CGF.CurFn);
-
-    llvm::BasicBlock *NonMasterInit = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".nonmaster.init.", CGF.CurFn);
-
-    llvm::Value *IsTeamMaster1 =
-        Bld.CreateICmpEQ(Bld.CreateCall(Get_thread_num(), {}),
-                         Bld.getInt32(MASTER_ID), "IsTeamMaster");
-
-    Bld.CreateCondBr(IsTeamMaster1, MasterInit, NonMasterInit);
-
-    // Perform in this block, all the work which a thread master
-    // should do.
-    Bld.SetInsertPoint(MasterInit);
-
-    if (CGF.useBlocking){
-      // Use all threads as lanes of the same vector unit.
-      Bld.CreateStore(Bld.CreateCall(Get_num_threads(), {}), SimdNumLanes);
-    } else {
-      // Use all CUDA threads but in batches of 32
-      Bld.CreateStore(Bld.getInt32(32), SimdNumLanes);
-    }
-
-    printf("Compute OmpNumThreads\n");
-    // Use all cuda threads as lanes - parallel regions will change this
-    // ASSUMPTION: thread_limit must be divisible by 32
-    llvm::Value *const32 = Bld.getInt32(5); // 2^5
-    llvm::Value *NumWarps = Bld.CreateCall(Get_num_threads(), {});
-    NumWarps = Bld.CreateAShr(NumWarps, const32);
-    Bld.CreateStore(NumWarps, OmpNumThreads);
-
-
-    // Carry on with the rest of threads (the non-team-master ones)
-    Bld.CreateBr(NonMasterInit);
-    Bld.SetInsertPoint(NonMasterInit);
-    Bld.CreateCall(Get_syncthreads(), {});
-
-    // set initial simd lane num, which could be changed later on
-    // depending on safelen and num_threads clauses
-    // This performs an AND between the CUDA threadID and the SimdNumLanes to
-    // get: threadIdx.x mod SimdNumLanes
-
-    // Each thread does this.
-    // So now Each Thread will know its lane ID (for the SIMD following)
-    printf(" Compute SimdLaneNum\n");
-    SimdLaneNum = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "SimdLaneNum");
-    if (CGF.useBlocking){
-      Bld.CreateStore(Bld.CreateCall(Get_thread_num(), {}), SimdLaneNum);
-    } else {
-      Bld.CreateStore(Bld.CreateAnd(Bld.CreateCall(Get_thread_num(), {}),
-                                    Bld.CreateSub(Bld.CreateLoad(SimdNumLanes),
-                                                  Bld.getInt32(1))),
-                      SimdLaneNum);
-    }
-
-    // Calculate the OMP thread ID of this CUDA thread
-    // The OMP thread number is a zero based numbering of threads which will be active in S1.
-    // Since this operaiton is happening for all threads then each group of 32 threads will receive the
-    // same OMP thread ID. We must be careful to exclude the threads non-warp master threads from
-    // executing S1.
-    llvm::Value *globalTid = Bld.CreateAdd(Bld.CreateCall(Get_thread_num(), {}), Bld.CreateMul(
-        Bld.CreateCall(Get_num_threads(), {}), Bld.CreateCall(Get_team_num(), {})));
-    printf(" Compute globalTid\n");
-    CudaGlobalThreadId = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "CudaGlobalThreadId");
-    Bld.CreateStore(globalTid, CudaGlobalThreadId);
-
-    // Get the div of the globalTid with the size of a warp.
-    // llvm::Value *ompTid = Bld.CreateSExt(globalTid, VarTy);
-    llvm::Value *ompTid = Bld.CreateAShr(globalTid, const32);
-    printf(" Compute OmpTid\n");
-    OmpThreadNum = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "OmpThreadNum");
-    Bld.CreateStore(ompTid, OmpThreadNum);
-
-    // Lane ID: each thread has a lane ID which is between 0 and 31.
-    // SimdNumLanes should be 32 to indicate that a SIMD is used.
-    // When SimdNumLanes is 1 then it SHOULD mean that all threads are
-    // already in use and no actual SIMD-ization is going to happen.
-    llvm::Value *LaneID;
-    if (CGF.useBlocking){
-      LaneID = Bld.CreateCall(Get_thread_num(), {});
-    } else {
-      LaneID = Bld.CreateSub(globalTid, Bld.CreateMul(Bld.CreateLoad(OmpThreadNum),
-                             Bld.getInt32(32)));
-    }
-    printf(" Compute SimdLocalLaneId\n");
-    SimdLocalLaneId = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "SimdLocalLaneId");
-    Bld.CreateStore(LaneID, SimdLocalLaneId);
 
     // Set up variables for UB and LB
     OuterLB = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "OuterLB");
@@ -3835,26 +3830,29 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // ============= Finished the Preamble of the Loop Nest ==============
 
-    // ============= Enter parallel region =============
+    if (CGF.combinedSimd){
 
-    // Handle the existence of the parallel for
+        // ============= Account for parallel region =============
 
-    OMPRegionTypesStack.push_back(OMP_Parallel);
+        // Handle the existence of the parallel for
 
-    // // clear up the data structure that will be used to determine the
-    // // optimal amount of simd lanes to be used in this region
-    SimdAndWorksharingNesting.reset();
+        OMPRegionTypesStack.push_back(OMP_Parallel);
 
-    // TO DO: figure out the value that goes in here.
-    // Bld.CreateStore(PrepareParallel, CudaThreadsInParallel);
-    // Builder.CreateStore(Builder.CreateLoad(OmpNumThreads), CudaThreadsInParallel);
+        // // clear up the data structure that will be used to determine the
+        // // optimal amount of simd lanes to be used in this region
+        SimdAndWorksharingNesting.reset();
 
-    // Increment the nesting level
-    Bld.CreateStore(
-       Bld.CreateAdd(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
-       ParallelNesting);
+        // TO DO: figure out the value that goes in here.
+        // Bld.CreateStore(PrepareParallel, CudaThreadsInParallel);
+        // Builder.CreateStore(Builder.CreateLoad(OmpNumThreads), CudaThreadsInParallel);
 
-    //PushNewParallelRegion(true);
+        // Increment the nesting level
+        Bld.CreateStore(
+           Bld.CreateAdd(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
+           ParallelNesting);
+
+        //PushNewParallelRegion(true);
+    }
 
     // Call the function which generates the code for the outer loop.
     // Inside this function resolve the body of the outer loop
@@ -3867,22 +3865,24 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     EmitOMPCombinedNestDirectiveLoop(DKind, SKind, S, CGF, TgtFunName,
                                      StmtHasScheduleStaticOne);
 
-    // ============= Exit parallel region ==============
+    if (CGF.combinedSimd){
+        // ============= Exit parallel region ==============
 
-    // Decrement the nesting level
-    Bld.CreateStore(
-       Bld.CreateSub(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
-       ParallelNesting);
+        // Decrement the nesting level
+        Bld.CreateStore(
+           Bld.CreateSub(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
+           ParallelNesting);
 
-    assert((OMPRegionTypesStack.back() == OMP_Parallel) &&
-           "Exiting a parallel region does not match stack state");
-    OMPRegionTypesStack.pop_back();
+        assert((OMPRegionTypesStack.back() == OMP_Parallel) &&
+               "Exiting a parallel region does not match stack state");
+        OMPRegionTypesStack.pop_back();
 
-    // we need to inspect the previous layer to understand what type
-    // of end we need
-    PopParallelRegion();
+        // we need to inspect the previous layer to understand what type
+        // of end we need
+        PopParallelRegion();
 
-    //SetNumSimdLanesPerTargetRegion(32);
+        //SetNumSimdLanesPerTargetRegion(32);
+    }
 
     // Call previous method, the one used in the control loop.
     // Try to avoid the jumps back to control loop code blocks.
@@ -4027,6 +4027,64 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     return OnlyTopBlockHasSimd(*For->getBody());
   }
 
+  bool isParallelForDirective(const Stmt &S){
+     return isa<OMPParallelForDirective>(S);
+  }
+
+  // Look for a parallel for directive in the given code block
+  bool OnlyTopBlockHasParallelFor(const Stmt &S) {
+    // If the simd directive is a SIMD then return true as long as not in a sub-block.
+    if (isa<OMPParallelForDirective>(S))
+      return true;
+
+    // Traverse all children of the for body: if #simd is found, return true.
+    // Subtree doesn't need to be traversed in this case.
+    int hasParallelForPragma = 0;
+    int invalidateParallelForNest = false;
+
+    // Traverse all the top block statements.
+    for (Stmt::const_child_iterator ii = S.child_begin(), ie = S.child_end();
+         ii != ie; ++ii) {
+      if (*ii){
+        //printf("Visit top Stmt (%d)\n", isa<OMPSimdDirective>(*ii));
+        if (isParallelForDirective(**ii)){
+           hasParallelForPragma++;
+           continue;
+        }
+        // If either another non-simd pragma is encountered in the top block
+        // or some other OMP directive in the sub-block then nest is invalid.
+        if (CheckOMPPragmas(**ii)){
+          invalidateParallelForNest = true;
+          break;
+        }
+      }
+    }
+
+    // True if only ONE simd pragma exists.
+    return hasParallelForPragma == 1 && !invalidateParallelForNest;
+  }
+
+  bool ParallelForinTopBlock(const OMPExecutableDirective &S){
+    // We must check if the for loop has any SIMD pragmas
+    // as direct children (aprt of its body).
+    // An invalid simd placement would be:
+    //
+    //   #pragma omp target teams distribute
+    //   for(...){
+    //
+    //      ControlFlowStmt{
+    //        #pragma omp parallel for
+    //      }
+    //      
+    //   }
+    // Also ensure no other pragmas exist.
+    const Stmt *Body = S.getAssociatedStmt();
+    if (const CapturedStmt *CS = dyn_cast_or_null<CapturedStmt>(Body))
+      Body = CS->getCapturedStmt();
+    const ForStmt *For = dyn_cast_or_null<ForStmt>(Body);
+    return OnlyTopBlockHasParallelFor(*For->getBody());
+  }
+
   // Enter the target loop code generation for NVPTX.
   void EnterTargetLoop(SourceLocation Loc,
       CodeGenFunction &CGF, StringRef TgtFunName, OpenMPDirectiveKind DKind,
@@ -4046,9 +4104,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // the control loop.
     // Additional supported directives/clauses:
     //    - reduction(+:red)
-    bool applyCombinedConstruct = SKind == OMPD_teams_distribute_parallel_for &&
-                                  StmtHasScheduleStaticOne(S, CGF, SKind) &&
-                                  !StmtHasOMPPragmas(S, CGF);
+    CGF.combined = SKind == OMPD_teams_distribute_parallel_for &&
+                   StmtHasScheduleStaticOne(S, CGF, SKind) &&
+                   !StmtHasOMPPragmas(S, CGF);
 
     // Support for nested constructs with simplified code generation.
     //
@@ -4063,15 +4121,29 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     //
     // 1. The SIMD pragma must be a direct descendant of the outer for loop.
     // 2. No other pragmas or function calls exist in the body of the SIMD.
-    // 3. No explicit schedule(static, 1) clause on the outer loop.
-    bool applyNestedSimd = SKind == OMPD_teams_distribute_parallel_for &&
-                           SIMDinTopBlock(S);
+    CGF.combinedSimd = SKind == OMPD_teams_distribute_parallel_for &&
+                       SIMDinTopBlock(S);
+
+    // Support for nested constructs with simplified code generation.
+    //
+    // #pragma omp target teams distribute
+    // for(int i ...){
+    //   <S1>
+    //   #pragma omp parallel for
+    //   for(int j ...){
+    //      <S2>
+    //   }
+    // }
+    //
+    // 1. The parallel for pragma must be a direct descendant of the outer for loop.
+    // 2. No other pragmas or function calls exist in the body of the parallel for.
+    CGF.distributedParallel = SKind == OMPD_teams_distribute &&
+                                   ParallelForinTopBlock(S);
 
     // Variable that controls which scheme to to use: with or without shared memory
     // in case we need to choose (currently on the nested loop nest with parallel for
     // on the outer loop and inner SIMD loop uses this flag).
     CGF.useSharedMemory = true;
-    CGF.useBlocking = true;
     //applyNestedSimd = false;
     //applyCombinedConstruct = false;
 
@@ -4080,16 +4152,15 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     //printf("    => SKIND is (OMPD_teams_distribute_parallel_for %d): %d\n", OMPD_teams_distribute_parallel_for, SKind);
     //printf("    => schedule(static, 1): %d\n", StmtHasScheduleStaticOne(S, CGF, SKind));
     //printf("    => Has other OMP pragmas inside. StmtHasOMPPragmas(S, CGF): %d\n", StmtHasOMPPragmas(S, CGF));
-    printf("             => Apply combined: %d\n", applyCombinedConstruct);
+    printf("             => Apply combined: %d\n", CGF.combined);
     printf("Conditions for nested construct with SIMD inside:\n");
     //printf("    => Has SIMD pragma inside (not in subblock): %d\n", SIMDinTopBlock(S));
-    printf("             => Apply nested parallelism: %d\n", applyNestedSimd);
+    printf("             => Apply simd nested parallelism: %d\n", CGF.combinedSimd);
+    printf("Conditions for distribute construct with parallel for inside:\n");
+    printf("             => Apply parallel for nested parallelism: %d\n", CGF.distributedParallel);
     printf("End\n");
 
-    if (applyCombinedConstruct){
-      // Set a flag to true to mark the use of a combined construct
-      CGF.combined = true;
-
+    if (CGF.combined){
       // If the directives contain a reduction clause then we insert appropriate
       // code before the main loop.
       const OMPClause *reduction_C = StmtHasReductionClause(S, CGF, SKind);
@@ -4101,9 +4172,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
       // Emit combined construct code.
       EmitOMPCombinedDirectiveLoop(DKind, SKind, S, CGF, TgtFunName, reduction_C);
-    } else if (applyNestedSimd){
+    } else if (CGF.combinedSimd){
       // Set a flag to true to mark the use of a simfplified Code Gen path
-      CGF.combinedSimd = true;
 
       ThreadLimitGlobal = new llvm::GlobalVariable(
             CGF.CGM.getModule(), Bld.getInt32Ty(), false,
@@ -4122,6 +4192,18 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         // Emit a more advanced combined construct which handles nests.
         // In particular, it handles the shared memory management.
         EnterOMPCombinedNestDirectiveLoop(DKind, SKind, S, CGF, TgtFunName, StmtHasScheduleStaticOne(S, CGF, SKind));
+      }
+    } else if (CGF.distributedParallel){
+      ThreadLimitGlobal = new llvm::GlobalVariable(
+            CGF.CGM.getModule(), Bld.getInt32Ty(), false,
+            llvm::GlobalValue::ExternalLinkage, Bld.getInt32(0),
+            TgtFunName + Twine("_thread_limit"));
+
+      if (CGF.useSharedMemory){
+        // Enable the outer loop to act as if schedule(static, 1) has been specified.
+        EnterOMPCombinedNestDirectiveLoop(DKind, SKind, S, CGF, TgtFunName, true);
+      } else {
+        printf("Simplified Code Gen for distribute parallel for nest not supported without shared memory.\n");
       }
     } else {
       // In case no special set of directives has been encountered then
@@ -4153,17 +4235,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
                                Bld.getInt8(GetNumSimdLanesPerTargetRegion()),
                                TgtFunName + Twine("_simd_info"));
     } else {
-      if (CGF.useBlocking){
-        new llvm::GlobalVariable(CGF.CGM.getModule(), Bld.getInt8Ty(), true,
-                               llvm::GlobalValue::ExternalLinkage,
-                               Bld.getInt8(96),
-                               TgtFunName + Twine("_simd_info"));
-      } else {
         new llvm::GlobalVariable(CGF.CGM.getModule(), Bld.getInt8Ty(), true,
                                  llvm::GlobalValue::ExternalLinkage,
                                  Bld.getInt8(32),
                                  TgtFunName + Twine("_simd_info"));
-      }
     }
   }
 
@@ -4666,16 +4741,16 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       for (ArrayRef<OMPClause *>::iterator I = Clauses.begin(),
                                            E = Clauses.end();
             I != E; ++I)
-      if (*I && (*I)->getClauseKind() == OMPC_safelen) {
-        OMPClause *C = dyn_cast<OMPClause>(*I);
-        RValue Len = CGF.EmitAnyExpr(cast<OMPSafelenClause>(C)->getSafelen(),
-                                      AggValueSlot::ignored(), true);
-        llvm::ConstantInt *Val =
-            dyn_cast<llvm::ConstantInt>(Len.getScalarVal());
-        assert(Val);
-        llvm::Value *Args[] = {Bld.CreateLoad(SimdNumLanes), Val};
-        Bld.CreateStore(Bld.CreateCall(Get_min32(), Args), SimdNumLanes);
-      }
+        if (*I && (*I)->getClauseKind() == OMPC_safelen) {
+          OMPClause *C = dyn_cast<OMPClause>(*I);
+          RValue Len = CGF.EmitAnyExpr(cast<OMPSafelenClause>(C)->getSafelen(),
+                                        AggValueSlot::ignored(), true);
+          llvm::ConstantInt *Val =
+              dyn_cast<llvm::ConstantInt>(Len.getScalarVal());
+          assert(Val);
+          llvm::Value *Args[] = {Bld.CreateLoad(SimdNumLanes), Val};
+          Bld.CreateStore(Bld.CreateCall(Get_min32(), Args), SimdNumLanes);
+        }
 
     // in simd region, weed out lanes in excess
     llvm::BasicBlock *LaneNotInExcessBlock = llvm::BasicBlock::Create(
@@ -4766,9 +4841,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       // We want to sync at the end of the SIMD.
       Bld.CreateBr(CGF.SyncAfterSimdBlock);
       Bld.SetInsertPoint(CGF.SyncAfterSimdBlock);
-      // if (CGF.useSharedMemory && !CGF.useBlocking){
-      //    Bld.CreateCall(Get_syncthreads(), {});
-      // }
       if (CGF.useSharedMemory){
          Bld.CreateCall(Get_syncthreads(), {});
       }
@@ -5231,7 +5303,29 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
      OMPRegionTypesStack.push_back(OMP_Parallel);
      CGBuilderTy &Bld = CGF.Builder;
 
-     if (!NestedParallelStack.back()) { // not already in a parallel region
+     if (CGF.distributedParallel){
+        const std::string SyncAfterParallelForName = ".sync.after.parallel.for";
+        CGF.SyncAfterParallelForBlock = llvm::BasicBlock::Create(
+            CGM.getLLVMContext(), SyncAfterParallelForName, CGF.CurFn);
+
+        // Increment the nesting level
+        Bld.CreateStore(
+            Bld.CreateAdd(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
+            ParallelNesting);
+
+        llvm::BasicBlock *ParallelRegionCG = llvm::BasicBlock::Create(
+            CGM.getLLVMContext(), ".par.reg.code", CGF.CurFn);
+
+        // Insert memfence here.
+        Bld.CreateBr(CGF.EndRegionS1);
+        Bld.SetInsertPoint(CGF.EndRegionS1);
+        Bld.CreateCall(Get_memfence());
+        //Bld.CreateCall(Get_syncthreads());
+        Bld.CreateBr(ParallelRegionCG);
+
+        Bld.SetInsertPoint(ParallelRegionCG);
+
+     } else if (!NestedParallelStack.back()) { // not already in a parallel region
 
        // clear up the data structure that will be used to determine the
        // optimal amount of simd lanes to be used in this region
@@ -5331,7 +5425,12 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
      // of end we need
      PopParallelRegion();
      // check if we are in a nested parallel region
-     if (!NestedParallelStack.back()) { // not nested parallel
+     if (CGF.distributedParallel){
+       Bld.CreateBr(CGF.SyncAfterParallelForName);
+       Bld.SetInsertPoint(CGF.SyncAfterParallelForName);
+       // Do nothing for now but maybe a syncthreads will be needed
+       //Bld.CreateCall(Get_syncthreads(), {});
+     } else if (!NestedParallelStack.back()) { // not nested parallel
        // we are now able to determine the optimal amount of lanes to be
        // used in this #parallel region and add the amount setting in the right
        // place, just before we start the region
@@ -5427,20 +5526,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
      CGBuilderTy &Builder = CGF.Builder;
 
-     // if (CGF.useBlocking){
-     //   LoopCount = Builder.CreateCall(Get_num_threads(), {});
-
-     //   llvm::Value *SimdLaneNumVal = Builder.CreateCall(Get_thread_num(), {});
-     //   llvm::Value *SimdLaneNumValSext = Builder.CreateSExt(SimdLaneNumVal,
-     //                                 LoopCount->getType());
-
-     //   llvm::Value *InitialValue =
-     //     Builder.CreateAdd(LoopStart, SimdLaneNumValSext);
-
-     //   Builder.CreateStore(InitialValue, LoopIndex);
-     //   return;
-     // }
-
      // sequential behavior in case of reduction clause detected
      if (SimdHasReduction) {
        CGOpenMPRuntime::EmitSimdInitialization(LoopIndex, LoopStart,
@@ -5459,7 +5544,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
          DKind == OMPD_teams_distribute_parallel_for_simd ||
          DKind == OMPD_distribute_parallel_for_simd;
      if (SimdWithinWarp) {
-         printf("==================> SIMD within warp!!\n");
          llvm::Value *Args1[] = {LoopStart, Builder.getInt32(0),
              Builder.getInt32(WARP_SIZE)};
          LoopStart = Builder.CreateCall(Get_shuffle(LoopStart->getType()),

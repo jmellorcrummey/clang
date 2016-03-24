@@ -132,10 +132,11 @@ public:
   bool combined = false;
   bool combinedSimd = false;
   bool useSharedMemory = false;
-  bool useBlocking = false;
+  bool applyDistributedParallel = false;
   llvm::AllocaInst *CombinedOuterLoopIndex;
   llvm::BasicBlock *SyncAfterCombinedBlock;
   llvm::BasicBlock *SyncAfterSimdBlock;
+  llvm::BasicBlock *SyncAfterParallelForBlock;
   llvm::BasicBlock *EndRegionS1;
 
   CodeGenModule &CGM;  // Per-module state.
