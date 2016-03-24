@@ -998,54 +998,56 @@ void CodeGenFunction::EmitOMPDirectiveWithParallelNoMicrotask(
   if (isTargetMode)
     CGM.getOpenMPRuntime().EnterParallelRegionInTarget(*this, DKind, SKinds, S);
 
-  // CodeGen for clauses (task init).
-  for (ArrayRef<OMPClause *>::iterator I = S.clauses().begin(), E =
-      S.clauses().end(); I != E; ++I)
-    if (*I && !IsAllowedClause((*I)->getClauseKind(), SKinds))
-      EmitAfterInitOMPClause(*(*I), S);
-
-  // CodeGen for clauses (call start).
-  {
-    printf(" ======> Inside EmitOMPSimdDirective: EmitOMPDirectiveWithParallelNoMicrotask: Code gen for clauses\n ");
+  if (!this->distributedParallel){
+    // CodeGen for clauses (task init).
     for (ArrayRef<OMPClause *>::iterator I = S.clauses().begin(), E =
         S.clauses().end(); I != E; ++I)
-      if (*I
-          && (!IsAllowedClause((*I)->getClauseKind(), SKinds)
-              || (*I)->getClauseKind() == OMPC_firstprivate))
-        EmitPreOMPClause(*(*I), S);
+      if (*I && !IsAllowedClause((*I)->getClauseKind(), SKinds))
+        EmitAfterInitOMPClause(*(*I), S);
 
-    switch (DKind) {
-    case OMPD_parallel:
-      EmitStmt(CS->getCapturedStmt());
-      break;
-    case OMPD_parallel_sections:
-      EmitOMPSectionsDirective(DKind, OMPD_sections, S);
-      break;
-    case OMPD_parallel_for:
-      EmitOMPDirectiveWithLoop(DKind, OMPD_for, S);
-      break;
-    case OMPD_parallel_for_simd:
-      EmitOMPDirectiveWithLoop(DKind, OMPD_for_simd, S);
-      break;
-    default:
-      break;
+    {
+      // CodeGen for clauses (call start).
+      printf(" ======> Inside EmitOMPSimdDirective: EmitOMPDirectiveWithParallelNoMicrotask: Code gen for clauses\n ");
+      for (ArrayRef<OMPClause *>::iterator I = S.clauses().begin(), E =
+          S.clauses().end(); I != E; ++I)
+        if (*I
+            && (!IsAllowedClause((*I)->getClauseKind(), SKinds)
+                || (*I)->getClauseKind() == OMPC_firstprivate))
+          EmitPreOMPClause(*(*I), S);
+
+      switch (DKind) {
+      case OMPD_parallel:
+        EmitStmt(CS->getCapturedStmt());
+        break;
+      case OMPD_parallel_sections:
+        EmitOMPSectionsDirective(DKind, OMPD_sections, S);
+        break;
+      case OMPD_parallel_for:
+        EmitOMPDirectiveWithLoop(DKind, OMPD_for, S);
+        break;
+      case OMPD_parallel_for_simd:
+        EmitOMPDirectiveWithLoop(DKind, OMPD_for_simd, S);
+        break;
+      default:
+        break;
+      }
+      EnsureInsertPoint();
+
+      // CodeGen for clauses (call end).
+      for (ArrayRef<OMPClause *>::iterator I = S.clauses().begin(), E =
+          S.clauses().end(); I != E; ++I)
+        if (*I && !IsAllowedClause((*I)->getClauseKind(), SKinds))
+          EmitPostOMPClause(*(*I), S);
+
+      // CodeGen for clauses (closing steps).
+      for (ArrayRef<OMPClause *>::iterator I = S.clauses().begin(), E =
+          S.clauses().end(); I != E; ++I)
+        if (*I && !IsAllowedClause((*I)->getClauseKind(), SKinds))
+          EmitCloseOMPClause(*(*I), S);
     }
+
     EnsureInsertPoint();
-
-    // CodeGen for clauses (call end).
-    for (ArrayRef<OMPClause *>::iterator I = S.clauses().begin(), E =
-        S.clauses().end(); I != E; ++I)
-      if (*I && !IsAllowedClause((*I)->getClauseKind(), SKinds))
-        EmitPostOMPClause(*(*I), S);
-
-    // CodeGen for clauses (closing steps).
-    for (ArrayRef<OMPClause *>::iterator I = S.clauses().begin(), E =
-        S.clauses().end(); I != E; ++I)
-      if (*I && !IsAllowedClause((*I)->getClauseKind(), SKinds))
-        EmitCloseOMPClause(*(*I), S);
   }
-
-  EnsureInsertPoint();
   // Implicit barrier for simple parallel region only.
   // Others (combined) directives already has implicit barriers.
 

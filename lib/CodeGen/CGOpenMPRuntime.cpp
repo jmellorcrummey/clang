@@ -5294,6 +5294,177 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
    // specified nowait
    bool RequireFirstprivateSynchronization() { return false; }
 
+   void
+   EmitOMPInnerParallelForLoop(const OMPExecutableDirective &S,
+                               CodeGenFunction &CGF){
+
+    // Implement a new for loop.
+    CGBuilderTy &Builder = CGF.Builder;
+
+    // Set the names of the basic block tags
+    llvm::BasicBlock *StartCombinedFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".start.parfor.for", CGF.CurFn);
+    llvm::BasicBlock *CondCombinedFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".cond.parfor.for", CGF.CurFn);
+    llvm::BasicBlock *BodyCombinedFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".body.parfor.for", CGF.CurFn);
+    llvm::BasicBlock *IncCombinedFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".inc.parfor.for", CGF.CurFn);
+    llvm::BasicBlock *EndTarget = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".end.parfor.for", CGF.CurFn);
+
+    printf("Setup of blocks! Done\n");
+
+    // // Before jumping anywhere, include a memfence.
+    // Not needed fot this case where shared memory isn't used.
+    // Builder.CreateCall(Get_memfence(), {});
+
+    // Start populating the basic blocks which perform the init, cond and inc
+    // of the combined construct for loop.
+    Builder.CreateBr(StartCombinedFor);
+    Builder.SetInsertPoint(StartCombinedFor);
+
+    // generating:
+    // for (int j = threadIdx.x mod 32; j < LAYERS; j += 32)
+    Expr *IterVar = nullptr;
+    if (const OMPParallelForDirective *D =
+            dyn_cast<OMPParallelForDirective>(&S))
+      IterVar = D->getNewIterVar();
+    else
+      assert(0 && "generating combined construct for an unsupported pragma sequence\n");
+
+    QualType QTy = IterVar->getType();
+    uint64_t TypeSize = 32;
+    if (CGF.getContext().getTypeSize(QTy) > TypeSize)
+      TypeSize = 64;
+    bool isSigned = true;
+    if (QTy->hasUnsignedIntegerRepresentation())
+      isSigned = false;
+    llvm::Type *VarTy = TypeSize == 32 ? Builder.getInt32Ty() :
+        Builder.getInt64Ty();
+
+    printf("Setup of IterVar and Qty! Done\n");
+
+    llvm::Value *LB = Builder.CreateCall(Get_thread_num(), {});
+
+    printf("Setup of LB! Done\n");
+    // Use inner loop upper bound
+    Expr *UBExpr = nullptr;
+    if (const OMPParallelForDirective *D =
+            dyn_cast<OMPParallelForDirective>(&S))
+      UBExpr = D->getNewIterEnd();
+    else
+      assert(0 && "generating combined construct for an unsupported pragma sequence\n");
+
+    llvm::Value *UB = CGF.EmitScalarExpr(UBExpr);
+    UB = Builder.CreateIntCast(UB, VarTy, isSigned);
+
+    printf("Setup of UB! Done\n");
+    // Setup loop iteration var
+    llvm::AllocaInst *InnerPrivate = CGF.CreateMemTemp(QTy, ".inner.idx.");
+
+    // Traverse any collapsed loops
+    const Stmt *Body = S.getAssociatedStmt();
+    ArrayRef<Expr *> Arr = nullptr;
+    unsigned numCollapsed = 0;
+    if (const OMPParallelForDirective *D =
+            dyn_cast<OMPParallelForDirective>(&S)) {
+      Arr = D->getCounters();
+      numCollapsed = D->getCollapsedNumber();
+    } else {
+      assert(0 && "generating combined construct for an unsupported pragma sequence\n");
+    }
+
+    printf("Setup of Collapse1! Done\n");
+    if (const CapturedStmt *CS = dyn_cast_or_null<CapturedStmt>(Body))
+      Body = CS->getCapturedStmt();
+
+    const VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(IterVar)->getDecl());
+    CGM.OpenMPSupport.addOpenMPPrivateVar(VD, InnerPrivate);
+    for (unsigned I = 0; I < numCollapsed; ++I) {
+      printf("Inside Collapse!\n");
+      CodeGenFunction::RunCleanupsScope InitScope(CGF);
+      const VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(Arr[I])->getDecl());
+      bool SkippedContainers = false;
+      while (!SkippedContainers) {
+        if (const AttributedStmt *AS = dyn_cast_or_null<AttributedStmt>(Body))
+          Body = AS->getSubStmt();
+        else if (const CompoundStmt *CS =
+                     dyn_cast_or_null<CompoundStmt>(Body)) {
+          if (CS->size() != 1) {
+            SkippedContainers = true;
+          } else {
+            Body = CS->body_back();
+          }
+        } else
+          SkippedContainers = true;
+      }
+      const ForStmt *For = dyn_cast_or_null<ForStmt>(Body);
+      Body = For->getBody();
+      if (CGM.OpenMPSupport.getTopOpenMPPrivateVar(VD))
+        continue;
+      QualType QTy = Arr[I]->getType();
+      llvm::AllocaInst *InnerPrivate =
+          CGF.CreateMemTemp(QTy, CGM.getMangledName(VD) + ".private.");
+      CGM.OpenMPSupport.addOpenMPPrivateVar(VD, InnerPrivate);
+      llvm::BasicBlock *PrecondBB = llvm::BasicBlock::Create(
+              CGF.CGM.getLLVMContext(), "omp.inner.loop.precond");
+      if (isa<DeclStmt>(For->getInit()))
+        CGF.EmitAnyExprToMem(VD->getAnyInitializer(), InnerPrivate,
+                         VD->getType().getQualifiers(), true);
+      else
+        CGF.EmitStmt(For->getInit());
+      // Use local EndTarget which should branch back
+      // to where we left the outer for.
+      CGF.EmitBranchOnBoolExpr(For->getCond(), PrecondBB, EndTarget, 0);
+      CGF.EmitBlock(PrecondBB);
+    }
+    printf("Setup of Collapse! Done\n");
+
+    Builder.CreateStore(LB, InnerPrivate);
+    Builder.CreateBr(CondCombinedFor);
+
+    // FOR COND: j <= LAYERS
+    Builder.SetInsertPoint(CondCombinedFor);
+    if (isSigned){
+      Builder.CreateCondBr(Builder.CreateICmpSLE(Builder.CreateLoad(InnerPrivate), UB),
+                           BodyCombinedFor, EndTarget);
+    }
+    else {
+      Builder.CreateCondBr(Builder.CreateICmpULE(Builder.CreateLoad(InnerPrivate), UB),
+                           BodyCombinedFor, EndTarget);
+    }
+    printf("Setup of Cond! Done\n");
+
+    // FOR INC: tid += blockDim.x
+    Builder.SetInsertPoint(IncCombinedFor);
+    llvm::Value *step = Builder.CreateCall(Get_num_threads(), {});
+    Builder.CreateBr(CondCombinedFor);
+    printf("Setup of INC! Done\n");
+
+    // FOR BODY
+    Builder.SetInsertPoint(BodyCombinedFor);
+
+    Expr *InitExpr = nullptr;
+    if (const OMPParallelForDirective *D =
+        dyn_cast<OMPParallelForDirective>(&S))
+      InitExpr = D->getInit();
+    else
+      assert(0 && "generating combined construct for an unsupported pragma sequence\n");
+    printf("Setup of Init! Done\n");
+    {
+      CodeGenFunction::RunCleanupsScope ThenScope(CGF);
+      CGF.EmitStmt(InitExpr);
+      {
+        printf("Setup of Init Before Body! Done\n");
+        CodeGenFunction::RunCleanupsScope BodyScope(CGF);
+        CGF.EmitStmt(Body);
+      }
+      Builder.CreateBr(IncCombinedFor);
+    }
+    Builder.SetInsertPoint(EndTarget);
+   }
+
    // the following two functions deal with nested parallelism
    // by calling the appropriate codegen functions above
    void EnterParallelRegionInTarget(CodeGenFunction &CGF,
@@ -5326,6 +5497,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         //Bld.CreateCall(Get_syncthreads());
         Bld.CreateBr(ParallelRegionCG);
         Bld.SetInsertPoint(ParallelRegionCG);
+
+        // Call the function which generates the loop for the inner parallel for.
+        EmitOMPInnerParallelForLoop(S, CGF);
      } else if (!NestedParallelStack.back()) { // not already in a parallel region
 
        // clear up the data structure that will be used to determine the
