@@ -970,7 +970,6 @@ void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
   assert(!ParentName.empty() && "Invalid target region parent name!");
 
   const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
-  CS.getCapturedStmt()->dump();
 
   EntryFunctionState EST;
   WorkerFunctionState WST(CGM);
