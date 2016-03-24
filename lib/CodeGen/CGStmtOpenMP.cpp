@@ -1712,11 +1712,14 @@ CodeGenFunction::EmitOMPDirectiveWithLoop(OpenMPDirectiveKind DKind,
           printf("======> Inside EmitOMPDirectiveWithLoop: Emit directive with parallel (instead of SIMD)\n");
           RunCleanupsScope Scope(*this);
           if (IsInnerLoopGen || !IsComplexParallelLoop) {
+            printf("======> Inside EmitOMPDirectiveWithLoop: then\n");
             if (SKind == OMPD_for)
               OMPCancelMap[OMPD_for] = getJumpDestInCurrentScope(EndBB);
+            printf("======> Inside EmitOMPDirectiveWithLoop: Emit Body\n");
             EmitStmt(Body);
             OMPCancelMap.erase(OMPD_for);
           } else {
+            printf("======> Inside EmitOMPDirectiveWithLoop: else\n");
             const Expr *LowerBound = getLowerBoundFromLoopDirective(&S);
             const Expr *UpperBound = getUpperBoundFromLoopDirective(&S);
             EmitStoreOfScalar(Builder.CreateLoad(PLB), EmitLValue(LowerBound));
