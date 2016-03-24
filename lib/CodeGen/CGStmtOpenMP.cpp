@@ -1677,7 +1677,6 @@ CodeGenFunction::EmitOMPDirectiveWithLoop(OpenMPDirectiveKind DKind,
               (CGM.getTarget().getTriple().getArch() == llvm::Triple::nvptx ||
                CGM.getTarget().getTriple().getArch() ==
                    llvm::Triple::nvptx64)) {
-            printf("======> Inside EmitOMPDirectiveWithLoop: Handle SIMD - TRUE\n");
             InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
             RunCleanupsScope ExecutedScope(*this);
 
@@ -1701,11 +1700,8 @@ CodeGenFunction::EmitOMPDirectiveWithLoop(OpenMPDirectiveKind DKind,
             CGPragmaOmpSimd Wrapper(&S, Private, PUB);
             EmitPragmaSimd(Wrapper);
           } else {
-            printf("======> Inside EmitOMPDirectiveWithLoop: Handle SIMD - FALSE\n");
             RunCleanupsScope Scope(*this);
-            printf("======> Inside EmitOMPDirectiveWithLoop: Call SIMD function\n");
             BodyFunction = EmitSimdFunction(SimdWrapper);
-            printf("======> Inside EmitOMPDirectiveWithLoop: SIMD for helper call\n");
             EmitSIMDForHelperCall(BodyFunction, CapStruct, Private, false);
           }
         } else {
