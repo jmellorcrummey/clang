@@ -2514,7 +2514,10 @@ void CodeGenFunction::EmitOMPDirectiveWithTarget(OpenMPDirectiveKind DKind,
         CGM.getOpenMPRuntime().EnterTargetLoop(CS->getLocStart(), CGF,
             FD->getName(), DKind, SKind, S);
 
-      if (!CGF.combined && !CGF.combinedSimd){
+      bool isSimplifiedCodeGen = CGF.combined ||
+                                 CGF.combinedSimd ||
+                                 CGF.distributedParallel;
+      if (!isSimplifiedCodeGen){
         // Emit the contents of the target region
         switch (SKind) {
         default:
