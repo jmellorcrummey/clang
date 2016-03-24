@@ -3381,6 +3381,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     else if (const OMPTargetTeamsDistributeDirective *D =
             dyn_cast<OMPTargetTeamsDistributeDirective>(&S))
       IterVar = D->getNewIterVar();
+    else if (const OMPTargetTeamsDirective *D =
+            dyn_cast<OMPTargetTeamsDirective>(&S))
+      IterVar = D->getNewIterVar();
     else
       assert(0 && "generating combined construct for an unsupported pragma sequence\n");
 
@@ -3426,6 +3429,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     else if (const OMPTargetTeamsDistributeDirective *D =
             dyn_cast<OMPTargetTeamsDistributeDirective>(&S))
       UBExpr = D->getNewIterEnd();
+    else if (const OMPTargetTeamsDirective *D =
+            dyn_cast<OMPTargetTeamsDirective>(&S))
+      UBExpr = D->getNewIterEnd();
     else
       assert(0 && "generating combined construct for an unsupported pragma sequence\n");
     llvm::Value * UB = CGF.EmitScalarExpr(UBExpr);
@@ -3444,6 +3450,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       numCollapsed = D->getCollapsedNumber();
     } else if (const OMPTargetTeamsDistributeDirective *D =
             dyn_cast<OMPTargetTeamsDistributeDirective>(&S)){
+      Arr = D->getCounters();
+      numCollapsed = D->getCollapsedNumber();
+    } else if (const OMPTargetTeamsDirective *D =
+            dyn_cast<OMPTargetTeamsDirective>(&S)){
       Arr = D->getCounters();
       numCollapsed = D->getCollapsedNumber();
     } else {
@@ -3595,6 +3605,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     else if (const OMPTargetTeamsDistributeDirective *D =
             dyn_cast<OMPTargetTeamsDistributeDirective>(&S))
       InitExpr = D->getInit();
+    else if (const OMPTargetTeamsDirective *D =
+            dyn_cast<OMPTargetTeamsDirective>(&S))
+      InitExpr = D->getInit();
     else
       assert(0 && "generating combined construct for an unsupported pragma sequence\n");
 
@@ -3663,6 +3676,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
           PushNewParallelRegion(true);
         }
 
+        printf(" In Combined Nest region: Emit Body\n");
         // Emit Body
         CGF.EmitStmt(Body);
       }
@@ -5300,10 +5314,12 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
                                     ArrayRef<OpenMPDirectiveKind> SKinds,
                                     const OMPExecutableDirective &S) {
 
+     printf("===> EnterParallelRegionInTarget 1\n");
      OMPRegionTypesStack.push_back(OMP_Parallel);
      CGBuilderTy &Bld = CGF.Builder;
 
      if (CGF.distributedParallel){
+        printf("===> EnterParallelRegionInTarget 2\n");
         const std::string SyncAfterParallelForName = ".sync.after.parallel.for";
         CGF.SyncAfterParallelForBlock = llvm::BasicBlock::Create(
             CGM.getLLVMContext(), SyncAfterParallelForName, CGF.CurFn);
@@ -5322,9 +5338,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         Bld.CreateCall(Get_memfence());
         //Bld.CreateCall(Get_syncthreads());
         Bld.CreateBr(ParallelRegionCG);
-
         Bld.SetInsertPoint(ParallelRegionCG);
-
      } else if (!NestedParallelStack.back()) { // not already in a parallel region
 
        // clear up the data structure that will be used to determine the
@@ -5411,6 +5425,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
    }
 
    void ExitParallelRegionInTarget(CodeGenFunction &CGF) {
+     printf("===> ExitParallelRegionInTarget 1\n");
      CGBuilderTy &Bld = CGF.Builder;
      // Decrement the nesting level
      Bld.CreateStore(
@@ -5426,6 +5441,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
      PopParallelRegion();
      // check if we are in a nested parallel region
      if (CGF.distributedParallel){
+       printf("===> ExitParallelRegionInTarget 2\n");
        Bld.CreateBr(CGF.SyncAfterParallelForBlock);
        Bld.SetInsertPoint(CGF.SyncAfterParallelForBlock);
        // Do nothing for now but maybe a syncthreads will be needed
