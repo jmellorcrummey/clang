@@ -3381,9 +3381,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     else if (const OMPTargetTeamsDistributeDirective *D =
             dyn_cast<OMPTargetTeamsDistributeDirective>(&S))
       IterVar = D->getNewIterVar();
-    else if (const OMPTargetTeamsDirective *D =
-            dyn_cast<OMPTargetTeamsDirective>(&S))
-      IterVar = D->getNewIterVar();
     else
       assert(0 && "generating combined construct for an unsupported pragma sequence\n");
 
@@ -3429,9 +3426,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     else if (const OMPTargetTeamsDistributeDirective *D =
             dyn_cast<OMPTargetTeamsDistributeDirective>(&S))
       UBExpr = D->getNewIterEnd();
-    else if (const OMPTargetTeamsDirective *D =
-            dyn_cast<OMPTargetTeamsDirective>(&S))
-      UBExpr = D->getNewIterEnd();
     else
       assert(0 && "generating combined construct for an unsupported pragma sequence\n");
     llvm::Value * UB = CGF.EmitScalarExpr(UBExpr);
@@ -3450,10 +3444,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       numCollapsed = D->getCollapsedNumber();
     } else if (const OMPTargetTeamsDistributeDirective *D =
             dyn_cast<OMPTargetTeamsDistributeDirective>(&S)){
-      Arr = D->getCounters();
-      numCollapsed = D->getCollapsedNumber();
-    } else if (const OMPTargetTeamsDirective *D =
-            dyn_cast<OMPTargetTeamsDirective>(&S)){
       Arr = D->getCounters();
       numCollapsed = D->getCollapsedNumber();
     } else {
@@ -3604,9 +3594,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       InitExpr = D->getInit();
     else if (const OMPTargetTeamsDistributeDirective *D =
             dyn_cast<OMPTargetTeamsDistributeDirective>(&S))
-      InitExpr = D->getInit();
-    else if (const OMPTargetTeamsDirective *D =
-            dyn_cast<OMPTargetTeamsDirective>(&S))
       InitExpr = D->getInit();
     else
       assert(0 && "generating combined construct for an unsupported pragma sequence\n");
