@@ -1074,6 +1074,7 @@ void CodeGenFunction::EmitOMPDirectiveWithParallelNoMicrotask(
 
   // Remove list of private globals from the stack.
   CGM.OpenMPSupport.endOpenMPRegion();
+  printf(" ======> Inside EmitOMPSimdDirective: Finish\n ");
 }
 
 void CodeGenFunction::EmitOMPDirectiveWithParallelMicrotask(
