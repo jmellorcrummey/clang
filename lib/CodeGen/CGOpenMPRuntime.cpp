@@ -2820,7 +2820,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     llvm::Value *step = Builder.getInt32(32);
     if (CGF.useBlocking){
       // FOR INC: tid += blockDim.x
-      step = Builder.CreateCall(Get_num_threads(), {})
+      step = Builder.CreateCall(Get_num_threads(), {});
     }
     Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(InnerPrivate), step),
                                           InnerPrivate);
