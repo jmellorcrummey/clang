@@ -3882,7 +3882,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // of end we need
     PopParallelRegion();
 
-    SetNumSimdLanesPerTargetRegion(32);
+    //SetNumSimdLanesPerTargetRegion(32);
 
     // Call previous method, the one used in the control loop.
     // Try to avoid the jumps back to control loop code blocks.
@@ -4148,15 +4148,22 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // to the RTL on the host the exact number of CUDA threads to launch
     // This is constant at runtime
     if (!CGF.combinedSimd) {
-    new llvm::GlobalVariable(CGF.CGM.getModule(), Bld.getInt8Ty(), true,
-                             llvm::GlobalValue::ExternalLinkage,
-                             Bld.getInt8(GetNumSimdLanesPerTargetRegion()),
-                             TgtFunName + Twine("_simd_info"));
+      new llvm::GlobalVariable(CGF.CGM.getModule(), Bld.getInt8Ty(), true,
+                               llvm::GlobalValue::ExternalLinkage,
+                               Bld.getInt8(GetNumSimdLanesPerTargetRegion()),
+                               TgtFunName + Twine("_simd_info"));
     } else {
-    new llvm::GlobalVariable(CGF.CGM.getModule(), Bld.getInt8Ty(), true,
-                             llvm::GlobalValue::ExternalLinkage,
-                             Bld.getInt8(32),
-                             TgtFunName + Twine("_simd_info"));
+      if (CGF.useBlocking){
+        new llvm::GlobalVariable(CGF.CGM.getModule(), Bld.getInt8Ty(), true,
+                               llvm::GlobalValue::ExternalLinkage,
+                               Bld.getInt8(96),
+                               TgtFunName + Twine("_simd_info"));
+      } else {
+        new llvm::GlobalVariable(CGF.CGM.getModule(), Bld.getInt8Ty(), true,
+                                 llvm::GlobalValue::ExternalLinkage,
+                                 Bld.getInt8(32),
+                                 TgtFunName + Twine("_simd_info"));
+      }
     }
   }
 
