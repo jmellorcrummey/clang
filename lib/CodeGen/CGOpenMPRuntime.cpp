@@ -3756,9 +3756,13 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // should do.
     Bld.SetInsertPoint(MasterInit);
 
-    // Use all CUDA threads but in batches of 32
-    Bld.CreateStore(Bld.getInt32(32), SimdNumLanes);
-    //Bld.CreateStore(Bld.CreateCall(Get_num_threads(), {}), SimdNumLanes);
+    if (CGF.useBlocking){
+      // Use all threads as lanes of the same vector unit.
+      Bld.CreateStore(Bld.CreateCall(Get_num_threads(), {}), SimdNumLanes);
+    } else {
+      // Use all CUDA threads but in batches of 32
+      Bld.CreateStore(Bld.getInt32(32), SimdNumLanes);
+    }
 
     printf("Compute OmpNumThreads\n");
     // Use all cuda threads as lanes - parallel regions will change this
