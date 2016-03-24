@@ -5439,6 +5439,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // FOR INC: tid += blockDim.x
     Builder.SetInsertPoint(IncCombinedFor);
     llvm::Value *step = Builder.CreateCall(Get_num_threads(), {});
+    Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(InnerPrivate), step),
+                                          InnerPrivate);
     Builder.CreateBr(CondCombinedFor);
     printf("Setup of INC! Done\n");
 
