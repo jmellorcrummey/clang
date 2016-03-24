@@ -5413,19 +5413,19 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
      CGBuilderTy &Builder = CGF.Builder;
 
-     if (CGF.useBlocking){
-       LoopCount = Builder.CreateCall(Get_num_threads(), {});
+     // if (CGF.useBlocking){
+     //   LoopCount = Builder.CreateCall(Get_num_threads(), {});
 
-       llvm::Value *SimdLaneNumVal = Builder.CreateCall(Get_thread_num(), {});
-       llvm::Value *SimdLaneNumValSext = Builder.CreateSExt(SimdLaneNumVal,
-                                     LoopCount->getType());
+     //   llvm::Value *SimdLaneNumVal = Builder.CreateCall(Get_thread_num(), {});
+     //   llvm::Value *SimdLaneNumValSext = Builder.CreateSExt(SimdLaneNumVal,
+     //                                 LoopCount->getType());
 
-       llvm::Value *InitialValue =
-         Builder.CreateAdd(LoopStart, SimdLaneNumValSext);
+     //   llvm::Value *InitialValue =
+     //     Builder.CreateAdd(LoopStart, SimdLaneNumValSext);
 
-       Builder.CreateStore(InitialValue, LoopIndex);
-       return;
-     }
+     //   Builder.CreateStore(InitialValue, LoopIndex);
+     //   return;
+     // }
 
      // sequential behavior in case of reduction clause detected
      if (SimdHasReduction) {
@@ -5445,6 +5445,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
          DKind == OMPD_teams_distribute_parallel_for_simd ||
          DKind == OMPD_distribute_parallel_for_simd;
      if (SimdWithinWarp) {
+         printf("==================> SIMD within warp!!\n");
          llvm::Value *Args1[] = {LoopStart, Builder.getInt32(0),
              Builder.getInt32(WARP_SIZE)};
          LoopStart = Builder.CreateCall(Get_shuffle(LoopStart->getType()),
