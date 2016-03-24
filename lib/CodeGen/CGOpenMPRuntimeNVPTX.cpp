@@ -977,9 +977,7 @@ void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
   // Emit target region as a standalone region.
   auto &&CodeGen = [&EST, &WST, &CS, this, &D](CodeGenFunction &CGF) {
     emitEntryHeader(CGF, EST, WST);
-
     CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
-    (void)CGF.EmitOMPFirstprivateClause(D, PrivateScope);
     CGF.EmitOMPPrivateClause(D, PrivateScope);
     (void)PrivateScope.Privatize();
 
