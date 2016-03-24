@@ -1488,6 +1488,11 @@ void CGOpenMPRuntimeNVPTX::emitTeamsCall(CodeGenFunction &CGF,
 
   // just emit the statements in the teams region inlined
   auto &&CodeGen = [&D](CodeGenFunction &CGF) {
+    CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
+    (void)CGF.EmitOMPFirstprivateClause(D, PrivateScope);
+    CGF.EmitOMPPrivateClause(D, PrivateScope);
+    (void)PrivateScope.Privatize();
+
     CGF.EmitStmt(cast<CapturedStmt>(D.getAssociatedStmt())->getCapturedStmt());
   };
 
