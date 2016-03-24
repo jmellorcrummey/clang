@@ -15,6 +15,8 @@
 #include "CGOpenMPRuntimeNVPTX.h"
 #include "CGCleanup.h"
 #include "clang/AST/DeclOpenMP.h"
+#include "CodeGenFunction.h"
+#include "clang/AST/StmtOpenMP.h"
 
 using namespace clang;
 using namespace CodeGen;
@@ -1140,30 +1142,37 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
     OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen) {
   assert(ThreadIDVar->getType()->isPointerType() &&
          "thread id variable must be of type kmp_int32 *");
-  const CapturedStmt *CS = cast<CapturedStmt>(D.getAssociatedStmt());
-  CodeGenFunction CGF(CGM, true);
-  bool HasCancel = false;
-  if (auto *OPD = dyn_cast<OMPParallelDirective>(&D))
-    HasCancel = OPD->hasCancel();
-  else if (auto *OPSD = dyn_cast<OMPParallelSectionsDirective>(&D))
-    HasCancel = OPSD->hasCancel();
-  else if (auto *OPFD = dyn_cast<OMPParallelForDirective>(&D))
-    HasCancel = OPFD->hasCancel();
 
-  // Include updates in runtime parallelism level.
-  auto &&CodeGenWithDataSharing = [this, &CodeGen](CodeGenFunction &CGF) {
-    increaseParallelismLevel(CGF);
-    CodeGen(CGF);
-    decreaseParallelismLevel(CGF);
-  };
+  llvm::Function *OutlinedFun = nullptr;
+  if (isa<OMPTeamsDirective>(D)) {
+    // no outlining happening for teams
+  } else {
+    const CapturedStmt *CS = cast<CapturedStmt>(D.getAssociatedStmt());
+    CodeGenFunction CGF(CGM, true);
+    bool HasCancel = false;
+    if (auto *OPD = dyn_cast<OMPParallelDirective>(&D))
+      HasCancel = OPD->hasCancel();
+    else if (auto *OPSD = dyn_cast<OMPParallelSectionsDirective>(&D))
+      HasCancel = OPSD->hasCancel();
+    else if (auto *OPFD = dyn_cast<OMPParallelForDirective>(&D))
+      HasCancel = OPFD->hasCancel();
 
-  CGOpenMPOutlinedRegionInfo CGInfo(*CS, ThreadIDVar, CodeGenWithDataSharing,
-                                    InnermostKind, HasCancel);
-  CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
-  ParallelNestingLevelRAII NestingRAII(ParallelNestingLevel);
-  // The outlined function takes as arguments the global_tid, bound_tid,
-  // and a capture structure created from the captured variables.
-  return CGF.GenerateCapturedStmtFunction(*CS);
+    // Include updates in runtime parallelism level.
+    auto &&CodeGenWithDataSharing = [this, &CodeGen](CodeGenFunction &CGF) {
+      increaseParallelismLevel(CGF);
+      CodeGen(CGF);
+      decreaseParallelismLevel(CGF);
+    };
+
+    CGOpenMPOutlinedRegionInfo CGInfo(*CS, ThreadIDVar, CodeGenWithDataSharing,
+                                      InnermostKind, HasCancel);
+    CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
+    ParallelNestingLevelRAII NestingRAII(ParallelNestingLevel);
+    // The outlined function takes as arguments the global_tid, bound_tid,
+    // and a capture structure created from the captured variables.
+    OutlinedFun = CGF.GenerateCapturedStmtFunction(*CS);
+  }
+  return OutlinedFun;
 }
 
 bool CGOpenMPRuntimeNVPTX::InL0() {
@@ -1627,4 +1636,23 @@ CGOpenMPRuntimeNVPTX::CGOpenMPRuntimeNVPTX(CodeGenModule &CGM)
     : CGOpenMPRuntime(CGM), IsOrphaned(false), ParallelNestingLevel(0) {
   if (!CGM.getLangOpts().OpenMPIsDevice)
     llvm_unreachable("OpenMP NVPTX can only handle device code.");
+}
+
+void CGOpenMPRuntimeNVPTX::emitNumTeamsClause(CodeGenFunction &CGF,
+                                              const Expr *NumTeams,
+                                              const Expr *ThreadLimit,
+                                              SourceLocation Loc) {}
+
+void CGOpenMPRuntimeNVPTX::emitTeamsCall(CodeGenFunction &CGF,
+                                    const OMPExecutableDirective &D,
+                                    SourceLocation Loc,
+                                    llvm::Value *OutlinedFn,
+                                    ArrayRef<llvm::Value *> CapturedVars) {
+
+  // just emit the statements in the teams region inlined
+  auto &&CodeGen = [&D](CodeGenFunction &CGF) {
+    CGF.EmitStmt(cast<CapturedStmt>(D.getAssociatedStmt())->getCapturedStmt());
+  };
+
+  emitInlinedDirective(CGF, OMPD_teams, CodeGen);
 }
