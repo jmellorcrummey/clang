@@ -3818,9 +3818,13 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // SimdNumLanes should be 32 to indicate that a SIMD is used.
     // When SimdNumLanes is 1 then it SHOULD mean that all threads are
     // already in use and no actual SIMD-ization is going to happen.
-    llvm::Value *LaneID = Bld.CreateSub(globalTid,
-                                        Bld.CreateMul(Bld.CreateLoad(OmpThreadNum),
-                                                      Bld.getInt32(32)));
+    llvm::Value *LaneID;
+    if (CGF.useBlocking){
+      LaneID = Bld.CreateCall(Get_thread_num(), {});
+    } else {
+      LaneID = Bld.CreateSub(globalTid, Bld.CreateMul(Bld.CreateLoad(OmpThreadNum),
+                             Bld.getInt32(32)));
+    }
     printf(" Compute SimdLocalLaneId\n");
     SimdLocalLaneId = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "SimdLocalLaneId");
     Bld.CreateStore(LaneID, SimdLocalLaneId);
