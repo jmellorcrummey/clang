@@ -2711,20 +2711,20 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     printf("Setup of IterVar and Qty! Done\n");
     
     llvm::Value *LB;
-    if (CGF.useBlocking){
-      LB = Builder.CreateCall(Get_thread_num(), {});
-    } else {
-      // Get the modulus of threadIdx.x by const32
-      llvm::Value *blockLocalThreadID = Builder.CreateCall(Get_thread_num(), {});
-      // LB = blockLocalThreadID div WARP32
-      blockLocalThreadID = Builder.CreateSExt(blockLocalThreadID, VarTy);
-      llvm::Value *const32 = Builder.getInt32(5); // 2^5
-      LB = Builder.CreateAShr(blockLocalThreadID, const32);
-      // LB *= WARP32
-      LB = Builder.CreateMul(LB, Builder.getInt32(32));
-      // Modulo result: LB = blockLocalThreadID - LB
-      LB = Builder.CreateSub(Builder.CreateCall(Get_thread_num(), {}), LB);
-    }
+    // if (CGF.useBlocking){
+    //   LB = Builder.CreateCall(Get_thread_num(), {});
+    // }
+
+    // Get the modulus of threadIdx.x by const32
+    llvm::Value *blockLocalThreadID = Builder.CreateCall(Get_thread_num(), {});
+    // LB = blockLocalThreadID div WARP32
+    blockLocalThreadID = Builder.CreateSExt(blockLocalThreadID, VarTy);
+    llvm::Value *const32 = Builder.getInt32(5); // 2^5
+    LB = Builder.CreateAShr(blockLocalThreadID, const32);
+    // LB *= WARP32
+    LB = Builder.CreateMul(LB, Builder.getInt32(32));
+    // Modulo result: LB = blockLocalThreadID - LB
+    LB = Builder.CreateSub(Builder.CreateCall(Get_thread_num(), {}), LB);
 
     printf("Setup of LB! Done\n");
     // Use inner loop upper bound
@@ -2818,10 +2818,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // FOR INC: tid += WARP32
     Builder.SetInsertPoint(IncCombinedFor);
     llvm::Value *step = Builder.getInt32(32);
-    if (CGF.useBlocking){
-      // FOR INC: tid += blockDim.x
-      step = Builder.CreateCall(Get_num_threads(), {});
-    }
+    // if (CGF.useBlocking){
+    //   // FOR INC: tid += blockDim.x
+    //   step = Builder.CreateCall(Get_num_threads(), {});
+    // }
     Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(InnerPrivate), step),
                                           InnerPrivate);
     Builder.CreateBr(CondCombinedFor);
@@ -5405,19 +5405,19 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
      CGBuilderTy &Builder = CGF.Builder;
 
-     // if (CGF.useBlocking){
-     //   LoopCount = Builder.CreateCall(Get_num_threads(), {});
+     if (CGF.useBlocking){
+       LoopCount = Builder.CreateCall(Get_num_threads(), {});
 
-     //   llvm::Value *SimdLaneNumVal = Builder.CreateCall(Get_thread_num(), {});
-     //   llvm::Value *SimdLaneNumValSext = Builder.CreateSExt(SimdLaneNumVal,
-     //                                 LoopCount->getType());
+       llvm::Value *SimdLaneNumVal = Builder.CreateCall(Get_thread_num(), {});
+       llvm::Value *SimdLaneNumValSext = Builder.CreateSExt(SimdLaneNumVal,
+                                     LoopCount->getType());
 
-     //   llvm::Value *InitialValue =
-     //     Builder.CreateAdd(LoopStart, SimdLaneNumValSext);
+       llvm::Value *InitialValue =
+         Builder.CreateAdd(LoopStart, SimdLaneNumValSext);
 
-     //   Builder.CreateStore(InitialValue, LoopIndex);
-     //   return;
-     // }
+       Builder.CreateStore(InitialValue, LoopIndex);
+       return;
+     }
 
      // sequential behavior in case of reduction clause detected
      if (SimdHasReduction) {
