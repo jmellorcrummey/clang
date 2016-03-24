@@ -64,6 +64,9 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   QualType DataSharingWorkerWarpSlotQtyIncomplete;
   QualType getDataSharingWorkerWarpSlotQty(bool UseFixedDataSize = false);
 
+  // \brief Get the type of the master or worker slot.
+  QualType getDataSharingSlotQty(bool IsMaster, bool UseFixedDataSize = false);
+
   // \brief Type of the data sharing root slot.
   QualType DataSharingRootSlotQty;
   QualType getDataSharingRootSlotQty();
@@ -88,6 +91,15 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
 
   // \brief Initialize the data sharing slots and pointers.
   void initializeSharedData(CodeGenFunction &CGF, bool IsMaster);
+
+  // \brief Map between a capture or function declaration and the captures that were promoted to a shared address space.
+  typedef SmallVector<llvm::Value*,8> LevelSharedCapturesTy;
+  typedef std::pair<unsigned, const Decl*> LevelDeclPairTy;
+  typedef llvm::DenseMap<LevelDeclPairTy, LevelSharedCapturesTy> LevelsSharedCapturesMapTy;
+  LevelsSharedCapturesMapTy LevelsSharedCapturesMap;
+
+  // \brief Create captures in the data sharing address space if they were not created before.
+  void CreateDataSharingCaptures(CodeGenFunction &CGF, bool IsMaster);
 
   //
   // NVPTX calls.
