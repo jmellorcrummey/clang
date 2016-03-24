@@ -5426,8 +5426,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
      PopParallelRegion();
      // check if we are in a nested parallel region
      if (CGF.distributedParallel){
-       Bld.CreateBr(CGF.SyncAfterParallelForName);
-       Bld.SetInsertPoint(CGF.SyncAfterParallelForName);
+       Bld.CreateBr(CGF.SyncAfterParallelForBlock);
+       Bld.SetInsertPoint(CGF.SyncAfterParallelForBlock);
        // Do nothing for now but maybe a syncthreads will be needed
        //Bld.CreateCall(Get_syncthreads(), {});
      } else if (!NestedParallelStack.back()) { // not nested parallel
