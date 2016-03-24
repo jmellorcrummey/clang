@@ -3787,10 +3787,14 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // So now Each Thread will know its lane ID (for the SIMD following)
     printf(" Compute SimdLaneNum\n");
     SimdLaneNum = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "SimdLaneNum");
-    Bld.CreateStore(Bld.CreateAnd(Bld.CreateCall(Get_thread_num(), {}),
-                                  Bld.CreateSub(Bld.CreateLoad(SimdNumLanes),
-                                                Bld.getInt32(1))),
-                    SimdLaneNum);
+    if (CGF.useBlocking){
+      Bld.CreateStore(Bld.CreateCall(Get_thread_num(), {}), SimdLaneNum);
+    } else {
+      Bld.CreateStore(Bld.CreateAnd(Bld.CreateCall(Get_thread_num(), {}),
+                                    Bld.CreateSub(Bld.CreateLoad(SimdNumLanes),
+                                                  Bld.getInt32(1))),
+                      SimdLaneNum);
+    }
 
     // Calculate the OMP thread ID of this CUDA thread
     // The OMP thread number is a zero based numbering of threads which will be active in S1.
