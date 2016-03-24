@@ -4755,7 +4755,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       // We want to sync at the end of the SIMD.
       Bld.CreateBr(CGF.SyncAfterSimdBlock);
       Bld.SetInsertPoint(CGF.SyncAfterSimdBlock);
-      if (CGF.useSharedMemory && !CGF.useBlocking){
+      // if (CGF.useSharedMemory && !CGF.useBlocking){
+      //    Bld.CreateCall(Get_syncthreads(), {});
+      // }
+      if (CGF.useSharedMemory){
          Bld.CreateCall(Get_syncthreads(), {});
       }
       // llvm::Value *isNotLaneMaster = Bld.CreateICmpNE(Bld.CreateLoad(SimdLocalLaneId), Bld.getInt32(0));
