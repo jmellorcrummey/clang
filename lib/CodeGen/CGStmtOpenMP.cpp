@@ -1452,9 +1452,10 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
     auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
     llvm::SmallVector<llvm::Value *, 16> CapturedVars;
     CGM.getOpenMPRuntime().emitCapturedVars(*this, S, CapturedVars);
+    auto *LaneId = CS->getCapturedDecl()->param_begin();
+    auto *NumLanes = std::next(LaneId);
     auto OutlinedFn = CGM.getOpenMPRuntime().emitSimdOutlinedFunction(
-        S, *CS->getCapturedDecl()->param_begin(),
-        *CS->getCapturedDecl()->param_begin() + 1, OMPD_simd, CodeGen);
+        S, *LaneId, *NumLanes, OMPD_simd, CodeGen);
     CGM.getOpenMPRuntime().emitSimdCall(*this, S.getLocStart(), OutlinedFn,
                                         CapturedVars);
   } else {

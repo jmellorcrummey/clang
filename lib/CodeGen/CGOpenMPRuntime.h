@@ -94,11 +94,11 @@ protected:
 public:
   /// \brief Gets lane id value for the current simd lane.
   ///
-  llvm::Value *getLaneID(CodeGenFunction &CGF, SourceLocation Loc);
+  virtual llvm::Value *getLaneID(CodeGenFunction &CGF, SourceLocation Loc);
 
   /// \brief Gets number of lanes value for the current simd region.
   ///
-  llvm::Value *getNumLanes(CodeGenFunction &CGF, SourceLocation Loc);
+  virtual llvm::Value *getNumLanes(CodeGenFunction &CGF, SourceLocation Loc);
 
 private:
   /// \brief Default const ident_t object used for initialization of all other
