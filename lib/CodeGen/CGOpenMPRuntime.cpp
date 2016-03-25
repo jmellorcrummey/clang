@@ -4330,7 +4330,15 @@ emitNumTeamsClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
 
   // FIXME: Accommodate other combined directives with teams when they become
   // available.
-  if (auto *TeamsDir = dyn_cast<OMPTeamsDirective>(CS.getCapturedStmt())) {
+  auto *NextBlock = dyn_cast<CompoundStmt>(CS.getCapturedStmt());
+  auto *LastBlock = NextBlock;
+   // search the next statement that is not a curly bracket
+   while (NextBlock) {
+     LastBlock = NextBlock;
+     NextBlock = dyn_cast<CompoundStmt>(NextBlock->body_front());
+   }
+
+   if (auto *TeamsDir = dyn_cast<OMPTeamsDirective>(LastBlock->body_front())) {
     if (auto *NTE = TeamsDir->getSingleClause<OMPNumTeamsClause>()) {
       CGOpenMPInnerExprInfo CGInfo(CGF, CS);
       CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
