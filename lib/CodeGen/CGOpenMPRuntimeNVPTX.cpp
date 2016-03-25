@@ -826,7 +826,7 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
   // ... and send to worker loop, awaiting parallel invocation.
   CGF.EmitBlock(WorkerBB);
   initializeParallelismLevel(CGF);
-  initializeSharedData(CGF, /*IsMaster=*/false);
+  //initializeSharedData(CGF, /*IsMaster=*/false);
   llvm::SmallVector<llvm::Value *, 16> WorkerVars;
   for (auto &I : CGF.CurFn->args()) {
     WorkerVars.push_back(&I);
@@ -837,7 +837,7 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
 
   // Only master thread executes subsequent serial code.
   CGF.EmitBlock(MasterBB);
-  initializeSharedData(CGF, /*IsMaster=*/true);
+  //initializeSharedData(CGF, /*IsMaster=*/true);
 
   // First action in sequential region:
   // Initialize the state of the OpenMP runtime library on the GPU.
