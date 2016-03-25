@@ -4300,7 +4300,7 @@ void CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(
       DeviceID, FileID, ParentName, Line, OutlinedFn, OutlinedFnID);
 }
 
-/// \brief look recursively inside a Body stmt for a LF statement discarding any
+/// \brief look inside a Body stmt for a LF statement discarding any
 /// intervening SK statements
 template<typename LF, typename SK>
 const static LF *
