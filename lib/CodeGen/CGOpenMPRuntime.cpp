@@ -4419,11 +4419,16 @@ public:
     /// should be mapped as well.
     OMP_MAP_IS_PTR = 0x10,
     /// \brief This flags signals that an argument is the first one relating to
-    /// a map clause expression. For some cases a single map results in multiple
-    /// arguments passed to the runtime library.
-    OMP_MAP_FIRST_MAP = 0x20,
+    /// a map/private clause expression. For some cases a single
+    /// map/privatization results in multiple arguments passed to the runtime
+    /// library.
+    OMP_MAP_FIRST_REF = 0x20,
+    /// \brief This flag signals that the reference being passed is a pointer to
+    /// private data.
+    OMP_MAP_PRIVATE_PTR = 0x80,
     /// \brief Pass the element to the device by value.
     OMP_MAP_PRIVATE_VAL = 0x100,
+
   };
 
   typedef SmallVector<llvm::Value *, 16> MapValuesArrayTy;
@@ -4587,7 +4592,7 @@ private:
     if (AddPtrFlag)
       Bits |= OMP_MAP_IS_PTR;
     if (AddIsFirstFlag)
-      Bits |= OMP_MAP_FIRST_MAP;
+      Bits |= OMP_MAP_FIRST_REF;
     if (Entry->MapTypeModifier == OMPC_MAP_always)
       Bits |= OMP_MAP_ALWAYS;
     return Bits;
@@ -5069,6 +5074,48 @@ static void emitOffloadingArraysArgument(
   }
 }
 
+/// \brief Return the adjusted map modifiers if the declaration a capture refers
+/// to appears in a private or first-private clause.
+static unsigned
+adjustMapModifiersForPrivateClauses(const OMPExecutableDirective &D,
+                                    const CapturedStmt::Capture *Cap,
+                                    unsigned CurrentModifiers) {
+  assert(Cap->capturesVariable() && "Expected capture by reference only!");
+
+  // The declaration that is being captured.
+  const VarDecl *VD = Cap->getCapturedVar();
+
+  // Check all the private clauses and see if this variable is referred to in
+  // there.
+  for (const auto *C : D.getClausesOfKind<OMPPrivateClause>()) {
+    for (const auto *D : C->varlists()) {
+      const auto *CurVD =
+          cast<VarDecl>(cast<DeclRefExpr>(D)->getDecl())->getCanonicalDecl();
+      // A private variable captured by reference will use only the 'private
+      // ptr' flag.
+      if (CurVD == VD)
+        return OpenMPMapClauseHandler::OMP_MAP_PRIVATE_PTR;
+    }
+  }
+
+  // Check all the first private clauses and see if this variable is referred to
+  // in there.
+  for (const auto *C : D.getClausesOfKind<OMPFirstprivateClause>()) {
+    for (const auto *D : C->varlists()) {
+      const auto *CurVD =
+          cast<VarDecl>(cast<DeclRefExpr>(D)->getDecl())->getCanonicalDecl();
+      // A first private variable captured by reference will use only the
+      // 'private ptr' and 'map to' flag.
+      if (CurVD == VD)
+        return OpenMPMapClauseHandler::OMP_MAP_PRIVATE_PTR |
+               OpenMPMapClauseHandler::OMP_MAP_TO;
+    }
+  }
+
+  // We didn't modify anything.
+  return CurrentModifiers;
+}
+
 void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
                                      const OMPExecutableDirective &D,
                                      llvm::Value *OutlinedFn,
@@ -5119,7 +5166,7 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
       CurSizes.push_back(CGF.getTypeSize(RI->getType()));
       // Copy to the device as an argument. No need to retrieve it.
       CurMapTypes.push_back(OpenMPMapClauseHandler::OMP_MAP_PRIVATE_VAL |
-                            OpenMPMapClauseHandler::OMP_MAP_FIRST_MAP);
+                            OpenMPMapClauseHandler::OMP_MAP_FIRST_REF);
     } else {
       // If we have any information in the map clause, we use it, otherwise we
       // just do a default mapping.
@@ -5187,10 +5234,16 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
                                     ? (OpenMPMapClauseHandler::OMP_MAP_TO |
                                        OpenMPMapClauseHandler::OMP_MAP_FROM)
                                     : OpenMPMapClauseHandler::OMP_MAP_TO);
+
+          // If we have a capture by reference we may need to add the private
+          // pointer flag if the base declaration shows in some first-private or
+          // private clauses.
+          CurMapTypes.back() =
+              adjustMapModifiersForPrivateClauses(D, CI, CurMapTypes.back());
         }
         // Every default map produces a single argument, so, it is always the
         // first one.
-        CurMapTypes.back() |= OpenMPMapClauseHandler::OMP_MAP_FIRST_MAP;
+        CurMapTypes.back() |= OpenMPMapClauseHandler::OMP_MAP_FIRST_REF;
       }
     }
     // We expect to have at least an element of information for this capture.
@@ -5476,17 +5529,21 @@ void CGOpenMPRuntime::emitNumTeamsClause(CodeGenFunction &CGF,
 
   auto *RTLoc = emitUpdateLocation(CGF, Loc);
 
-  llvm::Value *NumTeamsVal = (NumTeams) ? CGF.Builder.CreateIntCast(
-      CGF.EmitScalarExpr(NumTeams), CGF.CGM.Int32Ty, /* isSigned = */ true) :
-      CGF.Builder.getInt32(0);
+  llvm::Value *NumTeamsVal =
+      (NumTeams)
+          ? CGF.Builder.CreateIntCast(CGF.EmitScalarExpr(NumTeams),
+                                      CGF.CGM.Int32Ty, /* isSigned = */ true)
+          : CGF.Builder.getInt32(0);
 
-  llvm::Value *ThreadLimitVal = (ThreadLimit) ? CGF.Builder.CreateIntCast(
-      CGF.EmitScalarExpr(ThreadLimit), CGF.CGM.Int32Ty, /* isSigned = */ true) :
-      CGF.Builder.getInt32(0);
+  llvm::Value *ThreadLimitVal =
+      (ThreadLimit)
+          ? CGF.Builder.CreateIntCast(CGF.EmitScalarExpr(ThreadLimit),
+                                      CGF.CGM.Int32Ty, /* isSigned = */ true)
+          : CGF.Builder.getInt32(0);
 
   // Build call __kmpc_push_num_teamss(&loc, global_tid, num_teams, thread_limit)
-  llvm::Value *PushNumTeamsArgs[] = {
-      RTLoc, getThreadID(CGF, Loc), NumTeamsVal, ThreadLimitVal};
+  llvm::Value *PushNumTeamsArgs[] = {RTLoc, getThreadID(CGF, Loc), NumTeamsVal,
+                                     ThreadLimitVal};
   CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL__kmpc_push_num_teams),
                       PushNumTeamsArgs);
 }

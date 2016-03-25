@@ -14,8 +14,8 @@
 
 #include "CGOpenMPRuntimeNVPTX.h"
 #include "CGCleanup.h"
-#include "clang/AST/DeclOpenMP.h"
 #include "CodeGenFunction.h"
+#include "clang/AST/DeclOpenMP.h"
 #include "clang/AST/StmtOpenMP.h"
 
 using namespace clang;
@@ -50,15 +50,24 @@ enum OpenMPRTLFunctionNVPTX {
   OMPRTL_NVPTX__kmpc_kernel_end_convergent_parallel,
   /// \brief Call to int32_t __kmpc_warp_active_thread_mask();
   OMPRTL_NVPTX__kmpc_warp_active_thread_mask,
-//  /// \brief Call to void * malloc(size_t size);
-//  OMPRTL_NVPTX__malloc,
-//  /// \brief Call to void free(void *ptr);
-//  OMPRTL_NVPTX__free,
-  /// \brief Call to void __kmpc_initialize_data_sharing_environment(__kmpc_data_sharing_slot *RootS, __kmpc_data_sharing_slot **SharedS, void **SharedD, size_t InitialDataSize);
+  //  /// \brief Call to void * malloc(size_t size);
+  //  OMPRTL_NVPTX__malloc,
+  //  /// \brief Call to void free(void *ptr);
+  //  OMPRTL_NVPTX__free,
+  /// \brief Call to void
+  /// __kmpc_initialize_data_sharing_environment(__kmpc_data_sharing_slot
+  /// *RootS, __kmpc_data_sharing_slot **SharedS, void **SharedD, size_t
+  /// InitialDataSize);
   OMPRTL_NVPTX__kmpc_initialize_data_sharing_environment,
-  /// \brief Call to void* __kmpc_data_sharing_environment_begin(__kmpc_data_sharing_slot **SharedS, void **SharedD, __kmpc_data_sharing_slot **SavedSharedS, void **SavedSharedD, size_t SharingDataSize, size_t SharingDefaultDataSize, int32_t *ReuseData);
+  /// \brief Call to void*
+  /// __kmpc_data_sharing_environment_begin(__kmpc_data_sharing_slot **SharedS,
+  /// void **SharedD, __kmpc_data_sharing_slot **SavedSharedS, void
+  /// **SavedSharedD, size_t SharingDataSize, size_t SharingDefaultDataSize,
+  /// int32_t *ReuseData);
   OMPRTL_NVPTX__kmpc_data_sharing_environment_begin,
-  /// \brief Call to void __kmpc_data_sharing_environment_end( __kmpc_data_sharing_slot **SharedS, void **SharedD, __kmpc_data_sharing_slot **SavedSharedS, void **SavedSharedD);
+  /// \brief Call to void __kmpc_data_sharing_environment_end(
+  /// __kmpc_data_sharing_slot **SharedS, void **SharedD,
+  /// __kmpc_data_sharing_slot **SavedSharedS, void **SavedSharedD);
   OMPRTL_NVPTX__kmpc_data_sharing_environment_end,
 };
 
@@ -81,7 +90,8 @@ enum DATA_SHARING_SIZES {
   // The number of bits required to represent the maximum number of threads in a
   // warp.
   DS_Max_Worker_Warp_Size_Log2 = 5,
-  DS_Max_Worker_Warp_Size_Log2_Mask = (~0u >> (32-DS_Max_Worker_Warp_Size_Log2)),
+  DS_Max_Worker_Warp_Size_Log2_Mask =
+      (~0u >> (32 - DS_Max_Worker_Warp_Size_Log2)),
   // The slot size that should be reserved for a working warp.
   DS_Worker_Warp_Slot_Size = DS_Max_Worker_Warp_Size * DS_Slot_Size,
 };
@@ -166,8 +176,7 @@ static FieldDecl *addFieldToRecordDecl(ASTContext &C, DeclContext *DC,
 }
 
 // \brief Type of the data sharing master slot.
-QualType
-CGOpenMPRuntimeNVPTX::getDataSharingMasterSlotQty() {
+QualType CGOpenMPRuntimeNVPTX::getDataSharingMasterSlotQty() {
   //  struct MasterSlot {
   //    Slot *Next;
   //    void *DataEnd;
@@ -192,8 +201,7 @@ CGOpenMPRuntimeNVPTX::getDataSharingMasterSlotQty() {
 }
 
 // \brief Type of the data sharing worker warp slot.
-QualType
-CGOpenMPRuntimeNVPTX::getDataSharingWorkerWarpSlotQty() {
+QualType CGOpenMPRuntimeNVPTX::getDataSharingWorkerWarpSlotQty() {
   //  struct WorkerWarpSlot {
   //    Slot *Next;
   //    void *DataEnd;
@@ -219,7 +227,8 @@ CGOpenMPRuntimeNVPTX::getDataSharingWorkerWarpSlotQty() {
 }
 
 // \brief Get the type of the master or worker slot.
-QualType CGOpenMPRuntimeNVPTX::getDataSharingSlotQty(bool UseFixedDataSize, bool IsMaster) {
+QualType CGOpenMPRuntimeNVPTX::getDataSharingSlotQty(bool UseFixedDataSize,
+                                                     bool IsMaster) {
   if (UseFixedDataSize) {
     if (IsMaster)
       return getDataSharingMasterSlotQty();
@@ -248,8 +257,10 @@ QualType CGOpenMPRuntimeNVPTX::getDataSharingSlotQty(bool UseFixedDataSize, bool
   return DataSharingSlotQty;
 }
 
-llvm::Type* CGOpenMPRuntimeNVPTX::getDataSharingSlotTy(bool UseFixedDataSize, bool IsMaster){
-  return CGM.getTypes().ConvertTypeForMem(getDataSharingSlotQty(UseFixedDataSize, IsMaster));
+llvm::Type *CGOpenMPRuntimeNVPTX::getDataSharingSlotTy(bool UseFixedDataSize,
+                                                       bool IsMaster) {
+  return CGM.getTypes().ConvertTypeForMem(
+      getDataSharingSlotQty(UseFixedDataSize, IsMaster));
 }
 
 // \brief Type of the data sharing root slot.
@@ -263,14 +274,12 @@ QualType CGOpenMPRuntimeNVPTX::getDataSharingRootSlotQty() {
     ASTContext &C = CGM.getContext();
     auto *RD = C.buildImplicitRecord("__openmp_nvptx_data_sharing_ty");
     RD->startDefinition();
-    addFieldToRecordDecl(C, RD,
-                         getDataSharingMasterSlotQty());
+    addFieldToRecordDecl(C, RD, getDataSharingMasterSlotQty());
     llvm::APInt NumElems(C.getTypeSize(C.getUIntPtrType()),
                          DS_Max_Worker_Threads / DS_Max_Worker_Warp_Size);
-    addFieldToRecordDecl(
-        C, RD, C.getConstantArrayType(
-                   getDataSharingWorkerWarpSlotQty(),
-                   NumElems, ArrayType::Normal, /*IndexTypeQuals=*/0));
+    addFieldToRecordDecl(C, RD, C.getConstantArrayType(
+                                    getDataSharingWorkerWarpSlotQty(), NumElems,
+                                    ArrayType::Normal, /*IndexTypeQuals=*/0));
     RD->completeDefinition();
     DataSharingRootSlotQty = C.getRecordType(RD);
   }
@@ -279,7 +288,7 @@ QualType CGOpenMPRuntimeNVPTX::getDataSharingRootSlotQty() {
 
 // \brief Return address of the initial slot that is used to share data.
 LValue CGOpenMPRuntimeNVPTX::getDataSharingRootSlotLValue(CodeGenFunction &CGF,
-                                                         bool IsMaster) {
+                                                          bool IsMaster) {
   auto &M = CGM.getModule();
 
   const char *Name = "__openmp_nvptx_shared_data_slots";
@@ -300,16 +309,16 @@ LValue CGOpenMPRuntimeNVPTX::getDataSharingRootSlotLValue(CodeGenFunction &CGF,
     llvm::Value *Idx[] = {llvm::Constant::getNullValue(CGM.Int32Ty),
                           llvm::Constant::getNullValue(CGM.Int32Ty)};
     llvm::Value *AddrVal = CGF.Builder.CreateInBoundsGEP(Gbl, Idx);
-    return CGF.MakeNaturalAlignAddrLValue(
-        AddrVal, getDataSharingMasterSlotQty());
+    return CGF.MakeNaturalAlignAddrLValue(AddrVal,
+                                          getDataSharingMasterSlotQty());
   }
 
   auto *WarpID = getNVPTXWarpID(CGF);
   llvm::Value *Idx[] = {llvm::Constant::getNullValue(CGM.Int32Ty),
                         /*WS=*/CGF.Builder.getInt32(1), WarpID};
   llvm::Value *AddrVal = CGF.Builder.CreateInBoundsGEP(Gbl, Idx);
-  return CGF.MakeNaturalAlignAddrLValue(
-      AddrVal, getDataSharingWorkerWarpSlotQty());
+  return CGF.MakeNaturalAlignAddrLValue(AddrVal,
+                                        getDataSharingWorkerWarpSlotQty());
 }
 
 // \brief Return the address where the address of the current slot is stored.
@@ -431,7 +440,7 @@ void CGOpenMPRuntimeNVPTX::initializeSharedData(CodeGenFunction &CGF,
   // initial values. Also, we initialize the slots with the initial size.
 
   auto &Bld = CGF.Builder;
-  //auto &Ctx = CGF.getContext();
+  // auto &Ctx = CGF.getContext();
 
   // If this is not the OpenMP master thread, make sure that only the warp
   // master does the initialization.
@@ -451,39 +460,42 @@ void CGOpenMPRuntimeNVPTX::initializeSharedData(CodeGenFunction &CGF,
   auto StackPtrLV = getSharedDataStackPointerAddrLValue(CGF, IsMaster);
 
   auto *SlotPtrTy = getDataSharingSlotTy()->getPointerTo();
-  auto *CastedSlot =  Bld.CreateBitCast(SlotLV.getAddress(),SlotPtrTy).getPointer();
+  auto *CastedSlot =
+      Bld.CreateBitCast(SlotLV.getAddress(), SlotPtrTy).getPointer();
 
   llvm::Value *Args[] = {
-      CastedSlot,
-      SlotPtrLV.getPointer(),
-      StackPtrLV.getPointer(),
-      llvm::ConstantInt::get(CGM.SizeTy, IsMaster ? DS_Slot_Size : DS_Worker_Warp_Slot_Size) };
-  Bld.CreateCall(createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_initialize_data_sharing_environment), Args);
+      CastedSlot, SlotPtrLV.getPointer(), StackPtrLV.getPointer(),
+      llvm::ConstantInt::get(CGM.SizeTy, IsMaster ? DS_Slot_Size
+                                                  : DS_Worker_Warp_Slot_Size)};
+  Bld.CreateCall(createNVPTXRuntimeFunction(
+                     OMPRTL_NVPTX__kmpc_initialize_data_sharing_environment),
+                 Args);
 
-//  auto SlotPtrQTy =
-//      Ctx.getPointerType(getDataSharingSlotQty(IsMaster));
-//  auto *SlotPtrTy = CGF.getTypes().ConvertTypeForMem(SlotPtrQTy);
-//  auto SlotPtr = Bld.CreateBitCast(SlotLV.getAddress(), SlotPtrTy);
-//  CGF.EmitStoreOfScalar(SlotPtr.getPointer(), SlotPtrLV);
-//
-//  auto StackPtrLV = getSharedDataStackPointerAddrLValue(CGF, IsMaster);
-//  llvm::Value *Idx2[] = {Bld.getInt32(0), /*Data=*/Bld.getInt32(2),
-//                         Bld.getInt32(0)};
-//  auto *StackPtr = Bld.CreateInBoundsGEP(SlotLV.getPointer(), Idx2);
-//  CGF.EmitStoreOfScalar(StackPtr, StackPtrLV);
-//
-//  // Initialize the DataEnd ( DataEnd = &Data[0] + Size).
-//  auto *Base = Bld.CreatePtrToInt(StackPtr, CGF.IntPtrTy);
-//  auto *Size = llvm::ConstantInt::get(CGF.IntPtrTy, IsMaster ? DS_Slot_Size
-//          : DS_Worker_Warp_Slot_Size);
-//  auto *DataEndVal = Bld.CreateNUWAdd(Base, Size);
-//  DataEndVal = Bld.CreateIntToPtr(DataEndVal, CGF.VoidPtrTy);
-//
-//  llvm::Value *Idx[] = {llvm::Constant::getNullValue(CGM.Int32Ty),
-//                        /*DataEnd=*/Bld.getInt32(1)};
-//  auto *DataEndAddr = Bld.CreateGEP(SlotLV.getPointer(), Idx);
-//  auto DataEndLV = CGF.MakeNaturalAlignAddrLValue(DataEndAddr, Ctx.VoidPtrTy);
-//  CGF.EmitStoreOfScalar(DataEndVal,DataEndLV);
+  //  auto SlotPtrQTy =
+  //      Ctx.getPointerType(getDataSharingSlotQty(IsMaster));
+  //  auto *SlotPtrTy = CGF.getTypes().ConvertTypeForMem(SlotPtrQTy);
+  //  auto SlotPtr = Bld.CreateBitCast(SlotLV.getAddress(), SlotPtrTy);
+  //  CGF.EmitStoreOfScalar(SlotPtr.getPointer(), SlotPtrLV);
+  //
+  //  auto StackPtrLV = getSharedDataStackPointerAddrLValue(CGF, IsMaster);
+  //  llvm::Value *Idx2[] = {Bld.getInt32(0), /*Data=*/Bld.getInt32(2),
+  //                         Bld.getInt32(0)};
+  //  auto *StackPtr = Bld.CreateInBoundsGEP(SlotLV.getPointer(), Idx2);
+  //  CGF.EmitStoreOfScalar(StackPtr, StackPtrLV);
+  //
+  //  // Initialize the DataEnd ( DataEnd = &Data[0] + Size).
+  //  auto *Base = Bld.CreatePtrToInt(StackPtr, CGF.IntPtrTy);
+  //  auto *Size = llvm::ConstantInt::get(CGF.IntPtrTy, IsMaster ? DS_Slot_Size
+  //          : DS_Worker_Warp_Slot_Size);
+  //  auto *DataEndVal = Bld.CreateNUWAdd(Base, Size);
+  //  DataEndVal = Bld.CreateIntToPtr(DataEndVal, CGF.VoidPtrTy);
+  //
+  //  llvm::Value *Idx[] = {llvm::Constant::getNullValue(CGM.Int32Ty),
+  //                        /*DataEnd=*/Bld.getInt32(1)};
+  //  auto *DataEndAddr = Bld.CreateGEP(SlotLV.getPointer(), Idx);
+  //  auto DataEndLV = CGF.MakeNaturalAlignAddrLValue(DataEndAddr,
+  //  Ctx.VoidPtrTy);
+  //  CGF.EmitStoreOfScalar(DataEndVal,DataEndLV);
 
   CGF.EmitBlock(EndBB);
 }
@@ -560,7 +572,8 @@ CGOpenMPRuntimeNVPTX::getNVPTXWarpActiveThreadID(CodeGenFunction &CGF) {
   // The active thread Id can be computed as the number of bits in the active
   // mask to the right of the current thread:
   // popc( Mask << (32 - (threadID & 0x1f)) );
-  auto *WarpID = Bld.CreateAnd(getNVPTXThreadID(CGF), Bld.getInt32(DS_Max_Worker_Warp_Size_Log2_Mask));
+  auto *WarpID = Bld.CreateAnd(getNVPTXThreadID(CGF),
+                               Bld.getInt32(DS_Max_Worker_Warp_Size_Log2_Mask));
   auto *Mask = getNVPTXWarpActiveThreadsMask(CGF);
   auto *ShNum = Bld.CreateSub(Bld.getInt32(32), WarpID);
   auto *Sh = Bld.CreateShl(Mask, ShNum);
@@ -601,16 +614,22 @@ void CGOpenMPRuntimeNVPTX::syncCTAThreads(CodeGenFunction &CGF) const {
   getNVPTXCTABarrier(CGF);
 }
 
-//// \brief Emit code that allocates a memory chunk in global memory with size \a Size.
-//llvm::Value *CGOpenMPRuntimeNVPTX::emitMallocCall(CodeGenFunction &CGF, QualType DataTy, llvm::Value *Size) {
+//// \brief Emit code that allocates a memory chunk in global memory with size
+///\a Size.
+// llvm::Value *CGOpenMPRuntimeNVPTX::emitMallocCall(CodeGenFunction &CGF,
+// QualType DataTy, llvm::Value *Size) {
 //  CGBuilderTy &Bld = CGF.Builder;
-//  auto *Ptr = CGF.EmitRuntimeCall(createNVPTXRuntimeFunction(OMPRTL_NVPTX__malloc), Size, "malloc_ptr");
-//  auto *Ty = CGF.getTypes().ConvertTypeForMem(CGF.getContext().getPointerType(DataTy));
+//  auto *Ptr =
+//  CGF.EmitRuntimeCall(createNVPTXRuntimeFunction(OMPRTL_NVPTX__malloc), Size,
+//  "malloc_ptr");
+//  auto *Ty =
+//  CGF.getTypes().ConvertTypeForMem(CGF.getContext().getPointerType(DataTy));
 //  return Bld.CreateBitOrPointerCast(Ptr, Ty);
 //}
 //
 //// \brief Deallocates the memory chunk pointed by \a Ptr;
-//void CGOpenMPRuntimeNVPTX::emitFreeCall(CodeGenFunction &CGF, llvm::Value *Ptr){
+// void CGOpenMPRuntimeNVPTX::emitFreeCall(CodeGenFunction &CGF, llvm::Value
+// *Ptr){
 //  CGBuilderTy &Bld = CGF.Builder;
 //  Ptr = Bld.CreateBitOrPointerCast(Ptr, CGF.VoidPtrTy);
 //  CGF.EmitRuntimeCall(createNVPTXRuntimeFunction(OMPRTL_NVPTX__free), Ptr);
@@ -826,7 +845,7 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
   // ... and send to worker loop, awaiting parallel invocation.
   CGF.EmitBlock(WorkerBB);
   initializeParallelismLevel(CGF);
-  //initializeSharedData(CGF, /*IsMaster=*/false);
+  // initializeSharedData(CGF, /*IsMaster=*/false);
   llvm::SmallVector<llvm::Value *, 16> WorkerVars;
   for (auto &I : CGF.CurFn->args()) {
     WorkerVars.push_back(&I);
@@ -837,7 +856,7 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
 
   // Only master thread executes subsequent serial code.
   CGF.EmitBlock(MasterBB);
-  //initializeSharedData(CGF, /*IsMaster=*/true);
+  // initializeSharedData(CGF, /*IsMaster=*/true);
 
   // First action in sequential region:
   // Initialize the state of the OpenMP runtime library on the GPU.
@@ -959,38 +978,46 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_warp_active_thread_mask");
     break;
   }
-//  case OMPRTL_NVPTX__malloc: {
-//    /// Build void * malloc(size_t size);
-//    llvm::Type *TypeParams[] = {CGM.SizeTy};
-//    llvm::FunctionType *FnTy =
-//        llvm::FunctionType::get(CGM.VoidPtrTy, TypeParams, /*isVarArg*/ false);
-//    RTLFn = CGM.CreateRuntimeFunction(FnTy, "malloc");
-//    break;
-//  }
-//  case OMPRTL_NVPTX__free: {
-//    /// Build void free(void *ptr);
-//    llvm::Type *TypeParams[] = {CGM.VoidPtrTy};
-//    llvm::FunctionType *FnTy =
-//        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
-//    RTLFn = CGM.CreateRuntimeFunction(FnTy, "free");
-//    break;
-//  }
+  //  case OMPRTL_NVPTX__malloc: {
+  //    /// Build void * malloc(size_t size);
+  //    llvm::Type *TypeParams[] = {CGM.SizeTy};
+  //    llvm::FunctionType *FnTy =
+  //        llvm::FunctionType::get(CGM.VoidPtrTy, TypeParams, /*isVarArg*/
+  //        false);
+  //    RTLFn = CGM.CreateRuntimeFunction(FnTy, "malloc");
+  //    break;
+  //  }
+  //  case OMPRTL_NVPTX__free: {
+  //    /// Build void free(void *ptr);
+  //    llvm::Type *TypeParams[] = {CGM.VoidPtrTy};
+  //    llvm::FunctionType *FnTy =
+  //        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+  //    RTLFn = CGM.CreateRuntimeFunction(FnTy, "free");
+  //    break;
+  //  }
 
   case OMPRTL_NVPTX__kmpc_initialize_data_sharing_environment: {
-    /// Build void __kmpc_initialize_data_sharing_environment(__kmpc_data_sharing_slot *RootS, __kmpc_data_sharing_slot **SharedS, void **SharedD, size_t InitialDataSize);
+    /// Build void
+    /// __kmpc_initialize_data_sharing_environment(__kmpc_data_sharing_slot
+    /// *RootS, __kmpc_data_sharing_slot **SharedS, void **SharedD, size_t
+    /// InitialDataSize);
     auto *SlotTy = CGM.getTypes().ConvertTypeForMem(getDataSharingSlotQty());
     llvm::Type *TypeParams[] = {
         SlotTy->getPointerTo(),
         SlotTy->getPointerTo()->getPointerTo(ADDRESS_SPACE_SHARED),
-        CGM.VoidPtrTy->getPointerTo(ADDRESS_SPACE_SHARED),
-        CGM.SizeTy};
+        CGM.VoidPtrTy->getPointerTo(ADDRESS_SPACE_SHARED), CGM.SizeTy};
     llvm::FunctionType *FnTy =
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
-    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_initialize_data_sharing_environment");
+    RTLFn = CGM.CreateRuntimeFunction(
+        FnTy, "__kmpc_initialize_data_sharing_environment");
     break;
   }
   case OMPRTL_NVPTX__kmpc_data_sharing_environment_begin: {
-    /// Build void* __kmpc_data_sharing_environment_begin(__kmpc_data_sharing_slot **SharedS, void **SharedD, __kmpc_data_sharing_slot **SavedSharedS, void **SavedSharedD, size_t SharingDataSize, size_t SharingDefaultDataSize, int32_t *ReuseData);
+    /// Build void*
+    /// __kmpc_data_sharing_environment_begin(__kmpc_data_sharing_slot
+    /// **SharedS, void **SharedD, __kmpc_data_sharing_slot **SavedSharedS, void
+    /// **SavedSharedD, size_t SharingDataSize, size_t SharingDefaultDataSize,
+    /// int32_t *ReuseData);
 
     auto *SlotTy = CGM.getTypes().ConvertTypeForMem(getDataSharingSlotQty());
     llvm::Type *TypeParams[] = {
@@ -1000,25 +1027,27 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
         CGM.VoidPtrTy->getPointerTo(),
         CGM.SizeTy,
         CGM.SizeTy,
-        CGM.Int32Ty->getPointerTo()
-    };
+        CGM.Int32Ty->getPointerTo()};
     llvm::FunctionType *FnTy =
         llvm::FunctionType::get(CGM.VoidPtrTy, TypeParams, /*isVarArg*/ false);
-    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_data_sharing_environment_begin");
+    RTLFn = CGM.CreateRuntimeFunction(FnTy,
+                                      "__kmpc_data_sharing_environment_begin");
     break;
   }
   case OMPRTL_NVPTX__kmpc_data_sharing_environment_end: {
-    /// Build void __kmpc_data_sharing_environment_end( __kmpc_data_sharing_slot **SharedS, void **SharedD, __kmpc_data_sharing_slot **SavedSharedS, void **SavedSharedD);
+    /// Build void __kmpc_data_sharing_environment_end( __kmpc_data_sharing_slot
+    /// **SharedS, void **SharedD, __kmpc_data_sharing_slot **SavedSharedS, void
+    /// **SavedSharedD);
     auto *SlotTy = CGM.getTypes().ConvertTypeForMem(getDataSharingSlotQty());
     llvm::Type *TypeParams[] = {
         SlotTy->getPointerTo()->getPointerTo(ADDRESS_SPACE_SHARED),
         CGM.VoidPtrTy->getPointerTo(ADDRESS_SPACE_SHARED),
-        SlotTy->getPointerTo()->getPointerTo(),
-        CGM.VoidPtrTy->getPointerTo(),
+        SlotTy->getPointerTo()->getPointerTo(), CGM.VoidPtrTy->getPointerTo(),
     };
     llvm::FunctionType *FnTy =
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
-    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_data_sharing_environment_end");
+    RTLFn =
+        CGM.CreateRuntimeFunction(FnTy, "__kmpc_data_sharing_environment_end");
     break;
   }
   }
@@ -1288,9 +1317,11 @@ bool CGOpenMPRuntimeNVPTX::InL1Plus() {
 bool CGOpenMPRuntimeNVPTX::IndeterminateLevel() { return IsOrphaned; }
 
 // \brief Obtain the data sharing info for the current context.
-const CGOpenMPRuntimeNVPTX::DataSharingInfo &CGOpenMPRuntimeNVPTX::getDataSharingInfo(CodeGenFunction &CGF){
+const CGOpenMPRuntimeNVPTX::DataSharingInfo &
+CGOpenMPRuntimeNVPTX::getDataSharingInfo(CodeGenFunction &CGF) {
   auto *Context = CGF.CurCodeDecl;
-  assert(Context && "A parallel region is expected to be enclosed in a context.");
+  assert(Context &&
+         "A parallel region is expected to be enclosed in a context.");
 
   ASTContext &C = CGM.getContext();
 
@@ -1302,18 +1333,20 @@ const CGOpenMPRuntimeNVPTX::DataSharingInfo &CGOpenMPRuntimeNVPTX::getDataSharin
 
   auto &Info = DataSharingInfoMap[Context];
 
-  // Get the body of the region. The region context is either a function or a captured declaration.
+  // Get the body of the region. The region context is either a function or a
+  // captured declaration.
   const Stmt *Body;
   if (auto *D = dyn_cast<CapturedDecl>(Context))
     Body = D->getBody();
   else
     Body = cast<FunctionDecl>(D)->getBody();
 
-  // Find all the captures in all enclosed regions and obtain their captured statements.
-  SmallVector<const CapturedStmt*, 8> CapturedStmts;
-  SmallVector<const Stmt*, 64> WorkList;
+  // Find all the captures in all enclosed regions and obtain their captured
+  // statements.
+  SmallVector<const CapturedStmt *, 8> CapturedStmts;
+  SmallVector<const Stmt *, 64> WorkList;
   WorkList.push_back(Body);
-  while(!WorkList.empty()) {
+  while (!WorkList.empty()) {
     const Stmt *CurStmt = WorkList.pop_back_val();
     if (!CurStmt)
       continue;
@@ -1326,18 +1359,21 @@ const CGOpenMPRuntimeNVPTX::DataSharingInfo &CGOpenMPRuntimeNVPTX::getDataSharin
       }
 
     // Keep looking for other regions.
-    WorkList.append(CurStmt->child_begin(),CurStmt->child_end());
+    WorkList.append(CurStmt->child_begin(), CurStmt->child_end());
   }
 
   assert(!CapturedStmts.empty() && "Expecting at least one parallel region!");
 
-  // Scan the captured statements and generate a record to contain all the data to be shared. Make sure we do not share the same thing twice.
-  auto *SharedMasterRD = C.buildImplicitRecord("__openmp_nvptx_data_sharing_master_record");
-  auto *SharedWarpRD = C.buildImplicitRecord("__openmp_nvptx_data_sharing_warp_record");
+  // Scan the captured statements and generate a record to contain all the data
+  // to be shared. Make sure we do not share the same thing twice.
+  auto *SharedMasterRD =
+      C.buildImplicitRecord("__openmp_nvptx_data_sharing_master_record");
+  auto *SharedWarpRD =
+      C.buildImplicitRecord("__openmp_nvptx_data_sharing_warp_record");
   SharedMasterRD->startDefinition();
   SharedWarpRD->startDefinition();
 
-  llvm::SmallSet<const Decl*, 32> AlreadySharedDecls;
+  llvm::SmallSet<const Decl *, 32> AlreadySharedDecls;
   for (auto *CS : CapturedStmts) {
     const RecordDecl *RD = CS->getCapturedRecordDecl();
     auto CurField = RD->field_begin();
@@ -1360,19 +1396,23 @@ const CGOpenMPRuntimeNVPTX::DataSharingInfo &CGOpenMPRuntimeNVPTX::getDataSharin
         ElemTy = (*I)->getType();
         Info.CapturesValues.push_back(CGF.LoadCXXThis());
       } else if (CurCap->capturesVariableByCopy()) {
-        assert("Not expecting to capture variables by copy in NVPTX target data sharing!");
+        assert("Not expecting to capture variables by copy in NVPTX target "
+               "data sharing!");
         continue;
       } else {
         // Get the reference to the variable that is initializing the capture.
         const DeclRefExpr *DRE = cast<DeclRefExpr>(*I);
         const VarDecl *VD = cast<VarDecl>(DRE->getDecl());
-        assert(VD->hasLocalStorage() && "Expecting to capture only variables with local storage.");
+        assert(VD->hasLocalStorage() &&
+               "Expecting to capture only variables with local storage.");
         Info.CapturesValues.push_back(CGF.GetAddrOfLocalVar(VD).getPointer());
       }
 
       addFieldToRecordDecl(C, SharedMasterRD, ElemTy);
-      llvm::APInt NumElems(C.getTypeSize(C.getUIntPtrType()),DS_Max_Worker_Warp_Size);
-      auto QTy = C.getConstantArrayType(ElemTy, NumElems, ArrayType::Normal, /*IndexTypeQuals=*/0);
+      llvm::APInt NumElems(C.getTypeSize(C.getUIntPtrType()),
+                           DS_Max_Worker_Warp_Size);
+      auto QTy = C.getConstantArrayType(ElemTy, NumElems, ArrayType::Normal,
+                                        /*IndexTypeQuals=*/0);
       addFieldToRecordDecl(C, SharedWarpRD, QTy);
     }
   }
@@ -1383,72 +1423,102 @@ const CGOpenMPRuntimeNVPTX::DataSharingInfo &CGOpenMPRuntimeNVPTX::getDataSharin
   Info.WorkerWarpRecordType = C.getRecordType(SharedWarpRD);
 
   return Info;
-//  auto ShareRDTy = C.getRecordType(SharedRD);
-//
-//  // Now that we have a record type suitable to the data sharing, we need to check if we have room in the current slot of the stack. If not, we need to grow it. If this is not the master, only the warp master should grow the stack.
-//
-//  llvm::BasicBlock *EndBB = CGF.createBasicBlock("after_shared_stack_check");
-//  if (!IsMaster) {
-//    llvm::BasicBlock *WarpBB = CGF.createBasicBlock("warp_shared_stack_check");
-//    auto *IsWarpMaster = getNVPTXIsWarpActiveMaster(CGF);
-//    Bld.CreateCondBr(IsWarpMaster, WarpBB, EndBB);
-//    CGF.EmitBlock(WarpBB);
-//  }
-//
-//  // Save the current stack and slot pointer - this is requires to restore them after the region.
-//  auto SavedSharedStackAddr = CGF.CreateMemTemp(C.VoidPtrTy, "saved_shared_stack_pointer");
-//  auto SharedStackPointer = getSharedDataStackPointerLValue(CGF, IsMaster);
-//  CGF.EmitStoreOfScalar(Bld.CreateBitCast(SharedStackPointer.getAddress(), CGM.VoidPtrTy).getPointer(), SavedSharedStackAddr, /*Volatile=*/false, C.VoidPtrTy);
-//
-//  QualType SharedSlotPtrQTy = C.getPointerType(getDataSharingSlotQty(IsMaster));
-//  auto *SharedSlotPtrTy =  CGF.getTypes().ConvertTypeForMem(SharedSlotPtrQTy);
-//
-//  auto SavedSharedSlotAddr = CGF.CreateMemTemp(SharedSlotPtrQTy, "saved_shared_slot_pointer");
-//  auto SharedSlotPointer = getSharedDataSlotPointerLValue(CGF, IsMaster);
-//  CGF.EmitStoreOfScalar(Bld.CreateBitCast(SharedSlotPointer.getAddress(), SharedSlotPtrTy).getPointer(), SavedSharedSlotAddr, /*Volatile=*/false, SharedSlotPtrQTy);
-//
-//  // Clean up the 'Next' entry in the slot. If it is not NULL is that because some inner region had to grow the stack.
-//  llvm::Value *Idx[] = { Bld.getInt32(0), /*Next=*/Bld.getInt32(0) };
-//  auto *SlotNextAddr =  Bld.CreateInBoundsGEP(SharedSlotPointer.getPointer(), Idx);
-//  auto SlotNextAddrLV = CGF.MakeNaturalAlignAddrLValue(SlotNextAddr, C.VoidPtrTy);
-//  auto *SlotNext = CGF.EmitLoadOfScalar(SlotNextAddrLV, SourceLocation());
-//  auto *RequiresCleanUp = Bld.CreateIsNotNull(SlotNext,"needs_stack_clean_up");
-//
-//  llvm::BasicBlock *CleanUpBB = CGF.createBasicBlock("stack_clean_up");
-//  llvm::BasicBlock *AfterCleanUpBB = CGF.createBasicBlock("after_stack_clean_up");
-//  Bld.CreateCondBr(RequiresCleanUp, CleanUpBB, AfterCleanUpBB);
-//  CGF.EmitBlock(CleanUpBB);
-//  emitFreeCall(CGF, SlotNext);
-//  CGF.EmitBlock(AfterCleanUpBB);
-//
-//  // Get the end address of the slot.
-//  llvm::Value *Idx[] = { Bld.getInt32(0), /*DataEnd=*/ Bld.getInt32(1) };
-//  auto *SlotEndAddr =  Bld.CreateInBoundsGEP(SharedSlotPointer.getPointer(), Idx);
-//  auto SlotEndAddrLV = CGF.MakeNaturalAlignAddrLValue(SlotEndAddr, C.VoidPtrTy);
-//  auto *SlotEnd = CGF.EmitLoadOfScalar(SlotEndAddrLV, SourceLocation());
-//  SlotEnd = Bld.CreatePtrToInt(SlotEnd, CGF.IntPtrTy);
-//
-//  // Add the size of the record to the current stack pointer and check if it can fit in the stack.
-//  auto *SlotEndRequired = Bld.CreatePtrToInt(SharedStackPointer.getPointer(), CGF.IntPtrTy);
-//
-//  auto RecordSizeInBytes = C.getTypeSizeInChars(ShareRDTy).getQuantity();
-//  SlotEndRequired = Bld.CreateNUWAdd(SlotEndRequired, llvm::ConstantInt::get(CGF.IntPtrTy, RecordSizeInBytes));
-//  auto *NeedsToGrow = Bld.CreateICmpUGE(SlotEndRequired, SlotEnd, "needs_stack_grow");
-//
-//  auto *GrowBB = CGF.createBasicBlock("grow_shared_memory_stack");
-//  auto *AfterGrowBB = CGF.createBasicBlock("after_grow_shared_memory_stack");
-//  Bld.CreateCondBr(NeedsToGrow, GrowBB, AfterGrowBB);
-//  CGF.EmitBlock(GrowBB);
-//
-//  // Growing the stack consists of the allocation of a new slot whose size is the maximum between the default and what is required in this capture environment.
-//  auto NewSlotRequiredSize =  RecordSizeInBytes + /*Next*/C.getTypeSizeInChars(C.VoidPtrTy).getQuantity() + /*DataEnd*/;
-//
-//  CGF.EmitBlock(AfterGrowBB);
-//
-//  CGF.EmitBlock(EndBB);
+  //  auto ShareRDTy = C.getRecordType(SharedRD);
+  //
+  //  // Now that we have a record type suitable to the data sharing, we need to
+  //  check if we have room in the current slot of the stack. If not, we need to
+  //  grow it. If this is not the master, only the warp master should grow the
+  //  stack.
+  //
+  //  llvm::BasicBlock *EndBB =
+  //  CGF.createBasicBlock("after_shared_stack_check");
+  //  if (!IsMaster) {
+  //    llvm::BasicBlock *WarpBB =
+  //    CGF.createBasicBlock("warp_shared_stack_check");
+  //    auto *IsWarpMaster = getNVPTXIsWarpActiveMaster(CGF);
+  //    Bld.CreateCondBr(IsWarpMaster, WarpBB, EndBB);
+  //    CGF.EmitBlock(WarpBB);
+  //  }
+  //
+  //  // Save the current stack and slot pointer - this is requires to restore
+  //  them after the region.
+  //  auto SavedSharedStackAddr = CGF.CreateMemTemp(C.VoidPtrTy,
+  //  "saved_shared_stack_pointer");
+  //  auto SharedStackPointer = getSharedDataStackPointerLValue(CGF, IsMaster);
+  //  CGF.EmitStoreOfScalar(Bld.CreateBitCast(SharedStackPointer.getAddress(),
+  //  CGM.VoidPtrTy).getPointer(), SavedSharedStackAddr, /*Volatile=*/false,
+  //  C.VoidPtrTy);
+  //
+  //  QualType SharedSlotPtrQTy =
+  //  C.getPointerType(getDataSharingSlotQty(IsMaster));
+  //  auto *SharedSlotPtrTy =
+  //  CGF.getTypes().ConvertTypeForMem(SharedSlotPtrQTy);
+  //
+  //  auto SavedSharedSlotAddr = CGF.CreateMemTemp(SharedSlotPtrQTy,
+  //  "saved_shared_slot_pointer");
+  //  auto SharedSlotPointer = getSharedDataSlotPointerLValue(CGF, IsMaster);
+  //  CGF.EmitStoreOfScalar(Bld.CreateBitCast(SharedSlotPointer.getAddress(),
+  //  SharedSlotPtrTy).getPointer(), SavedSharedSlotAddr, /*Volatile=*/false,
+  //  SharedSlotPtrQTy);
+  //
+  //  // Clean up the 'Next' entry in the slot. If it is not NULL is that
+  //  because some inner region had to grow the stack.
+  //  llvm::Value *Idx[] = { Bld.getInt32(0), /*Next=*/Bld.getInt32(0) };
+  //  auto *SlotNextAddr =
+  //  Bld.CreateInBoundsGEP(SharedSlotPointer.getPointer(), Idx);
+  //  auto SlotNextAddrLV = CGF.MakeNaturalAlignAddrLValue(SlotNextAddr,
+  //  C.VoidPtrTy);
+  //  auto *SlotNext = CGF.EmitLoadOfScalar(SlotNextAddrLV, SourceLocation());
+  //  auto *RequiresCleanUp =
+  //  Bld.CreateIsNotNull(SlotNext,"needs_stack_clean_up");
+  //
+  //  llvm::BasicBlock *CleanUpBB = CGF.createBasicBlock("stack_clean_up");
+  //  llvm::BasicBlock *AfterCleanUpBB =
+  //  CGF.createBasicBlock("after_stack_clean_up");
+  //  Bld.CreateCondBr(RequiresCleanUp, CleanUpBB, AfterCleanUpBB);
+  //  CGF.EmitBlock(CleanUpBB);
+  //  emitFreeCall(CGF, SlotNext);
+  //  CGF.EmitBlock(AfterCleanUpBB);
+  //
+  //  // Get the end address of the slot.
+  //  llvm::Value *Idx[] = { Bld.getInt32(0), /*DataEnd=*/ Bld.getInt32(1) };
+  //  auto *SlotEndAddr =  Bld.CreateInBoundsGEP(SharedSlotPointer.getPointer(),
+  //  Idx);
+  //  auto SlotEndAddrLV = CGF.MakeNaturalAlignAddrLValue(SlotEndAddr,
+  //  C.VoidPtrTy);
+  //  auto *SlotEnd = CGF.EmitLoadOfScalar(SlotEndAddrLV, SourceLocation());
+  //  SlotEnd = Bld.CreatePtrToInt(SlotEnd, CGF.IntPtrTy);
+  //
+  //  // Add the size of the record to the current stack pointer and check if it
+  //  can fit in the stack.
+  //  auto *SlotEndRequired =
+  //  Bld.CreatePtrToInt(SharedStackPointer.getPointer(), CGF.IntPtrTy);
+  //
+  //  auto RecordSizeInBytes = C.getTypeSizeInChars(ShareRDTy).getQuantity();
+  //  SlotEndRequired = Bld.CreateNUWAdd(SlotEndRequired,
+  //  llvm::ConstantInt::get(CGF.IntPtrTy, RecordSizeInBytes));
+  //  auto *NeedsToGrow = Bld.CreateICmpUGE(SlotEndRequired, SlotEnd,
+  //  "needs_stack_grow");
+  //
+  //  auto *GrowBB = CGF.createBasicBlock("grow_shared_memory_stack");
+  //  auto *AfterGrowBB =
+  //  CGF.createBasicBlock("after_grow_shared_memory_stack");
+  //  Bld.CreateCondBr(NeedsToGrow, GrowBB, AfterGrowBB);
+  //  CGF.EmitBlock(GrowBB);
+  //
+  //  // Growing the stack consists of the allocation of a new slot whose size
+  //  is the maximum between the default and what is required in this capture
+  //  environment.
+  //  auto NewSlotRequiredSize =  RecordSizeInBytes +
+  //  /*Next*/C.getTypeSizeInChars(C.VoidPtrTy).getQuantity() + /*DataEnd*/;
+  //
+  //  CGF.EmitBlock(AfterGrowBB);
+  //
+  //  CGF.EmitBlock(EndBB);
 }
 
-const CGOpenMPRuntimeNVPTX::DataSharingInfo &CGOpenMPRuntimeNVPTX::getExistingDataSharingInfo(const Decl *Context){
+const CGOpenMPRuntimeNVPTX::DataSharingInfo &
+CGOpenMPRuntimeNVPTX::getExistingDataSharingInfo(const Decl *Context) {
   auto It = DataSharingInfoMap.find(Context);
   assert(It != DataSharingInfoMap.end() && "Data sharing info does not exist.");
   return It->second;
@@ -1576,7 +1646,6 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
   // Emit code that does the changes in the beginning of the function.
   //
   //
-
 
   auto *RTLoc = emitUpdateLocation(CGF, Loc);
   auto &&L0ParallelGen = [this, Fn, &CapturedVars](CodeGenFunction &CGF) {
@@ -1770,10 +1839,10 @@ void CGOpenMPRuntimeNVPTX::emitNumTeamsClause(CodeGenFunction &CGF,
                                               SourceLocation Loc) {}
 
 void CGOpenMPRuntimeNVPTX::emitTeamsCall(CodeGenFunction &CGF,
-                                    const OMPExecutableDirective &D,
-                                    SourceLocation Loc,
-                                    llvm::Value *OutlinedFn,
-                                    ArrayRef<llvm::Value *> CapturedVars) {
+                                         const OMPExecutableDirective &D,
+                                         SourceLocation Loc,
+                                         llvm::Value *OutlinedFn,
+                                         ArrayRef<llvm::Value *> CapturedVars) {
 
   // just emit the statements in the teams region inlined
   auto &&CodeGen = [&D](CodeGenFunction &CGF) {

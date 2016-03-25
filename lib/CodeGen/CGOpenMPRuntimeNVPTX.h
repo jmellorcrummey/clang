@@ -64,8 +64,10 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
 
   // \brief Get the type of the master or worker slot incomplete.
   QualType DataSharingSlotQty;
-  QualType getDataSharingSlotQty(bool UseFixedDataSize = false, bool IsMaster = false);
-  llvm::Type* getDataSharingSlotTy(bool UseFixedDataSize = false, bool IsMaster = false);
+  QualType getDataSharingSlotQty(bool UseFixedDataSize = false,
+                                 bool IsMaster = false);
+  llvm::Type *getDataSharingSlotTy(bool UseFixedDataSize = false,
+                                   bool IsMaster = false);
 
   // \brief Type of the data sharing root slot.
   QualType DataSharingRootSlotQty;
@@ -95,7 +97,7 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // \brief Group the captures information for a given context.
   struct DataSharingInfo {
     // The local values of the captures.
-    SmallVector<llvm::Value*,8> CapturesValues;
+    SmallVector<llvm::Value *, 8> CapturesValues;
     // The record type of the sharing region if shared by the master.
     QualType MasterRecordType;
     // The record type of the sharing region if shared by the worker warps.
@@ -110,16 +112,19 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   const DataSharingInfo &getDataSharingInfo(CodeGenFunction &CGF);
   const DataSharingInfo &getExistingDataSharingInfo(const Decl *Context);
 
-  // \brief Map between a context and the local addresses that save the slot and stack pointers.
-  struct DataSharingSlotAndStackSaveAddresses{
+  // \brief Map between a context and the local addresses that save the slot and
+  // stack pointers.
+  struct DataSharingSlotAndStackSaveAddresses {
     Address SlotSave;
     Address StackSave;
   };
-  typedef llvm::DenseMap<const Decl *, DataSharingSlotAndStackSaveAddresses> DataSharingSlotAndStackSaveMapTy;
+  typedef llvm::DenseMap<const Decl *, DataSharingSlotAndStackSaveAddresses>
+      DataSharingSlotAndStackSaveMapTy;
   DataSharingSlotAndStackSaveMapTy DataSharingSlotAndStackSaveMap;
 
-  // \brief Set that keeps the pairs of values that need to be replaced when the module is released.
-  struct DataSharingReplaceValue{
+  // \brief Set that keeps the pairs of values that need to be replaced when the
+  // module is released.
+  struct DataSharingReplaceValue {
     llvm::Value *From;
     llvm::Value *To;
   };
@@ -169,11 +174,13 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // \brief Synchronize all GPU threads in a block.
   void syncCTAThreads(CodeGenFunction &CGF) const;
 
-//  // \brief Emit code that allocates a memory chunk in global memory with size \a Size.
-//  llvm::Value *emitMallocCall(CodeGenFunction &CGF, QualType DataTy, llvm::Value *Size);
-//
-//  // \brief Deallocates the memory chunk pointed by \a Ptr;
-//  void emitFreeCall(CodeGenFunction &CGF, llvm::Value *Ptr);
+  //  // \brief Emit code that allocates a memory chunk in global memory with
+  //  size \a Size.
+  //  llvm::Value *emitMallocCall(CodeGenFunction &CGF, QualType DataTy,
+  //  llvm::Value *Size);
+  //
+  //  // \brief Deallocates the memory chunk pointed by \a Ptr;
+  //  void emitFreeCall(CodeGenFunction &CGF, llvm::Value *Ptr);
 
   //
   // OMP calls.
@@ -350,7 +357,7 @@ public:
   /// concurrent execution of certain directive and clause combinations.
   bool requiresBarrier(const OMPLoopDirective &S) const override;
 
- /// \brief This function ought to emit, in the general case, a call to
+  /// \brief This function ought to emit, in the general case, a call to
   // the openmp runtime kmpc_push_num_teams. In NVPTX backend it is not needed
   // as these numbers are obtained through the PTX grid and block configuration.
   /// \param NumTeams An integer expression of teams.
@@ -367,10 +374,11 @@ public:
   /// \param InnermostKind Kind of innermost directive (for simple directives it
   /// is a directive itself, for combined - its innermost directive).
   /// \param CodeGen Code generation sequence for the \a D directive.
-  llvm::Value *emitParallelOrTeamsOutlinedFunction(
-      const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
-      OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen)
-        override;
+  llvm::Value *
+  emitParallelOrTeamsOutlinedFunction(const OMPExecutableDirective &D,
+                                      const VarDecl *ThreadIDVar,
+                                      OpenMPDirectiveKind InnermostKind,
+                                      const RegionCodeGenTy &CodeGen) override;
 
   /// \brief Emits code for teams call of the \a OutlinedFn with
   /// variables captured in a record which address is stored in \a
