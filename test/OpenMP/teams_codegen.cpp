@@ -38,7 +38,7 @@ int teams_argument_global_local(int a){
       ++comp;
     }
   }}}
-  
+
   // CK1-DAG: call i32 @__tgt_target_teams(i32 -1, i8* @{{[^,]+}}, i32 2, i8** %{{[^,]+}}, i8** %{{[^,]+}}, i{{64|32}}* {{.+}}@{{[^,]+}}, i32 0, i32 0), i32* {{.+}}@{{[^,]+}}, i32 0, i32 0), i32 [[NT:%[^,]+]], i32 0)
   // CK1-DAG: [[NT]] = load i32, i32* [[NTA:%[^,]+]],
 

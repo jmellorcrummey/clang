@@ -4306,9 +4306,9 @@ template<typename LF, typename SK>
 const static LF *
 hasEnclosingOpenMPDirective(const Stmt *Body) {
   const SK *S = nullptr;
-  // keep iterating while we find SK statements until: nullptr is found or any
-  // statement that is not an LF
-  while ((S = dyn_cast_or_null<SK>(Body)))
+  // keep iterating until we find an LF or not an SK or a nullptr
+  while ((S = dyn_cast_or_null<SK>(Body)) &&
+         (!dyn_cast_or_null<LF>(Body)))
       Body = S->body_front();
 
   return (Body) ? dyn_cast_or_null<LF>(Body) :
