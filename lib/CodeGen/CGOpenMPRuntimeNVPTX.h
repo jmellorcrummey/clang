@@ -54,25 +54,25 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
 
   // \brief Type of the data sharing master slot. By default the size is zero
   // meaning that the data size is to be determined.
-  QualType DataSharingMasterSlotQtyFixedSize;
-  QualType DataSharingMasterSlotQtyIncomplete;
-  QualType getDataSharingMasterSlotQty(bool UseFixedDataSize = false);
+  QualType DataSharingMasterSlotQty;
+  QualType getDataSharingMasterSlotQty();
 
   // \brief Type of the data sharing worker warp slot. By default the size is
   // zero meaning that the data size is to be determined.
-  QualType DataSharingWorkerWarpSlotQtyFixedSize;
-  QualType DataSharingWorkerWarpSlotQtyIncomplete;
-  QualType getDataSharingWorkerWarpSlotQty(bool UseFixedDataSize = false);
+  QualType DataSharingWorkerWarpSlotQty;
+  QualType getDataSharingWorkerWarpSlotQty();
 
-  // \brief Get the type of the master or worker slot.
-  QualType getDataSharingSlotQty(bool IsMaster, bool UseFixedDataSize = false);
+  // \brief Get the type of the master or worker slot incomplete.
+  QualType DataSharingSlotQty;
+  QualType getDataSharingSlotQty(bool UseFixedDataSize = false, bool IsMaster = false);
+  llvm::Type* getDataSharingSlotTy(bool UseFixedDataSize = false, bool IsMaster = false);
 
   // \brief Type of the data sharing root slot.
   QualType DataSharingRootSlotQty;
   QualType getDataSharingRootSlotQty();
 
   // \brief Return address of the initial slot that is used to share data.
-  LValue getSharedDataRootSlotLValue(CodeGenFunction &CGF, bool IsMaster);
+  LValue getDataSharingRootSlotLValue(CodeGenFunction &CGF, bool IsMaster);
 
   // \brief Return the address where the address of the current slot is stored.
   LValue getSharedDataSlotPointerAddrLValue(CodeGenFunction &CGF,
@@ -92,14 +92,26 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // \brief Initialize the data sharing slots and pointers.
   void initializeSharedData(CodeGenFunction &CGF, bool IsMaster);
 
-  // \brief Map between a capture or function declaration and the captures that were promoted to a shared address space.
+  // \brief Map between a context and its data sharing information.
   typedef SmallVector<llvm::Value*,8> LevelSharedCapturesTy;
   typedef std::pair<unsigned, const Decl*> LevelDeclPairTy;
   typedef llvm::DenseMap<LevelDeclPairTy, LevelSharedCapturesTy> LevelsSharedCapturesMapTy;
   LevelsSharedCapturesMapTy LevelsSharedCapturesMap;
 
-  // \brief Create captures in the data sharing address space if they were not created before.
-  void CreateDataSharingCaptures(CodeGenFunction &CGF, bool IsMaster);
+  // \brief Group the captures information for a given context.
+  struct DataSharingInfo {
+    // The local values of the captures.
+    SmallVector<llvm::Value*,8> CapturesValues;
+    // The record type of the sharing region if shared by the master.
+    QualType MasterRecordType;
+    // The record type of the sharing region if shared by the worker warps.
+    QualType WorkerWarpRecordType;
+  };
+  typedef llvm::DenseMap<const Decl *, DataSharingInfo> DataSharingInfoMapTy;
+  DataSharingInfoMapTy DataSharingInfoMap;
+
+  // \brief Obtain the data sharing info for the current context.
+  const DataSharingInfo &getDataSharingInfo(const Decl *Context);
 
   //
   // NVPTX calls.
@@ -143,6 +155,12 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
 
   // \brief Synchronize all GPU threads in a block.
   void syncCTAThreads(CodeGenFunction &CGF) const;
+
+//  // \brief Emit code that allocates a memory chunk in global memory with size \a Size.
+//  llvm::Value *emitMallocCall(CodeGenFunction &CGF, QualType DataTy, llvm::Value *Size);
+//
+//  // \brief Deallocates the memory chunk pointed by \a Ptr;
+//  void emitFreeCall(CodeGenFunction &CGF, llvm::Value *Ptr);
 
   //
   // OMP calls.
