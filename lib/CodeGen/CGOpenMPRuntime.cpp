@@ -4300,15 +4300,18 @@ void CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(
       DeviceID, FileID, ParentName, Line, OutlinedFn, OutlinedFnID);
 }
 
+/// \brief look recursively inside a Body stmt for a LF statement discarding any
+/// intervening SK statements
+template<typename LF, typename SK>
+const static LF *
+hasEnclosingOpenMPDirective(const Stmt *Body) {
+  const SK *S = nullptr;
+  // keep iterating while we find SK statements until: nullptr is found or any
+  // statement that is not an LF
+  while ((S = dyn_cast_or_null<SK>(Body)))
+      Body = S->body_front();
 
-template<typename F>
-const static F *
-hasEnclosingTeams(const Stmt *TargetBody) {
-  const CompoundStmt *S = nullptr;
-  while ((S = dyn_cast_or_null<CompoundStmt>(TargetBody)))
-    TargetBody = S->body_front();
-
-  return (TargetBody) ? dyn_cast_or_null<F>(TargetBody) :
+  return (Body) ? dyn_cast_or_null<LF>(Body) :
       nullptr;
 }
 
@@ -4342,8 +4345,8 @@ emitNumTeamsClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
 
   // FIXME: Accommodate other combined directives with teams when they become
   // available.
-   if (auto *TeamsDir = hasEnclosingTeams<OMPTeamsDirective>(
-       CS.getCapturedStmt())) {
+   if (auto *TeamsDir = hasEnclosingOpenMPDirective<
+       OMPTeamsDirective,CompoundStmt>(CS.getCapturedStmt())) {
     if (auto *NTE = TeamsDir->getSingleClause<OMPNumTeamsClause>()) {
       CGOpenMPInnerExprInfo CGInfo(CGF, CS);
       CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
@@ -4391,8 +4394,8 @@ emitThreadLimitClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
 
   // FIXME: Accommodate other combined directives with teams when they become
   // available.
-  if (auto *TeamsDir = hasEnclosingTeams<OMPTeamsDirective>(
-      CS.getCapturedStmt())) {
+  if (auto *TeamsDir = hasEnclosingOpenMPDirective<
+      OMPTeamsDirective,CompoundStmt>(CS.getCapturedStmt())) {
     if (auto *TLE = TeamsDir->getSingleClause<OMPThreadLimitClause>()) {
       CGOpenMPInnerExprInfo CGInfo(CGF, CS);
       CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
