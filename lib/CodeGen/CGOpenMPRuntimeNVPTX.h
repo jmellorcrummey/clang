@@ -196,6 +196,18 @@ public:
                         ArrayRef<llvm::Value *> CapturedVars,
                         const Expr *IfCond) override;
 
+  /// \brief Emits code for simd call of the \a OutlinedFn with
+  /// variables captured in a record which address is stored in \a
+  /// CapturedStruct.
+  /// \param OutlinedFn Outlined function to be run in simd lanes. Type of
+  /// this function is void(*)(kmp_int32 *,  struct context_vars*).
+  /// \param CapturedVars A pointer to the record with the references to
+  /// variables used in \a OutlinedFn function.
+  ///
+  void emitSimdCall(CodeGenFunction &CGF, SourceLocation Loc,
+                    llvm::Value *OutlinedFn,
+                    ArrayRef<llvm::Value *> CapturedVars) override;
+
   /// \brief Emits outlined function for the specified OpenMP parallel directive
   /// \a D. This outlined function has type void(*)(kmp_int32 *ThreadID,
   /// kmp_int32 BoundID, struct context_vars*).

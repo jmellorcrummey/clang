@@ -39,6 +39,9 @@ public:
     /// \brief Region with outlined function for standalone 'parallel'
     /// directive.
     ParallelOutlinedRegion,
+    /// \brief Region with outlined function for standalone 'simd'
+    /// directive.
+    SimdOutlinedRegion,
     /// \brief Region with outlined function for standalone 'task' directive.
     TaskOutlinedRegion,
     /// \brief Region for constructs that do not require function outlining,
@@ -61,6 +64,14 @@ public:
       : CGCapturedStmtInfo(CR_OpenMP), RegionKind(RegionKind), CodeGen(CodeGen),
         Kind(Kind), HasCancel(HasCancel) {}
 
+  /// \brief Get a variable or parameter for storing the lane id
+  /// inside OpenMP construct.
+  virtual const VarDecl *getLaneIDVariable() const { return nullptr; }
+
+  /// \brief Get a variable or parameter for storing the number of lanes
+  /// inside OpenMP construct.
+  virtual const VarDecl *getNumLanesVariable() const { return nullptr; }
+
   /// \brief Get a variable or parameter for storing global thread id
   /// inside OpenMP construct.
   virtual const VarDecl *getThreadIDVariable() const = 0;
@@ -71,6 +82,14 @@ public:
   /// \brief Get an LValue for the current ThreadID variable.
   /// \return LValue for thread id variable. This LValue always has type int32*.
   virtual LValue getThreadIDVariableLValue(CodeGenFunction &CGF);
+
+  /// \brief Get an LValue for the current LaneID variable.
+  /// \return LValue for lane id variable. This LValue always has type int32*.
+  virtual LValue getLaneIDVariableLValue(CodeGenFunction &CGF);
+
+  /// \brief Get an LValue for the current NumLanes variable.
+  /// \return LValue for num lanes variable. This LValue always has type int32*.
+  virtual LValue getNumLanesVariableLValue(CodeGenFunction &CGF);
 
   CGOpenMPRegionKind getRegionKind() const { return RegionKind; }
 
@@ -118,6 +137,49 @@ private:
   /// \brief A variable or parameter storing global thread id for OpenMP
   /// constructs.
   const VarDecl *ThreadIDVar;
+};
+
+/// \brief API for captured statement code generation in OpenMP constructs.
+class CGOpenMPSimdOutlinedRegionInfo : public CGOpenMPRegionInfo {
+public:
+  CGOpenMPSimdOutlinedRegionInfo(const CapturedStmt &CS,
+                                 const VarDecl *LaneIDVar,
+                                 const VarDecl *NumLanesVar,
+                                 const RegionCodeGenTy &CodeGen,
+                                 OpenMPDirectiveKind Kind)
+      : CGOpenMPRegionInfo(CS, SimdOutlinedRegion, CodeGen, Kind, false),
+        LaneIDVar(LaneIDVar), NumLanesVar(NumLanesVar) {
+    assert(LaneIDVar != nullptr && "No LaneID in OpenMP region.");
+    assert(NumLanesVar != nullptr && "No # Lanes in OpenMP region.");
+  }
+
+  /// \brief Get a variable or parameter for storing the lane id
+  /// inside OpenMP construct.
+  const VarDecl *getLaneIDVariable() const override { return LaneIDVar; }
+
+  /// \brief Get a variable or parameter for storing the number of lanes
+  /// inside OpenMP construct.
+  const VarDecl *getNumLanesVariable() const override { return NumLanesVar; }
+
+  /// \brief This is unused for simd regions.
+  const VarDecl *getThreadIDVariable() const override { return nullptr; }
+
+  /// \brief Get the name of the capture helper.
+  StringRef getHelperName() const override { return ".omp_simd_outlined."; }
+
+  static bool classof(const CGCapturedStmtInfo *Info) {
+    return CGOpenMPRegionInfo::classof(Info) &&
+           cast<CGOpenMPRegionInfo>(Info)->getRegionKind() ==
+               SimdOutlinedRegion;
+  }
+
+private:
+  /// \brief A variable or parameter storing the lane id for OpenMP
+  /// constructs.
+  const VarDecl *LaneIDVar;
+  /// \brief A variable or parameter storing the number of lanes for OpenMP
+  /// constructs.
+  const VarDecl *NumLanesVar;
 };
 
 /// \brief API for captured statement code generation in OpenMP constructs.
@@ -572,6 +634,18 @@ LValue CGOpenMPRegionInfo::getThreadIDVariableLValue(CodeGenFunction &CGF) {
       getThreadIDVariable()->getType()->castAs<PointerType>());
 }
 
+LValue CGOpenMPRegionInfo::getLaneIDVariableLValue(CodeGenFunction &CGF) {
+  return CGF.EmitLoadOfPointerLValue(
+      CGF.GetAddrOfLocalVar(getLaneIDVariable()),
+      getLaneIDVariable()->getType()->castAs<PointerType>());
+}
+
+LValue CGOpenMPRegionInfo::getNumLanesVariableLValue(CodeGenFunction &CGF) {
+  return CGF.EmitLoadOfPointerLValue(
+      CGF.GetAddrOfLocalVar(getNumLanesVariable()),
+      getNumLanesVariable()->getType()->castAs<PointerType>());
+}
+
 void CGOpenMPRegionInfo::EmitBody(CodeGenFunction &CGF, const Stmt * /*S*/) {
   if (!CGF.HaveInsertPoint())
     return;
@@ -734,6 +808,18 @@ llvm::Value *CGOpenMPRuntime::emitParallelOrTeamsOutlinedFunction(
   return CGF.GenerateOpenMPCapturedStmtFunction(*CS);
 }
 
+llvm::Value *CGOpenMPRuntime::emitSimdOutlinedFunction(
+    const OMPExecutableDirective &D, const VarDecl *LaneIDVar,
+    const VarDecl *NumLanesVar, OpenMPDirectiveKind InnermostKind,
+    const RegionCodeGenTy &CodeGen) {
+  const CapturedStmt *CS = cast<CapturedStmt>(D.getAssociatedStmt());
+  CodeGenFunction CGF(CGM, true);
+  CGOpenMPSimdOutlinedRegionInfo CGInfo(*CS, LaneIDVar, NumLanesVar, CodeGen,
+                                        InnermostKind);
+  CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
+  return CGF.GenerateCapturedStmtFunction(*CS);
+}
+
 llvm::Value *CGOpenMPRuntime::emitTaskOutlinedFunction(
     const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
     OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen) {
@@ -835,6 +921,32 @@ llvm::Value *CGOpenMPRuntime::emitUpdateLocation(CodeGenFunction &CGF,
   // Our callers always pass this to a runtime function, so for
   // convenience, go ahead and return a naked pointer.
   return LocValue.getPointer();
+}
+
+llvm::Value *CGOpenMPRuntime::getLaneID(CodeGenFunction &CGF,
+                                        SourceLocation Loc) {
+  assert(CGF.CurFn && "No function in current CodeGenFunction.");
+  if (auto *OMPRegionInfo =
+          dyn_cast_or_null<CGOpenMPRegionInfo>(CGF.CapturedStmtInfo))
+    if (OMPRegionInfo->getLaneIDVariable()) {
+      auto LVal = OMPRegionInfo->getLaneIDVariableLValue(CGF);
+      return CGF.EmitLoadOfLValue(LVal, Loc).getScalarVal();
+    }
+
+  return nullptr;
+}
+
+llvm::Value *CGOpenMPRuntime::getNumLanes(CodeGenFunction &CGF,
+                                          SourceLocation Loc) {
+  assert(CGF.CurFn && "No function in current CodeGenFunction.");
+  if (auto *OMPRegionInfo =
+          dyn_cast_or_null<CGOpenMPRegionInfo>(CGF.CapturedStmtInfo))
+    if (OMPRegionInfo->getNumLanesVariable()) {
+      auto LVal = OMPRegionInfo->getNumLanesVariableLValue(CGF);
+      return CGF.EmitLoadOfLValue(LVal, Loc).getScalarVal();
+    }
+
+  return nullptr;
 }
 
 llvm::Value *CGOpenMPRuntime::getThreadID(CodeGenFunction &CGF,
@@ -1737,6 +1849,10 @@ void CGOpenMPRuntime::emitParallelCall(CodeGenFunction &CGF, SourceLocation Loc,
     ThenGen(CGF);
   }
 }
+
+void CGOpenMPRuntime::emitSimdCall(CodeGenFunction &CGF, SourceLocation Loc,
+                                   llvm::Value *OutlinedFn,
+                                   ArrayRef<llvm::Value *> CapturedVars) {}
 
 // If we're inside an (outlined) parallel region, use the region info's
 // thread-ID variable (it is passed in a first argument of the outlined function

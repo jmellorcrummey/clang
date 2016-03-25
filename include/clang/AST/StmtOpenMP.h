@@ -311,22 +311,24 @@ class OMPLoopDirective : public OMPExecutableDirective {
     PreConditionOffset = 4,
     CondOffset = 5,
     InitOffset = 6,
-    IncOffset = 7,
+    LaneInitOffset = 7,
+    NumLanesOffset = 8,
+    IncOffset = 9,
     // The '...End' enumerators do not correspond to child expressions - they
     // specify the offset to the end (and start of the following counters/
     // updates/finals arrays).
-    DefaultEnd = 8,
+    DefaultEnd = 10,
     // The following 7 exprs are used by worksharing loops only.
-    IsLastIterVariableOffset = 8,
-    LowerBoundVariableOffset = 9,
-    UpperBoundVariableOffset = 10,
-    StrideVariableOffset = 11,
-    EnsureUpperBoundOffset = 12,
-    NextLowerBoundOffset = 13,
-    NextUpperBoundOffset = 14,
+    IsLastIterVariableOffset = 10,
+    LowerBoundVariableOffset = 11,
+    UpperBoundVariableOffset = 12,
+    StrideVariableOffset = 13,
+    EnsureUpperBoundOffset = 14,
+    NextLowerBoundOffset = 15,
+    NextUpperBoundOffset = 16,
     // Offset to the end (and start of the following counters/updates/finals
     // arrays) for worksharing loop directives.
-    WorksharingEnd = 15,
+    WorksharingEnd = 17,
   };
 
   /// \brief Get the counters storage.
@@ -421,6 +423,12 @@ protected:
     *std::next(child_begin(), CondOffset) = Cond;
   }
   void setInit(Expr *Init) { *std::next(child_begin(), InitOffset) = Init; }
+  void setLaneInit(Expr *LaneInit) {
+    *std::next(child_begin(), LaneInitOffset) = LaneInit;
+  }
+  void setNumLanes(Expr *NumLanes) {
+    *std::next(child_begin(), NumLanesOffset) = NumLanes;
+  }
   void setInc(Expr *Inc) { *std::next(child_begin(), IncOffset) = Inc; }
   void setIsLastIterVariable(Expr *IL) {
     assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
@@ -495,6 +503,10 @@ public:
     Expr *Cond;
     /// \brief Loop iteration variable init.
     Expr *Init;
+    /// \brief Loop iteration variable init for a simd lane.
+    Expr *LaneInit;
+    /// \brief Loop increment in outlined simd region: # simd lanes.
+    Expr *NumLanes;
     /// \brief Loop increment.
     Expr *Inc;
     /// \brief IsLastIteration - local flag variable passed to runtime.
@@ -539,6 +551,8 @@ public:
       PreCond = nullptr;
       Cond = nullptr;
       Init = nullptr;
+      LaneInit = nullptr;
+      NumLanes = nullptr;
       Inc = nullptr;
       IL = nullptr;
       LB = nullptr;
@@ -588,6 +602,14 @@ public:
   Expr *getInit() const {
     return const_cast<Expr *>(
         reinterpret_cast<const Expr *>(*std::next(child_begin(), InitOffset)));
+  }
+  Expr *getLaneInit() const {
+    return const_cast<Expr *>(reinterpret_cast<const Expr *>(
+        *std::next(child_begin(), LaneInitOffset)));
+  }
+  Expr *getNumLanes() const {
+    return const_cast<Expr *>(reinterpret_cast<const Expr *>(
+        *std::next(child_begin(), NumLanesOffset)));
   }
   Expr *getInc() const {
     return const_cast<Expr *>(
