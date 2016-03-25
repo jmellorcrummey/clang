@@ -4300,6 +4300,27 @@ void CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(
       DeviceID, FileID, ParentName, Line, OutlinedFn, OutlinedFnID);
 }
 
+/// \brief Search in a target region until either a teams directive is found
+/// or a different statement or construct. Return the teams directive object
+/// in the former case, nullptr otherwise.
+const static OMPTeamsDirective *
+hasEnclosingTeams(const Stmt *TargetBody) {
+  if(auto *TeamsDir = dyn_cast<OMPTeamsDirective>(TargetBody)) return TeamsDir;
+
+  auto *NextBlock = dyn_cast<CompoundStmt>(TargetBody);
+  auto *LastBlock = NextBlock;
+  // keep reading compound statements until something else is found
+  while (NextBlock) {
+    LastBlock = NextBlock;
+    NextBlock = dyn_cast<CompoundStmt>(NextBlock->body_front());
+  }
+
+  if (LastBlock) return dyn_cast<OMPTeamsDirective>(LastBlock->body_front());
+
+  // no teams or no compund stmt in the target region body
+  return nullptr;
+}
+
 /// \brief Emit the num_teams clause of an enclosed teams directive at the
 /// target region scope. If there is no teams directive associated with the
 /// target directive, or if there is no num_teams clause associated with the
@@ -4330,15 +4351,7 @@ emitNumTeamsClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
 
   // FIXME: Accommodate other combined directives with teams when they become
   // available.
-  auto *NextBlock = dyn_cast<CompoundStmt>(CS.getCapturedStmt());
-  auto *LastBlock = NextBlock;
-   // search the next statement that is not a curly bracket
-   while (NextBlock) {
-     LastBlock = NextBlock;
-     NextBlock = dyn_cast<CompoundStmt>(NextBlock->body_front());
-   }
-
-   if (auto *TeamsDir = dyn_cast<OMPTeamsDirective>(LastBlock->body_front())) {
+   if (auto *TeamsDir = hasEnclosingTeams(CS.getCapturedStmt())) {
     if (auto *NTE = TeamsDir->getSingleClause<OMPNumTeamsClause>()) {
       CGOpenMPInnerExprInfo CGInfo(CGF, CS);
       CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
@@ -4386,7 +4399,7 @@ emitThreadLimitClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
 
   // FIXME: Accommodate other combined directives with teams when they become
   // available.
-  if (auto *TeamsDir = dyn_cast<OMPTeamsDirective>(CS.getCapturedStmt())) {
+  if (auto *TeamsDir = hasEnclosingTeams(CS.getCapturedStmt())) {
     if (auto *TLE = TeamsDir->getSingleClause<OMPThreadLimitClause>()) {
       CGOpenMPInnerExprInfo CGInfo(CGF, CS);
       CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
