@@ -92,12 +92,6 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // \brief Initialize the data sharing slots and pointers.
   void initializeSharedData(CodeGenFunction &CGF, bool IsMaster);
 
-  // \brief Map between a context and its data sharing information.
-  typedef SmallVector<llvm::Value*,8> LevelSharedCapturesTy;
-  typedef std::pair<unsigned, const Decl*> LevelDeclPairTy;
-  typedef llvm::DenseMap<LevelDeclPairTy, LevelSharedCapturesTy> LevelsSharedCapturesMapTy;
-  LevelsSharedCapturesMapTy LevelsSharedCapturesMap;
-
   // \brief Group the captures information for a given context.
   struct DataSharingInfo {
     // The local values of the captures.
@@ -107,11 +101,30 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
     // The record type of the sharing region if shared by the worker warps.
     QualType WorkerWarpRecordType;
   };
+
+  // \brief Map between a context and its data sharing information.
   typedef llvm::DenseMap<const Decl *, DataSharingInfo> DataSharingInfoMapTy;
   DataSharingInfoMapTy DataSharingInfoMap;
 
   // \brief Obtain the data sharing info for the current context.
-  const DataSharingInfo &getDataSharingInfo(const Decl *Context);
+  const DataSharingInfo &getDataSharingInfo(CodeGenFunction &CGF);
+  const DataSharingInfo &getExistingDataSharingInfo(const Decl *Context);
+
+  // \brief Map between a context and the local addresses that save the slot and stack pointers.
+  struct DataSharingSlotAndStackSaveAddresses{
+    Address SlotSave;
+    Address StackSave;
+  };
+  typedef llvm::DenseMap<const Decl *, DataSharingSlotAndStackSaveAddresses> DataSharingSlotAndStackSaveMapTy;
+  DataSharingSlotAndStackSaveMapTy DataSharingSlotAndStackSaveMap;
+
+  // \brief Set that keeps the pairs of values that need to be replaced when the module is released.
+  struct DataSharingReplaceValue{
+    llvm::Value *From;
+    llvm::Value *To;
+  };
+  typedef std::set<DataSharingReplaceValue> DataSharingReplaceValuesTy;
+  DataSharingReplaceValuesTy DataSharingReplaceValues;
 
   //
   // NVPTX calls.

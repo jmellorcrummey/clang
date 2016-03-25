@@ -747,6 +747,13 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
 
     // Execute this outlined function.
     CGF.EmitBlock(ExecuteFNBB);
+
+    //
+    //
+    // Get the arguments from block master to worker.
+    //
+    //
+
     llvm::SmallVector<llvm::Value *, 20> FnArgs;
     // First two arguments are not used on the device.
     Address ZeroAddr =
@@ -1284,7 +1291,8 @@ bool CGOpenMPRuntimeNVPTX::InL1Plus() {
 bool CGOpenMPRuntimeNVPTX::IndeterminateLevel() { return IsOrphaned; }
 
 // \brief Obtain the data sharing info for the current context.
-const CGOpenMPRuntimeNVPTX::DataSharingInfo &CGOpenMPRuntimeNVPTX::getDataSharingInfo(const Decl *Context){
+const CGOpenMPRuntimeNVPTX::DataSharingInfo &CGOpenMPRuntimeNVPTX::getDataSharingInfo(CodeGenFunction &CGF){
+  auto *Context = CGF.CurCodeDecl;
   assert(Context && "A parallel region is expected to be enclosed in a context.");
 
   ASTContext &C = CGM.getContext();
@@ -1293,7 +1301,7 @@ const CGOpenMPRuntimeNVPTX::DataSharingInfo &CGOpenMPRuntimeNVPTX::getDataSharin
 
   // Check if the info was created before.
   if (It != DataSharingInfoMap.end())
-    return *It;
+    return It->second;
 
   auto &Info = DataSharingInfoMap[Context];
 
@@ -1329,7 +1337,8 @@ const CGOpenMPRuntimeNVPTX::DataSharingInfo &CGOpenMPRuntimeNVPTX::getDataSharin
   // Scan the captured statements and generate a record to contain all the data to be shared. Make sure we do not share the same thing twice.
   auto *SharedMasterRD = C.buildImplicitRecord("__openmp_nvptx_data_sharing_master_record");
   auto *SharedWarpRD = C.buildImplicitRecord("__openmp_nvptx_data_sharing_warp_record");
-  SharedRD->startDefinition();
+  SharedMasterRD->startDefinition();
+  SharedWarpRD->startDefinition();
 
   llvm::SmallSet<const Decl*, 32> AlreadySharedDecls;
   for (auto *CS : CapturedStmts) {
@@ -1350,9 +1359,10 @@ const CGOpenMPRuntimeNVPTX::DataSharingInfo &CGOpenMPRuntimeNVPTX::getDataSharin
       if (CurField->hasCapturedVLAType()) {
         assert("VLAs are not yet supported in NVPTX target data sharing!");
         continue;
-      } else if (CurCap->capturesThis())
+      } else if (CurCap->capturesThis()) {
         ElemTy = (*I)->getType();
-      else if (CurCap->capturesVariableByCopy()) {
+        Info.CapturesValues.push_back(CGF.LoadCXXThis());
+      } else if (CurCap->capturesVariableByCopy()) {
         assert("Not expecting to capture variables by copy in NVPTX target data sharing!");
         continue;
       } else {
@@ -1360,28 +1370,22 @@ const CGOpenMPRuntimeNVPTX::DataSharingInfo &CGOpenMPRuntimeNVPTX::getDataSharin
         const DeclRefExpr *DRE = cast<DeclRefExpr>(*I);
         const VarDecl *VD = cast<VarDecl>(DRE->getDecl());
         assert(VD->hasLocalStorage() && "Expecting to capture only variables with local storage.");
+        Info.CapturesValues.push_back(CGF.GetAddrOfLocalVar(VD).getPointer());
       }
 
-      QualType QTy;
-
-      // If the parallel level is not zero, then we need to share an instance per war
-      if (!IsMaster) {
-        llvm::APInt NumElems(C.getTypeSize(C.getUIntPtrType()),DS_Max_Worker_Warp_Size);
-        QTy = C.getConstantArrayType(ElemTy, NumElems, ArrayType::Normal, /*IndexTypeQuals=*/0);
-      } else
-        QTy = ElemTy;
-
-      addFieldToRecordDecl(C, SharedRD, QTy);
+      addFieldToRecordDecl(C, SharedMasterRD, ElemTy);
+      llvm::APInt NumElems(C.getTypeSize(C.getUIntPtrType()),DS_Max_Worker_Warp_Size);
+      auto QTy = C.getConstantArrayType(ElemTy, NumElems, ArrayType::Normal, /*IndexTypeQuals=*/0);
+      addFieldToRecordDecl(C, SharedWarpRD, QTy);
     }
   }
 
-  SharedRD->completeDefinition();
-
+  SharedMasterRD->completeDefinition();
+  SharedWarpRD->completeDefinition();
   Info.MasterRecordType = C.getRecordType(SharedMasterRD);
   Info.WorkerWarpRecordType = C.getRecordType(SharedWarpRD);
 
-  return Info
-
+  return Info;
 //  auto ShareRDTy = C.getRecordType(SharedRD);
 //
 //  // Now that we have a record type suitable to the data sharing, we need to check if we have room in the current slot of the stack. If not, we need to grow it. If this is not the master, only the warp master should grow the stack.
@@ -1447,6 +1451,12 @@ const CGOpenMPRuntimeNVPTX::DataSharingInfo &CGOpenMPRuntimeNVPTX::getDataSharin
 //  CGF.EmitBlock(EndBB);
 }
 
+const CGOpenMPRuntimeNVPTX::DataSharingInfo &CGOpenMPRuntimeNVPTX::getExistingDataSharingInfo(const Decl *Context){
+  auto It = DataSharingInfoMap.find(Context);
+  assert(It != DataSharingInfoMap.end() && "Data sharing info does not exist.");
+  return It->second;
+}
+
 // \brief Emit the code that each thread requires to execute when it encounters
 // one of the three possible parallelism level. This also emits the required
 // data sharing code for each level.
@@ -1454,12 +1464,6 @@ void CGOpenMPRuntimeNVPTX::emitParallelismLevelCode(
     CodeGenFunction &CGF, const RegionCodeGenTy &Level0,
     const RegionCodeGenTy &Level1, const RegionCodeGenTy &Sequential) {
   auto &Bld = CGF.Builder;
-
-  llvm::errs() << "This is the current enclosing context body:\n";
-  if (auto *CD = dyn_cast_or_null<CapturedDecl>(CGF.CurCodeDecl)) {
-    if (CD->getBody())
-      CD->getBody()->dump();
-  }
 
   // Flags that prevent code to be emitted if it can be proven that threads
   // cannot reach this function at a given level.
@@ -1569,6 +1573,14 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
   // Force inline this outlined function at its call site.
   // Fn->addFnAttr(llvm::Attribute::AlwaysInline);
   Fn->setLinkage(llvm::GlobalValue::InternalLinkage);
+
+  //
+  //
+  // Emit code that does the changes in the beginning of the function.
+  //
+  //
+
+
   auto *RTLoc = emitUpdateLocation(CGF, Loc);
   auto &&L0ParallelGen = [this, Fn, &CapturedVars](CodeGenFunction &CGF) {
     CGBuilderTy &Bld = CGF.Builder;
@@ -1649,6 +1661,13 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
     Bld.CreateCondBr(IsActive, ExecuteBB, DoCondBB);
 
     CGF.EmitBlock(ExecuteBB);
+
+    //
+    //
+    // Get the arguments from worker master to worker.
+    //
+    //
+
     // OutlinedFn(&GTid, &zero, CapturedStruct);
     auto ThreadIDAddr = emitThreadIDAddress(CGF, Loc);
     Address ZeroAddr =
