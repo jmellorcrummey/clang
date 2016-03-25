@@ -4300,25 +4300,16 @@ void CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(
       DeviceID, FileID, ParentName, Line, OutlinedFn, OutlinedFnID);
 }
 
-/// \brief Search in a target region until either a teams directive is found
-/// or a different statement or construct. Return the teams directive object
-/// in the former case, nullptr otherwise.
-const static OMPTeamsDirective *
+
+template<typename F>
+const static F *
 hasEnclosingTeams(const Stmt *TargetBody) {
-  if(auto *TeamsDir = dyn_cast<OMPTeamsDirective>(TargetBody)) return TeamsDir;
+  const CompoundStmt *S = nullptr;
+  while ((S = dyn_cast_or_null<CompoundStmt>(TargetBody)))
+    TargetBody = S->body_front();
 
-  auto *NextBlock = dyn_cast<CompoundStmt>(TargetBody);
-  auto *LastBlock = NextBlock;
-  // keep reading compound statements until something else is found
-  while (NextBlock) {
-    LastBlock = NextBlock;
-    NextBlock = dyn_cast<CompoundStmt>(NextBlock->body_front());
-  }
-
-  if (LastBlock) return dyn_cast<OMPTeamsDirective>(LastBlock->body_front());
-
-  // no teams or no compund stmt in the target region body
-  return nullptr;
+  return (TargetBody) ? dyn_cast_or_null<F>(TargetBody) :
+      nullptr;
 }
 
 /// \brief Emit the num_teams clause of an enclosed teams directive at the
@@ -4351,7 +4342,8 @@ emitNumTeamsClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
 
   // FIXME: Accommodate other combined directives with teams when they become
   // available.
-   if (auto *TeamsDir = hasEnclosingTeams(CS.getCapturedStmt())) {
+   if (auto *TeamsDir = hasEnclosingTeams<OMPTeamsDirective>(
+       CS.getCapturedStmt())) {
     if (auto *NTE = TeamsDir->getSingleClause<OMPNumTeamsClause>()) {
       CGOpenMPInnerExprInfo CGInfo(CGF, CS);
       CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
@@ -4399,7 +4391,8 @@ emitThreadLimitClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
 
   // FIXME: Accommodate other combined directives with teams when they become
   // available.
-  if (auto *TeamsDir = hasEnclosingTeams(CS.getCapturedStmt())) {
+  if (auto *TeamsDir = hasEnclosingTeams<OMPTeamsDirective>(
+      CS.getCapturedStmt())) {
     if (auto *TLE = TeamsDir->getSingleClause<OMPThreadLimitClause>()) {
       CGOpenMPInnerExprInfo CGInfo(CGF, CS);
       CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
