@@ -565,6 +565,15 @@ void CGOpenMPRuntimeNVPTX::exitTarget() {
 }
 
 namespace {
+///
+/// FIXME: This is stupid!
+/// These class definitions are duplicated from CGOpenMPRuntime.cpp.  They
+/// should instead be placed in the header file CGOpenMPRuntime.h and made
+/// accessible to CGOpenMPRuntimeNVPTX.cpp.  Otherwise not only do we have
+/// to duplicate code, but we have to ensure that both these definitions are
+/// always the same.  This is a problem because a CGOpenMPRegionInfo object
+/// from CGOpenMPRuntimeNVPTX.cpp is accessed in methods of CGOpenMPRuntime.cpp.
+///
 /// \brief Base class for handling code generation inside OpenMP regions.
 class CGOpenMPRegionInfo : public CodeGenFunction::CGCapturedStmtInfo {
 public:
@@ -573,6 +582,9 @@ public:
     /// \brief Region with outlined function for standalone 'parallel'
     /// directive.
     ParallelOutlinedRegion,
+    /// \brief Region with outlined function for standalone 'simd'
+    /// directive.
+    SimdOutlinedRegion,
     /// \brief Region with outlined function for standalone 'task' directive.
     TaskOutlinedRegion,
     /// \brief Region for constructs that do not require function outlining,
@@ -595,6 +607,14 @@ public:
       : CGCapturedStmtInfo(CR_OpenMP), RegionKind(RegionKind), CodeGen(CodeGen),
         Kind(Kind), HasCancel(HasCancel) {}
 
+  /// \brief Get a variable or parameter for storing the lane id
+  /// inside OpenMP construct.
+  virtual const VarDecl *getLaneIDVariable() const { return nullptr; }
+
+  /// \brief Get a variable or parameter for storing the number of lanes
+  /// inside OpenMP construct.
+  virtual const VarDecl *getNumLanesVariable() const { return nullptr; }
+
   /// \brief Get a variable or parameter for storing global thread id
   /// inside OpenMP construct.
   virtual const VarDecl *getThreadIDVariable() const = 0;
@@ -605,6 +625,14 @@ public:
   /// \brief Get an LValue for the current ThreadID variable.
   /// \return LValue for thread id variable. This LValue always has type int32*.
   virtual LValue getThreadIDVariableLValue(CodeGenFunction &CGF);
+
+  /// \brief Get an LValue for the current LaneID variable.
+  /// \return LValue for lane id variable. This LValue always has type int32*.
+  virtual LValue getLaneIDVariableLValue(CodeGenFunction &CGF);
+
+  /// \brief Get an LValue for the current NumLanes variable.
+  /// \return LValue for num lanes variable. This LValue always has type int32*.
+  virtual LValue getNumLanesVariableLValue(CodeGenFunction &CGF);
 
   CGOpenMPRegionKind getRegionKind() const { return RegionKind; }
 
@@ -658,6 +686,18 @@ LValue CGOpenMPRegionInfo::getThreadIDVariableLValue(CodeGenFunction &CGF) {
   return CGF.EmitLoadOfPointerLValue(
       CGF.GetAddrOfLocalVar(getThreadIDVariable()),
       getThreadIDVariable()->getType()->castAs<PointerType>());
+}
+
+LValue CGOpenMPRegionInfo::getLaneIDVariableLValue(CodeGenFunction &CGF) {
+  return CGF.EmitLoadOfPointerLValue(
+      CGF.GetAddrOfLocalVar(getLaneIDVariable()),
+      getLaneIDVariable()->getType()->castAs<PointerType>());
+}
+
+LValue CGOpenMPRegionInfo::getNumLanesVariableLValue(CodeGenFunction &CGF) {
+  return CGF.EmitLoadOfPointerLValue(
+      CGF.GetAddrOfLocalVar(getNumLanesVariable()),
+      getNumLanesVariable()->getType()->castAs<PointerType>());
 }
 
 void CGOpenMPRegionInfo::EmitBody(CodeGenFunction &CGF, const Stmt * /*S*/) {
