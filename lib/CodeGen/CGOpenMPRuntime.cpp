@@ -4307,8 +4307,7 @@ const static LF *
 hasEnclosingOpenMPDirective(const Stmt *Body) {
   const SK *S = nullptr;
   // keep iterating until we find an LF or not an SK or a nullptr
-  while ((S = dyn_cast_or_null<SK>(Body)) &&
-         (!dyn_cast_or_null<LF>(Body)))
+  while ((S = dyn_cast_or_null<SK>(Body)) && (!dyn_cast_or_null<LF>(Body)))
       Body = S->body_front();
 
   return (Body) ? dyn_cast_or_null<LF>(Body) :
@@ -4345,8 +4344,9 @@ emitNumTeamsClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
 
   // FIXME: Accommodate other combined directives with teams when they become
   // available.
-   if (auto *TeamsDir = hasEnclosingOpenMPDirective<
-       OMPTeamsDirective,CompoundStmt>(CS.getCapturedStmt())) {
+  if (auto *TeamsDir =
+          hasEnclosingOpenMPDirective<OMPTeamsDirective, CompoundStmt>(
+              CS.getCapturedStmt())) {
     if (auto *NTE = TeamsDir->getSingleClause<OMPNumTeamsClause>()) {
       CGOpenMPInnerExprInfo CGInfo(CGF, CS);
       CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
@@ -4394,8 +4394,9 @@ emitThreadLimitClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
 
   // FIXME: Accommodate other combined directives with teams when they become
   // available.
-  if (auto *TeamsDir = hasEnclosingOpenMPDirective<
-      OMPTeamsDirective,CompoundStmt>(CS.getCapturedStmt())) {
+  if (auto *TeamsDir =
+          hasEnclosingOpenMPDirective<OMPTeamsDirective, CompoundStmt>(
+              CS.getCapturedStmt())) {
     if (auto *TLE = TeamsDir->getSingleClause<OMPThreadLimitClause>()) {
       CGOpenMPInnerExprInfo CGInfo(CGF, CS);
       CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
