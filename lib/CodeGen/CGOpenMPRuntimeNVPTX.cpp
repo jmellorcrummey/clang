@@ -1071,7 +1071,6 @@ void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
   assert(!ParentName.empty() && "Invalid target region parent name!");
 
   const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
-  CS.getCapturedStmt()->dump();
 
   EntryFunctionState EST;
   WorkerFunctionState WST(CGM);
@@ -1079,9 +1078,7 @@ void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
   // Emit target region as a standalone region.
   auto &&CodeGen = [&EST, &WST, &CS, this, &D](CodeGenFunction &CGF) {
     emitEntryHeader(CGF, EST, WST);
-
     CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
-    (void)CGF.EmitOMPFirstprivateClause(D, PrivateScope);
     CGF.EmitOMPPrivateClause(D, PrivateScope);
     (void)PrivateScope.Privatize();
 
@@ -1780,6 +1777,11 @@ void CGOpenMPRuntimeNVPTX::emitTeamsCall(CodeGenFunction &CGF,
 
   // just emit the statements in the teams region inlined
   auto &&CodeGen = [&D](CodeGenFunction &CGF) {
+    CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
+    (void)CGF.EmitOMPFirstprivateClause(D, PrivateScope);
+    CGF.EmitOMPPrivateClause(D, PrivateScope);
+    (void)PrivateScope.Privatize();
+
     CGF.EmitStmt(cast<CapturedStmt>(D.getAssociatedStmt())->getCapturedStmt());
   };
 
