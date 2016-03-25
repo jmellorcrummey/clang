@@ -114,22 +114,21 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
 
   // \brief Map between a context and the local addresses that save the slot and
   // stack pointers.
-  struct DataSharingSlotAndStackSaveAddresses {
-    Address SlotSave;
-    Address StackSave;
-  };
+  typedef std::pair<llvm::Value *, llvm::Value *>
+      DataSharingSlotAndStackSaveAddresses;
   typedef llvm::DenseMap<const Decl *, DataSharingSlotAndStackSaveAddresses>
       DataSharingSlotAndStackSaveMapTy;
   DataSharingSlotAndStackSaveMapTy DataSharingSlotAndStackSaveMap;
 
   // \brief Set that keeps the pairs of values that need to be replaced when the
   // module is released.
-  struct DataSharingReplaceValue {
-    llvm::Value *From;
-    llvm::Value *To;
-  };
+  typedef std::pair<llvm::Value *, llvm::Value *> DataSharingReplaceValue;
   typedef std::set<DataSharingReplaceValue> DataSharingReplaceValuesTy;
   DataSharingReplaceValuesTy DataSharingReplaceValues;
+
+  // \brief Create the data sharing replacement pairs at the top of a function
+  // with parallel regions. If they were created already, do not do anything.
+  void createDataSharingPerFunctionInfrastructure(CodeGenFunction &CGF);
 
   //
   // NVPTX calls.

@@ -433,6 +433,16 @@ CGOpenMPRuntimeNVPTX::getSharedDataStackPointerLValue(CodeGenFunction &CGF,
   return CGF.MakeNaturalAlignAddrLValue(Val, CGF.getContext().VoidTy);
 }
 
+// \brief Cast a pointer to a given address space, being the generic address
+// space the default.
+static llvm::Value *CastToAddressSpace(CodeGenFunction &CGF, llvm::Value *Addr,
+                                       unsigned AddressSpace = 0) {
+  auto *Ty = Addr->getType();
+  auto *NewTy =
+      cast<llvm::PointerType>(Ty)->getElementType()->getPointerTo(AddressSpace);
+  return CGF.Builder.CreateAddrSpaceCast(Addr, NewTy);
+}
+
 // \brief Initialize the data sharing slots and pointers.
 void CGOpenMPRuntimeNVPTX::initializeSharedData(CodeGenFunction &CGF,
                                                 bool IsMaster) {
@@ -445,7 +455,7 @@ void CGOpenMPRuntimeNVPTX::initializeSharedData(CodeGenFunction &CGF,
   // If this is not the OpenMP master thread, make sure that only the warp
   // master does the initialization.
   llvm::BasicBlock *EndBB = CGF.createBasicBlock("after_shared_data_init");
-  ;
+
   if (!IsMaster) {
     auto *IsWarpMaster = getNVPTXIsWarpActiveMaster(CGF);
     llvm::BasicBlock *InitBB = CGF.createBasicBlock("shared_data_init");
@@ -464,7 +474,8 @@ void CGOpenMPRuntimeNVPTX::initializeSharedData(CodeGenFunction &CGF,
       Bld.CreateBitCast(SlotLV.getAddress(), SlotPtrTy).getPointer();
 
   llvm::Value *Args[] = {
-      CastedSlot, SlotPtrLV.getPointer(), StackPtrLV.getPointer(),
+      CastedSlot, CastToAddressSpace(CGF, SlotPtrLV.getPointer()),
+      CastToAddressSpace(CGF, StackPtrLV.getPointer()),
       llvm::ConstantInt::get(CGM.SizeTy, IsMaster ? DS_Slot_Size
                                                   : DS_Worker_Warp_Slot_Size)};
   Bld.CreateCall(createNVPTXRuntimeFunction(
@@ -1002,10 +1013,9 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
     /// *RootS, __kmpc_data_sharing_slot **SharedS, void **SharedD, size_t
     /// InitialDataSize);
     auto *SlotTy = CGM.getTypes().ConvertTypeForMem(getDataSharingSlotQty());
-    llvm::Type *TypeParams[] = {
-        SlotTy->getPointerTo(),
-        SlotTy->getPointerTo()->getPointerTo(ADDRESS_SPACE_SHARED),
-        CGM.VoidPtrTy->getPointerTo(ADDRESS_SPACE_SHARED), CGM.SizeTy};
+    llvm::Type *TypeParams[] = {SlotTy->getPointerTo(),
+                                SlotTy->getPointerTo()->getPointerTo(),
+                                CGM.VoidPtrPtrTy, CGM.SizeTy};
     llvm::FunctionType *FnTy =
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
     RTLFn = CGM.CreateRuntimeFunction(
@@ -1020,14 +1030,13 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
     /// int32_t *ReuseData);
 
     auto *SlotTy = CGM.getTypes().ConvertTypeForMem(getDataSharingSlotQty());
-    llvm::Type *TypeParams[] = {
-        SlotTy->getPointerTo()->getPointerTo(ADDRESS_SPACE_SHARED),
-        CGM.VoidPtrTy->getPointerTo(ADDRESS_SPACE_SHARED),
-        SlotTy->getPointerTo()->getPointerTo(),
-        CGM.VoidPtrTy->getPointerTo(),
-        CGM.SizeTy,
-        CGM.SizeTy,
-        CGM.Int32Ty->getPointerTo()};
+    llvm::Type *TypeParams[] = {SlotTy->getPointerTo()->getPointerTo(),
+                                CGM.VoidPtrPtrTy,
+                                SlotTy->getPointerTo()->getPointerTo(),
+                                CGM.VoidPtrTy->getPointerTo(),
+                                CGM.SizeTy,
+                                CGM.SizeTy,
+                                CGM.Int32Ty->getPointerTo()};
     llvm::FunctionType *FnTy =
         llvm::FunctionType::get(CGM.VoidPtrTy, TypeParams, /*isVarArg*/ false);
     RTLFn = CGM.CreateRuntimeFunction(FnTy,
@@ -1040,8 +1049,7 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
     /// **SavedSharedD);
     auto *SlotTy = CGM.getTypes().ConvertTypeForMem(getDataSharingSlotQty());
     llvm::Type *TypeParams[] = {
-        SlotTy->getPointerTo()->getPointerTo(ADDRESS_SPACE_SHARED),
-        CGM.VoidPtrTy->getPointerTo(ADDRESS_SPACE_SHARED),
+        SlotTy->getPointerTo()->getPointerTo(), CGM.VoidPtrPtrTy,
         SlotTy->getPointerTo()->getPointerTo(), CGM.VoidPtrTy->getPointerTo(),
     };
     llvm::FunctionType *FnTy =
@@ -1325,11 +1333,8 @@ CGOpenMPRuntimeNVPTX::getDataSharingInfo(CodeGenFunction &CGF) {
 
   ASTContext &C = CGM.getContext();
 
-  auto It = DataSharingInfoMap.find(Context);
-
-  // Check if the info was created before.
-  if (It != DataSharingInfoMap.end())
-    return It->second;
+  assert(DataSharingInfoMap.find(Context) == DataSharingInfoMap.end() &&
+         "Data sharing info was already created for this region.");
 
   auto &Info = DataSharingInfoMap[Context];
 
@@ -1524,6 +1529,180 @@ CGOpenMPRuntimeNVPTX::getExistingDataSharingInfo(const Decl *Context) {
   return It->second;
 }
 
+void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
+    CodeGenFunction &CGF) {
+  const Decl *CD = CGF.CurCodeDecl;
+
+  auto &Bld = CGF.Builder;
+  auto &Ctx = CGF.getContext();
+
+  assert(CD && "Function does not have a context associated!");
+
+  // Check if we have data sharing info for this function already.
+  auto It = DataSharingInfoMap.find(CD);
+  if (It != DataSharingInfoMap.end())
+    return;
+
+  // Create the data sharing information.
+  auto &DSI = getDataSharingInfo(CGF);
+
+  // If there is nothing being captured in the parallel regions, we do not need
+  // to do anything.
+  if (DSI.CapturesValues.empty())
+    return;
+
+  // Create temporary variables to contain the new addresses.
+  SmallVector<Address, 32> NewAddressPtrs;
+
+  auto *MasterRD = DSI.MasterRecordType->getAs<RecordType>()->getDecl();
+  for (auto *F : MasterRD->fields())
+    NewAddressPtrs.push_back(
+        CGF.CreateMemTemp(Ctx.getPointerType(F->getType())));
+
+  // Create a variable to control the reusing of the data sharing
+  // infrastructure.
+  auto ReuseAddr = CGF.CreateMemTemp(
+      Ctx.getIntTypeForBitwidth(/*DestWidth=*/32, /*Signed=*/false));
+  CGF.InitTempAlloca(ReuseAddr, llvm::Constant::getNullValue(CGM.Int32Ty));
+
+  // Create the variables to save the slot and stack.
+  QualType SlotPtrTy = Ctx.getPointerType(getDataSharingSlotQty());
+  auto *SavedSlot = CGF.CreateMemTemp(SlotPtrTy).getPointer();
+  auto *SavedStack = CGF.CreateMemTemp(Ctx.VoidPtrTy).getPointer();
+  DataSharingSlotAndStackSaveMap[CD] = std::make_pair(SavedSlot, SavedStack);
+
+  // Save insertion pointer, we will now codegen in the header of the function.
+  auto SavedInsertionPoint = Bld.GetInsertPoint();
+  auto NewInsertPoint = CGF.AllocaInsertPt->getIterator();
+  Bld.SetInsertPoint(&*(++NewInsertPoint));
+
+  auto &&L0ParallelGen = [this, &DSI, MasterRD, &Ctx, SavedSlot, SavedStack,
+                          &ReuseAddr, &NewAddressPtrs](CodeGenFunction &CGF) {
+    auto &Bld = CGF.Builder;
+
+    // In the Level 0 regions, we use the master record to get the data.
+    auto *DataSize = llvm::ConstantInt::get(
+        CGM.SizeTy, Ctx.getTypeSizeInChars(DSI.MasterRecordType).getQuantity());
+    auto *DefaultDataSize = llvm::ConstantInt::get(CGM.SizeTy, DS_Slot_Size);
+
+    // Get the address in the stack to use.
+    auto SlotPtrLV = getSharedDataSlotPointerAddrLValue(CGF, /*IsMaster=*/true);
+    auto StackPtrLV =
+        getSharedDataStackPointerAddrLValue(CGF, /*IsMaster=*/true);
+
+    llvm::Value *Args[] = {CastToAddressSpace(CGF, SlotPtrLV.getPointer()),
+                           CastToAddressSpace(CGF, StackPtrLV.getPointer()),
+                           SavedSlot,
+                           SavedStack,
+                           DataSize,
+                           DefaultDataSize,
+                           ReuseAddr.getPointer()};
+    auto *DataShareAddr =
+        Bld.CreateCall(createNVPTXRuntimeFunction(
+                           OMPRTL_NVPTX__kmpc_data_sharing_environment_begin),
+                       Args, "data_share_master_addr");
+    auto DataSharePtrQTy = Ctx.getPointerType(DSI.MasterRecordType);
+    auto *DataSharePtrTy = CGF.getTypes().ConvertTypeForMem(DataSharePtrQTy);
+    auto *CasterDataShareAddr =
+        Bld.CreateBitOrPointerCast(DataShareAddr, DataSharePtrTy);
+
+    // For each field, generate the shared address and store it in the new
+    // addresses array.
+    auto FI = MasterRD->field_begin();
+    for (unsigned i = 0; i < NewAddressPtrs.size(); ++i, ++FI) {
+      llvm::Value *Idx[] = {Bld.getInt32(0), Bld.getInt32(i)};
+      auto *NewAddr = Bld.CreateInBoundsGEP(CasterDataShareAddr, Idx);
+      CGF.EmitStoreOfScalar(NewAddr, NewAddressPtrs[i], /*Volatile=*/false,
+                            Ctx.getPointerType(FI->getType()));
+    }
+
+    llvm::Value *Args2[] = {CastToAddressSpace(CGF, SlotPtrLV.getPointer()),
+                            CastToAddressSpace(CGF, StackPtrLV.getPointer()),
+                            SavedSlot, SavedStack};
+    Bld.CreateCall(createNVPTXRuntimeFunction(
+                       OMPRTL_NVPTX__kmpc_data_sharing_environment_end),
+                   Args2);
+  };
+  auto &&L1ParallelGen = [this, &DSI, MasterRD, &Ctx, SavedSlot, SavedStack,
+                          &ReuseAddr, &NewAddressPtrs](CodeGenFunction &CGF) {
+    // In the Level 1 regions, we use the worker record that has each capture
+    // organized as an array.
+    auto &Bld = CGF.Builder;
+
+    // In the Level 0 regions, we use the master record to get the data.
+    auto *DataSize = llvm::ConstantInt::get(
+        CGM.SizeTy,
+        Ctx.getTypeSizeInChars(DSI.WorkerWarpRecordType).getQuantity());
+    auto *DefaultDataSize =
+        llvm::ConstantInt::get(CGM.SizeTy, DS_Worker_Warp_Slot_Size);
+
+    // Get the address in the stack to use.
+    auto SlotPtrLV =
+        getSharedDataSlotPointerAddrLValue(CGF, /*IsMaster=*/false);
+    auto StackPtrLV =
+        getSharedDataStackPointerAddrLValue(CGF, /*IsMaster=*/false);
+
+    llvm::Value *Args[] = {CastToAddressSpace(CGF, SlotPtrLV.getPointer()),
+                           CastToAddressSpace(CGF, StackPtrLV.getPointer()),
+                           SavedSlot,
+                           SavedStack,
+                           DataSize,
+                           DefaultDataSize,
+                           ReuseAddr.getPointer()};
+    auto *DataShareAddr =
+        Bld.CreateCall(createNVPTXRuntimeFunction(
+                           OMPRTL_NVPTX__kmpc_data_sharing_environment_begin),
+                       Args, "data_share_master_addr");
+    auto DataSharePtrQTy = Ctx.getPointerType(DSI.WorkerWarpRecordType);
+    auto *DataSharePtrTy = CGF.getTypes().ConvertTypeForMem(DataSharePtrQTy);
+    auto *CasterDataShareAddr =
+        Bld.CreateBitOrPointerCast(DataShareAddr, DataSharePtrTy);
+
+    // Get the threadID.
+    auto *ThreadID = getThreadID(CGF, SourceLocation());
+
+    // For each field, generate the shared address and store it in the new
+    // addresses array.
+    auto FI = MasterRD->field_begin();
+    for (unsigned i = 0; i < NewAddressPtrs.size(); ++i, ++FI) {
+      llvm::Value *Idx[] = {Bld.getInt32(0), Bld.getInt32(i), ThreadID};
+      auto *NewAddr = Bld.CreateInBoundsGEP(CasterDataShareAddr, Idx);
+      // The types are the same as in the master record.
+      CGF.EmitStoreOfScalar(NewAddr, NewAddressPtrs[i], /*Volatile=*/false,
+                            Ctx.getPointerType(FI->getType()));
+    }
+
+    llvm::Value *Args2[] = {CastToAddressSpace(CGF, SlotPtrLV.getPointer()),
+                            CastToAddressSpace(CGF, StackPtrLV.getPointer()),
+                            SavedSlot, SavedStack};
+    Bld.CreateCall(createNVPTXRuntimeFunction(
+                       OMPRTL_NVPTX__kmpc_data_sharing_environment_end),
+                   Args2);
+  };
+  auto &&Sequential = [this, &DSI, &Ctx, MasterRD,
+                       &NewAddressPtrs](CodeGenFunction &CGF) {
+    // In the sequential regions, we just use the regular allocas.
+    auto FI = MasterRD->field_begin();
+    for (unsigned i = 0; i < NewAddressPtrs.size(); ++i, ++FI)
+      CGF.EmitStoreOfScalar(DSI.CapturesValues[i], NewAddressPtrs[i],
+                            /*Volatile=*/false,
+                            Ctx.getPointerType(FI->getType()));
+  };
+
+  // Generate the values to replace.
+  auto FI = MasterRD->field_begin();
+  for (unsigned i = 0; i < NewAddressPtrs.size(); ++i, ++FI) {
+    auto *NewAddr = CGF.EmitLoadOfScalar(NewAddressPtrs[i], /*Volatile=*/false,
+                                         Ctx.getPointerType(FI->getType()),
+                                         SourceLocation());
+    DataSharingReplaceValues.insert(
+        std::make_pair(DSI.CapturesValues[i], NewAddr));
+  }
+
+  emitParallelismLevelCode(CGF, L0ParallelGen, L1ParallelGen, Sequential);
+  Bld.SetInsertPoint(&*SavedInsertionPoint);
+}
+
 // \brief Emit the code that each thread requires to execute when it encounters
 // one of the three possible parallelism level. This also emits the required
 // data sharing code for each level.
@@ -1643,7 +1822,8 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
 
   //
   //
-  // Emit code that does the changes in the beginning of the function.
+  // Emit code that does the data sharing changes in the beginning of the
+  // function.
   //
   //
 
