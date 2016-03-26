@@ -76,20 +76,20 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // \brief Return address of the initial slot that is used to share data.
   LValue getDataSharingRootSlotLValue(CodeGenFunction &CGF, bool IsMaster);
 
-  // \brief Return the address where the address of the current slot is stored.
-  LValue getSharedDataSlotPointerAddrLValue(CodeGenFunction &CGF,
-                                            bool IsMaster);
-
-  // \brief Return the address of the current data sharing slot.
-  LValue getSharedDataSlotPointerLValue(CodeGenFunction &CGF, bool IsMaster);
-
-  // \brief Return the address where the address of the current stack pointer
-  // (in the current slot) is stored.
-  LValue getSharedDataStackPointerAddrLValue(CodeGenFunction &CGF,
-                                             bool IsMaster);
-
-  // \brief Return the address of the current data stack pointer.
-  LValue getSharedDataStackPointerLValue(CodeGenFunction &CGF, bool IsMaster);
+//  // \brief Return the address where the address of the current slot is stored.
+//  LValue getSharedDataSlotPointerAddrLValue(CodeGenFunction &CGF,
+//                                            bool IsMaster);
+//
+//  // \brief Return the address of the current data sharing slot.
+//  LValue getSharedDataSlotPointerLValue(CodeGenFunction &CGF, bool IsMaster);
+//
+//  // \brief Return the address where the address of the current stack pointer
+//  // (in the current slot) is stored.
+//  LValue getSharedDataStackPointerAddrLValue(CodeGenFunction &CGF,
+//                                             bool IsMaster);
+//
+//  // \brief Return the address of the current data stack pointer.
+//  LValue getSharedDataStackPointerLValue(CodeGenFunction &CGF, bool IsMaster);
 
   // \brief Initialize the data sharing slots and pointers.
   void initializeSharedData(CodeGenFunction &CGF, bool IsMaster);
@@ -97,7 +97,7 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // \brief Group the captures information for a given context.
   struct DataSharingInfo {
     // The local values of the captures.
-    SmallVector<llvm::Value *, 8> CapturesValues;
+    llvm::SmallVector<std::pair<const VarDecl *, llvm::Value *>, 8> CapturesValues;
     // The record type of the sharing region if shared by the master.
     QualType MasterRecordType;
     // The record type of the sharing region if shared by the worker warps.
@@ -114,11 +114,19 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
 
   // \brief Map between a context and the local addresses that save the slot and
   // stack pointers.
-  typedef std::pair<llvm::Value *, llvm::Value *>
-      DataSharingSlotAndStackSaveAddresses;
-  typedef llvm::DenseMap<const Decl *, DataSharingSlotAndStackSaveAddresses>
-      DataSharingSlotAndStackSaveMapTy;
-  DataSharingSlotAndStackSaveMapTy DataSharingSlotAndStackSaveMap;
+  struct DataSharingSavedAddresses {
+    llvm::Value *SlotPtr;
+    llvm::Value *StackPtr;
+    llvm::Value *FramePtr;
+    llvm::Value *ActiveThreads;
+  };
+  typedef llvm::DenseMap<const Decl *, DataSharingSavedAddresses>
+      DataSharingSavedAddressesMapTy;
+  DataSharingSavedAddressesMapTy DataSharingSavedAddressesMap;
+
+  // \brief Map between the context and the LLVM function, useful to do the post-codegen replacements.
+  typedef llvm::DenseMap<llvm::Function *, const Decl *> DataSharingfunctionToContextMapTy;
+  DataSharingfunctionToContextMapTy DataSharingfunctionToContextMap;
 
   // \brief Set that keeps the pairs of values that need to be replaced when the
   // module is released.
