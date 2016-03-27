@@ -97,7 +97,7 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // \brief Group the captures information for a given context.
   struct DataSharingInfo {
     // The local values of the captures.
-    llvm::SmallVector<std::pair<const VarDecl *, llvm::Value *>, 8> CapturesValues;
+    llvm::SmallVector<const VarDecl *, 8> CapturesValues;
     // The record type of the sharing region if shared by the master.
     QualType MasterRecordType;
     // The record type of the sharing region if shared by the worker warps.
@@ -109,24 +109,22 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   DataSharingInfoMapTy DataSharingInfoMap;
 
   // \brief Obtain the data sharing info for the current context.
-  const DataSharingInfo &getDataSharingInfo(CodeGenFunction &CGF);
-  const DataSharingInfo &getExistingDataSharingInfo(const Decl *Context);
+  const DataSharingInfo &getDataSharingInfo(const Decl *Context);
 
-  // \brief Map between a context and the local addresses that save the slot and
-  // stack pointers.
+  // \brief Map between a function and the local addresses that save the slot and stack pointers.
   struct DataSharingSavedAddresses {
     llvm::Value *SlotPtr;
     llvm::Value *StackPtr;
     llvm::Value *FramePtr;
     llvm::Value *ActiveThreads;
   };
-  typedef llvm::DenseMap<const Decl *, DataSharingSavedAddresses>
+  typedef llvm::DenseMap<llvm::Function *, DataSharingSavedAddresses>
       DataSharingSavedAddressesMapTy;
   DataSharingSavedAddressesMapTy DataSharingSavedAddressesMap;
 
-  // \brief Map between the context and the LLVM function, useful to do the post-codegen replacements.
-  typedef llvm::DenseMap<llvm::Function *, const Decl *> DataSharingfunctionToContextMapTy;
-  DataSharingfunctionToContextMapTy DataSharingfunctionToContextMap;
+//  // \brief Map between the context and the LLVM function, useful to do the post-codegen replacements.
+//  typedef llvm::DenseMap<llvm::Function *, const Decl *> DataSharingFunctionToContextMapTy;
+//  DataSharingFunctionToContextMapTy DataSharingFunctionToContextMap;
 
   // \brief Set that keeps the pairs of values that need to be replaced when the
   // module is released.
@@ -137,6 +135,15 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // \brief Create the data sharing replacement pairs at the top of a function
   // with parallel regions. If they were created already, do not do anything.
   void createDataSharingPerFunctionInfrastructure(CodeGenFunction &CGF);
+
+  // \brief Create the data sharing arguments and call the parallel outlined function.
+  llvm::Function* createDataSharingParallelWrapper(llvm::Function &OutlinedParallelFn, const CapturedStmt &CS);
+
+  // \brief Map between an outlined function and its data-sharing-wrap version.
+  llvm::DenseMap<llvm::Function *, llvm::Function *> WrapperFunctionsMap;
+
+  // \brief Context that is being currently used for purposes of parallel region code generarion.
+  const Decl *CurrentParallelContext = nullptr;
 
   //
   // NVPTX calls.
@@ -398,6 +405,12 @@ public:
   void emitTeamsCall(CodeGenFunction &CGF, const OMPExecutableDirective &D,
                      SourceLocation Loc, llvm::Value *OutlinedFn,
                      ArrayRef<llvm::Value *> CapturedVars) override;
+
+  /// \brief Creates the offloading descriptor in the event any target region
+  /// was emitted in the current module and return the function that registers
+  /// it. We take advantage of this hook to do data sharing replacements.
+  llvm::Function *emitRegistrationFunction() override;
+
 };
 
 } // CodeGen namespace.
