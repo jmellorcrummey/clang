@@ -281,7 +281,8 @@ static void AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
 /// \brief Add OpenMP linker script arguments at the end of the argument list
 /// so that the fat binary is built by embedding each of the device images into
 /// the host. The device images are the last inputs, one for each device and
-/// come in the same order the triples are passed through the fomptargets option.
+/// come in the same order the triples are passed through the fomptargets
+/// option.
 /// The linker script also defines a few symbols required by the code generation
 /// so that the images can be easily retrieved at runtime by the offloading
 /// library. This should be used in tool chains that support linker scripts.
@@ -521,7 +522,7 @@ void Clang::AddPreprocessingOptions(Compilation &C, const JobAction &JA,
     ++AI;
 
     if (getToolChain().getDriver().IsCLMode()) {
-      // In clang-cl mode, /Ycfoo.h means that all code up to a foo.h 
+      // In clang-cl mode, /Ycfoo.h means that all code up to a foo.h
       // include is compiled into foo.h, and everything after goes into
       // the .obj file. /Yufoo.h means that all includes prior to and including
       // foo.h are completely skipped and replaced with a use of the pch file
@@ -532,7 +533,7 @@ void Clang::AddPreprocessingOptions(Compilation &C, const JobAction &JA,
       // FIXME: The code here assumes that /Yc and /Yu refer to the same file.
       // cl.exe seems to support both flags with different values, but that
       // seems strange (which flag does /Fp now refer to?), so don't implement
-      // that until someone needs that.
+      // that until someone needs it.
       int PchIndex = YcIndex != -1 ? YcIndex : YuIndex;
       if (PchIndex != -1) {
         if (isa<PrecompileJobAction>(JA)) {
@@ -542,8 +543,10 @@ void Clang::AddPreprocessingOptions(Compilation &C, const JobAction &JA,
             continue;
         } else {
           // When using the pch, skip all includes prior to the pch.
-          if (AI < PchIndex)
+          if (AI < PchIndex) {
+            A->claim();
             continue;
+          }
           if (AI == PchIndex) {
             A->claim();
             CmdArgs.push_back("-include-pch");
@@ -3361,6 +3364,7 @@ VersionTuple visualstudio::getMSVCVersion(const Driver *D,
     if (Major || Minor || Micro)
       return VersionTuple(Major, Minor, Micro);
 
+    // FIXME: Consider bumping this to 19 (MSVC2015) soon.
     return VersionTuple(18);
   }
   return VersionTuple();
@@ -5126,28 +5130,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (!Args.hasFlag(options::OPT_fimplicit_modules,
                     options::OPT_fno_implicit_modules)) {
     CmdArgs.push_back("-fno-implicit-modules");
-  }
-
-  // -fmodule-name specifies the module that is currently being built (or
-  // used for header checking by -fmodule-maps).
-  Args.AddLastArg(CmdArgs, options::OPT_fmodule_name_EQ);
-
-  // -fmodule-map-file can be used to specify files containing module
-  // definitions.
-  Args.AddAllArgs(CmdArgs, options::OPT_fmodule_map_file);
-
-  // -fmodule-file can be used to specify files containing precompiled modules.
-  if (HaveModules)
-    Args.AddAllArgs(CmdArgs, options::OPT_fmodule_file);
-  else
-    Args.ClaimAllArgs(options::OPT_fmodule_file);
-
-  // -fmodule-cache-path specifies where our implicitly-built module files
-  // should be written.
-  SmallString<128> Path;
-  if (Arg *A = Args.getLastArg(options::OPT_fmodules_cache_path))
-    Path = A->getValue();
-  if (HaveModules) {
+  } else if (HaveModules) {
+    // -fmodule-cache-path specifies where our implicitly-built module files
+    // should be written.
+    SmallString<128> Path;
+    if (Arg *A = Args.getLastArg(options::OPT_fmodules_cache_path))
+      Path = A->getValue();
     if (C.isForDiagnostics()) {
       // When generating crash reports, we want to emit the modules along with
       // the reproduction sources, so we ignore any provided module path.
@@ -5165,6 +5153,20 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     Path.insert(Path.begin(), Arg, Arg + strlen(Arg));
     CmdArgs.push_back(Args.MakeArgString(Path));
   }
+
+  // -fmodule-name specifies the module that is currently being built (or
+  // used for header checking by -fmodule-maps).
+  Args.AddLastArg(CmdArgs, options::OPT_fmodule_name_EQ);
+
+  // -fmodule-map-file can be used to specify files containing module
+  // definitions.
+  Args.AddAllArgs(CmdArgs, options::OPT_fmodule_map_file);
+
+  // -fmodule-file can be used to specify files containing precompiled modules.
+  if (HaveModules)
+    Args.AddAllArgs(CmdArgs, options::OPT_fmodule_file);
+  else
+    Args.ClaimAllArgs(options::OPT_fmodule_file);
 
   // When building modules and generating crashdumps, we need to dump a module
   // dependency VFS alongside the output.
@@ -5877,7 +5879,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // Handle the debug info splitting at object creation time if we're
   // creating an object.
   // TODO: Currently only works on linux with newer objcopy.
-  if (SplitDwarf && !isa<CompileJobAction>(JA) && !isa<BackendJobAction>(JA))
+  if (SplitDwarf && Output.getType() == types::TY_Object)
     SplitDebugInfo(getToolChain(), C, *this, JA, Args, Output, SplitDwarfOut);
 
   if (Arg *A = Args.getLastArg(options::OPT_pg))
@@ -10643,7 +10645,6 @@ void tools::SHAVE::Compiler::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-S");
     CmdArgs.push_back("-fno-exceptions"); // Always do this even if unspecified.
   }
-  CmdArgs.push_back("-mcpu=myriad2");
   CmdArgs.push_back("-DMYRIAD2");
 
   // Append all -I, -iquote, -isystem paths, defines/undefines,
@@ -10653,7 +10654,8 @@ void tools::SHAVE::Compiler::ConstructJob(Compilation &C, const JobAction &JA,
                             options::OPT_std_EQ, options::OPT_D, options::OPT_U,
                             options::OPT_f_Group, options::OPT_f_clang_Group,
                             options::OPT_g_Group, options::OPT_M_Group,
-                            options::OPT_O_Group, options::OPT_W_Group});
+                            options::OPT_O_Group, options::OPT_W_Group,
+                            options::OPT_mcpu_EQ});
 
   // If we're producing a dependency file, and assembly is the final action,
   // then the name of the target in the dependency file should be the '.o'
@@ -10693,7 +10695,10 @@ void tools::SHAVE::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
   assert(Output.getType() == types::TY_Object);
 
   CmdArgs.push_back("-no6thSlotCompression");
-  CmdArgs.push_back("-cv:myriad2"); // Chip Version
+  const Arg *CPUArg = Args.getLastArg(options::OPT_mcpu_EQ);
+  if (CPUArg)
+    CmdArgs.push_back(
+        Args.MakeArgString("-cv:" + StringRef(CPUArg->getValue())));
   CmdArgs.push_back("-noSPrefixing");
   CmdArgs.push_back("-a"); // Mystery option.
   Args.AddAllArgValues(CmdArgs, options::OPT_Wa_COMMA, options::OPT_Xassembler);

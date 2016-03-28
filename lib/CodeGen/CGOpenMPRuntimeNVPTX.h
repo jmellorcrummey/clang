@@ -25,30 +25,161 @@ namespace CodeGen {
 
 class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   //
+  // Data Sharing related calls.
+  //
+
+  // \brief Return the address where the parallelism level is kept in shared
+  // memory for the current thread. It is assumed we have up to 992 parallel
+  // worker threads.
+  //
+  // FIXME: Make this value reside in a descriptor whose size is decided at
+  // runtime (extern shared memory). This can be used for the other thread
+  // specific state as well.
+  LValue getParallelismLevelLValue(CodeGenFunction &CGF) const;
+
+  // \brief Return an integer with the parallelism level. Zero means that the
+  // current region is not enclosed in a parallel/simd region. The current level
+  // is kept in a shared memory array.
+  llvm::Value *getParallelismLevel(CodeGenFunction &CGF) const;
+
+  // \brief Increase the value of parallelism level for the current thread.
+  void increaseParallelismLevel(CodeGenFunction &CGF) const;
+
+  // \brief Decrease the value of parallelism level for the current thread.
+  void decreaseParallelismLevel(CodeGenFunction &CGF) const;
+
+  // \brief Initialize with zero the value of parallelism level for the current
+  // thread.
+  void initializeParallelismLevel(CodeGenFunction &CGF) const;
+
+  // \brief Type of the data sharing master slot. By default the size is zero
+  // meaning that the data size is to be determined.
+  QualType DataSharingMasterSlotQty;
+  QualType getDataSharingMasterSlotQty();
+
+  // \brief Type of the data sharing worker warp slot. By default the size is
+  // zero meaning that the data size is to be determined.
+  QualType DataSharingWorkerWarpSlotQty;
+  QualType getDataSharingWorkerWarpSlotQty();
+
+  // \brief Get the type of the master or worker slot incomplete.
+  QualType DataSharingSlotQty;
+  QualType getDataSharingSlotQty(bool UseFixedDataSize = false,
+                                 bool IsMaster = false);
+  llvm::Type *getDataSharingSlotTy(bool UseFixedDataSize = false,
+                                   bool IsMaster = false);
+
+  // \brief Type of the data sharing root slot.
+  QualType DataSharingRootSlotQty;
+  QualType getDataSharingRootSlotQty();
+
+  // \brief Return address of the initial slot that is used to share data.
+  LValue getDataSharingRootSlotLValue(CodeGenFunction &CGF, bool IsMaster);
+
+  // \brief Return the address where the address of the current slot is stored.
+  LValue getSharedDataSlotPointerAddrLValue(CodeGenFunction &CGF,
+                                            bool IsMaster);
+
+  // \brief Return the address of the current data sharing slot.
+  LValue getSharedDataSlotPointerLValue(CodeGenFunction &CGF, bool IsMaster);
+
+  // \brief Return the address where the address of the current stack pointer
+  // (in the current slot) is stored.
+  LValue getSharedDataStackPointerAddrLValue(CodeGenFunction &CGF,
+                                             bool IsMaster);
+
+  // \brief Return the address of the current data stack pointer.
+  LValue getSharedDataStackPointerLValue(CodeGenFunction &CGF, bool IsMaster);
+
+  // \brief Initialize the data sharing slots and pointers.
+  void initializeSharedData(CodeGenFunction &CGF, bool IsMaster);
+
+  // \brief Group the captures information for a given context.
+  struct DataSharingInfo {
+    // The local values of the captures.
+    SmallVector<llvm::Value *, 8> CapturesValues;
+    // The record type of the sharing region if shared by the master.
+    QualType MasterRecordType;
+    // The record type of the sharing region if shared by the worker warps.
+    QualType WorkerWarpRecordType;
+  };
+
+  // \brief Map between a context and its data sharing information.
+  typedef llvm::DenseMap<const Decl *, DataSharingInfo> DataSharingInfoMapTy;
+  DataSharingInfoMapTy DataSharingInfoMap;
+
+  // \brief Obtain the data sharing info for the current context.
+  const DataSharingInfo &getDataSharingInfo(CodeGenFunction &CGF);
+  const DataSharingInfo &getExistingDataSharingInfo(const Decl *Context);
+
+  // \brief Map between a context and the local addresses that save the slot and
+  // stack pointers.
+  typedef std::pair<llvm::Value *, llvm::Value *>
+      DataSharingSlotAndStackSaveAddresses;
+  typedef llvm::DenseMap<const Decl *, DataSharingSlotAndStackSaveAddresses>
+      DataSharingSlotAndStackSaveMapTy;
+  DataSharingSlotAndStackSaveMapTy DataSharingSlotAndStackSaveMap;
+
+  // \brief Set that keeps the pairs of values that need to be replaced when the
+  // module is released.
+  typedef std::pair<llvm::Value *, llvm::Value *> DataSharingReplaceValue;
+  typedef std::set<DataSharingReplaceValue> DataSharingReplaceValuesTy;
+  DataSharingReplaceValuesTy DataSharingReplaceValues;
+
+  // \brief Create the data sharing replacement pairs at the top of a function
+  // with parallel regions. If they were created already, do not do anything.
+  void createDataSharingPerFunctionInfrastructure(CodeGenFunction &CGF);
+
+  //
   // NVPTX calls.
   //
 
   /// \brief Get the GPU warp size.
-  llvm::Value *getNVPTXWarpSize(CodeGenFunction &CGF);
+  llvm::Value *getNVPTXWarpSize(CodeGenFunction &CGF) const;
 
   /// \brief Get the id of the current thread on the GPU.
-  llvm::Value *getNVPTXThreadID(CodeGenFunction &CGF);
+  llvm::Value *getNVPTXThreadID(CodeGenFunction &CGF) const;
 
   /// \brief Get the id of the current block on the GPU.
-  llvm::Value *getNVPTXBlockID(CodeGenFunction &CGF);
+  llvm::Value *getNVPTXBlockID(CodeGenFunction &CGF) const;
+
+  /// \brief Get the id of the warp in the block.
+  llvm::Value *getNVPTXWarpID(CodeGenFunction &CGF) const;
 
   // \brief Get the maximum number of threads in a block of the GPU.
-  llvm::Value *getNVPTXNumThreads(CodeGenFunction &CGF);
+  llvm::Value *getNVPTXNumThreads(CodeGenFunction &CGF) const;
+
+  // \brief Get a 32 bit mask, whose bits set to 1 represent the active threads.
+  llvm::Value *getNVPTXWarpActiveThreadsMask(CodeGenFunction &CGF);
+
+  // \brief Get the number of active threads in a warp.
+  llvm::Value *getNVPTXWarpActiveNumThreads(CodeGenFunction &CGF);
+
+  // \brief Get the ID of the thread among the current active threads in the
+  // warp.
+  llvm::Value *getNVPTXWarpActiveThreadID(CodeGenFunction &CGF);
+
+  // \brief Get a conditional that is set to true if the thread is the master of
+  // the active threads in the warp.
+  llvm::Value *getNVPTXIsWarpActiveMaster(CodeGenFunction &CGF);
 
   /// \brief Get barrier to synchronize all threads in a block.
-  void getNVPTXCTABarrier(CodeGenFunction &CGF);
+  void getNVPTXCTABarrier(CodeGenFunction &CGF) const;
 
   /// \brief Get barrier #n to synchronize selected (multiple of 32) threads in
   /// a block.
-  void getNVPTXBarrier(CodeGenFunction &CGF, int ID, int NumThreads);
+  void getNVPTXBarrier(CodeGenFunction &CGF, int ID, int NumThreads) const;
 
   // \brief Synchronize all GPU threads in a block.
-  void syncCTAThreads(CodeGenFunction &CGF);
+  void syncCTAThreads(CodeGenFunction &CGF) const;
+
+  //  // \brief Emit code that allocates a memory chunk in global memory with
+  //  size \a Size.
+  //  llvm::Value *emitMallocCall(CodeGenFunction &CGF, QualType DataTy,
+  //  llvm::Value *Size);
+  //
+  //  // \brief Deallocates the memory chunk pointed by \a Ptr;
+  //  void emitFreeCall(CodeGenFunction &CGF, llvm::Value *Ptr);
 
   //
   // OMP calls.
@@ -158,11 +289,25 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
                                   llvm::Constant *&OutlinedFnID,
                                   bool IsOffloadEntry) override;
 
-  // \brief Initialize state on entry to a target region.
-  void enterTarget();
+  /// \brief Emit the code that each thread requires to execute when it
+  /// encounters one of the three possible parallelism level. This also emits
+  /// the required data sharing code for each level.
+  /// \param Level0 Code to emit by the master thread when it encounters a
+  /// parallel region.
+  /// \param Level1 Code to emit by a worker thread when it encounters a
+  /// parallel region.
+  /// \param Sequential Code to emit by a worker thread when the parallel region
+  /// is to be computed sequentially.
+  void emitParallelismLevelCode(CodeGenFunction &CGF,
+                                const RegionCodeGenTy &Level0,
+                                const RegionCodeGenTy &Level1,
+                                const RegionCodeGenTy &Sequential);
 
-  // \brief Reset state on exit from a target region.
-  void exitTarget();
+  //  // \brief Initialize state on entry to a target region.
+  //  void enterTarget();
+  //
+  //  // \brief Reset state on exit from a target region.
+  //  void exitTarget();
 
   // \brief Test if a construct is always encountered at nesting level 0.
   bool InL0();
@@ -208,20 +353,6 @@ public:
                     llvm::Value *OutlinedFn,
                     ArrayRef<llvm::Value *> CapturedVars) override;
 
-  /// \brief Emits outlined function for the specified OpenMP parallel directive
-  /// \a D. This outlined function has type void(*)(kmp_int32 *ThreadID,
-  /// kmp_int32 BoundID, struct context_vars*).
-  /// \param D OpenMP directive.
-  /// \param ThreadIDVar Variable for thread id in the current OpenMP region.
-  /// \param InnermostKind Kind of innermost directive (for simple directives it
-  /// is a directive itself, for combined - its innermost directive).
-  /// \param CodeGen Code generation sequence for the \a D directive.
-  llvm::Value *
-  emitParallelOrTeamsOutlinedFunction(const OMPExecutableDirective &D,
-                               const VarDecl *ThreadIDVar,
-                               OpenMPDirectiveKind InnermostKind,
-                               const RegionCodeGenTy &CodeGen) override;
-
   /// \brief Check if we should generate code as if \a ScheduleKind is static
   /// with a chunk size of 1.
   /// \param ScheduleKind Schedule Kind specified in the 'schedule' clause.
@@ -236,6 +367,41 @@ public:
   /// This may occur when a particular offload device does not support
   /// concurrent execution of certain directive and clause combinations.
   bool requiresBarrier(const OMPLoopDirective &S) const override;
+
+  /// \brief This function ought to emit, in the general case, a call to
+  // the openmp runtime kmpc_push_num_teams. In NVPTX backend it is not needed
+  // as these numbers are obtained through the PTX grid and block configuration.
+  /// \param NumTeams An integer expression of teams.
+  /// \param ThreadLimit An integer expression of threads.
+  void emitNumTeamsClause(CodeGenFunction &CGF, const Expr *NumTeams,
+                          const Expr *ThreadLimit, SourceLocation Loc) override;
+
+  /// \brief Emits inlined function for the specified OpenMP parallel
+  //  directive but an inlined function for teams.
+  /// \a D. This outlined function has type void(*)(kmp_int32 *ThreadID,
+  /// kmp_int32 BoundID, struct context_vars*).
+  /// \param D OpenMP directive.
+  /// \param ThreadIDVar Variable for thread id in the current OpenMP region.
+  /// \param InnermostKind Kind of innermost directive (for simple directives it
+  /// is a directive itself, for combined - its innermost directive).
+  /// \param CodeGen Code generation sequence for the \a D directive.
+  llvm::Value *
+  emitParallelOrTeamsOutlinedFunction(const OMPExecutableDirective &D,
+                                      const VarDecl *ThreadIDVar,
+                                      OpenMPDirectiveKind InnermostKind,
+                                      const RegionCodeGenTy &CodeGen) override;
+
+  /// \brief Emits code for teams call of the \a OutlinedFn with
+  /// variables captured in a record which address is stored in \a
+  /// CapturedStruct.
+  /// \param OutlinedFn Outlined function to be run by team masters. Type of
+  /// this function is void(*)(kmp_int32 *, kmp_int32, struct context_vars*).
+  /// \param CapturedVars A pointer to the record with the references to
+  /// variables used in \a OutlinedFn function.
+  ///
+  void emitTeamsCall(CodeGenFunction &CGF, const OMPExecutableDirective &D,
+                     SourceLocation Loc, llvm::Value *OutlinedFn,
+                     ArrayRef<llvm::Value *> CapturedVars) override;
 };
 
 } // CodeGen namespace.

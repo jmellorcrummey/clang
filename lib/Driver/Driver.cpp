@@ -375,10 +375,10 @@ InputInfo Driver::CreateBundledOffloadingResult(Compilation &C,
 
   // Get the result file based on BaseInput file name and the previous host
   // action.
-  InputInfo BundledFile =
-      CreateActionResult(C, *BundleAction->input_begin(), Results[0].getBaseInput(),
-                         /*BoundArch=*/nullptr,
-                         /*AtTopLevel=*/true, /*MultipleArchs=*/false);
+  InputInfo BundledFile = CreateActionResult(
+      C, *BundleAction->input_begin(), Results[0].getBaseInput(),
+      /*BoundArch=*/nullptr,
+      /*AtTopLevel=*/true, /*MultipleArchs=*/false);
 
   // The unbundled files are the previous action result for each target.
   InputInfoList &UnbundledFiles = Results;

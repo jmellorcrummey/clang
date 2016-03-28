@@ -418,6 +418,9 @@ public:
   /// Emit code for the specified user defined reduction construct.
   virtual void emitUserDefinedReduction(CodeGenFunction *CGF,
                                         const OMPDeclareReductionDecl *D);
+  /// Get combiner/initializer for the specified user-defined reduction, if any.
+  virtual std::pair<llvm::Function *, llvm::Function *>
+  getUserDefinedReduction(const OMPDeclareReductionDecl *D);
   /// \brief Emits outlined function for the specified OpenMP parallel directive
   /// \a D. This outlined function has type void(*)(kmp_int32 *ThreadID,
   /// kmp_int32 BoundID, struct context_vars*).
@@ -573,7 +576,7 @@ public:
   virtual bool isStaticNonchunked(OpenMPDistScheduleClauseKind ScheduleKind,
                                   bool Chunked) const;
 
-	/// \brief Check if we should generate code as if \a ScheduleKind is static
+  /// \brief Check if we should generate code as if \a ScheduleKind is static
   /// with a chunk size of 1.
   /// \param ScheduleKind Schedule Kind specified in the 'schedule' clause.
   /// \param Chunk size.
@@ -944,11 +947,34 @@ public:
   /// \brief Emits call to void __kmpc_push_num_teams(ident_t *loc, kmp_int32
   /// global_tid, kmp_int32 num_teams, kmp_int32 thread_limit) to generate code
   /// for num_teams clause.
-  /// \param NumTeams An integer value of teams.
-  /// \param ThreadLimit An integer value of threads.
-  virtual void emitNumTeamsClause(CodeGenFunction &CGF, llvm::Value *NumTeams,
-                                  llvm::Value *ThreadLimit, SourceLocation Loc);
+  /// \param NumTeams An integer expression of teams.
+  /// \param ThreadLimit An integer expression of threads.
+  virtual void emitNumTeamsClause(CodeGenFunction &CGF, const Expr *NumTeams,
+                                  const Expr *ThreadLimit, SourceLocation Loc);
 
+  /// \brief Emit the target data mapping code associated with \a D.
+  /// \param D Directive to emit.
+  /// \param IfCond Expression evaluated in if clause associated with the target
+  /// directive, or null if no if clause is used.
+  /// \param Device Expression evaluated in device clause associated with the
+  /// target directive, or null if no device clause is used.
+  /// \param CodeGen, Function that emits the enclosed region.
+  virtual void emitTargetDataCalls(CodeGenFunction &CGF,
+                                   const OMPExecutableDirective &D,
+                                   const Expr *IfCond, const Expr *Device,
+                                   const RegionCodeGenTy &CodeGen);
+
+  /// \brief Emit the target enter or exit data mapping code associated with
+  /// directive \a D.
+  /// \param D Directive to emit.
+  /// \param IfCond Expression evaluated in if clause associated with the target
+  /// directive, or null if no if clause is used.
+  /// \param Device Expression evaluated in device clause associated with the
+  /// target directive, or null if no device clause is used.
+  virtual void emitTargetEnterOrExitDataCall(CodeGenFunction &CGF,
+                                             const OMPExecutableDirective &D,
+                                             const Expr *IfCond,
+                                             const Expr *Device);
 };
 
 } // namespace CodeGen

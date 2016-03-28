@@ -2006,7 +2006,7 @@ const char * const AMDGPUTargetInfo::GCCRegNames[] = {
   "s96", "s97", "s98", "s99", "s100", "s101", "s102", "s103",
   "s104", "s105", "s106", "s107", "s108", "s109", "s110", "s111",
   "s112", "s113", "s114", "s115", "s116", "s117", "s118", "s119",
-  "s120", "s121", "s122", "s123", "s124", "s125", "s126", "s127"
+  "s120", "s121", "s122", "s123", "s124", "s125", "s126", "s127",
   "exec", "vcc", "scc", "m0", "flat_scratch", "exec_lo", "exec_hi",
   "vcc_lo", "vcc_hi", "flat_scratch_lo", "flat_scratch_hi"
 };
@@ -2584,6 +2584,9 @@ bool X86TargetInfo::initFeatureMap(
   // X86_64 always has SSE2.
   if (getTriple().getArch() == llvm::Triple::x86_64)
     setFeatureEnabledImpl(Features, "sse2", true);
+
+  // Enable X87 for all X86 processors.
+  setFeatureEnabledImpl(Features, "x87", true);
 
   switch (getCPUKind(CPU)) {
   case CK_Generic:
@@ -4095,6 +4098,8 @@ public:
     case CC_X86VectorCall:
     case CC_IntelOclBicc:
     case CC_X86_64Win64:
+    case CC_PreserveMost:
+    case CC_PreserveAll:
       return CCCR_OK;
     default:
       return CCCR_Warning;
@@ -5545,6 +5550,8 @@ public:
     switch (CC) {
     case CC_C:
     case CC_Swift:
+    case CC_PreserveMost:
+    case CC_PreserveAll:
       return CCCR_OK;
     default:
       return CCCR_Warning;
@@ -6031,7 +6038,9 @@ public:
     CK_NIAGARA,
     CK_NIAGARA2,
     CK_NIAGARA3,
-    CK_NIAGARA4
+    CK_NIAGARA4,
+    CK_MYRIAD2_1,
+    CK_MYRIAD2_2
   } CPU = CK_GENERIC;
 
   enum CPUGeneration {
@@ -6050,6 +6059,8 @@ public:
     case CK_SPARCLITE86X:
     case CK_SPARCLET:
     case CK_TSC701:
+    case CK_MYRIAD2_1:
+    case CK_MYRIAD2_2:
       return CG_V8;
     case CK_V9:
     case CK_ULTRASPARC:
@@ -6080,6 +6091,9 @@ public:
         .Case("niagara2", CK_NIAGARA2)
         .Case("niagara3", CK_NIAGARA3)
         .Case("niagara4", CK_NIAGARA4)
+        .Case("myriad2", CK_MYRIAD2_1)
+        .Case("myriad2.1", CK_MYRIAD2_1)
+        .Case("myriad2.2", CK_MYRIAD2_2)
         .Default(CK_GENERIC);
   }
 
@@ -6176,6 +6190,20 @@ public:
         Builder.defineMacro("__sparc_v9__");
       }
       break;
+    }
+    if (getTriple().getVendor() == llvm::Triple::Myriad) {
+      switch (CPU) {
+      case CK_MYRIAD2_1:
+        Builder.defineMacro("__myriad2", "1");
+        Builder.defineMacro("__myriad2__", "1");
+        break;
+      case CK_MYRIAD2_2:
+        Builder.defineMacro("__myriad2", "2");
+        Builder.defineMacro("__myriad2__", "2");
+        break;
+      default:
+        break;
+      }
     }
   }
 };
