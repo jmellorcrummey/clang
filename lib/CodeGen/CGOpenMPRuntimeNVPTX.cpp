@@ -1017,6 +1017,8 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
     RTLFn =
         CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_end_convergent_simd");
+    break;
+  }
   case OMPRTL_NVPTX__kmpc_warp_active_thread_mask: {
     /// Build void __kmpc_warp_active_thread_mask();
     llvm::FunctionType *FnTy =
