@@ -529,6 +529,9 @@ enum OpenMPRTLFunction {
   // Call to void __kmpc_push_num_threads(ident_t *loc, kmp_int32 global_tid,
   // kmp_int32 num_threads);
   OMPRTL__kmpc_push_num_threads,
+  // Call to void __kmpc_push_simd_limit(ident_t *loc, kmp_int32 global_tid,
+  // kmp_int32 simd_limit);
+  OMPRTL__kmpc_push_simd_limit,
   // Call to void __kmpc_flush(ident_t *loc);
   OMPRTL__kmpc_flush,
   // Call to kmp_int32 __kmpc_master(ident_t *, kmp_int32 global_tid);
@@ -1134,6 +1137,16 @@ CGOpenMPRuntime::createRuntimeFunction(unsigned Function) {
     llvm::FunctionType *FnTy =
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_push_num_threads");
+    break;
+  }
+  case OMPRTL__kmpc_push_simd_limit: {
+    // Build void __kmpc_push_simd_limit(ident_t *loc, kmp_int32 global_tid,
+    // kmp_int32 simd_limit)
+    llvm::Type *TypeParams[] = {getIdentTyPointerTy(), CGM.Int32Ty,
+                                CGM.Int32Ty};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_push_simd_limit");
     break;
   }
   case OMPRTL__kmpc_serialized_parallel: {
@@ -2504,6 +2517,19 @@ void CGOpenMPRuntime::emitProcBindClause(CodeGenFunction &CGF,
       emitUpdateLocation(CGF, Loc), getThreadID(CGF, Loc),
       llvm::ConstantInt::get(CGM.IntTy, RuntimeProcBind, /*isSigned=*/true)};
   CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL__kmpc_push_proc_bind), Args);
+}
+
+void CGOpenMPRuntime::emitSimdLimit(CodeGenFunction &CGF,
+                                    llvm::Value *SimdLimit,
+                                    SourceLocation Loc) {
+  if (!CGF.HaveInsertPoint())
+    return;
+  // Build call __kmpc_push_simd_limit(&loc, global_tid, simd_limit)
+  llvm::Value *Args[] = {
+      emitUpdateLocation(CGF, Loc), getThreadID(CGF, Loc),
+      CGF.Builder.CreateIntCast(SimdLimit, CGF.Int32Ty, /*isSigned*/ true)};
+  CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL__kmpc_push_simd_limit),
+                      Args);
 }
 
 bool CGOpenMPRuntime::requiresBarrier(const OMPLoopDirective &S) const {

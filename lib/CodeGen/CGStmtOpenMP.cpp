@@ -1347,6 +1347,34 @@ void CodeGenFunction::EmitOMPSimdFinal(
     EmitBlock(DoneBB, /*IsFinished=*/true);
 }
 
+static void emitCommonOMPSimdDirective(CodeGenFunction &CGF,
+                                       const OMPExecutableDirective &S,
+                                       OpenMPDirectiveKind InnermostKind,
+                                       const RegionCodeGenTy &CodeGen) {
+  auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
+  llvm::SmallVector<llvm::Value *, 16> CapturedVars;
+  CGF.CGM.getOpenMPRuntime().emitCapturedVars(CGF, S, CapturedVars);
+  auto *LaneId = CS->getCapturedDecl()->param_begin();
+  auto *NumLanes = std::next(LaneId);
+  auto OutlinedFn = CGF.CGM.getOpenMPRuntime().emitSimdOutlinedFunction(
+      S, *LaneId, *NumLanes, InnermostKind, CodeGen);
+  if (const auto *C = S.getSingleClause<OMPSimdlenClause>()) {
+    RValue Len = CGF.EmitAnyExpr(C->getSimdlen(), AggValueSlot::ignored(),
+                                 /*ignoreResult=*/true);
+    llvm::ConstantInt *Val = cast<llvm::ConstantInt>(Len.getScalarVal());
+    CodeGenFunction::RunCleanupsScope SimdLimitScope(CGF);
+    CGF.CGM.getOpenMPRuntime().emitSimdLimit(CGF, Val, C->getLocStart());
+  } else if (const auto *C = S.getSingleClause<OMPSafelenClause>()) {
+    RValue Len = CGF.EmitAnyExpr(C->getSafelen(), AggValueSlot::ignored(),
+                                 /*ignoreResult=*/true);
+    llvm::ConstantInt *Val = cast<llvm::ConstantInt>(Len.getScalarVal());
+    CodeGenFunction::RunCleanupsScope SimdLimitScope(CGF);
+    CGF.CGM.getOpenMPRuntime().emitSimdLimit(CGF, Val, C->getLocStart());
+  }
+  CGF.CGM.getOpenMPRuntime().emitSimdCall(CGF, S.getLocStart(), OutlinedFn,
+                                          CapturedVars);
+}
+
 void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
   bool OutlinedSimd =
       CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX();
@@ -1449,15 +1477,7 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
   };
 
   if (OutlinedSimd) {
-    auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
-    llvm::SmallVector<llvm::Value *, 16> CapturedVars;
-    CGM.getOpenMPRuntime().emitCapturedVars(*this, S, CapturedVars);
-    auto *LaneId = CS->getCapturedDecl()->param_begin();
-    auto *NumLanes = std::next(LaneId);
-    auto OutlinedFn = CGM.getOpenMPRuntime().emitSimdOutlinedFunction(
-        S, *LaneId, *NumLanes, OMPD_simd, CodeGen);
-    CGM.getOpenMPRuntime().emitSimdCall(*this, S.getLocStart(), OutlinedFn,
-                                        CapturedVars);
+    emitCommonOMPSimdDirective(*this, S, OMPD_simd, CodeGen);
   } else {
     CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_simd, CodeGen);
   }

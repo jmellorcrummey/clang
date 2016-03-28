@@ -702,6 +702,13 @@ public:
                                   OpenMPProcBindClauseKind ProcBind,
                                   SourceLocation Loc);
 
+  /// \brief Emits call to void __kmpc_push_simd_limit(ident_t *loc, kmp_int32
+  /// global_tid, kmp_int32 simd_limit) to generate code for 'simdlen' and
+  /// 'safelen' clauses.
+  /// \param SimdLimit An integer value of lanes.
+  virtual void emitSimdLimit(CodeGenFunction &CGF, llvm::Value *SimdLimit,
+                             SourceLocation Loc);
+
   /// \brief Returns address of the threadprivate variable for the current
   /// thread.
   /// \param VD Threadprivate variable.
