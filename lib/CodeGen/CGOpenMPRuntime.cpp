@@ -3328,7 +3328,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
                                    CodeGenFunction &CGF,
                                    StringRef TgtFunName,
                                    bool StmtHasScheduleStaticOne) {
-        // // Set distribute
+    // Assumption: for the distributedParallel flag, schedule(static, 1) is
+    // always true.
+
+    // Set distribute
     CGF.CGM.OpenMPSupport.startOpenMPRegion(false);
     CGF.CGM.OpenMPSupport.setNoWait(false);
     CGF.CGM.OpenMPSupport.setMergeable(true);
@@ -3673,7 +3676,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
       Builder.CreateBr(CGF.SyncAfterCombinedBlock);
       Builder.SetInsertPoint(CGF.SyncAfterCombinedBlock);
-      // Builder.CreateCall(Get_syncthreads(), {});
+      if (CGF.distributedParallel){
+        Builder.CreateCall(Get_syncthreads(), {});
+      }
       Builder.CreateBr(IncCombinedFor);
     }
 
@@ -5612,7 +5617,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
        Bld.CreateBr(CGF.SyncAfterParallelForBlock);
        Bld.SetInsertPoint(CGF.SyncAfterParallelForBlock);
        // Do nothing for now but maybe a syncthreads will be needed
-       //Bld.CreateCall(Get_syncthreads(), {});
+       Bld.CreateCall(Get_syncthreads(), {});
      } else if (!NestedParallelStack.back()) { // not nested parallel
        // we are now able to determine the optimal amount of lanes to be
        // used in this #parallel region and add the amount setting in the right
