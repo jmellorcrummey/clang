@@ -4148,6 +4148,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     //applyNestedSimd = false;
     //applyCombinedConstruct = false;
 
+    CGF.isSimplifiedConstruct = CGF.combined ||
+                                CGF.combinedSimd ||
+                                CGF.distributedParallel;
+
     //applyNestedSimd = false;
     printf("Considering if combined construct is applicable:\n");
     //printf("    => SKIND is (OMPD_teams_distribute_parallel_for %d): %d\n", OMPD_teams_distribute_parallel_for, SKind);
@@ -4221,7 +4225,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // If no special combination of directives was encountered then
     // include control loop specific exit code.
-    if (!CGF.combined && !CGF.combinedSimd){
+    if (!CGF.isSimplifiedConstructs){
       ExitTargetControlLoop(Loc, CGF, prevIsParallel, TgtFunName, SKind);
     }
     Bld.SetInsertPoint(EndTarget);

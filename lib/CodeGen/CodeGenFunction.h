@@ -133,6 +133,7 @@ public:
   bool combinedSimd = false;
   bool useSharedMemory = false;
   bool distributedParallel = false;
+  bool isSimplifiedConstruct = false;
   llvm::AllocaInst *CombinedOuterLoopIndex;
   llvm::BasicBlock *SyncAfterCombinedBlock;
   llvm::BasicBlock *SyncAfterSimdBlock;

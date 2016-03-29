@@ -934,7 +934,7 @@ void CodeGenFunction::EmitOMPDirectiveWithParallelNoMicrotask(
     OpenMPDirectiveKind DKind, ArrayRef<OpenMPDirectiveKind> SKinds,
     const OMPExecutableDirective &S) {
 
-  printf(" ======> Inside EmitOMPSimdDirective: EmitOMPDirectiveWithParallelNoMicrotask\n ");
+  printf(" ======> Inside EmitOMPDirectiveWithParallelNoMicrotask: EmitOMPDirectiveWithParallelNoMicrotask\n ");
   // Generate shared args for captured stmt.
   CapturedStmt *CS = cast<CapturedStmt>(S.getAssociatedStmt());
 
@@ -953,7 +953,7 @@ void CodeGenFunction::EmitOMPDirectiveWithParallelNoMicrotask(
   // If this is a nvptx target we do not support codegen for parallel in
   // functions that are not entry points.
   if (IsNvptxTarget) {
-    printf(" ======> Inside EmitOMPSimdDirective: EmitOMPDirectiveWithParallelNoMicrotask: IsNvptxTarget\n ");
+    printf(" ======> Inside EmitOMPDirectiveWithParallelNoMicrotask: EmitOMPDirectiveWithParallelNoMicrotask: IsNvptxTarget\n ");
     const DeclContext *DC = CS->getCapturedDecl()->getParent();
     while (DC) {
       // If this is in a declare target just emit the captured statment as is.
@@ -1007,7 +1007,7 @@ void CodeGenFunction::EmitOMPDirectiveWithParallelNoMicrotask(
 
     {
       // CodeGen for clauses (call start).
-      printf(" ======> Inside EmitOMPSimdDirective: EmitOMPDirectiveWithParallelNoMicrotask: Code gen for clauses\n ");
+      printf(" ======> Inside EmitOMPDirectiveWithParallelNoMicrotask: EmitOMPDirectiveWithParallelNoMicrotask: Code gen for clauses\n ");
       for (ArrayRef<OMPClause *>::iterator I = S.clauses().begin(), E =
           S.clauses().end(); I != E; ++I)
         if (*I
@@ -1054,7 +1054,7 @@ void CodeGenFunction::EmitOMPDirectiveWithParallelNoMicrotask(
   if (DKind == OMPD_parallel && !IsNvptxTarget) {
     EmitOMPCancelBarrier(S.getLocEnd(), KMP_IDENT_BARRIER_IMPL);
   } else if (IsNvptxTarget) {
-    printf(" ======> Inside EmitOMPSimdDirective: EmitOMPDirectiveWithParallelNoMicrotask: IsNvptxTarget\n ");
+    printf(" ======> Inside EmitOMPDirectiveWithParallelNoMicrotask: IsNvptxTarget\n ");
     // in nvptx we need to transition back to serial execution and to do so
     // a synchronization is required: always codegen a barrier here, even if
     // nowait was specified
@@ -1074,7 +1074,7 @@ void CodeGenFunction::EmitOMPDirectiveWithParallelNoMicrotask(
 
   // Remove list of private globals from the stack.
   CGM.OpenMPSupport.endOpenMPRegion();
-  printf(" ======> Inside EmitOMPSimdDirective: Finish\n ");
+  printf(" ======> Inside EmitOMPDirectiveWithParallelNoMicrotask: Finish\n ");
 }
 
 void CodeGenFunction::EmitOMPDirectiveWithParallelMicrotask(
@@ -2517,11 +2517,8 @@ void CodeGenFunction::EmitOMPDirectiveWithTarget(OpenMPDirectiveKind DKind,
         CGM.getOpenMPRuntime().EnterTargetLoop(CS->getLocStart(), CGF,
             FD->getName(), DKind, SKind, S);
 
-      bool isSimplifiedCodeGen = CGF.combined ||
-                                 CGF.combinedSimd ||
-                                 CGF.distributedParallel;
       printf("Apply isSimplifiedCodeGen = %d\n", isSimplifiedCodeGen);
-      if (!isSimplifiedCodeGen){
+      if (!CGF.isSimplifiedConstruct){
         // Emit the contents of the target region
         switch (SKind) {
         default:
