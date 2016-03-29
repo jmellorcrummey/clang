@@ -1585,7 +1585,12 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
     break;
   }
   case OMPD_simd: {
+    QualType KmpInt32Ty = Context.getIntTypeForBitwidth(32, 1);
+    QualType KmpInt32PtrTy =
+        Context.getPointerType(KmpInt32Ty).withConst().withRestrict();
     Sema::CapturedParamNameType Params[] = {
+        std::make_pair(".lane_id.", KmpInt32PtrTy),
+        std::make_pair(".num_lanes.", KmpInt32PtrTy),
         std::make_pair(StringRef(), QualType()) // __context with shared vars
     };
     ActOnCapturedRegionStart(DSAStack->getConstructLoc(), CurScope, CR_OpenMP,
@@ -4517,17 +4522,34 @@ CheckOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
     EUB = SemaRef.ActOnFinishFullExpr(EUB.get());
   }
 
+  // Build iteration variable initializer for simd loop on nvptx.
+  bool OutlinedSimd = DKind == OMPD_simd &&
+                      SemaRef.getLangOpts().OpenMPIsDevice &&
+                      SemaRef.Context.getTargetInfo().getTriple().isNVPTX();
+  ExprResult LaneInit;
+  ExprResult NumLanes;
+  if (OutlinedSimd) {
+    VarDecl *LaneInitDecl =
+        buildVarDecl(SemaRef, InitLoc, VType, ".omp.lane.init");
+    LaneInit = buildDeclRefExpr(SemaRef, LaneInitDecl, VType, InitLoc);
+    VarDecl *NumLanesDecl =
+        buildVarDecl(SemaRef, InitLoc, VType, ".omp.num.lanes");
+    NumLanes = buildDeclRefExpr(SemaRef, NumLanesDecl, VType, InitLoc);
+  }
+
   // Build the iteration variable and its initialization before loop.
   ExprResult IV;
   ExprResult Init;
   {
     VarDecl *IVDecl = buildVarDecl(SemaRef, InitLoc, VType, ".omp.iv");
     IV = buildDeclRefExpr(SemaRef, IVDecl, VType, InitLoc);
-    Expr *RHS = (isOpenMPWorksharingDirective(DKind) ||
-                 isOpenMPTaskLoopDirective(DKind) ||
-                 isOpenMPDistributeDirective(DKind))
-                    ? LB.get()
-                    : SemaRef.ActOnIntegerConstant(SourceLocation(), 0).get();
+    Expr *RHS =
+        (isOpenMPWorksharingDirective(DKind) ||
+         isOpenMPTaskLoopDirective(DKind) || isOpenMPDistributeDirective(DKind))
+            ? LB.get()
+            : OutlinedSimd
+                  ? LaneInit.get()
+                  : SemaRef.ActOnIntegerConstant(SourceLocation(), 0).get();
     Init = SemaRef.BuildBinOp(CurScope, InitLoc, BO_Assign, IV.get(), RHS);
     Init = SemaRef.ActOnFinishFullExpr(Init.get());
   }
@@ -4544,8 +4566,11 @@ CheckOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
   // Loop increment (IV = IV + 1)
   SourceLocation IncLoc;
   ExprResult Inc =
-      SemaRef.BuildBinOp(CurScope, IncLoc, BO_Add, IV.get(),
-                         SemaRef.ActOnIntegerConstant(IncLoc, 1).get());
+      OutlinedSimd
+          ? SemaRef.BuildBinOp(CurScope, IncLoc, BO_Add, IV.get(),
+                               NumLanes.get())
+          : SemaRef.BuildBinOp(CurScope, IncLoc, BO_Add, IV.get(),
+                               SemaRef.ActOnIntegerConstant(IncLoc, 1).get());
   if (!Inc.isUsable())
     return 0;
   Inc = SemaRef.BuildBinOp(CurScope, IncLoc, BO_Assign, IV.get(), Inc.get());
@@ -4681,6 +4706,12 @@ CheckOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
   Built.PreCond = PreCond.get();
   Built.Cond = Cond.get();
   Built.Init = Init.get();
+  Built.LaneInit =
+      OutlinedSimd ? LaneInit.get()
+                   : SemaRef.ActOnIntegerConstant(SourceLocation(), 0).get();
+  Built.NumLanes =
+      OutlinedSimd ? NumLanes.get()
+                   : SemaRef.ActOnIntegerConstant(SourceLocation(), 0).get();
   Built.Inc = Inc.get();
   Built.LB = LB.get();
   Built.UB = UB.get();

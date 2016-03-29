@@ -390,6 +390,18 @@ public:
                         ArrayRef<llvm::Value *> CapturedVars,
                         const Expr *IfCond) override;
 
+  /// \brief Emits code for simd call of the \a OutlinedFn with
+  /// variables captured in a record which address is stored in \a
+  /// CapturedStruct.
+  /// \param OutlinedFn Outlined function to be run in simd lanes. Type of
+  /// this function is void(*)(kmp_int32 *,  struct context_vars*).
+  /// \param CapturedVars A pointer to the record with the references to
+  /// variables used in \a OutlinedFn function.
+  ///
+  void emitSimdCall(CodeGenFunction &CGF, SourceLocation Loc,
+                    llvm::Value *OutlinedFn,
+                    ArrayRef<llvm::Value *> CapturedVars) override;
+
   /// \brief Check if we should generate code as if \a ScheduleKind is static
   /// with a chunk size of 1.
   /// \param ScheduleKind Schedule Kind specified in the 'schedule' clause.

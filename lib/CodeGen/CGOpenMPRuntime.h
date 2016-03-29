@@ -91,6 +91,15 @@ protected:
   /// \brief Returns pointer to ident_t type.
   llvm::Type *getIdentTyPointerTy();
 
+public:
+  /// \brief Gets lane id value for the current simd lane.
+  ///
+  virtual llvm::Value *getLaneID(CodeGenFunction &CGF, SourceLocation Loc);
+
+  /// \brief Gets number of lanes value for the current simd region.
+  ///
+  virtual llvm::Value *getNumLanes(CodeGenFunction &CGF, SourceLocation Loc);
+
 private:
   /// \brief Default const ident_t object used for initialization of all other
   /// ident_t objects.
@@ -424,6 +433,20 @@ public:
       const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
       OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen);
 
+  /// \brief Emits outlined function for the specified OpenMP simd directive
+  /// \a D. This outlined function has type void(*)(kmp_int32 *LaneID,
+  /// struct context_vars*).
+  /// \param D OpenMP directive.
+  /// \param LaneIDVar Variable for lane id in the current OpenMP region.
+  /// \param InnermostKind Kind of innermost directive (for simple directives it
+  /// is a directive itself, for combined - its innermost directive).
+  /// \param CodeGen Code generation sequence for the \a D directive.
+  virtual llvm::Value *
+  emitSimdOutlinedFunction(const OMPExecutableDirective &D,
+                           const VarDecl *LaneIDVar, const VarDecl *NumLanesVar,
+                           OpenMPDirectiveKind InnermostKind,
+                           const RegionCodeGenTy &CodeGen);
+
   /// \brief Emits outlined function for the OpenMP task directive \a D. This
   /// outlined function has type void(*)(kmp_int32 ThreadID, kmp_int32
   /// PartID, struct context_vars*).
@@ -466,6 +489,18 @@ public:
                                 llvm::Value *OutlinedFn,
                                 ArrayRef<llvm::Value *> CapturedVars,
                                 const Expr *IfCond);
+
+  /// \brief Emits code for simd call of the \a OutlinedFn with
+  /// variables captured in a record which address is stored in \a
+  /// CapturedStruct.
+  /// \param OutlinedFn Outlined function to be run in simd lanes. Type of
+  /// this function is void(*)(kmp_int32 *,  struct context_vars*).
+  /// \param CapturedVars A pointer to the record with the references to
+  /// variables used in \a OutlinedFn function.
+  ///
+  virtual void emitSimdCall(CodeGenFunction &CGF, SourceLocation Loc,
+                            llvm::Value *OutlinedFn,
+                            ArrayRef<llvm::Value *> CapturedVars);
 
   /// \brief Emits a critical region.
   /// \param CriticalName Name of the critical region.
@@ -669,6 +704,13 @@ public:
   virtual void emitProcBindClause(CodeGenFunction &CGF,
                                   OpenMPProcBindClauseKind ProcBind,
                                   SourceLocation Loc);
+
+  /// \brief Emits call to void __kmpc_push_simd_limit(ident_t *loc, kmp_int32
+  /// global_tid, kmp_int32 simd_limit) to generate code for 'simdlen' and
+  /// 'safelen' clauses.
+  /// \param SimdLimit An integer value of lanes.
+  virtual void emitSimdLimit(CodeGenFunction &CGF, llvm::Value *SimdLimit,
+                             SourceLocation Loc);
 
   /// \brief Returns address of the threadprivate variable for the current
   /// thread.

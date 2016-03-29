@@ -49,6 +49,13 @@ enum OpenMPRTLFunctionNVPTX {
   /// \brief Call to void __kmpc_kernel_end_convergent_parallel(
   /// void *buffer);
   OMPRTL_NVPTX__kmpc_kernel_end_convergent_parallel,
+  /// \brief Call to bool __kmpc_kernel_convergent_simd(
+  /// void *buffer, bool *IsFinal, kmpc_int32 *LaneSource, kmpc_int32 *LaneId,
+  /// kmpc_int32 *NumLanes);
+  OMPRTL_NVPTX__kmpc_kernel_convergent_simd,
+  /// \brief Call to void __kmpc_kernel_end_convergent_simd(
+  /// void *buffer);
+  OMPRTL_NVPTX__kmpc_kernel_end_convergent_simd,
   /// \brief Call to int32_t __kmpc_warp_active_thread_mask();
   OMPRTL_NVPTX__kmpc_warp_active_thread_mask,
   //  /// \brief Call to void * malloc(size_t size);
@@ -80,6 +87,7 @@ enum ADDRESS_SPACE {
 
 enum STATE_SIZE {
   TASK_STATE_SIZE = 48,
+  SIMD_STATE_SIZE = 48,
 };
 
 enum DATA_SHARING_SIZES {
@@ -758,10 +766,15 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
       CGF.Int8PtrTy, CharUnits::fromQuantity(8), /*Name*/ "work_fn");
   Address WorkArgs = CGF.CreateTempAlloca(
       CGF.Int8PtrTy, CharUnits::fromQuantity(8), /*Name*/ "work_args");
+  Address ExecStatus =
+        CGF.CreateTempAlloca(CGF.Int8Ty, CharUnits::fromQuantity(1),
+                             /*Name*/ "exec_status");
+  CGF.InitTempAlloca(ExecStatus, Bld.getInt8(/*C=*/0));
+
   llvm::Value *Args[] = {WorkFn.getPointer(), WorkArgs.getPointer()};
-  llvm::Value *IsActive = CGF.EmitRuntimeCall(
-      createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_parallel), Args,
-      "is_active");
+  llvm::Value *Ret = CGF.EmitRuntimeCall(
+      createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_parallel), Args);
+  Bld.CreateStore(Bld.CreateZExt(Ret, CGF.Int8Ty), ExecStatus);
 
   // On termination condition (workfn == 0), exit loop.
   llvm::Value *ShouldTerminate = Bld.CreateICmpEQ(
@@ -771,6 +784,8 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
 
   // Activate requested workers.
   CGF.EmitBlock(SelectWorkersBB);
+  llvm::Value *IsActive =
+      Bld.CreateICmpNE(Bld.CreateLoad(ExecStatus), Bld.getInt8(0), "is_active");
   Bld.CreateCondBr(IsActive, ExecuteBB, BarrierBB);
 
   // Signal start of parallel region.
@@ -979,7 +994,7 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
   }
   case OMPRTL_NVPTX__kmpc_kernel_convergent_parallel: {
     /// \brief Call to bool __kmpc_kernel_convergent_parallel(
-    /// bool *IsFinal, kmpc_int32 *LaneSource);
+    /// void *buffer, bool *IsFinal, kmpc_int32 *LaneSource);
     llvm::Type *TypeParams[] = {CGM.Int8PtrTy, CGM.Int8PtrTy,
                                 CGM.Int32Ty->getPointerTo()};
     llvm::FunctionType *FnTy =
@@ -990,12 +1005,34 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
     break;
   }
   case OMPRTL_NVPTX__kmpc_kernel_end_convergent_parallel: {
-    /// Build void __kmpc_kernel_end_convergent_parallel();
+    /// Build void __kmpc_kernel_end_convergent_parallel(void *buffer);
     llvm::Type *TypeParams[] = {CGM.Int8PtrTy};
     llvm::FunctionType *FnTy =
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
     RTLFn = CGM.CreateRuntimeFunction(FnTy,
                                       "__kmpc_kernel_end_convergent_parallel");
+    break;
+  }
+  case OMPRTL_NVPTX__kmpc_kernel_convergent_simd: {
+    /// \brief Call to bool __kmpc_kernel_convergent_simd(
+    /// void *buffer, bool *IsFinal, kmpc_int32 *LaneSource, kmpc_int32 *LaneId,
+    /// kmpc_int32 *NumLanes);
+    llvm::Type *TypeParams[] = {
+        CGM.Int8PtrTy, CGM.Int8PtrTy, CGM.Int32Ty->getPointerTo(),
+        CGM.Int32Ty->getPointerTo(), CGM.Int32Ty->getPointerTo()};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(llvm::Type::getInt1Ty(CGM.getLLVMContext()),
+                                TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_convergent_simd");
+    break;
+  }
+  case OMPRTL_NVPTX__kmpc_kernel_end_convergent_simd: {
+    /// Build void __kmpc_kernel_end_convergent_simd(void *buffer);
+    llvm::Type *TypeParams[] = {CGM.Int8PtrTy};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+    RTLFn =
+        CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_end_convergent_simd");
     break;
   }
   case OMPRTL_NVPTX__kmpc_warp_active_thread_mask: {
@@ -1170,6 +1207,15 @@ void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
 //}
 
 namespace {
+///
+/// FIXME: This is stupid!
+/// These class definitions are duplicated from CGOpenMPRuntime.cpp.  They
+/// should instead be placed in the header file CGOpenMPRuntime.h and made
+/// accessible to CGOpenMPRuntimeNVPTX.cpp.  Otherwise not only do we have
+/// to duplicate code, but we have to ensure that both these definitions are
+/// always the same.  This is a problem because a CGOpenMPRegionInfo object
+/// from CGOpenMPRuntimeNVPTX.cpp is accessed in methods of CGOpenMPRuntime.cpp.
+///
 /// \brief Base class for handling code generation inside OpenMP regions.
 class CGOpenMPRegionInfo : public CodeGenFunction::CGCapturedStmtInfo {
 public:
@@ -1178,6 +1224,9 @@ public:
     /// \brief Region with outlined function for standalone 'parallel'
     /// directive.
     ParallelOutlinedRegion,
+    /// \brief Region with outlined function for standalone 'simd'
+    /// directive.
+    SimdOutlinedRegion,
     /// \brief Region with outlined function for standalone 'task' directive.
     TaskOutlinedRegion,
     /// \brief Region for constructs that do not require function outlining,
@@ -1200,6 +1249,14 @@ public:
       : CGCapturedStmtInfo(CR_OpenMP), RegionKind(RegionKind), CodeGen(CodeGen),
         Kind(Kind), HasCancel(HasCancel) {}
 
+  /// \brief Get a variable or parameter for storing the lane id
+  /// inside OpenMP construct.
+  virtual const VarDecl *getLaneIDVariable() const { return nullptr; }
+
+  /// \brief Get a variable or parameter for storing the number of lanes
+  /// inside OpenMP construct.
+  virtual const VarDecl *getNumLanesVariable() const { return nullptr; }
+
   /// \brief Get a variable or parameter for storing global thread id
   /// inside OpenMP construct.
   virtual const VarDecl *getThreadIDVariable() const = 0;
@@ -1210,6 +1267,14 @@ public:
   /// \brief Get an LValue for the current ThreadID variable.
   /// \return LValue for thread id variable. This LValue always has type int32*.
   virtual LValue getThreadIDVariableLValue(CodeGenFunction &CGF);
+
+  /// \brief Get an LValue for the current LaneID variable.
+  /// \return LValue for lane id variable. This LValue always has type int32*.
+  virtual LValue getLaneIDVariableLValue(CodeGenFunction &CGF);
+
+  /// \brief Get an LValue for the current NumLanes variable.
+  /// \return LValue for num lanes variable. This LValue always has type int32*.
+  virtual LValue getNumLanesVariableLValue(CodeGenFunction &CGF);
 
   CGOpenMPRegionKind getRegionKind() const { return RegionKind; }
 
@@ -1263,6 +1328,18 @@ LValue CGOpenMPRegionInfo::getThreadIDVariableLValue(CodeGenFunction &CGF) {
   return CGF.EmitLoadOfPointerLValue(
       CGF.GetAddrOfLocalVar(getThreadIDVariable()),
       getThreadIDVariable()->getType()->castAs<PointerType>());
+}
+
+LValue CGOpenMPRegionInfo::getLaneIDVariableLValue(CodeGenFunction &CGF) {
+  return CGF.EmitLoadOfPointerLValue(
+      CGF.GetAddrOfLocalVar(getLaneIDVariable()),
+      getLaneIDVariable()->getType()->castAs<PointerType>());
+}
+
+LValue CGOpenMPRegionInfo::getNumLanesVariableLValue(CodeGenFunction &CGF) {
+  return CGF.EmitLoadOfPointerLValue(
+      CGF.GetAddrOfLocalVar(getNumLanesVariable()),
+      getNumLanesVariable()->getType()->castAs<PointerType>());
 }
 
 void CGOpenMPRegionInfo::EmitBody(CodeGenFunction &CGF, const Stmt * /*S*/) {
@@ -2208,6 +2285,87 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
     CodeGenFunction::RunCleanupsScope Scope(CGF);
     ThenGen(CGF);
   }
+}
+
+void CGOpenMPRuntimeNVPTX::emitSimdCall(CodeGenFunction &CGF,
+                                        SourceLocation Loc,
+                                        llvm::Value *OutlinedFn,
+                                        ArrayRef<llvm::Value *> CapturedVars) {
+  if (!CGF.HaveInsertPoint())
+    return;
+  llvm::Function *Fn = cast<llvm::Function>(OutlinedFn);
+  // Force inline this outlined function at its call site.
+  Fn->addFnAttr(llvm::Attribute::AlwaysInline);
+  Fn->setLinkage(llvm::GlobalValue::InternalLinkage);
+  auto *RTLoc = emitUpdateLocation(CGF, Loc);
+  auto &&CodeGen = [this, Fn, CapturedVars, RTLoc, Loc](CodeGenFunction &CGF) {
+    CGBuilderTy &Bld = CGF.Builder;
+    clang::ASTContext &Ctx = CGF.getContext();
+
+    Address IsFinal =
+        CGF.CreateTempAlloca(CGF.Int8Ty, CharUnits::fromQuantity(1),
+                             /*Name*/ "is_final");
+    Address WorkSource =
+        CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
+                             /*Name*/ "work_source");
+    Address LaneId =
+        CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
+                             /*Name*/ "lane_id");
+    Address NumLanes =
+        CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
+                             /*Name*/ "num_lanes");
+    llvm::APInt TaskBufferSize(/*numBits=*/32, SIMD_STATE_SIZE);
+    auto TaskBufferTy = Ctx.getConstantArrayType(
+        Ctx.CharTy, TaskBufferSize, ArrayType::Normal, /*IndexTypeQuals=*/0);
+    auto TaskState = CGF.CreateMemTemp(TaskBufferTy, CharUnits::fromQuantity(8),
+                                       /*Name=*/"task_state")
+                         .getPointer();
+    CGF.InitTempAlloca(IsFinal, Bld.getInt8(/*C=*/0));
+    CGF.InitTempAlloca(WorkSource, Bld.getInt32(/*C=*/-1));
+
+    llvm::BasicBlock *DoBodyBB = CGF.createBasicBlock(".do.body");
+    llvm::BasicBlock *ExecuteBB = CGF.createBasicBlock(".do.body.execute");
+    llvm::BasicBlock *DoCondBB = CGF.createBasicBlock(".do.cond");
+    llvm::BasicBlock *DoEndBB = CGF.createBasicBlock(".do.end");
+
+    CGF.EmitBranch(DoBodyBB);
+    CGF.EmitBlock(DoBodyBB);
+    auto ArrayDecay = Bld.CreateConstInBoundsGEP2_32(
+        llvm::ArrayType::get(CGM.Int8Ty, SIMD_STATE_SIZE), TaskState,
+        /*Idx0=*/0, /*Idx1=*/0);
+    llvm::Value *Args[] = {ArrayDecay, IsFinal.getPointer(),
+                           WorkSource.getPointer(), LaneId.getPointer(),
+                           NumLanes.getPointer()};
+    llvm::Value *IsActive = CGF.EmitRuntimeCall(
+        createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_convergent_simd),
+        Args);
+    Bld.CreateCondBr(IsActive, ExecuteBB, DoCondBB);
+
+    CGF.EmitBlock(ExecuteBB);
+    // OutlinedFn(&ID, CapturedStruct);
+    llvm::SmallVector<llvm::Value *, 16> OutlinedFnArgs;
+    OutlinedFnArgs.push_back(LaneId.getPointer());
+    OutlinedFnArgs.push_back(NumLanes.getPointer());
+    OutlinedFnArgs.append(CapturedVars.begin(), CapturedVars.end());
+    CGF.EmitCallOrInvoke(Fn, OutlinedFnArgs);
+    ArrayDecay = Bld.CreateConstInBoundsGEP2_32(
+        llvm::ArrayType::get(CGM.Int8Ty, SIMD_STATE_SIZE), TaskState,
+        /*Idx0=*/0, /*Idx1=*/0);
+    llvm::Value *EndArgs[] = {ArrayDecay};
+    CGF.EmitRuntimeCall(createNVPTXRuntimeFunction(
+                            OMPRTL_NVPTX__kmpc_kernel_end_convergent_simd),
+                        EndArgs);
+    CGF.EmitBranch(DoCondBB);
+
+    CGF.EmitBlock(DoCondBB);
+    llvm::Value *IsDone = Bld.CreateICmpEQ(Bld.CreateLoad(IsFinal),
+                                           Bld.getInt8(/*C=*/1), "is_done");
+    Bld.CreateCondBr(IsDone, DoEndBB, DoBodyBB);
+
+    CGF.EmitBlock(DoEndBB);
+  };
+  CodeGenFunction::RunCleanupsScope Scope(CGF);
+  CodeGen(CGF);
 }
 
 //
