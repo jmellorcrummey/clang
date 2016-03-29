@@ -633,6 +633,14 @@ void CGOpenMPRuntimeNVPTX::syncCTAThreads(CodeGenFunction &CGF) const {
   getNVPTXCTABarrier(CGF);
 }
 
+// \brief Get the value of the thread_limit clause in the teams directive.
+// The runtime always starts thread_limit+warpSize threads.
+llvm::Value *CGOpenMPRuntimeNVPTX::getThreadLimit(CodeGenFunction &CGF) const {
+  CGBuilderTy &Bld = CGF.Builder;
+  return Bld.CreateSub(getNVPTXNumThreads(CGF), getNVPTXWarpSize(CGF),
+                       "thread_limit");
+}
+
 //// \brief Emit code that allocates a memory chunk in global memory with size
 ///\a Size.
 // llvm::Value *CGOpenMPRuntimeNVPTX::emitMallocCall(CodeGenFunction &CGF,
@@ -846,21 +854,27 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
                                            WorkerFunctionState &WST) {
   CGBuilderTy &Bld = CGF.Builder;
 
-  // Get the master thread id.
-  llvm::Value *MasterID = getMasterThreadID(CGF);
-  // Current thread's identifier.
-  llvm::Value *ThreadID = getNVPTXThreadID(CGF);
-
   // Setup BBs in entry function.
   llvm::BasicBlock *WorkerCheckBB = CGF.createBasicBlock(".check.for.worker");
   llvm::BasicBlock *WorkerBB = CGF.createBasicBlock(".worker");
   llvm::BasicBlock *MasterBB = CGF.createBasicBlock(".master");
   EST.ExitBB = CGF.createBasicBlock(".sleepy.hollow");
 
+  // Get the thread limit.
+  llvm::Value *ThreadLimit = getThreadLimit(CGF);
+  // Get the master thread id.
+  llvm::Value *MasterID = getMasterThreadID(CGF);
+  // Current thread's identifier.
+  llvm::Value *ThreadID = getNVPTXThreadID(CGF);
+
   // The head (master thread) marches on while its body of companion threads in
-  // the warp go to sleep.
+  // the warp go to sleep.  Also put to sleep threads in excess of the
+  // thread_limit value on the teams directive.
+  llvm::Value *NotMaster = Bld.CreateICmpNE(ThreadID, MasterID, "not_master");
+  llvm::Value *ThreadLimitExcess =
+      Bld.CreateICmpUGE(ThreadID, ThreadLimit, "thread_limit_excess");
   llvm::Value *ShouldDie =
-      Bld.CreateICmpUGT(ThreadID, MasterID, "excess_in_master_warp");
+      Bld.CreateAnd(ThreadLimitExcess, NotMaster, "excess_threads");
   Bld.CreateCondBr(ShouldDie, EST.ExitBB, WorkerCheckBB);
 
   // Select worker threads...
@@ -886,7 +900,7 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
 
   // First action in sequential region:
   // Initialize the state of the OpenMP runtime library on the GPU.
-  llvm::Value *Args[] = {Bld.getInt32(/*OmpHandle=*/0), getNVPTXThreadID(CGF)};
+  llvm::Value *Args[] = {Bld.getInt32(/*OmpHandle=*/0), getThreadLimit(CGF)};
   CGF.EmitRuntimeCall(
       createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_init), Args);
 }
