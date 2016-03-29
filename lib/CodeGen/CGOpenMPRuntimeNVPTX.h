@@ -76,23 +76,28 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // \brief Return address of the initial slot that is used to share data.
   LValue getDataSharingRootSlotLValue(CodeGenFunction &CGF, bool IsMaster);
 
-//  // \brief Return the address where the address of the current slot is stored.
-//  LValue getSharedDataSlotPointerAddrLValue(CodeGenFunction &CGF,
-//                                            bool IsMaster);
-//
-//  // \brief Return the address of the current data sharing slot.
-//  LValue getSharedDataSlotPointerLValue(CodeGenFunction &CGF, bool IsMaster);
-//
-//  // \brief Return the address where the address of the current stack pointer
-//  // (in the current slot) is stored.
-//  LValue getSharedDataStackPointerAddrLValue(CodeGenFunction &CGF,
-//                                             bool IsMaster);
-//
-//  // \brief Return the address of the current data stack pointer.
-//  LValue getSharedDataStackPointerLValue(CodeGenFunction &CGF, bool IsMaster);
+  //  // \brief Return the address where the address of the current slot is
+  //  stored.
+  //  LValue getSharedDataSlotPointerAddrLValue(CodeGenFunction &CGF,
+  //                                            bool IsMaster);
+  //
+  //  // \brief Return the address of the current data sharing slot.
+  //  LValue getSharedDataSlotPointerLValue(CodeGenFunction &CGF, bool
+  //  IsMaster);
+  //
+  //  // \brief Return the address where the address of the current stack
+  //  pointer
+  //  // (in the current slot) is stored.
+  //  LValue getSharedDataStackPointerAddrLValue(CodeGenFunction &CGF,
+  //                                             bool IsMaster);
+  //
+  //  // \brief Return the address of the current data stack pointer.
+  //  LValue getSharedDataStackPointerLValue(CodeGenFunction &CGF, bool
+  //  IsMaster);
 
-  // \brief Initialize the data sharing slots and pointers.
-  void initializeSharedData(CodeGenFunction &CGF, bool IsMaster);
+  // \brief Initialize the data sharing slots and pointers and return the
+  // generated call.
+  llvm::CallInst *initializeSharedData(CodeGenFunction &CGF, bool IsMaster);
 
   // \brief Group the captures information for a given context.
   struct DataSharingInfo {
@@ -111,38 +116,64 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // \brief Obtain the data sharing info for the current context.
   const DataSharingInfo &getDataSharingInfo(const Decl *Context);
 
-  // \brief Map between a function and the local addresses that save the slot and stack pointers.
+  // \brief Map between a function and the local addresses that save the slot
+  // and stack pointers.
   struct DataSharingSavedAddresses {
     llvm::Value *SlotPtr;
     llvm::Value *StackPtr;
     llvm::Value *FramePtr;
     llvm::Value *ActiveThreads;
+    DataSharingSavedAddresses(llvm::Value *SlotPtr, llvm::Value *StackPtr,
+                              llvm::Value *FramePtr, llvm::Value *ActiveThreads)
+        : SlotPtr(SlotPtr), StackPtr(StackPtr), FramePtr(FramePtr),
+          ActiveThreads(ActiveThreads) {}
+    DataSharingSavedAddresses()
+        : SlotPtr(nullptr), StackPtr(nullptr), FramePtr(nullptr),
+          ActiveThreads(nullptr) {}
   };
   typedef llvm::DenseMap<llvm::Function *, DataSharingSavedAddresses>
       DataSharingSavedAddressesMapTy;
   DataSharingSavedAddressesMapTy DataSharingSavedAddressesMap;
 
-//  // \brief Map between the context and the LLVM function, useful to do the post-codegen replacements.
-//  typedef llvm::DenseMap<llvm::Function *, const Decl *> DataSharingFunctionToContextMapTy;
-//  DataSharingFunctionToContextMapTy DataSharingFunctionToContextMap;
+  // \brief Map between entry point functions and the data sharing
+  // initialization. This is useful to drive decisions that only make sense for
+  // entry points.
+  llvm::DenseMap<llvm::Function *, llvm::CallInst *> EntryPointDataSharingInit;
+
+  //  // \brief Map between the context and the LLVM function, useful to do the
+  //  post-codegen replacements.
+  //  typedef llvm::DenseMap<llvm::Function *, const Decl *>
+  //  DataSharingFunctionToContextMapTy;
+  //  DataSharingFunctionToContextMapTy DataSharingFunctionToContextMap;
 
   // \brief Set that keeps the pairs of values that need to be replaced when the
   // module is released.
-  typedef std::pair<llvm::Value *, llvm::Value *> DataSharingReplaceValue;
-  typedef std::set<DataSharingReplaceValue> DataSharingReplaceValuesTy;
+  struct DataSharingReplaceValue {
+    llvm::Value *From;
+    llvm::Value *To;
+    unsigned Align;
+    DataSharingReplaceValue(llvm::Value *From, llvm::Value *To, unsigned Align)
+        : From(From), To(To), Align(Align) {}
+    DataSharingReplaceValue() : From(nullptr), To(nullptr), Align(0u) {}
+  };
+  typedef SmallVector<DataSharingReplaceValue, 8> DataSharingReplaceValuesTy;
   DataSharingReplaceValuesTy DataSharingReplaceValues;
 
   // \brief Create the data sharing replacement pairs at the top of a function
   // with parallel regions. If they were created already, do not do anything.
   void createDataSharingPerFunctionInfrastructure(CodeGenFunction &CGF);
 
-  // \brief Create the data sharing arguments and call the parallel outlined function.
-  llvm::Function* createDataSharingParallelWrapper(llvm::Function &OutlinedParallelFn, const CapturedStmt &CS);
+  // \brief Create the data sharing arguments and call the parallel outlined
+  // function.
+  llvm::Function *
+  createDataSharingParallelWrapper(llvm::Function &OutlinedParallelFn,
+                                   const CapturedStmt &CS);
 
   // \brief Map between an outlined function and its data-sharing-wrap version.
   llvm::DenseMap<llvm::Function *, llvm::Function *> WrapperFunctionsMap;
 
-  // \brief Context that is being currently used for purposes of parallel region code generarion.
+  // \brief Context that is being currently used for purposes of parallel region
+  // code generarion.
   const Decl *CurrentParallelContext = nullptr;
 
   //
@@ -154,6 +185,9 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
 
   /// \brief Get the id of the current thread on the GPU.
   llvm::Value *getNVPTXThreadID(CodeGenFunction &CGF) const;
+
+  /// \brief Get the id of the current thread in the Warp.
+  llvm::Value *getNVPTXThreadWarpID(CodeGenFunction &CGF) const;
 
   /// \brief Get the id of the current block on the GPU.
   llvm::Value *getNVPTXBlockID(CodeGenFunction &CGF) const;
@@ -410,7 +444,6 @@ public:
   /// was emitted in the current module and return the function that registers
   /// it. We take advantage of this hook to do data sharing replacements.
   llvm::Function *emitRegistrationFunction() override;
-
 };
 
 } // CodeGen namespace.
