@@ -5504,8 +5504,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         // Insert memfence here.
         Bld.CreateBr(CGF.EndRegionS1);
         Bld.SetInsertPoint(CGF.EndRegionS1);
-        Bld.CreateCall(Get_memfence());
-        //Bld.CreateCall(Get_syncthreads());
+        //Bld.CreateCall(Get_memfence());
+        Bld.CreateCall(Get_syncthreads());
         Bld.CreateBr(ParallelRegionCG);
         Bld.SetInsertPoint(ParallelRegionCG);
 
