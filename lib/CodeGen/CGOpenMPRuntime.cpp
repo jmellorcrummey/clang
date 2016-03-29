@@ -4225,7 +4225,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // If no special combination of directives was encountered then
     // include control loop specific exit code.
-    if (!CGF.isSimplifiedConstructs){
+    if (!CGF.isSimplifiedConstruct){
       ExitTargetControlLoop(Loc, CGF, prevIsParallel, TgtFunName, SKind);
     }
     Bld.SetInsertPoint(EndTarget);
