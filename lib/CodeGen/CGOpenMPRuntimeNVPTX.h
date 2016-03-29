@@ -222,6 +222,10 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // \brief Synchronize all GPU threads in a block.
   void syncCTAThreads(CodeGenFunction &CGF) const;
 
+  // \brief Get the value of the thread_limit clause in the teams directive.
+  // The runtime always starts thread_limit + warpSize threads.
+  llvm::Value *getThreadLimit(CodeGenFunction &CGF) const;
+
   //  // \brief Emit code that allocates a memory chunk in global memory with
   //  size \a Size.
   //  llvm::Value *emitMallocCall(CodeGenFunction &CGF, QualType DataTy,

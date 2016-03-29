@@ -2524,22 +2524,34 @@ void CodeGenFunction::EmitOMPDistributeLoop(const OMPDistributeDirective &S) {
       incrementProfileCounter(&S);
     }
 
+
+    OMPPrivateScope LoopScope(*this);
+
+     // Emit helper vars inits.
+     LValue LB =
+         EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getLowerBoundVariable()));
+     LValue UB =
+         EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getUpperBoundVariable()));
+     LValue ST =
+         EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getStrideVariable()));
+     LValue IL =
+         EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getIsLastIterVariable()));
+
     // Emit 'then' code.
     {
-      // Emit helper vars inits.
-      LValue LB =
-          EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getLowerBoundVariable()));
-      LValue UB =
-          EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getUpperBoundVariable()));
-      LValue ST =
-          EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getStrideVariable()));
-      LValue IL =
-          EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getIsLastIterVariable()));
-
-      OMPPrivateScope LoopScope(*this);
-      emitPrivateLoopCounters(*this, LoopScope, S.counters(),
-                              S.private_counters());
-      (void)LoopScope.Privatize();
+       if (EmitOMPFirstprivateClause(S, LoopScope)) {
+         // Emit implicit barrier to synchronize threads and avoid data races on
+         // initialization of firstprivate variables and post-update of
+         // lastprivate variables.
+         CGM.getOpenMPRuntime().emitBarrierCall(
+             *this, S.getLocStart(), OMPD_unknown, /*EmitChecks=*/false,
+             /*ForceSimpleCall=*/true);
+       }
+       EmitOMPPrivateClause(S, LoopScope);
+       emitPrivateLoopCounters(*this, LoopScope, S.counters(),
+                               S.private_counters());
+       emitPrivateLinearVars(*this, S, LoopScope);
+       (void)LoopScope.Privatize();
 
       // Detect the distribute schedule kind and chunk.
       llvm::Value *Chunk = nullptr;

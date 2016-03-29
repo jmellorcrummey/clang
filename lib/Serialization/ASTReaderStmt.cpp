@@ -2307,6 +2307,8 @@ void ASTStmtReader::VisitOMPLoopDirective(OMPLoopDirective *D) {
   D->setPreCond(Reader.ReadSubExpr());
   D->setCond(Reader.ReadSubExpr());
   D->setInit(Reader.ReadSubExpr());
+  D->setLaneInit(Reader.ReadSubExpr());
+  D->setNumLanes(Reader.ReadSubExpr());
   D->setInc(Reader.ReadSubExpr());
   if (isOpenMPWorksharingDirective(D->getDirectiveKind()) ||
       isOpenMPTaskLoopDirective(D->getDirectiveKind()) ||

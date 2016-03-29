@@ -17,7 +17,6 @@
 #include "CodeGenFunction.h"
 #include "clang/AST/DeclOpenMP.h"
 #include "clang/AST/StmtOpenMP.h"
-#include "llvm/Support/Format.h"
 
 using namespace clang;
 using namespace CodeGen;
@@ -490,6 +489,14 @@ void CGOpenMPRuntimeNVPTX::syncCTAThreads(CodeGenFunction &CGF) const {
   getNVPTXCTABarrier(CGF);
 }
 
+// \brief Get the value of the thread_limit clause in the teams directive.
+// The runtime always starts thread_limit+warpSize threads.
+llvm::Value *CGOpenMPRuntimeNVPTX::getThreadLimit(CodeGenFunction &CGF) const {
+  CGBuilderTy &Bld = CGF.Builder;
+  return Bld.CreateSub(getNVPTXNumThreads(CGF), getNVPTXWarpSize(CGF),
+                       "thread_limit");
+}
+
 /// \brief Get the thread id of the OMP master thread.
 /// The master thread id is the first thread (lane) of the last warp in the
 /// GPU block.  Warp size is assumed to be some power of 2.
@@ -519,8 +526,9 @@ llvm::Value *CGOpenMPRuntimeNVPTX::getNumWorkers(CodeGenFunction &CGF) {
 /// FIXME: Remove the expensive remainder operation.
 llvm::Value *CGOpenMPRuntimeNVPTX::getTeamThreadId(CodeGenFunction &CGF) {
   CGBuilderTy &Bld = CGF.Builder;
-  return Bld.CreateURem(getNVPTXThreadID(CGF), getMasterThreadID(CGF),
-                        "team_tid");
+  // N % M = N & (M-1) it M is a power of 2. The master Id is expected to be a power fo two in all cases.
+  auto *Mask = Bld.CreateNUWSub(getMasterThreadID(CGF), Bld.getInt32(1));
+  return Bld.CreateAnd(getNVPTXThreadID(CGF), Mask, "team_tid");
 }
 
 /// \brief Get global thread id.
@@ -661,28 +669,33 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
                                            WorkerFunctionState &WST) {
   CGBuilderTy &Bld = CGF.Builder;
 
+  // Setup BBs in entry function.
+  llvm::BasicBlock *WorkerCheckBB = CGF.createBasicBlock(".check.for.worker");
+  llvm::BasicBlock *WorkerBB = CGF.createBasicBlock(".worker");
+  llvm::BasicBlock *MasterBB = CGF.createBasicBlock(".master");
+  EST.ExitBB = CGF.createBasicBlock(".sleepy.hollow");
+
+  // Get the thread limit.
+  llvm::Value *ThreadLimit = getThreadLimit(CGF);
   // Get the master thread id.
   llvm::Value *MasterID = getMasterThreadID(CGF);
   // Current thread's identifier.
   llvm::Value *ThreadID = getNVPTXThreadID(CGF);
 
-  // Setup BBs in entry function.
-  llvm::BasicBlock *MasterCheckBB = CGF.createBasicBlock(".check.if.master");
-  llvm::BasicBlock *WorkerBB = CGF.createBasicBlock(".worker");
-  llvm::BasicBlock *MasterBB = CGF.createBasicBlock(".master");
-  EST.ExitBB = CGF.createBasicBlock(".sleepy.hollow");
-
   // The head (master thread) marches on while its body of companion threads in
-  // the warp go to sleep. Threads should die if greater than the
-  // NumberOfThreadsInBLock-32 and not the MasterID.
-  auto *WorkersCap = Bld.CreateNUWSub(getNVPTXNumThreads(CGF), Bld.getInt32(32));
-  auto *IsWorker = Bld.CreateICmpULT(ThreadID, WorkersCap, "is_worker");
+  // the warp go to sleep.  Also put to sleep threads in excess of the
+  // thread_limit value on the teams directive.
+  llvm::Value *NotMaster = Bld.CreateICmpNE(ThreadID, MasterID, "not_master");
+  llvm::Value *ThreadLimitExcess =
+      Bld.CreateICmpUGE(ThreadID, ThreadLimit, "thread_limit_excess");
+  llvm::Value *ShouldDie =
+      Bld.CreateAnd(ThreadLimitExcess, NotMaster, "excess_threads");
+  Bld.CreateCondBr(ShouldDie, EST.ExitBB, WorkerCheckBB);
 
-  Bld.CreateCondBr(IsWorker, WorkerBB, MasterCheckBB);
-
-  CGF.EmitBlock(MasterCheckBB);
-  auto *IsMaster = Bld.CreateICmpEQ(ThreadID, MasterID, "is_master");
-  Bld.CreateCondBr(IsMaster, MasterBB, EST.ExitBB);
+  // Select worker threads...
+  CGF.EmitBlock(WorkerCheckBB);
+  llvm::Value *IsWorker = Bld.CreateICmpULT(ThreadID, MasterID, "is_worker");
+  Bld.CreateCondBr(IsWorker, WorkerBB, MasterBB);
 
   // ... and send to worker loop, awaiting parallel invocation.
   CGF.EmitBlock(WorkerBB);
@@ -703,7 +716,7 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
 
   // First action in sequential region:
   // Initialize the state of the OpenMP runtime library on the GPU.
-  llvm::Value *Args[] = {Bld.getInt32(/*OmpHandle=*/0), getNVPTXThreadID(CGF)};
+  llvm::Value *Args[] = {Bld.getInt32(/*OmpHandle=*/0), getThreadLimit(CGF)};
   CGF.EmitRuntimeCall(
       createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_init), Args);
 }
