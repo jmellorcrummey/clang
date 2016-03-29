@@ -2517,7 +2517,7 @@ void CodeGenFunction::EmitOMPDirectiveWithTarget(OpenMPDirectiveKind DKind,
         CGM.getOpenMPRuntime().EnterTargetLoop(CS->getLocStart(), CGF,
             FD->getName(), DKind, SKind, S);
 
-      printf("Apply isSimplifiedCodeGen = %d\n", isSimplifiedCodeGen);
+      printf("Apply isSimplifiedCodeGen ==============>>> %d\n", CGF.isSimplifiedConstruct);
       if (!CGF.isSimplifiedConstruct){
         // Emit the contents of the target region
         switch (SKind) {
