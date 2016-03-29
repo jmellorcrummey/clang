@@ -4366,13 +4366,15 @@ void CGOpenMPRuntime::emitTargetOutlinedFunction(
   const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
 
   // Emit target region as a standalone region.
-  auto &&CodeGen = [&CS, &D](CodeGenFunction &CGF) {
+  auto &&CodeGen = [&CS, &D, this](CodeGenFunction &CGF) {
     CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
     (void)CGF.EmitOMPFirstprivateClause(D, PrivateScope);
     CGF.EmitOMPPrivateClause(D, PrivateScope);
     (void)PrivateScope.Privatize();
 
+    GenerationRelatedWithTargetRegion = true;
     CGF.EmitStmt(CS.getCapturedStmt());
+    GenerationRelatedWithTargetRegion = false;
   };
 
   emitTargetOutlinedFunctionHelper(D, ParentName, OutlinedFn, OutlinedFnID,
