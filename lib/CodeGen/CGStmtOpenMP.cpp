@@ -2520,6 +2520,7 @@ void CodeGenFunction::EmitOMPDirectiveWithTarget(OpenMPDirectiveKind DKind,
       bool isSimplifiedCodeGen = CGF.combined ||
                                  CGF.combinedSimd ||
                                  CGF.distributedParallel;
+      printf("Apply isSimplifiedCodeGen = %d\n", isSimplifiedCodeGen);
       if (!isSimplifiedCodeGen){
         // Emit the contents of the target region
         switch (SKind) {
@@ -2552,7 +2553,7 @@ void CodeGenFunction::EmitOMPDirectiveWithTarget(OpenMPDirectiveKind DKind,
           break;
         }
       }
-
+      printf("===> EmitOMPDirectiveWithTarget: Finished handling of construct\n");
       if (isTargetMode)
         // at the end of the target region, set next label as the finishing case
         // note that we need to understand if we are in a sequential or parallel
@@ -2562,7 +2563,7 @@ void CodeGenFunction::EmitOMPDirectiveWithTarget(OpenMPDirectiveKind DKind,
                                               SKind);
       CGF.FinishFunction();
     }
-
+    printf("===> EmitOMPDirectiveWithTarget: Finished block handling the pragma combination\n");
     HasTeams = CGM.OpenMPSupport.getTeams();
     NumTeamsExpr = CGM.OpenMPSupport.getNumTeams();
     ThreadLimitExpr = CGM.OpenMPSupport.getThreadLimit();
