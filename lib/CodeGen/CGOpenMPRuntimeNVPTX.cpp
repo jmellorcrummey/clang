@@ -35,33 +35,24 @@ enum OpenMPRTLFunctionNVPTX {
   // Call to void __kmpc_end_serialized_parallel(ident_t *loc, kmp_int32
   // global_tid);
   OMPRTL_NVPTX__kmpc_end_serialized_parallel,
-  /// \brief Call to void __kmpc_kernel_prepare_parallel(
-  /// void *outlined_function, void **args, kmp_int32 nArgs);
+  /// \brief Call to void __kmpc_kernel_prepare_parallel(void *outlined_function);
   OMPRTL_NVPTX__kmpc_kernel_prepare_parallel,
-  /// \brief Call to bool __kmpc_kernel_parallel(
-  /// void **outlined_function, void **args);
+  /// \brief Call to bool __kmpc_kernel_parallel(void **outlined_function);
   OMPRTL_NVPTX__kmpc_kernel_parallel,
   /// \brief Call to void __kmpc_kernel_end_parallel();
   OMPRTL_NVPTX__kmpc_kernel_end_parallel,
-  /// \brief Call to bool __kmpc_kernel_convergent_parallel(
-  /// void *buffer, bool *IsFinal, kmpc_int32 *LaneSource);
+  /// \brief Call to bool __kmpc_kernel_convergent_parallel(void *buffer, bool *IsFinal, kmpc_int32 *LaneSource);
   OMPRTL_NVPTX__kmpc_kernel_convergent_parallel,
-  /// \brief Call to void __kmpc_kernel_end_convergent_parallel(
-  /// void *buffer);
+  /// \brief Call to void __kmpc_kernel_end_convergent_parallel(void *buffer);
   OMPRTL_NVPTX__kmpc_kernel_end_convergent_parallel,
   /// \brief Call to bool __kmpc_kernel_convergent_simd(
   /// void *buffer, bool *IsFinal, kmpc_int32 *LaneSource, kmpc_int32 *LaneId,
   /// kmpc_int32 *NumLanes);
   OMPRTL_NVPTX__kmpc_kernel_convergent_simd,
-  /// \brief Call to void __kmpc_kernel_end_convergent_simd(
-  /// void *buffer);
+  /// \brief Call to void __kmpc_kernel_end_convergent_simd(void *buffer);
   OMPRTL_NVPTX__kmpc_kernel_end_convergent_simd,
   /// \brief Call to int32_t __kmpc_warp_active_thread_mask();
   OMPRTL_NVPTX__kmpc_warp_active_thread_mask,
-  //  /// \brief Call to void * malloc(size_t size);
-  //  OMPRTL_NVPTX__malloc,
-  //  /// \brief Call to void free(void *ptr);
-  //  OMPRTL_NVPTX__free,
   /// \brief Call to void
   /// __kmpc_initialize_data_sharing_environment(__kmpc_data_sharing_slot
   /// *RootS, size_t InitialDataSize);
@@ -104,6 +95,8 @@ enum DATA_SHARING_SIZES {
       (~0u >> (32 - DS_Max_Worker_Warp_Size_Log2)),
   // The slot size that should be reserved for a working warp.
   DS_Worker_Warp_Slot_Size = DS_Max_Worker_Warp_Size * DS_Slot_Size,
+  // the maximum number of teams.
+  DS_Max_Teams = 1024
 };
 
 } // namespace
@@ -150,19 +143,21 @@ CGOpenMPRuntimeNVPTX::getParallelismLevel(CodeGenFunction &CGF) const {
 
 // \brief Increase the value of parallelism level for the current thread.
 void CGOpenMPRuntimeNVPTX::increaseParallelismLevel(
-    CodeGenFunction &CGF) const {
+    CodeGenFunction &CGF, bool IsSimd) const {
+  unsigned Increment = IsSimd ? 10 : 1;
   auto Addr = getParallelismLevelLValue(CGF);
   auto *CurVal = CGF.EmitLoadOfLValue(Addr, SourceLocation()).getScalarVal();
-  auto *NewVal = CGF.Builder.CreateNSWAdd(CurVal, CGF.Builder.getInt32(1));
+  auto *NewVal = CGF.Builder.CreateNSWAdd(CurVal, CGF.Builder.getInt32(Increment));
   CGF.EmitStoreOfScalar(NewVal, Addr);
 }
 
 // \brief Decrease the value of parallelism level for the current thread.
 void CGOpenMPRuntimeNVPTX::decreaseParallelismLevel(
-    CodeGenFunction &CGF) const {
+    CodeGenFunction &CGF, bool IsSimd) const {
+  unsigned Increment = IsSimd ? 10 : 1;
   auto Addr = getParallelismLevelLValue(CGF);
   auto *CurVal = CGF.EmitLoadOfLValue(Addr, SourceLocation()).getScalarVal();
-  auto *NewVal = CGF.Builder.CreateNSWSub(CurVal, CGF.Builder.getInt32(1));
+  auto *NewVal = CGF.Builder.CreateNSWSub(CurVal, CGF.Builder.getInt32(Increment));
   CGF.EmitStoreOfScalar(NewVal, Addr);
 }
 
@@ -291,7 +286,10 @@ QualType CGOpenMPRuntimeNVPTX::getDataSharingRootSlotQty() {
                                     getDataSharingWorkerWarpSlotQty(), NumElems,
                                     ArrayType::Normal, /*IndexTypeQuals=*/0));
     RD->completeDefinition();
-    DataSharingRootSlotQty = C.getRecordType(RD);
+
+    llvm::APInt NumTeams(C.getTypeSize(C.getUIntPtrType()), DS_Max_Teams);
+    DataSharingRootSlotQty = C.getConstantArrayType(C.getRecordType(RD), NumTeams,
+        ArrayType::Normal, /*IndexTypeQuals=*/0);
   }
   return DataSharingRootSlotQty;
 }
@@ -317,6 +315,7 @@ LValue CGOpenMPRuntimeNVPTX::getDataSharingRootSlotLValue(CodeGenFunction &CGF,
   // slots.
   if (IsMaster) {
     llvm::Value *Idx[] = {llvm::Constant::getNullValue(CGM.Int32Ty),
+                          getNVPTXBlockID(CGF),
                           llvm::Constant::getNullValue(CGM.Int32Ty)};
     llvm::Value *AddrVal = CGF.Builder.CreateInBoundsGEP(Gbl, Idx);
     return CGF.MakeNaturalAlignAddrLValue(AddrVal,
@@ -324,141 +323,12 @@ LValue CGOpenMPRuntimeNVPTX::getDataSharingRootSlotLValue(CodeGenFunction &CGF,
   }
 
   auto *WarpID = getNVPTXWarpID(CGF);
-  llvm::Value *Idx[] = {llvm::Constant::getNullValue(CGM.Int32Ty),
+  llvm::Value *Idx[] = {llvm::Constant::getNullValue(CGM.Int32Ty), getNVPTXBlockID(CGF),
                         /*WS=*/CGF.Builder.getInt32(1), WarpID};
   llvm::Value *AddrVal = CGF.Builder.CreateInBoundsGEP(Gbl, Idx);
   return CGF.MakeNaturalAlignAddrLValue(AddrVal,
                                         getDataSharingWorkerWarpSlotQty());
 }
-
-//// \brief Return the address where the address of the current slot is stored.
-// LValue
-// CGOpenMPRuntimeNVPTX::getSharedDataSlotPointerAddrLValue(CodeGenFunction
-// &CGF,
-//                                                         bool IsMaster) {
-//  auto &M = CGM.getModule();
-//  auto &C = CGM.getContext();
-//
-//  if (IsMaster) {
-//    const char *Name =
-//    "__openmp_nvptx_shared_data_current_master_slot_pointer";
-//    auto QTy = C.getPointerType(getDataSharingSlotQty());
-//    llvm::GlobalVariable *Gbl = M.getGlobalVariable(Name);
-//
-//    if (!Gbl) {
-//      auto *Ty = CGF.getTypes().ConvertTypeForMem(QTy);
-//      Gbl = new llvm::GlobalVariable(
-//          M, Ty,
-//          /*isConstant=*/false, llvm::GlobalVariable::CommonLinkage,
-//          llvm::Constant::getNullValue(Ty), Name,
-//          /*InsertBefore=*/nullptr, llvm::GlobalVariable::NotThreadLocal,
-//          ADDRESS_SPACE_SHARED);
-//    }
-//    return CGF.MakeNaturalAlignAddrLValue(Gbl, QTy);
-//  }
-//
-//  const char *Name =
-//      "__openmp_nvptx_shared_data_current_worker_warp_slot_pointers";
-//  auto QTy = C.getPointerType(getDataSharingSlotQty());
-//  llvm::GlobalVariable *Gbl = M.getGlobalVariable(Name);
-//
-//  if (!Gbl) {
-//    auto *ElemTy = CGF.getTypes().ConvertTypeForMem(QTy);
-//    auto *Ty = llvm::ArrayType::get(ElemTy, DS_Max_Worker_Threads /
-//                                                DS_Max_Worker_Warp_Size);
-//    Gbl = new llvm::GlobalVariable(
-//        M, Ty,
-//        /*isConstant=*/false, llvm::GlobalVariable::CommonLinkage,
-//        llvm::Constant::getNullValue(Ty), Name,
-//        /*InsertBefore=*/nullptr, llvm::GlobalVariable::NotThreadLocal,
-//        ADDRESS_SPACE_SHARED);
-//  }
-//
-//  llvm::Value *Idx[] = {llvm::Constant::getNullValue(CGM.Int32Ty),
-//                        getNVPTXWarpID(CGF)};
-//  auto *AddrVal = CGF.Builder.CreateInBoundsGEP(Gbl, Idx);
-//  return CGF.MakeNaturalAlignAddrLValue(AddrVal, QTy);
-//}
-//
-//// \brief Return the address of the current data sharing slot.
-// LValue
-// CGOpenMPRuntimeNVPTX::getSharedDataSlotPointerLValue(CodeGenFunction &CGF,
-//                                                     bool IsMaster) {
-//  auto AddrLValue = getSharedDataSlotPointerAddrLValue(CGF, IsMaster);
-//  auto *Val = CGF.EmitLoadOfLValue(AddrLValue,
-//  SourceLocation()).getScalarVal();
-//  auto QTy = getDataSharingSlotQty(IsMaster);
-//  return CGF.MakeNaturalAlignAddrLValue(Val, QTy);
-//}
-//
-//// \brief Return the address where the address of the current stack pointer
-///(in
-//// the current slot) is stored.
-// LValue
-// CGOpenMPRuntimeNVPTX::getSharedDataStackPointerAddrLValue(CodeGenFunction
-// &CGF,
-//                                                          bool IsMaster) {
-//  auto &M = CGM.getModule();
-//  auto &C = CGM.getContext();
-//
-//  if (IsMaster) {
-//    const char *Name =
-//        "__openmp_nvptx_shared_data_current_master_stack_pointer";
-//    llvm::GlobalVariable *Gbl = M.getGlobalVariable(Name);
-//
-//    if (!Gbl) {
-//      Gbl = new llvm::GlobalVariable(
-//          M, CGF.VoidPtrTy,
-//          /*isConstant=*/false, llvm::GlobalVariable::CommonLinkage,
-//          llvm::Constant::getNullValue(CGF.VoidPtrTy), Name,
-//          /*InsertBefore=*/nullptr, llvm::GlobalVariable::NotThreadLocal,
-//          ADDRESS_SPACE_SHARED);
-//    }
-//    return CGF.MakeNaturalAlignAddrLValue(Gbl, C.VoidPtrTy);
-//  }
-//
-//  const char *Name =
-//      "__openmp_nvptx_shared_data_current_worker_warp_stack_pointers";
-//  llvm::GlobalVariable *Gbl = M.getGlobalVariable(Name);
-//
-//  if (!Gbl) {
-//    auto *ElemTy = CGF.VoidPtrTy;
-//    auto *Ty = llvm::ArrayType::get(ElemTy, DS_Max_Worker_Threads /
-//                                                DS_Max_Worker_Warp_Size);
-//    Gbl = new llvm::GlobalVariable(
-//        M, Ty,
-//        /*isConstant=*/false, llvm::GlobalVariable::CommonLinkage,
-//        llvm::Constant::getNullValue(Ty), Name,
-//        /*InsertBefore=*/nullptr, llvm::GlobalVariable::NotThreadLocal,
-//        ADDRESS_SPACE_SHARED);
-//  }
-//
-//  llvm::Value *Idx[] = {llvm::Constant::getNullValue(CGM.Int32Ty),
-//                        getNVPTXWarpID(CGF)};
-//  auto *AddrVal = CGF.Builder.CreateInBoundsGEP(Gbl, Idx);
-//  return CGF.MakeNaturalAlignAddrLValue(AddrVal, C.VoidPtrTy);
-//}
-//
-//// \brief Return the address of the current data stack pointer.
-// LValue
-// CGOpenMPRuntimeNVPTX::getSharedDataStackPointerLValue(CodeGenFunction &CGF,
-//                                                      bool IsMaster) {
-//  auto AddrLValue = getSharedDataSlotPointerAddrLValue(CGF, IsMaster);
-//  auto *Val = CGF.EmitLoadOfLValue(AddrLValue,
-//  SourceLocation()).getScalarVal();
-//  return CGF.MakeNaturalAlignAddrLValue(Val, CGF.getContext().VoidTy);
-//}
-
-//// \brief Cast a pointer to a given address space, being the generic address
-//// space the default.
-// static llvm::Value *CastToAddressSpace(CodeGenFunction &CGF, llvm::Value
-// *Addr,
-//                                       unsigned AddressSpace = 0) {
-//  auto *Ty = Addr->getType();
-//  auto *NewTy =
-//      cast<llvm::PointerType>(Ty)->getElementType()->getPointerTo(AddressSpace);
-//  return CGF.Builder.CreateAddrSpaceCast(Addr, NewTy);
-//}
 
 // \brief Initialize the data sharing slots and pointers.
 llvm::CallInst *CGOpenMPRuntimeNVPTX::initializeSharedData(CodeGenFunction &CGF,
@@ -494,32 +364,6 @@ llvm::CallInst *CGOpenMPRuntimeNVPTX::initializeSharedData(CodeGenFunction &CGF,
       createNVPTXRuntimeFunction(
           OMPRTL_NVPTX__kmpc_initialize_data_sharing_environment),
       Args);
-
-  //  auto SlotPtrQTy =
-  //      Ctx.getPointerType(getDataSharingSlotQty(IsMaster));
-  //  auto *SlotPtrTy = CGF.getTypes().ConvertTypeForMem(SlotPtrQTy);
-  //  auto SlotPtr = Bld.CreateBitCast(SlotLV.getAddress(), SlotPtrTy);
-  //  CGF.EmitStoreOfScalar(SlotPtr.getPointer(), SlotPtrLV);
-  //
-  //  auto StackPtrLV = getSharedDataStackPointerAddrLValue(CGF, IsMaster);
-  //  llvm::Value *Idx2[] = {Bld.getInt32(0), /*Data=*/Bld.getInt32(2),
-  //                         Bld.getInt32(0)};
-  //  auto *StackPtr = Bld.CreateInBoundsGEP(SlotLV.getPointer(), Idx2);
-  //  CGF.EmitStoreOfScalar(StackPtr, StackPtrLV);
-  //
-  //  // Initialize the DataEnd ( DataEnd = &Data[0] + Size).
-  //  auto *Base = Bld.CreatePtrToInt(StackPtr, CGF.IntPtrTy);
-  //  auto *Size = llvm::ConstantInt::get(CGF.IntPtrTy, IsMaster ? DS_Slot_Size
-  //          : DS_Worker_Warp_Slot_Size);
-  //  auto *DataEndVal = Bld.CreateNUWAdd(Base, Size);
-  //  DataEndVal = Bld.CreateIntToPtr(DataEndVal, CGF.VoidPtrTy);
-  //
-  //  llvm::Value *Idx[] = {llvm::Constant::getNullValue(CGM.Int32Ty),
-  //                        /*DataEnd=*/Bld.getInt32(1)};
-  //  auto *DataEndAddr = Bld.CreateGEP(SlotLV.getPointer(), Idx);
-  //  auto DataEndLV = CGF.MakeNaturalAlignAddrLValue(DataEndAddr,
-  //  Ctx.VoidPtrTy);
-  //  CGF.EmitStoreOfScalar(DataEndVal,DataEndLV);
 
   CGF.EmitBlock(EndBB);
   return Call;
@@ -646,27 +490,6 @@ void CGOpenMPRuntimeNVPTX::syncCTAThreads(CodeGenFunction &CGF) const {
   getNVPTXCTABarrier(CGF);
 }
 
-//// \brief Emit code that allocates a memory chunk in global memory with size
-///\a Size.
-// llvm::Value *CGOpenMPRuntimeNVPTX::emitMallocCall(CodeGenFunction &CGF,
-// QualType DataTy, llvm::Value *Size) {
-//  CGBuilderTy &Bld = CGF.Builder;
-//  auto *Ptr =
-//  CGF.EmitRuntimeCall(createNVPTXRuntimeFunction(OMPRTL_NVPTX__malloc), Size,
-//  "malloc_ptr");
-//  auto *Ty =
-//  CGF.getTypes().ConvertTypeForMem(CGF.getContext().getPointerType(DataTy));
-//  return Bld.CreateBitOrPointerCast(Ptr, Ty);
-//}
-//
-//// \brief Deallocates the memory chunk pointed by \a Ptr;
-// void CGOpenMPRuntimeNVPTX::emitFreeCall(CodeGenFunction &CGF, llvm::Value
-// *Ptr){
-//  CGBuilderTy &Bld = CGF.Builder;
-//  Ptr = Bld.CreateBitOrPointerCast(Ptr, CGF.VoidPtrTy);
-//  CGF.EmitRuntimeCall(createNVPTXRuntimeFunction(OMPRTL_NVPTX__free), Ptr);
-//}
-
 /// \brief Get the thread id of the OMP master thread.
 /// The master thread id is the first thread (lane) of the last warp in the
 /// GPU block.  Warp size is assumed to be some power of 2.
@@ -689,7 +512,7 @@ llvm::Value *CGOpenMPRuntimeNVPTX::getMasterThreadID(CodeGenFunction &CGF) {
 /// the master warp.
 llvm::Value *CGOpenMPRuntimeNVPTX::getNumWorkers(CodeGenFunction &CGF) {
   CGBuilderTy &Bld = CGF.Builder;
-  return Bld.CreateAdd(getMasterThreadID(CGF), Bld.getInt32(0), "num_workers");
+  return Bld.CreateNUWSub(getNVPTXNumThreads(CGF), Bld.getInt32(32), "num_workers");
 }
 
 /// \brief Get thread id in team.
@@ -764,14 +587,12 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
 
   Address WorkFn = CGF.CreateTempAlloca(
       CGF.Int8PtrTy, CharUnits::fromQuantity(8), /*Name*/ "work_fn");
-  Address WorkArgs = CGF.CreateTempAlloca(
-      CGF.Int8PtrTy, CharUnits::fromQuantity(8), /*Name*/ "work_args");
   Address ExecStatus =
         CGF.CreateTempAlloca(CGF.Int8Ty, CharUnits::fromQuantity(1),
                              /*Name*/ "exec_status");
   CGF.InitTempAlloca(ExecStatus, Bld.getInt8(/*C=*/0));
 
-  llvm::Value *Args[] = {WorkFn.getPointer(), WorkArgs.getPointer()};
+  llvm::Value *Args[] = {WorkFn.getPointer()};
   llvm::Value *Ret = CGF.EmitRuntimeCall(
       createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_parallel), Args);
   Bld.CreateStore(Bld.CreateZExt(Ret, CGF.Int8Ty), ExecStatus);
@@ -806,31 +627,10 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
     // Execute this outlined function.
     CGF.EmitBlock(ExecuteFNBB);
 
-    //
-    //
-    // Get the arguments from block master to worker.
-    //
-    //
-
-    //    llvm::SmallVector<llvm::Value *, 20> FnArgs;
-    //    // First two arguments are not used on the device.
-    //    Address ZeroAddr =
-    //        CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
-    //                             /*Name*/ ".zero.addr");
-    //    CGF.InitTempAlloca(ZeroAddr, CGF.Builder.getInt32(/*C*/ 0));
-    //    FnArgs.push_back(ZeroAddr.getPointer());
-    //    FnArgs.push_back(llvm::Constant::getNullValue(CGM.Int32Ty->getPointerTo()));
-
-    // Cast the shared memory structure work_args and pass it as the third
-    // argument, i.e., the capture structure.
+    // Insert call to work function. We pass the master has source thread ID.
     auto Fn = cast<llvm::Function>(W);
-    //    auto CaptureType = std::next(std::next(Fn->arg_begin()))->getType();
-    //    auto Capture = Bld.CreateBitCast(Bld.CreateLoad(WorkArgs),
-    //    CaptureType);
-    //    FnArgs.push_back(Capture);
-
-    // Insert call to work function.
-    CGF.EmitCallOrInvoke(Fn, None);
+    llvm::Value *Args[] = {getMasterThreadID(CGF)};
+    CGF.EmitCallOrInvoke(Fn,  Args);
 
     // Go to end of parallel region.
     CGF.EmitBranch(TerminateBB);
@@ -867,21 +667,22 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
   llvm::Value *ThreadID = getNVPTXThreadID(CGF);
 
   // Setup BBs in entry function.
-  llvm::BasicBlock *WorkerCheckBB = CGF.createBasicBlock(".check.for.worker");
+  llvm::BasicBlock *MasterCheckBB = CGF.createBasicBlock(".check.if.master");
   llvm::BasicBlock *WorkerBB = CGF.createBasicBlock(".worker");
   llvm::BasicBlock *MasterBB = CGF.createBasicBlock(".master");
   EST.ExitBB = CGF.createBasicBlock(".sleepy.hollow");
 
   // The head (master thread) marches on while its body of companion threads in
-  // the warp go to sleep.
-  llvm::Value *ShouldDie =
-      Bld.CreateICmpUGT(ThreadID, MasterID, "excess_in_master_warp");
-  Bld.CreateCondBr(ShouldDie, EST.ExitBB, WorkerCheckBB);
+  // the warp go to sleep. Threads should die if greater than the
+  // NumberOfThreadsInBLock-32 and not the MasterID.
+  auto *WorkersCap = Bld.CreateNUWSub(getNVPTXNumThreads(CGF), Bld.getInt32(32));
+  auto *IsWorker = Bld.CreateICmpULT(ThreadID, WorkersCap, "is_worker");
 
-  // Select worker threads...
-  CGF.EmitBlock(WorkerCheckBB);
-  llvm::Value *IsWorker = Bld.CreateICmpULT(ThreadID, MasterID, "is_worker");
-  Bld.CreateCondBr(IsWorker, WorkerBB, MasterBB);
+  Bld.CreateCondBr(IsWorker, WorkerBB, MasterCheckBB);
+
+  CGF.EmitBlock(MasterCheckBB);
+  auto *IsMaster = Bld.CreateICmpEQ(ThreadID, MasterID, "is_master");
+  Bld.CreateCondBr(IsMaster, MasterBB, EST.ExitBB);
 
   // ... and send to worker loop, awaiting parallel invocation.
   CGF.EmitBlock(WorkerBB);
@@ -892,7 +693,7 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
     WorkerVars.push_back(&I);
   }
 
-  CGF.EmitCallOrInvoke(WST.WorkerFn, llvm::None);
+  CGF.EmitCallOrInvoke(WST.WorkerFn, None);
   CGF.EmitBranch(EST.ExitBB);
 
   // Only master thread executes subsequent serial code.
@@ -968,17 +769,16 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
   }
   case OMPRTL_NVPTX__kmpc_kernel_prepare_parallel: {
     /// Build void __kmpc_kernel_prepare_parallel(
-    /// void *outlined_function, void **args, kmp_int32 nArgs);
-    llvm::Type *TypeParams[] = {CGM.Int8PtrTy, CGM.Int8PtrPtrTy, CGM.Int32Ty};
+    /// void *outlined_function);
+    llvm::Type *TypeParams[] = {CGM.Int8PtrTy};
     llvm::FunctionType *FnTy =
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_prepare_parallel");
     break;
   }
   case OMPRTL_NVPTX__kmpc_kernel_parallel: {
-    /// Build bool __kmpc_kernel_parallel(
-    /// void **outlined_function, void **args);
-    llvm::Type *TypeParams[] = {CGM.Int8PtrPtrTy, CGM.Int8PtrPtrTy};
+    /// Build bool __kmpc_kernel_parallel(void **outlined_function);
+    llvm::Type *TypeParams[] = {CGM.Int8PtrPtrTy};
     llvm::FunctionType *FnTy =
         llvm::FunctionType::get(llvm::Type::getInt1Ty(CGM.getLLVMContext()),
                                 TypeParams, /*isVarArg*/ false);
@@ -1042,24 +842,6 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_warp_active_thread_mask");
     break;
   }
-  //  case OMPRTL_NVPTX__malloc: {
-  //    /// Build void * malloc(size_t size);
-  //    llvm::Type *TypeParams[] = {CGM.SizeTy};
-  //    llvm::FunctionType *FnTy =
-  //        llvm::FunctionType::get(CGM.VoidPtrTy, TypeParams, /*isVarArg*/
-  //        false);
-  //    RTLFn = CGM.CreateRuntimeFunction(FnTy, "malloc");
-  //    break;
-  //  }
-  //  case OMPRTL_NVPTX__free: {
-  //    /// Build void free(void *ptr);
-  //    llvm::Type *TypeParams[] = {CGM.VoidPtrTy};
-  //    llvm::FunctionType *FnTy =
-  //        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
-  //    RTLFn = CGM.CreateRuntimeFunction(FnTy, "free");
-  //    break;
-  //  }
-
   case OMPRTL_NVPTX__kmpc_initialize_data_sharing_environment: {
     /// Build void
     /// __kmpc_initialize_data_sharing_environment(__kmpc_data_sharing_slot
@@ -1322,6 +1104,49 @@ private:
   /// constructs.
   const VarDecl *ThreadIDVar;
 };
+
+/// \brief API for captured statement code generation in OpenMP constructs.
+class CGOpenMPSimdOutlinedRegionInfo : public CGOpenMPRegionInfo {
+public:
+  CGOpenMPSimdOutlinedRegionInfo(const CapturedStmt &CS,
+                                 const VarDecl *LaneIDVar,
+                                 const VarDecl *NumLanesVar,
+                                 const RegionCodeGenTy &CodeGen,
+                                 OpenMPDirectiveKind Kind)
+      : CGOpenMPRegionInfo(CS, SimdOutlinedRegion, CodeGen, Kind, false),
+        LaneIDVar(LaneIDVar), NumLanesVar(NumLanesVar) {
+    assert(LaneIDVar != nullptr && "No LaneID in OpenMP region.");
+    assert(NumLanesVar != nullptr && "No # Lanes in OpenMP region.");
+  }
+
+  /// \brief Get a variable or parameter for storing the lane id
+  /// inside OpenMP construct.
+  const VarDecl *getLaneIDVariable() const override { return LaneIDVar; }
+
+  /// \brief Get a variable or parameter for storing the number of lanes
+  /// inside OpenMP construct.
+  const VarDecl *getNumLanesVariable() const override { return NumLanesVar; }
+
+  /// \brief This is unused for simd regions.
+  const VarDecl *getThreadIDVariable() const override { return nullptr; }
+
+  /// \brief Get the name of the capture helper.
+  StringRef getHelperName() const override { return ".omp_simd_outlined."; }
+
+  static bool classof(const CGCapturedStmtInfo *Info) {
+    return CGOpenMPRegionInfo::classof(Info) &&
+           cast<CGOpenMPRegionInfo>(Info)->getRegionKind() ==
+               SimdOutlinedRegion;
+  }
+
+private:
+  /// \brief A variable or parameter storing the lane id for OpenMP
+  /// constructs.
+  const VarDecl *LaneIDVar;
+  /// \brief A variable or parameter storing the number of lanes for OpenMP
+  /// constructs.
+  const VarDecl *NumLanesVar;
+};
 }
 
 LValue CGOpenMPRegionInfo::getThreadIDVariableLValue(CodeGenFunction &CGF) {
@@ -1362,13 +1187,14 @@ namespace {
 class ParallelNestingLevelRAII {
 private:
   int &ParallelNestingLevel;
-
+  int Increment;
 public:
-  ParallelNestingLevelRAII(int &ParallelNestingLevel)
-      : ParallelNestingLevel(ParallelNestingLevel) {
-    ParallelNestingLevel++;
+  // If in Simd we increase the parallelism level by a bunch to make sure all the Simd regions nested are implemented in a sequential way.
+  ParallelNestingLevelRAII(int &ParallelNestingLevel, bool IsSimd=false)
+      : ParallelNestingLevel(ParallelNestingLevel), Increment(IsSimd?10:1)  {
+    ParallelNestingLevel += Increment;
   }
-  ~ParallelNestingLevelRAII() { ParallelNestingLevel--; }
+  ~ParallelNestingLevelRAII() { ParallelNestingLevel -= Increment; }
 };
 } // namespace
 
@@ -1411,6 +1237,35 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
     auto *WrapperFun = createDataSharingParallelWrapper(*OutlinedFun, *CS);
     WrapperFunctionsMap[OutlinedFun] = WrapperFun;
   }
+  return OutlinedFun;
+}
+
+llvm::Value *CGOpenMPRuntimeNVPTX::emitSimdOutlinedFunction(
+    const OMPExecutableDirective &D, const VarDecl *LaneIDVar,
+    const VarDecl *NumLanesVar, OpenMPDirectiveKind InnermostKind,
+    const RegionCodeGenTy &CodeGen) {
+  llvm::Function *OutlinedFun = nullptr;
+
+  const CapturedStmt *CS = cast<CapturedStmt>(D.getAssociatedStmt());
+
+  // Include updates in runtime parallelism level.
+  auto &&CodeGenWithDataSharing = [this, &CodeGen](CodeGenFunction &CGF) {
+    increaseParallelismLevel(CGF, /*IsSimd=*/true);
+    CodeGen(CGF);
+    decreaseParallelismLevel(CGF, /*IsSimd=*/true);
+  };
+
+  CodeGenFunction CGF(CGM, true);
+  CGOpenMPSimdOutlinedRegionInfo CGInfo(*CS, LaneIDVar, NumLanesVar, CodeGenWithDataSharing,
+                                        InnermostKind);
+  CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
+  {
+    ParallelNestingLevelRAII NestingRAII(ParallelNestingLevel, /*IsSimd=*/true);
+    OutlinedFun =  CGF.GenerateOpenMPCapturedStmtFunction(*CS);
+  }
+
+  auto *WrapperFun = createDataSharingParallelWrapper(*OutlinedFun, *CS, /*IsSimd=*/true);
+  WrapperFunctionsMap[OutlinedFun] = WrapperFun;
   return OutlinedFun;
 }
 
@@ -1540,98 +1395,6 @@ CGOpenMPRuntimeNVPTX::getDataSharingInfo(const Decl *Context) {
   Info.WorkerWarpRecordType = C.getRecordType(SharedWarpRD);
 
   return Info;
-  //  auto ShareRDTy = C.getRecordType(SharedRD);
-  //
-  //  // Now that we have a record type suitable to the data sharing, we need to
-  //  check if we have room in the current slot of the stack. If not, we need to
-  //  grow it. If this is not the master, only the warp master should grow the
-  //  stack.
-  //
-  //  llvm::BasicBlock *EndBB =
-  //  CGF.createBasicBlock("after_shared_stack_check");
-  //  if (!IsMaster) {
-  //    llvm::BasicBlock *WarpBB =
-  //    CGF.createBasicBlock("warp_shared_stack_check");
-  //    auto *IsWarpMaster = getNVPTXIsWarpActiveMaster(CGF);
-  //    Bld.CreateCondBr(IsWarpMaster, WarpBB, EndBB);
-  //    CGF.EmitBlock(WarpBB);
-  //  }
-  //
-  //  // Save the current stack and slot pointer - this is requires to restore
-  //  them after the region.
-  //  auto SavedSharedStackAddr = CGF.CreateMemTemp(C.VoidPtrTy,
-  //  "saved_shared_stack_pointer");
-  //  auto SharedStackPointer = getSharedDataStackPointerLValue(CGF, IsMaster);
-  //  CGF.EmitStoreOfScalar(Bld.CreateBitCast(SharedStackPointer.getAddress(),
-  //  CGM.VoidPtrTy).getPointer(), SavedSharedStackAddr, /*Volatile=*/false,
-  //  C.VoidPtrTy);
-  //
-  //  QualType SharedSlotPtrQTy =
-  //  C.getPointerType(getDataSharingSlotQty(IsMaster));
-  //  auto *SharedSlotPtrTy =
-  //  CGF.getTypes().ConvertTypeForMem(SharedSlotPtrQTy);
-  //
-  //  auto SavedSharedSlotAddr = CGF.CreateMemTemp(SharedSlotPtrQTy,
-  //  "saved_shared_slot_pointer");
-  //  auto SharedSlotPointer = getSharedDataSlotPointerLValue(CGF, IsMaster);
-  //  CGF.EmitStoreOfScalar(Bld.CreateBitCast(SharedSlotPointer.getAddress(),
-  //  SharedSlotPtrTy).getPointer(), SavedSharedSlotAddr, /*Volatile=*/false,
-  //  SharedSlotPtrQTy);
-  //
-  //  // Clean up the 'Next' entry in the slot. If it is not NULL is that
-  //  because some inner region had to grow the stack.
-  //  llvm::Value *Idx[] = { Bld.getInt32(0), /*Next=*/Bld.getInt32(0) };
-  //  auto *SlotNextAddr =
-  //  Bld.CreateInBoundsGEP(SharedSlotPointer.getPointer(), Idx);
-  //  auto SlotNextAddrLV = CGF.MakeNaturalAlignAddrLValue(SlotNextAddr,
-  //  C.VoidPtrTy);
-  //  auto *SlotNext = CGF.EmitLoadOfScalar(SlotNextAddrLV, SourceLocation());
-  //  auto *RequiresCleanUp =
-  //  Bld.CreateIsNotNull(SlotNext,"needs_stack_clean_up");
-  //
-  //  llvm::BasicBlock *CleanUpBB = CGF.createBasicBlock("stack_clean_up");
-  //  llvm::BasicBlock *AfterCleanUpBB =
-  //  CGF.createBasicBlock("after_stack_clean_up");
-  //  Bld.CreateCondBr(RequiresCleanUp, CleanUpBB, AfterCleanUpBB);
-  //  CGF.EmitBlock(CleanUpBB);
-  //  emitFreeCall(CGF, SlotNext);
-  //  CGF.EmitBlock(AfterCleanUpBB);
-  //
-  //  // Get the end address of the slot.
-  //  llvm::Value *Idx[] = { Bld.getInt32(0), /*DataEnd=*/ Bld.getInt32(1) };
-  //  auto *SlotEndAddr =  Bld.CreateInBoundsGEP(SharedSlotPointer.getPointer(),
-  //  Idx);
-  //  auto SlotEndAddrLV = CGF.MakeNaturalAlignAddrLValue(SlotEndAddr,
-  //  C.VoidPtrTy);
-  //  auto *SlotEnd = CGF.EmitLoadOfScalar(SlotEndAddrLV, SourceLocation());
-  //  SlotEnd = Bld.CreatePtrToInt(SlotEnd, CGF.IntPtrTy);
-  //
-  //  // Add the size of the record to the current stack pointer and check if it
-  //  can fit in the stack.
-  //  auto *SlotEndRequired =
-  //  Bld.CreatePtrToInt(SharedStackPointer.getPointer(), CGF.IntPtrTy);
-  //
-  //  auto RecordSizeInBytes = C.getTypeSizeInChars(ShareRDTy).getQuantity();
-  //  SlotEndRequired = Bld.CreateNUWAdd(SlotEndRequired,
-  //  llvm::ConstantInt::get(CGF.IntPtrTy, RecordSizeInBytes));
-  //  auto *NeedsToGrow = Bld.CreateICmpUGE(SlotEndRequired, SlotEnd,
-  //  "needs_stack_grow");
-  //
-  //  auto *GrowBB = CGF.createBasicBlock("grow_shared_memory_stack");
-  //  auto *AfterGrowBB =
-  //  CGF.createBasicBlock("after_grow_shared_memory_stack");
-  //  Bld.CreateCondBr(NeedsToGrow, GrowBB, AfterGrowBB);
-  //  CGF.EmitBlock(GrowBB);
-  //
-  //  // Growing the stack consists of the allocation of a new slot whose size
-  //  is the maximum between the default and what is required in this capture
-  //  environment.
-  //  auto NewSlotRequiredSize =  RecordSizeInBytes +
-  //  /*Next*/C.getTypeSizeInChars(C.VoidPtrTy).getQuantity() + /*DataEnd*/;
-  //
-  //  CGF.EmitBlock(AfterGrowBB);
-  //
-  //  CGF.EmitBlock(EndBB);
 }
 
 void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
@@ -1786,14 +1549,14 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
     auto *CasterDataShareAddr =
         Bld.CreateBitOrPointerCast(DataShareAddr, DataSharePtrTy);
 
-    // Get the threadID.
-    auto *ThreadID = getNVPTXThreadID(CGF);
+    // Get the threadID in the warp. We have a frame per warp.
+    auto *ThreadWarpID = getNVPTXThreadWarpID(CGF);
 
     // For each field, generate the shared address and store it in the new
     // addresses array.
     auto FI = MasterRD->field_begin();
     for (unsigned i = 0; i < NewAddressPtrs.size(); ++i, ++FI) {
-      llvm::Value *Idx[] = {Bld.getInt32(0), Bld.getInt32(i), ThreadID};
+      llvm::Value *Idx[] = {Bld.getInt32(0), Bld.getInt32(i), ThreadWarpID};
       auto *NewAddr = Bld.CreateInBoundsGEP(CasterDataShareAddr, Idx);
       // The types are the same as in the master record.
       CGF.EmitStoreOfScalar(NewAddr, NewAddressPtrs[i], /*Volatile=*/false,
@@ -1851,11 +1614,22 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
 // \brief Create the data sharing arguments and call the parallel outlined
 // function.
 llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
-    llvm::Function &OutlinedParallelFn, const CapturedStmt &CS) {
+    llvm::Function &OutlinedParallelFn, const CapturedStmt &CS, bool IsSimd) {
   auto &Ctx = CGM.getContext();
 
-  // Create a function with no arguments to obtain the data sharing argument.
-  auto &CGFI = CGM.getTypes().arrangeNullaryFunction();
+  // Create a function that takes as argument the source lane.
+  FunctionArgList WrapperArgs;
+  QualType WrapperArgTy = Ctx.getIntTypeForBitwidth(/*DestWidth=*/32,/*Signed=*/false);
+  ImplicitParamDecl WrapperArg(Ctx, /*DC=*/nullptr, SourceLocation(), /*Id=*/nullptr, WrapperArgTy);
+  ImplicitParamDecl WrapperLaneArg(Ctx, /*DC=*/nullptr, SourceLocation(), /*Id=*/nullptr, Ctx.getPointerType(WrapperArgTy));
+  ImplicitParamDecl WrapperNumLanesArg(Ctx, /*DC=*/nullptr, SourceLocation(), /*Id=*/nullptr, Ctx.getPointerType(WrapperArgTy));
+  WrapperArgs.push_back(&WrapperArg);
+  if (IsSimd) {
+    WrapperArgs.push_back(&WrapperLaneArg);
+    WrapperArgs.push_back(&WrapperNumLanesArg);
+  }
+
+  auto &CGFI = CGM.getTypes().arrangeBuiltinFunctionDeclaration(Ctx.VoidTy, WrapperArgs);
 
   auto *Fn = llvm::Function::Create(
       CGM.getTypes().GetFunctionType(CGFI), llvm::GlobalValue::InternalLinkage,
@@ -1864,7 +1638,11 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
   Fn->setLinkage(llvm::GlobalValue::InternalLinkage);
 
   CodeGenFunction CGF(CGM, /*suppressNewContext=*/true);
-  CGF.StartFunction(GlobalDecl(), Ctx.VoidTy, Fn, CGFI, {});
+  CGF.StartFunction(GlobalDecl(), Ctx.VoidTy, Fn, CGFI, WrapperArgs);
+
+  // Get the source thread ID, it is the argument of the current function.
+  auto SourceThreadIDAddr = CGF.GetAddrOfLocalVar(&WrapperArg);
+  auto *SourceThreadID = CGF.EmitLoadOfScalar(SourceThreadIDAddr, /*Volatile=*/false, WrapperArgTy, SourceLocation());
 
   // Create temporary variables to contain the new args.
   SmallVector<Address, 32> ArgsAddresses;
@@ -1893,15 +1671,14 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
   auto &DSI = getDataSharingInfo(CurrentParallelContext);
 
   auto &&L0ParallelGen = [this, &DSI, &Ctx, &CS, &RD,
-                          &ArgsAddresses](CodeGenFunction &CGF) {
+                          &ArgsAddresses, SourceThreadID](CodeGenFunction &CGF) {
     auto &Bld = CGF.Builder;
 
     // In the Level 0 regions, we need to get the record of the master thread.
-    auto *OriginThreadID = getMasterThreadID(CGF);
     auto *DataAddr = Bld.CreateCall(
         createNVPTXRuntimeFunction(
             OMPRTL_NVPTX__kmpc_get_data_sharing_environment_frame),
-        OriginThreadID);
+            SourceThreadID);
     auto *RTy = CGF.getTypes().ConvertTypeForMem(DSI.MasterRecordType);
     auto *CastedDataAddr =
         Bld.CreateBitOrPointerCast(DataAddr, RTy->getPointerTo());
@@ -1927,23 +1704,21 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
   };
 
   auto &&L1ParallelGen = [this, &DSI, &Ctx, &CS, &RD,
-                          &ArgsAddresses](CodeGenFunction &CGF) {
+                          &ArgsAddresses, SourceThreadID](CodeGenFunction &CGF) {
     auto &Bld = CGF.Builder;
 
     // In the Level 1 regions, we need to get the record of the current worker
     // thread.
-    auto *OriginThreadID = getNVPTXThreadID(CGF);
     auto *DataAddr = Bld.CreateCall(
         createNVPTXRuntimeFunction(
             OMPRTL_NVPTX__kmpc_get_data_sharing_environment_frame),
-        OriginThreadID);
+            SourceThreadID);
     auto *RTy = CGF.getTypes().ConvertTypeForMem(DSI.WorkerWarpRecordType);
     auto *CastedDataAddr =
         Bld.CreateBitOrPointerCast(DataAddr, RTy->getPointerTo());
 
-    // FIXME: OriginThreadID must be the ID in the Warp of the thread we are
-    // using the data from.
-    auto *OriginThreadWarpID = Bld.getInt32(0); // getNVPTXThreadWarpID(CGF);
+    // Get the source thread warp ID.
+    auto *SourceThreadWarpID = Bld.CreateAnd(SourceThreadID, Bld.getInt32(DS_Max_Worker_Warp_Size_Log2_Mask));
 
     // For each capture obtain the pointer by calculating the right offset in
     // the host record.
@@ -1958,8 +1733,7 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
       assert(It != DSI.CapturesValues.end() && "Capture must exist!");
       auto Idx = std::distance(DSI.CapturesValues.begin(), It);
 
-      llvm::Value *Idxs[] = {Bld.getInt32(0), Bld.getInt32(Idx),
-                             OriginThreadWarpID};
+      llvm::Value *Idxs[] = {Bld.getInt32(0), Bld.getInt32(Idx), SourceThreadWarpID};
       auto *Arg = Bld.CreateInBoundsGEP(CastedDataAddr, Idxs);
       CGF.EmitStoreOfScalar(Arg, ArgsAddresses[ArgsIdx], /*Volatile=*/false,
                             Ctx.getPointerType(FI->getType()));
@@ -1969,12 +1743,22 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
     // A sequential region does not use the wrapper.
   };
 
-  emitParallelismLevelCode(CGF, L0ParallelGen, L1ParallelGen, Sequential);
+  // In Simd we only support L1 level.
+  if (IsSimd)
+    emitParallelismLevelCode(CGF, Sequential, L1ParallelGen, Sequential);
+  else
+    emitParallelismLevelCode(CGF, L0ParallelGen, L1ParallelGen, Sequential);
 
   // Get the array of arguments.
   SmallVector<llvm::Value *, 8> Args;
-  Args.push_back(llvm::Constant::getNullValue(CGM.Int32Ty->getPointerTo()));
-  Args.push_back(llvm::Constant::getNullValue(CGM.Int32Ty->getPointerTo()));
+
+  if (IsSimd) {
+    Args.push_back(CGF.GetAddrOfLocalVar(&WrapperLaneArg).getPointer());
+    Args.push_back(CGF.GetAddrOfLocalVar(&WrapperNumLanesArg).getPointer());
+  } else {
+    Args.push_back(llvm::Constant::getNullValue(CGM.Int32Ty->getPointerTo()));
+    Args.push_back(llvm::Constant::getNullValue(CGM.Int32Ty->getPointerTo()));
+  }
 
   auto FI = DSI.MasterRecordType->getAs<RecordType>()->getDecl()->field_begin();
   for (unsigned i = 0; i < ArgsAddresses.size(); ++i, ++FI) {
@@ -2038,14 +1822,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelismLevelCode(
 
     CGF.EmitBlock(LBB);
 
-    // Fill up captures of shared data here.
-    //
-    // Captures here will be a struct of arrays with a single element each (one
-    // array per capture).
-
     Level0(CGF);
-
-    // Free captures of shared data here.
 
     CGF.EmitBranch(AfterBB);
     if (NextBB)
@@ -2067,15 +1844,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelismLevelCode(
 
     CGF.EmitBlock(LBB);
 
-    // Fill up captures of shared data here.
-    //
-    // Captures here will be a struct of arrays with 32 elements. It is possible
-    // some threads do not reach this point which will cause waste but that is
-    // the only way to generate this statically.
-
     Level1(CGF);
-
-    // Free captures of shared data here.
 
     CGF.EmitBranch(AfterBB);
     if (NextBB)
@@ -2108,56 +1877,25 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
 
   llvm::Function *Fn = cast<llvm::Function>(OutlinedFn);
   llvm::Function *WFn = WrapperFunctionsMap[Fn];
-
   assert(WFn && "Wrapper function does not exist??");
 
   // Force inline this outlined function at its call site.
   // Fn->addFnAttr(llvm::Attribute::AlwaysInline);
   Fn->setLinkage(llvm::GlobalValue::InternalLinkage);
 
-  //
-  //
   // Emit code that does the data sharing changes in the beginning of the
   // function.
-  //
-  //
   createDataSharingPerFunctionInfrastructure(CGF);
 
   auto *RTLoc = emitUpdateLocation(CGF, Loc);
   auto &&L0ParallelGen = [this, WFn, &CapturedVars](CodeGenFunction &CGF) {
     CGBuilderTy &Bld = CGF.Builder;
 
-    //    auto Capture = CapturedVars.front();
-    //    auto CaptureType = Capture->getType()->getArrayElementType();
     auto ID = Bld.CreateBitOrPointerCast(WFn, CGM.Int8PtrTy);
 
-    // Prepare for parallel region.  Indicate the outlined function and request
-    // a buffer to place its arguments.
-    Address WorkArgs = CGF.CreateTempAlloca(
-        CGF.Int8PtrTy, CharUnits::fromQuantity(8), /*Name*/ "work_args");
-    llvm::Value *Args[] = {ID, WorkArgs.getPointer(),
-                           /*nArgs=*/Bld.getInt32(0)};
-    CGF.EmitRuntimeCall(
-        createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_prepare_parallel),
-        Args);
-
-    //    // Copy variables in the capture buffer to the shared workargs
-    //    structure for
-    //    // use by the workers.  The extraneous capture buffer will be
-    //    optimized out
-    //    // by llvm.
-    //    auto WorkArgsPtr =
-    //        Bld.CreateBitCast(Bld.CreateLoad(WorkArgs), Capture->getType());
-    //    for (unsigned idx = 0; idx < CaptureType->getStructNumElements();
-    //    idx++) {
-    //      auto Src = Bld.CreateConstInBoundsGEP2_32(CaptureType, Capture, 0,
-    //      idx);
-    //      auto Dst =
-    //          Bld.CreateConstInBoundsGEP2_32(CaptureType, WorkArgsPtr, 0,
-    //          idx);
-    //      Bld.CreateDefaultAlignedStore(Bld.CreateDefaultAlignedLoad(Src),
-    //      Dst);
-    //    }
+    // Prepare for parallel region. Indicate the outlined function.
+    llvm::Value *Args[] = {ID};
+    CGF.EmitRuntimeCall(createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_prepare_parallel),Args);
 
     // Activate workers.
     syncCTAThreads(CGF);
@@ -2201,30 +1939,14 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
     llvm::Value *Args[] = {ArrayDecay, IsFinal.getPointer(),
                            WorkSource.getPointer()};
     llvm::Value *IsActive =
-        CGF.EmitRuntimeCall(createNVPTXRuntimeFunction(
-                                OMPRTL_NVPTX__kmpc_kernel_convergent_parallel),
-                            Args);
+        CGF.EmitRuntimeCall(createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_convergent_parallel), Args);
     Bld.CreateCondBr(IsActive, ExecuteBB, DoCondBB);
 
     CGF.EmitBlock(ExecuteBB);
 
-    //
-    //
-    // Get the arguments from worker master to worker.
-    //
-    //
-
-    // OutlinedFn(&GTid, &zero, CapturedStruct);
-    //    auto ThreadIDAddr = emitThreadIDAddress(CGF, Loc);
-    //    Address ZeroAddr =
-    //        CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
-    //                             /*Name*/ ".zero.addr");
-    //    CGF.InitTempAlloca(ZeroAddr, CGF.Builder.getInt32(/*C*/ 0));
-    //    llvm::SmallVector<llvm::Value *, 16> OutlinedFnArgs;
-    //    OutlinedFnArgs.push_back(ThreadIDAddr.getPointer());
-    //    OutlinedFnArgs.push_back(ZeroAddr.getPointer());
-    //    OutlinedFnArgs.append(CapturedVars.begin(), CapturedVars.end());
-    CGF.EmitCallOrInvoke(WFn, None);
+    // Execute the work, and pass the thread source from where the data should be used.
+    auto *SourceThread = CGF.EmitLoadOfScalar(WorkSource,/*Volatile=*/false, Ctx.getIntTypeForBitwidth(/*DestWidth=*/32,/*Signed=*/false), SourceLocation());
+    CGF.EmitCallOrInvoke(WFn, SourceThread);
     ArrayDecay = Bld.CreateConstInBoundsGEP2_32(
         llvm::ArrayType::get(CGM.Int8Ty, TASK_STATE_SIZE), TaskState,
         /*Idx0=*/0, /*Idx1=*/0);
@@ -2253,12 +1975,6 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
         createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_serialized_parallel),
         Args);
 
-    // OutlinedFn(&GTid, &zero, CapturedStruct);
-    //    auto ThreadIDAddr = emitThreadIDAddress(CGF, Loc);
-    //    Address ZeroAddr =
-    //        CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
-    //                             /*Name*/ ".zero.addr");
-    //    CGF.InitTempAlloca(ZeroAddr, CGF.Builder.getInt32(/*C*/ 0));
     llvm::SmallVector<llvm::Value *, 16> OutlinedFnArgs;
     OutlinedFnArgs.push_back(
         llvm::Constant::getNullValue(CGM.Int32Ty->getPointerTo()));
@@ -2293,12 +2009,17 @@ void CGOpenMPRuntimeNVPTX::emitSimdCall(CodeGenFunction &CGF,
                                         ArrayRef<llvm::Value *> CapturedVars) {
   if (!CGF.HaveInsertPoint())
     return;
+
   llvm::Function *Fn = cast<llvm::Function>(OutlinedFn);
+  llvm::Function *WFn = WrapperFunctionsMap[Fn];
+  assert(WFn && "Wrapper function does not exist??");
+
   // Force inline this outlined function at its call site.
-  Fn->addFnAttr(llvm::Attribute::AlwaysInline);
+  // Fn->addFnAttr(llvm::Attribute::AlwaysInline);
   Fn->setLinkage(llvm::GlobalValue::InternalLinkage);
   auto *RTLoc = emitUpdateLocation(CGF, Loc);
-  auto &&CodeGen = [this, Fn, CapturedVars, RTLoc, Loc](CodeGenFunction &CGF) {
+
+  auto &&L1SimdGen = [this, WFn, RTLoc, Loc](CodeGenFunction &CGF) {
     CGBuilderTy &Bld = CGF.Builder;
     clang::ASTContext &Ctx = CGF.getContext();
 
@@ -2342,12 +2063,14 @@ void CGOpenMPRuntimeNVPTX::emitSimdCall(CodeGenFunction &CGF,
     Bld.CreateCondBr(IsActive, ExecuteBB, DoCondBB);
 
     CGF.EmitBlock(ExecuteBB);
-    // OutlinedFn(&ID, CapturedStruct);
+
     llvm::SmallVector<llvm::Value *, 16> OutlinedFnArgs;
+
+    auto *SourceThread = CGF.EmitLoadOfScalar(WorkSource,/*Volatile=*/false, Ctx.getIntTypeForBitwidth(/*DestWidth=*/32,/*Signed=*/false), SourceLocation());
+    OutlinedFnArgs.push_back(SourceThread);
     OutlinedFnArgs.push_back(LaneId.getPointer());
     OutlinedFnArgs.push_back(NumLanes.getPointer());
-    OutlinedFnArgs.append(CapturedVars.begin(), CapturedVars.end());
-    CGF.EmitCallOrInvoke(Fn, OutlinedFnArgs);
+    CGF.EmitCallOrInvoke(WFn, OutlinedFnArgs);
     ArrayDecay = Bld.CreateConstInBoundsGEP2_32(
         llvm::ArrayType::get(CGM.Int8Ty, SIMD_STATE_SIZE), TaskState,
         /*Idx0=*/0, /*Idx1=*/0);
@@ -2364,8 +2087,29 @@ void CGOpenMPRuntimeNVPTX::emitSimdCall(CodeGenFunction &CGF,
 
     CGF.EmitBlock(DoEndBB);
   };
+
+  auto &&SeqGen = [Fn, &CapturedVars](CodeGenFunction &CGF) {
+    CGBuilderTy &Bld = CGF.Builder;
+    Address LaneId =
+        CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
+                             /*Name*/ "lane_id");
+    Address NumLanes =
+        CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
+                             /*Name*/ "num_lanes");
+
+    CGF.InitTempAlloca(LaneId, Bld.getInt32(/*C=*/0));
+    CGF.InitTempAlloca(NumLanes, Bld.getInt32(/*C=*/1));
+
+    llvm::SmallVector<llvm::Value *, 16> OutlinedFnArgs;
+    OutlinedFnArgs.push_back(LaneId.getPointer());
+    OutlinedFnArgs.push_back(NumLanes.getPointer());
+    OutlinedFnArgs.append(CapturedVars.begin(), CapturedVars.end());
+    CGF.EmitCallOrInvoke(Fn, OutlinedFnArgs);
+  };
+
   CodeGenFunction::RunCleanupsScope Scope(CGF);
-  CodeGen(CGF);
+  // We only do SIMD if nested in a parallel region.
+  emitParallelismLevelCode(CGF, SeqGen, L1SimdGen, SeqGen);
 }
 
 //

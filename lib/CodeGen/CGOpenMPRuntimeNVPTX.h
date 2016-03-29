@@ -43,10 +43,10 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   llvm::Value *getParallelismLevel(CodeGenFunction &CGF) const;
 
   // \brief Increase the value of parallelism level for the current thread.
-  void increaseParallelismLevel(CodeGenFunction &CGF) const;
+  void increaseParallelismLevel(CodeGenFunction &CGF, bool IsSimd = false) const;
 
   // \brief Decrease the value of parallelism level for the current thread.
-  void decreaseParallelismLevel(CodeGenFunction &CGF) const;
+  void decreaseParallelismLevel(CodeGenFunction &CGF, bool IsSimd = false) const;
 
   // \brief Initialize with zero the value of parallelism level for the current
   // thread.
@@ -167,7 +167,7 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // function.
   llvm::Function *
   createDataSharingParallelWrapper(llvm::Function &OutlinedParallelFn,
-                                   const CapturedStmt &CS);
+                                   const CapturedStmt &CS, bool IsSimd = false);
 
   // \brief Map between an outlined function and its data-sharing-wrap version.
   llvm::DenseMap<llvm::Function *, llvm::Function *> WrapperFunctionsMap;
@@ -439,6 +439,20 @@ public:
                                       const VarDecl *ThreadIDVar,
                                       OpenMPDirectiveKind InnermostKind,
                                       const RegionCodeGenTy &CodeGen) override;
+
+  /// \brief Emits outlined function for the specified OpenMP simd directive
+  /// \a D. This outlined function has type void(*)(kmp_int32 *LaneID,
+  /// struct context_vars*).
+  /// \param D OpenMP directive.
+  /// \param LaneIDVar Variable for lane id in the current OpenMP region.
+  /// \param InnermostKind Kind of innermost directive (for simple directives it
+  /// is a directive itself, for combined - its innermost directive).
+  /// \param CodeGen Code generation sequence for the \a D directive.
+  llvm::Value *
+  emitSimdOutlinedFunction(const OMPExecutableDirective &D,
+                           const VarDecl *LaneIDVar, const VarDecl *NumLanesVar,
+                           OpenMPDirectiveKind InnermostKind,
+                           const RegionCodeGenTy &CodeGen) override;
 
   /// \brief Emits code for teams call of the \a OutlinedFn with
   /// variables captured in a record which address is stored in \a
