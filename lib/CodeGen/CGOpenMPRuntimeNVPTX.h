@@ -306,7 +306,8 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
                                   StringRef ParentName,
                                   llvm::Function *&OutlinedFn,
                                   llvm::Constant *&OutlinedFnID,
-                                  bool IsOffloadEntry) override;
+                                  bool IsOffloadEntry,
+                                  const RegionCodeGenTy &CodeGen) override;
 
   /// \brief Emit the code that each thread requires to execute when it
   /// encounters one of the three possible parallelism level. This also emits

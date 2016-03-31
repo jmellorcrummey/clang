@@ -3028,6 +3028,10 @@ SanitizerMask CloudABI::getSupportedSanitizers() const {
   return Res;
 }
 
+SanitizerMask CloudABI::getDefaultSanitizers() const {
+  return SanitizerKind::SafeStack;
+}
+
 /// OpenBSD - OpenBSD tool chain which can call as(1) and ld(1) directly.
 
 OpenBSD::OpenBSD(const Driver &D, const llvm::Triple &Triple,

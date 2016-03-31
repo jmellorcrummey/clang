@@ -623,6 +623,7 @@ public:
   bool isPIEDefault() const override { return false; }
 
   SanitizerMask getSupportedSanitizers() const override;
+  SanitizerMask getDefaultSanitizers() const override;
 
 protected:
   Tool *buildLinker() const override;
@@ -879,6 +880,14 @@ public:
 private:
   Multilib SelectedMultilib;
   std::string LibSuffix;
+};
+
+class LLVM_LIBRARY_VISIBILITY LanaiToolChain : public Generic_ELF {
+public:
+  LanaiToolChain(const Driver &D, const llvm::Triple &Triple,
+                 const llvm::opt::ArgList &Args)
+      : Generic_ELF(D, Triple, Args) {}
+  bool IsIntegratedAssemblerDefault() const override { return true; }
 };
 
 class LLVM_LIBRARY_VISIBILITY HexagonToolChain : public Linux {

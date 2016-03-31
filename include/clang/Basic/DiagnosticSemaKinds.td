@@ -6491,6 +6491,12 @@ def err_variadic_device_fn : Error<
 def err_va_arg_in_device : Error<
   "CUDA device code does not support va_arg">;
 def err_alias_not_supported_on_nvptx : Error<"CUDA does not support aliases">;
+def err_cuda_unattributed_constexpr_cannot_overload_device : Error<
+  "constexpr function '%0' without __host__ or __device__ attributes cannot "
+  "overload __device__ function with same signature.  Add a __host__ "
+  "attribute, or build with -fno-cuda-host-device-constexpr.">;
+def note_cuda_conflicting_device_function_declared_here : Note<
+  "conflicting __device__ function declared here">;
 def err_dynamic_var_init : Error<
     "dynamic initialization is not supported for "
     "__device__, __constant__, and __shared__ variables.">;
@@ -7776,7 +7782,7 @@ def err_opencl_builtin_pipe_first_arg : Error<
 def err_opencl_builtin_pipe_arg_num : Error<
   "invalid number of arguments to function: %0">;
 def err_opencl_builtin_pipe_invalid_arg : Error<
-  "invalid argument type to function %0 (expecting %1)">;
+  "invalid argument type to function %0 (expecting %1 having %2)">;
 def err_opencl_builtin_pipe_invalid_access_modifier : Error<
   "invalid pipe access modifier (expecting %0)">;
 
@@ -8039,6 +8045,10 @@ def err_omp_single_copyprivate_with_nowait : Error<
   "the 'copyprivate' clause must not be used with the 'nowait' clause">;
 def note_omp_nowait_clause_here : Note<
   "'nowait' clause is here">;
+def err_omp_single_decl_in_declare_simd : Error<
+  "single declaration is expected after 'declare simd' directive">;
+def err_omp_function_expected : Error<
+  "'#pragma omp declare simd' can only be applied to functions">;
 def err_omp_wrong_cancel_region : Error<
   "one of 'for', 'parallel', 'sections' or 'taskgroup' is expected">;
 def err_omp_parent_cancel_region_nowait : Error<
