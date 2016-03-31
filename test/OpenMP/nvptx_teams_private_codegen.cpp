@@ -57,10 +57,10 @@ int foo(int n) {
 
   // because of firstprivate, a.addr and a parameter are
   // created. This is fine, as long as we do not use a.addr
-  // TCHECK:  define void @__omp_offloading_{{.+}}(i{{[0-9]+}} [[A_IN:%.+]])
+  // TCHECK:  define void @__omp_offloading_{{.+}}({{.+}})
   // TCHECK:  [[A_ADDR:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK:  [[ATA:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
-  // TCHECK:  store i{{[0-9]+}} [[A]], i{{[0-9]+}}* [[A_ADDR]],
   // TCHECK-NOT: store {{.+}}, {{.+}} [[ATE]],
   // TCHECK:  ret void  
 
@@ -97,6 +97,7 @@ int foo(int n) {
   // check that we store in a without looking at the parameter
   // TCHECK:  define void @__omp_offloading_{{.+}}({{.+}})
   // TCHECK:  [[A_ADDR:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK:  [[ATA:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[ATE]],
   // TCHECK:  ret void
@@ -144,6 +145,8 @@ int foo(int n) {
   // TCHECK:  define void @__omp_offloading_{{.+}}({{.+}})
   // TCHECK:  [[A_ADDR:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[A2_ADDR:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK:  [[ATA:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK:  [[A2TA:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[A2TE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[ATE]],
@@ -154,7 +157,7 @@ int foo(int n) {
   // TCHECK:  store i{{[0-9]+}} [[CONV]], i{{[0-9]+}}* [[A2TE]]
   // TCHECK:  ret void
 
-  #pragma omp target private(a, b, c, d)
+  #pragma omp target private(a, b,c, d)
   #pragma omp teams private(a, b, c, d)
   {
     a = 1;
@@ -225,6 +228,10 @@ int foo(int n) {
   // TCHECK:  [[B_ADDR:%.+]] = alloca [10 x float]*,
   // TCHECK:  [[C_ADDR:%.+]] = alloca [5 x [10 x double]]*,
   // TCHECK:  [[D_ADDR:%.+]] = alloca [[TT]]*,
+  // TCHECK:  [[ATA:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK:  [[BTA:%.+]] = alloca [10 x float],
+  // TCHECK:  [[CTA:%.+]] = alloca [5 x [10 x double]],
+  // TCHECK:  [[DTA:%.+]] = alloca [[TT]],
   // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[BTE:%.+]] = alloca [10 x float],
   // TCHECK:  [[CTE:%.+]] = alloca [5 x [10 x double]],
@@ -344,6 +351,10 @@ int fstatic(int n) {
 // TCHECK:  [[A2_ADDR:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[A3_ADDR:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[B_ADDR:%.+]] = alloca [10 x i{{[0-9]+}}]*,
+// TCHECK:  [[ATA:%.+]] = alloca i{{[0-9]+}},
+// TCHECK:  [[A2TA:%.+]] = alloca i{{[0-9]+}},
+// TCHECK:  [[A3TA:%.+]] = alloca i{{[0-9]+}},
+// TCHECK:  [[BTA:%.+]] = alloca [10 x i{{[0-9]+}}],
 // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[A2TE:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[A3TE:%.+]] = alloca i{{[0-9]+}},
@@ -445,6 +456,8 @@ struct S1 {
   // TCHECK: [[TH_ADDR:%.+]] = alloca [[S1]]*,
   // TCHECK: [[B_ADDR:%.+]] = alloca i{{[0-9]+}},
   // TCHECK: [[C_ADDR:%.+]] = alloca [2 x [5 x i{{[0-9]+}}]]*,
+  // TCHECK: [[BTA:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK: [[CTA:%.+]] = alloca [2 x [5 x i{{[0-9]+}}]],
   // TCHECK: [[BTE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK: [[CTE:%.+]] = alloca [2 x [5 x i{{[0-9]+}}]],
   // TCHECK: store [[S1]]* [[TH]], [[S1]]** [[TH_ADDR]],
@@ -510,6 +523,9 @@ int bar(int n){
 // TCHECK: [[A_ADDR:%.+]] = alloca i{{[0-9]+}},
 // TCHECK: [[A2_ADDR:%.+]] = alloca i{{[0-9]+}},
 // TCHECK: [[B_ADDR:%.+]] = alloca [10 x i{{[0-9]+}}]*,
+// TCHECK: [[ATA:%.+]] = alloca i{{[0-9]+}},
+// TCHECK: [[A2TA:%.+]] = alloca i{{[0-9]+}},
+// TCHECK: [[BTA:%.+]] = alloca [10 x i{{[0-9]+}}],
 // TCHECK: [[ATE:%.+]] = alloca i{{[0-9]+}},
 // TCHECK: [[A2TE:%.+]] = alloca i{{[0-9]+}},
 // TCHECK: [[BTE:%.+]] = alloca [10 x i{{[0-9]+}}],
