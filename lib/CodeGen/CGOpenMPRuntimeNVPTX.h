@@ -43,10 +43,12 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   llvm::Value *getParallelismLevel(CodeGenFunction &CGF) const;
 
   // \brief Increase the value of parallelism level for the current thread.
-  void increaseParallelismLevel(CodeGenFunction &CGF, bool IsSimd = false) const;
+  void increaseParallelismLevel(CodeGenFunction &CGF,
+                                bool IsSimd = false) const;
 
   // \brief Decrease the value of parallelism level for the current thread.
-  void decreaseParallelismLevel(CodeGenFunction &CGF, bool IsSimd = false) const;
+  void decreaseParallelismLevel(CodeGenFunction &CGF,
+                                bool IsSimd = false) const;
 
   // \brief Initialize with zero the value of parallelism level for the current
   // thread.
@@ -86,7 +88,8 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
 
   // \brief Group the captures information for a given context.
   struct DataSharingInfo {
-    // The local values of the captures. The boolean indicates that what is being shared is a reference and not the variable original storage.
+    // The local values of the captures. The boolean indicates that what is
+    // being shared is a reference and not the variable original storage.
     llvm::SmallVector<const VarDecl *, 8> CapturesValues;
     llvm::SmallVector<bool, 8> CapturesValuesIsRef;
     // The record type of the sharing region if shared by the master.
@@ -108,19 +111,23 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // \brief Set of all functions that are offload entry points.
   llvm::SmallPtrSet<llvm::Function *, 16> EntryPointFunctionSet;
 
-  // \brief Map between a function and its associated data sharing related values.
+  // \brief Map between a function and its associated data sharing related
+  // values.
   struct DataSharingFunctionInfo {
     bool IsEntryPoint;
     llvm::Function *InitializationFunction;
     SmallVector<llvm::Value *, 16> ValuesToBeReplaced;
-    DataSharingFunctionInfo() : IsEntryPoint(false), InitializationFunction(nullptr) {}
+    DataSharingFunctionInfo()
+        : IsEntryPoint(false), InitializationFunction(nullptr) {}
   };
-  typedef llvm::DenseMap<llvm::Function *, DataSharingFunctionInfo> DataSharingFunctionInfoMapTy;
+  typedef llvm::DenseMap<llvm::Function *, DataSharingFunctionInfo>
+      DataSharingFunctionInfoMapTy;
   DataSharingFunctionInfoMapTy DataSharingFunctionInfoMap;
 
   // \brief Create the data sharing replacement pairs at the top of a function
   // with parallel regions. If they were created already, do not do anything.
-  void createDataSharingPerFunctionInfrastructure(CodeGenFunction &EnclosingCGF);
+  void
+  createDataSharingPerFunctionInfrastructure(CodeGenFunction &EnclosingCGF);
 
   // \brief Create the data sharing arguments and call the parallel outlined
   // function.
