@@ -985,17 +985,20 @@ void CGOpenMPRuntimeNVPTX::emitCapturedVars(
   // We emit the variables exactly like the default implementation, but we
   // record the context because it is important to derive the enclosing
   // environment.
-  // FIXME: This is a hack, we should look for a way to derive it from the
-  // captured declaration of the parallel region.
+
+  CGOpenMPRuntime::emitCapturedVars(CGF, S, CapturedVars);
+}
+
+/// \brief Registers the context of a parallel region with the runtime
+/// codegen implementation.
+void CGOpenMPRuntimeNVPTX::registerParallelContext(
+    CodeGenFunction &CGF, const OMPExecutableDirective &S) {
   CurrentParallelContext = CGF.CurCodeDecl;
 
-  //
   if (isOpenMPParallelDirective(S.getDirectiveKind()) ||
       isOpenMPSimdDirective(S.getDirectiveKind())) {
     createDataSharingInfo(CGF);
   }
-
-  CGOpenMPRuntime::emitCapturedVars(CGF, S, CapturedVars);
 }
 
 void CGOpenMPRuntimeNVPTX::createOffloadEntry(llvm::Constant *ID,

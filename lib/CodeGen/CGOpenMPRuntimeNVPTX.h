@@ -284,6 +284,11 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   emitCapturedVars(CodeGenFunction &CGF, const OMPExecutableDirective &S,
                    llvm::SmallVector<llvm::Value *, 16> &CapturedVars) override;
 
+  /// \brief Registers the context of a parallel region with the runtime
+  /// codegen implementation.
+  void registerParallelContext(CodeGenFunction &CGF,
+                               const OMPExecutableDirective &S) override;
+
   //
   // Base class overrides.
   //

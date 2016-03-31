@@ -452,6 +452,11 @@ public:
   emitCapturedVars(CodeGenFunction &CGF, const OMPExecutableDirective &S,
                    llvm::SmallVector<llvm::Value *, 16> &CapturedVars);
 
+  /// \brief Registers the context of a parallel region with the runtime
+  /// codegen implementation.
+  virtual void registerParallelContext(CodeGenFunction &CGF,
+                                       const OMPExecutableDirective &S) {}
+
   /// Emit code for the specified user defined reduction construct.
   virtual void emitUserDefinedReduction(CodeGenFunction *CGF,
                                         const OMPDeclareReductionDecl *D);

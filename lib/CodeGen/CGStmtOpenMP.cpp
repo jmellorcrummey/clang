@@ -1115,9 +1115,8 @@ static void emitCommonOMPParallelDirective(CodeGenFunction &CGF,
                                            const OMPExecutableDirective &S,
                                            OpenMPDirectiveKind InnermostKind,
                                            const RegionCodeGenTy &CodeGen) {
+  CGF.CGM.getOpenMPRuntime().registerParallelContext(CGF, S);
   auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
-  llvm::SmallVector<llvm::Value *, 16> CapturedVars;
-  CGF.CGM.getOpenMPRuntime().emitCapturedVars(CGF, S, CapturedVars);
   auto OutlinedFn = CGF.CGM.getOpenMPRuntime().
       emitParallelOrTeamsOutlinedFunction(S,
           *CS->getCapturedDecl()->param_begin(), InnermostKind, CodeGen);
@@ -1143,6 +1142,8 @@ static void emitCommonOMPParallelDirective(CodeGenFunction &CGF,
   }
 
   OMPLexicalScope Scope(CGF, S);
+  llvm::SmallVector<llvm::Value *, 16> CapturedVars;
+  CGF.CGM.getOpenMPRuntime().emitCapturedVars(CGF, S, CapturedVars);
   CGF.CGM.getOpenMPRuntime().emitParallelCall(CGF, S.getLocStart(), OutlinedFn,
                                               CapturedVars, IfCond);
 }
@@ -1488,6 +1489,7 @@ static void emitCommonOMPSimdDirective(CodeGenFunction &CGF,
                                        const OMPExecutableDirective &S,
                                        OpenMPDirectiveKind InnermostKind,
                                        const RegionCodeGenTy &CodeGen) {
+  CGF.CGM.getOpenMPRuntime().registerParallelContext(CGF, S);
   auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
   llvm::SmallVector<llvm::Value *, 16> CapturedVars;
   CGF.CGM.getOpenMPRuntime().emitCapturedVars(CGF, S, CapturedVars);
