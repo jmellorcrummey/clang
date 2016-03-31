@@ -1116,6 +1116,8 @@ static void emitCommonOMPParallelDirective(CodeGenFunction &CGF,
                                            OpenMPDirectiveKind InnermostKind,
                                            const RegionCodeGenTy &CodeGen) {
   auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
+  llvm::SmallVector<llvm::Value *, 16> CapturedVars;
+  CGF.CGM.getOpenMPRuntime().emitCapturedVars(CGF, S, CapturedVars);
   auto OutlinedFn = CGF.CGM.getOpenMPRuntime().
       emitParallelOrTeamsOutlinedFunction(S,
           *CS->getCapturedDecl()->param_begin(), InnermostKind, CodeGen);
@@ -1141,8 +1143,6 @@ static void emitCommonOMPParallelDirective(CodeGenFunction &CGF,
   }
 
   OMPLexicalScope Scope(CGF, S);
-  llvm::SmallVector<llvm::Value *, 16> CapturedVars;
-  CGF.CGM.getOpenMPRuntime().emitCapturedVars(CGF, S, CapturedVars);
   CGF.CGM.getOpenMPRuntime().emitParallelCall(CGF, S.getLocStart(), OutlinedFn,
                                               CapturedVars, IfCond);
 }
@@ -1515,7 +1515,7 @@ static void emitCommonOMPSimdDirective(CodeGenFunction &CGF,
 void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
   bool OutlinedSimd =
       CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX();
-  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+  auto &&CodeGen = [&S, OutlinedSimd](CodeGenFunction &CGF, PrePostActionTy &) {
     OMPLoopScope PreInitScope(CGF, S);
     // if (PreCond) {
     //   for (IV in 0..LastIteration) BODY;
@@ -3171,6 +3171,7 @@ void CodeGenFunction::EmitOMPTargetDirective(const OMPTargetDirective &S) {
 
   // Check if we have any if clause associated with the directive.
   const Expr *IfCond = nullptr;
+
   if (auto *C = S.getSingleClause<OMPIfClause>()) {
     IfCond = C->getCondition();
   }
@@ -3205,9 +3206,9 @@ void CodeGenFunction::EmitOMPTargetDirective(const OMPTargetDirective &S) {
     ParentName =
         CGM.getMangledName(GlobalDecl(cast<FunctionDecl>(CurFuncDecl)));
 
-  CGM.getOpenMPRuntime().emitTargetOutlinedFunction(S, ParentName, Fn, FnID,
-                                                    IsOffloadEntry);
-
+  std::tie(Fn, FnID) = EmitOMPTargetDirectiveOutlinedFunction(
+      CGM, S, ParentName, IsOffloadEntry);
+  OMPLexicalScope Scope(*this, S);
   CGM.getOpenMPRuntime().emitTargetCall(*this, S, Fn, FnID, IfCond, Device,
                                         CapturedVars);
 }

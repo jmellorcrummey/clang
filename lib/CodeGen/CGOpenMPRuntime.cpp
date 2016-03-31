@@ -2040,25 +2040,6 @@ void CGOpenMPRuntime::emitCriticalRegion(CodeGenFunction &CGF,
   emitInlinedDirective(CGF, OMPD_critical, CriticalOpGen);
 }
 
-static void emitIfStmt(CodeGenFunction &CGF, llvm::Value *IfCond,
-                       OpenMPDirectiveKind Kind, SourceLocation Loc,
-                       const RegionCodeGenTy &BodyOpGen) {
-  llvm::Value *CallBool = CGF.EmitScalarConversion(
-      IfCond,
-      CGF.getContext().getIntTypeForBitwidth(/*DestWidth=*/32, /*Signed=*/true),
-      CGF.getContext().BoolTy, Loc);
-
-  auto *ThenBlock = CGF.createBasicBlock("omp_if.then");
-  auto *ContBlock = CGF.createBasicBlock("omp_if.end");
-  // Generate the branch (If-stmt)
-  CGF.Builder.CreateCondBr(CallBool, ThenBlock, ContBlock);
-  CGF.EmitBlock(ThenBlock);
-  CGF.CGM.getOpenMPRuntime().emitInlinedDirective(CGF, Kind, BodyOpGen);
-  // Emit the rest of bblocks/branches
-  CGF.EmitBranch(ContBlock);
-  CGF.EmitBlock(ContBlock, true);
-}
-
 void CGOpenMPRuntime::emitMasterRegion(CodeGenFunction &CGF,
                                        const RegionCodeGenTy &MasterOpGen,
                                        SourceLocation Loc) {
@@ -4562,7 +4543,9 @@ emitThreadLimitClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
 
   // FIXME: Accommodate other combined directives with teams when they become
   // available.
-  if (auto *TeamsDir = dyn_cast<OMPTeamsDirective>(CS.getCapturedStmt())) {
+  if (auto *TeamsDir =
+          hasEnclosingOpenMPDirective<OMPTeamsDirective, CompoundStmt>(
+              CS.getCapturedStmt())) {
     if (auto *TLE = TeamsDir->getSingleClause<OMPThreadLimitClause>()) {
       CGOpenMPInnerExprInfo CGInfo(CGF, CS);
       CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
@@ -5460,6 +5443,7 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
   auto &&ThenGen = [this, &BasePointers, &Pointers, &Sizes, &MapTypes, Device,
                     OutlinedFnID, OffloadError, OffloadErrorQType,
                     &D](CodeGenFunction &CGF, PrePostActionTy &) {
+    auto &RT = CGF.CGM.getOpenMPRuntime();
 
     // Emit the offloading arrays.
     llvm::Value *BasePointersArray;
@@ -5753,7 +5737,7 @@ void CGOpenMPRuntime::emitTargetDataCalls(CodeGenFunction &CGF,
   // closing of the region.
   auto &&BeginThenGen = [this, &D, &CGF, &BasePointersArray, &PointersArray,
                          &SizesArray, &MapTypesArray, Device,
-                         &NumOfPtrs](CodeGenFunction &CGF) {
+                         &NumOfPtrs](CodeGenFunction &CGF, PrePostActionTy &) {
     // Fill up the arrays with all the mapped variables.
     OpenMPMapClauseHandler::MapValuesArrayTy BasePointers;
     OpenMPMapClauseHandler::MapValuesArrayTy Pointers;
@@ -5800,7 +5784,7 @@ void CGOpenMPRuntime::emitTargetDataCalls(CodeGenFunction &CGF,
   // Generate code for the closing of the data region.
   auto &&EndThenGen = [this, &CGF, &BasePointersArray, &PointersArray,
                        &SizesArray, &MapTypesArray, Device,
-                       &NumOfPtrs](CodeGenFunction &CGF) {
+                       &NumOfPtrs](CodeGenFunction &CGF, PrePostActionTy &) {
     assert(BasePointersArray && PointersArray && SizesArray && MapTypesArray &&
            NumOfPtrs && "Invalid data environment closing arguments.");
 
@@ -5833,13 +5817,14 @@ void CGOpenMPRuntime::emitTargetDataCalls(CodeGenFunction &CGF,
 
   // In the event we get an if clause, we don't have to take any action on the
   // else side.
-  auto &&ElseGen = [](CodeGenFunction &CGF) {};
+  auto &&ElseGen = [](CodeGenFunction &CGF, PrePostActionTy &) {};
 
   if (IfCond) {
     emitOMPIfClause(CGF, IfCond, BeginThenGen, ElseGen);
   } else {
     CodeGenFunction::RunCleanupsScope Scope(CGF);
-    BeginThenGen(CGF);
+    RegionCodeGenTy BeginThenRCG(BeginThenGen);
+    BeginThenRCG(CGF);
   }
 
   CGM.getOpenMPRuntime().emitInlinedDirective(CGF, OMPD_target_data, CodeGen);
@@ -5848,7 +5833,8 @@ void CGOpenMPRuntime::emitTargetDataCalls(CodeGenFunction &CGF,
     emitOMPIfClause(CGF, IfCond, EndThenGen, ElseGen);
   } else {
     CodeGenFunction::RunCleanupsScope Scope(CGF);
-    EndThenGen(CGF);
+    RegionCodeGenTy EndThenRCG(EndThenGen);
+    EndThenRCG(CGF);
   }
 }
 
@@ -5863,7 +5849,7 @@ void CGOpenMPRuntime::emitTargetEnterOrExitDataCall(
          "Expecting either target enter or exit data directives.");
 
   // Generate the code for the opening of the data environment.
-  auto &&ThenGen = [this, &D, &CGF, Device](CodeGenFunction &CGF) {
+  auto &&ThenGen = [this, &D, &CGF, Device](CodeGenFunction &CGF, PrePostActionTy &) {
     // Fill up the arrays with all the mapped variables.
     OpenMPMapClauseHandler::MapValuesArrayTy BasePointers;
     OpenMPMapClauseHandler::MapValuesArrayTy Pointers;
@@ -5911,12 +5897,13 @@ void CGOpenMPRuntime::emitTargetEnterOrExitDataCall(
 
   // In the event we get an if clause, we don't have to take any action on the
   // else side.
-  auto &&ElseGen = [](CodeGenFunction &CGF) {};
+  auto &&ElseGen = [](CodeGenFunction &CGF, PrePostActionTy &) {};
 
   if (IfCond) {
     emitOMPIfClause(CGF, IfCond, ThenGen, ElseGen);
   } else {
     CodeGenFunction::RunCleanupsScope Scope(CGF);
-    ThenGen(CGF);
+    RegionCodeGenTy ThenRCG(ThenGen);
+    ThenRCG(CGF);
   }
 }

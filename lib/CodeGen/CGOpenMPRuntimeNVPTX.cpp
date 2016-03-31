@@ -1294,7 +1294,7 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
       HasCancel = OPFD->hasCancel();
 
     // Include updates in runtime parallelism level.
-    auto &&CodeGenWithDataSharing = [this, &CodeGen](CodeGenFunction &CGF) {
+    auto &&CodeGenWithDataSharing = [this, &CodeGen](CodeGenFunction &CGF, PrePostActionTy &) {
       increaseParallelismLevel(CGF);
       CodeGen(CGF);
       decreaseParallelismLevel(CGF);
@@ -1324,7 +1324,7 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitSimdOutlinedFunction(
   const CapturedStmt *CS = cast<CapturedStmt>(D.getAssociatedStmt());
 
   // Include updates in runtime parallelism level.
-  auto &&CodeGenWithDataSharing = [this, &CodeGen](CodeGenFunction &CGF) {
+  auto &&CodeGenWithDataSharing = [this, &CodeGen](CodeGenFunction &CGF, PrePostActionTy &) {
     increaseParallelismLevel(CGF, /*IsSimd=*/true);
     CodeGen(CGF);
     decreaseParallelismLevel(CGF, /*IsSimd=*/true);
@@ -1644,7 +1644,7 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
 
   auto &&L0ParallelGen = [this, &DSI, MasterRD, &Ctx, SavedSlot, SavedStack,
                           SavedFrame, SavedActiveThreads, &NewAddressPtrs,
-                          &OrigAddresses](CodeGenFunction &CGF) {
+                          &OrigAddresses](CodeGenFunction &CGF, PrePostActionTy &) {
     auto &Bld = CGF.Builder;
 
     // In the Level 0 regions, we use the master record to get the data.
@@ -1685,7 +1685,7 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
   };
   auto &&L1ParallelGen = [this, &DSI, MasterRD, &Ctx, SavedSlot, SavedStack,
                           SavedFrame, SavedActiveThreads, &NewAddressPtrs,
-                          &OrigAddresses](CodeGenFunction &CGF) {
+                          &OrigAddresses](CodeGenFunction &CGF, PrePostActionTy &) {
     auto &Bld = CGF.Builder;
 
     // In the Level 1 regions, we use the worker record that has each capture
@@ -1731,7 +1731,7 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
     }
   };
   auto &&Sequential = [this, &DSI, &Ctx, MasterRD, &NewAddressPtrs,
-                       &OrigAddresses](CodeGenFunction &CGF) {
+                       &OrigAddresses](CodeGenFunction &CGF, PrePostActionTy &) {
     // In the sequential regions, we just use the regular allocas.
     auto FI = MasterRD->field_begin();
     auto CapturesIsRefIt = DSI.CapturesValuesIsRef.begin();
@@ -1842,7 +1842,7 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
   auto &DSI = getDataSharingInfo(CurrentParallelContext);
 
   auto &&L0ParallelGen = [this, &DSI, &Ctx, &CS, &RD, &ArgsAddresses,
-                          SourceThreadID](CodeGenFunction &CGF) {
+                          SourceThreadID](CodeGenFunction &CGF, PrePostActionTy &) {
     auto &Bld = CGF.Builder;
 
     // In the Level 0 regions, we need to get the record of the master thread.
@@ -1884,7 +1884,7 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
   };
 
   auto &&L1ParallelGen = [this, &DSI, &Ctx, &CS, &RD, &ArgsAddresses,
-                          SourceThreadID](CodeGenFunction &CGF) {
+                          SourceThreadID](CodeGenFunction &CGF, PrePostActionTy &) {
     auto &Bld = CGF.Builder;
 
     // In the Level 1 regions, we need to get the record of the current worker
@@ -1929,7 +1929,7 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
                               Ctx.getPointerType(FI->getType()));
     }
   };
-  auto &&Sequential = [](CodeGenFunction &CGF) {
+  auto &&Sequential = [](CodeGenFunction &CGF, PrePostActionTy &) {
     // A sequential region does not use the wrapper.
   };
 
@@ -2084,7 +2084,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
   createDataSharingPerFunctionInfrastructure(CGF);
 
   auto *RTLoc = emitUpdateLocation(CGF, Loc);
-  auto &&L0ParallelGen = [this, WFn, &CapturedVars](CodeGenFunction &CGF) {
+  auto &&L0ParallelGen = [this, WFn, &CapturedVars](CodeGenFunction &CGF, PrePostActionTy &) {
     CGBuilderTy &Bld = CGF.Builder;
 
     auto ID = Bld.CreateBitOrPointerCast(WFn, CGM.Int8PtrTy);
@@ -2105,7 +2105,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
     Work.push_back(WFn);
   };
   auto &&L1ParallelGen = [this, WFn, &CapturedVars, &RTLoc,
-                          &Loc](CodeGenFunction &CGF) {
+                          &Loc](CodeGenFunction &CGF, PrePostActionTy &) {
     CGBuilderTy &Bld = CGF.Builder;
     clang::ASTContext &Ctx = CGF.getContext();
 
@@ -2169,7 +2169,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
   };
 
   auto &&SeqGen = [this, Fn, &CapturedVars, &RTLoc,
-                   &Loc](CodeGenFunction &CGF) {
+                   &Loc](CodeGenFunction &CGF, PrePostActionTy &) {
     auto DL = CGM.getDataLayout();
     auto ThreadID = getThreadID(CGF, Loc);
     // Build calls:
@@ -2195,7 +2195,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
   };
 
   auto &&ThenGen = [this, &L0ParallelGen, &L1ParallelGen,
-                    &SeqGen](CodeGenFunction &CGF) {
+                    &SeqGen](CodeGenFunction &CGF, PrePostActionTy &) {
     emitParallelismLevelCode(CGF, L0ParallelGen, L1ParallelGen, SeqGen);
   };
 
@@ -2203,7 +2203,8 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
     emitOMPIfClause(CGF, IfCond, ThenGen, SeqGen);
   } else {
     CodeGenFunction::RunCleanupsScope Scope(CGF);
-    ThenGen(CGF);
+    RegionCodeGenTy ThenRCG(ThenGen);
+    ThenRCG(CGF);
   }
 }
 
@@ -2223,7 +2224,7 @@ void CGOpenMPRuntimeNVPTX::emitSimdCall(CodeGenFunction &CGF,
   Fn->setLinkage(llvm::GlobalValue::InternalLinkage);
   auto *RTLoc = emitUpdateLocation(CGF, Loc);
 
-  auto &&L1SimdGen = [this, WFn, RTLoc, Loc](CodeGenFunction &CGF) {
+  auto &&L1SimdGen = [this, WFn, RTLoc, Loc](CodeGenFunction &CGF, PrePostActionTy &) {
     CGBuilderTy &Bld = CGF.Builder;
     clang::ASTContext &Ctx = CGF.getContext();
 
@@ -2295,7 +2296,7 @@ void CGOpenMPRuntimeNVPTX::emitSimdCall(CodeGenFunction &CGF,
     CGF.EmitBlock(DoEndBB);
   };
 
-  auto &&SeqGen = [Fn, &CapturedVars](CodeGenFunction &CGF) {
+  auto &&SeqGen = [Fn, &CapturedVars](CodeGenFunction &CGF, PrePostActionTy &) {
     CGBuilderTy &Bld = CGF.Builder;
     Address LaneId =
         CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
@@ -2359,7 +2360,7 @@ void CGOpenMPRuntimeNVPTX::emitTeamsCall(CodeGenFunction &CGF,
                                          ArrayRef<llvm::Value *> CapturedVars) {
 
   // just emit the statements in the teams region inlined
-  auto &&CodeGen = [&D](CodeGenFunction &CGF) {
+  auto &&CodeGen = [&D](CodeGenFunction &CGF, PrePostActionTy &) {
     CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
     (void)CGF.EmitOMPFirstprivateClause(D, PrivateScope);
     CGF.EmitOMPPrivateClause(D, PrivateScope);
@@ -2406,8 +2407,14 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
       LastNonAllocaReplacement = cast<llvm::Instruction>(*It);
     }
 
-    assert(LastAlloca && "We should have at least one alloca.");
-    auto *InsertPtr = LastAlloca->getNextNode();
+    // We will start inserting after the first alloca or at the beginning of the function.
+    llvm::Instruction *InsertPtr = nullptr;
+    if (LastAlloca)
+      InsertPtr = LastAlloca->getNextNode();
+    else
+      InsertPtr = &(*HeaderBB.begin());
+
+    assert(InsertPtr && "Empty function???");
 
     // If there is nothing to share, and this is an entry point, we should
     // initialize the data sharing logic anyways.

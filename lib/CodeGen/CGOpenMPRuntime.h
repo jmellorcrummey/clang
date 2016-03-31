@@ -351,11 +351,6 @@ private:
   };
   OffloadEntriesInfoManagerTy OffloadEntriesInfoManager;
 
-  /// \brief Flag that is set to true if the code that is being generated is
-  /// related with a target region. This includes the function used in target
-  /// regions.
-  bool GenerationRelatedWithTargetRegion = false;
-
   /// \brief Creates and registers offloading binary descriptor for the current
   /// compilation unit. The function that does the registration is returned.
   llvm::Function *createOffloadingBinaryDescriptorRegistration();
