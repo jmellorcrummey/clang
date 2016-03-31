@@ -4451,16 +4451,14 @@ void CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(
 
 /// \brief look inside a Body stmt for a LF statement discarding any
 /// intervening SK statements
-template<typename LF, typename SK>
-const static LF *
-hasEnclosingOpenMPDirective(const Stmt *Body) {
+template <typename LF, typename SK>
+const static LF *hasEnclosingOpenMPDirective(const Stmt *Body) {
   const SK *S = nullptr;
   // keep iterating until we find an LF or not an SK or a nullptr
   while ((S = dyn_cast_or_null<SK>(Body)) && (!dyn_cast_or_null<LF>(Body)))
-      Body = S->body_front();
+    Body = S->body_front();
 
-  return (Body) ? dyn_cast_or_null<LF>(Body) :
-      nullptr;
+  return (Body) ? dyn_cast_or_null<LF>(Body) : nullptr;
 }
 
 /// \brief Emit the num_teams clause of an enclosed teams directive at the
@@ -5849,7 +5847,8 @@ void CGOpenMPRuntime::emitTargetEnterOrExitDataCall(
          "Expecting either target enter or exit data directives.");
 
   // Generate the code for the opening of the data environment.
-  auto &&ThenGen = [this, &D, &CGF, Device](CodeGenFunction &CGF, PrePostActionTy &) {
+  auto &&ThenGen = [this, &D, &CGF, Device](CodeGenFunction &CGF,
+                                            PrePostActionTy &) {
     // Fill up the arrays with all the mapped variables.
     OpenMPMapClauseHandler::MapValuesArrayTy BasePointers;
     OpenMPMapClauseHandler::MapValuesArrayTy Pointers;

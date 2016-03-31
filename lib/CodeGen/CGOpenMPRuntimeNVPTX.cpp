@@ -655,8 +655,8 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
   Address WorkFn = CGF.CreateTempAlloca(
       CGF.Int8PtrTy, CharUnits::fromQuantity(8), /*Name*/ "work_fn");
   Address ExecStatus =
-        CGF.CreateTempAlloca(CGF.Int8Ty, CharUnits::fromQuantity(1),
-                             /*Name*/ "exec_status");
+      CGF.CreateTempAlloca(CGF.Int8Ty, CharUnits::fromQuantity(1),
+                           /*Name*/ "exec_status");
   CGF.InitTempAlloca(ExecStatus, Bld.getInt8(/*C=*/0));
 
   llvm::Value *Args[] = {WorkFn.getPointer()};
@@ -1294,7 +1294,8 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
       HasCancel = OPFD->hasCancel();
 
     // Include updates in runtime parallelism level.
-    auto &&CodeGenWithDataSharing = [this, &CodeGen](CodeGenFunction &CGF, PrePostActionTy &) {
+    auto &&CodeGenWithDataSharing = [this, &CodeGen](CodeGenFunction &CGF,
+                                                     PrePostActionTy &) {
       increaseParallelismLevel(CGF);
       CodeGen(CGF);
       decreaseParallelismLevel(CGF);
@@ -1324,7 +1325,8 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitSimdOutlinedFunction(
   const CapturedStmt *CS = cast<CapturedStmt>(D.getAssociatedStmt());
 
   // Include updates in runtime parallelism level.
-  auto &&CodeGenWithDataSharing = [this, &CodeGen](CodeGenFunction &CGF, PrePostActionTy &) {
+  auto &&CodeGenWithDataSharing = [this, &CodeGen](CodeGenFunction &CGF,
+                                                   PrePostActionTy &) {
     increaseParallelismLevel(CGF, /*IsSimd=*/true);
     CodeGen(CGF);
     decreaseParallelismLevel(CGF, /*IsSimd=*/true);
@@ -1644,7 +1646,8 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
 
   auto &&L0ParallelGen = [this, &DSI, MasterRD, &Ctx, SavedSlot, SavedStack,
                           SavedFrame, SavedActiveThreads, &NewAddressPtrs,
-                          &OrigAddresses](CodeGenFunction &CGF, PrePostActionTy &) {
+                          &OrigAddresses](CodeGenFunction &CGF,
+                                          PrePostActionTy &) {
     auto &Bld = CGF.Builder;
 
     // In the Level 0 regions, we use the master record to get the data.
@@ -1685,7 +1688,8 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
   };
   auto &&L1ParallelGen = [this, &DSI, MasterRD, &Ctx, SavedSlot, SavedStack,
                           SavedFrame, SavedActiveThreads, &NewAddressPtrs,
-                          &OrigAddresses](CodeGenFunction &CGF, PrePostActionTy &) {
+                          &OrigAddresses](CodeGenFunction &CGF,
+                                          PrePostActionTy &) {
     auto &Bld = CGF.Builder;
 
     // In the Level 1 regions, we use the worker record that has each capture
@@ -1731,7 +1735,8 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
     }
   };
   auto &&Sequential = [this, &DSI, &Ctx, MasterRD, &NewAddressPtrs,
-                       &OrigAddresses](CodeGenFunction &CGF, PrePostActionTy &) {
+                       &OrigAddresses](CodeGenFunction &CGF,
+                                       PrePostActionTy &) {
     // In the sequential regions, we just use the regular allocas.
     auto FI = MasterRD->field_begin();
     auto CapturesIsRefIt = DSI.CapturesValuesIsRef.begin();
@@ -1842,7 +1847,8 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
   auto &DSI = getDataSharingInfo(CurrentParallelContext);
 
   auto &&L0ParallelGen = [this, &DSI, &Ctx, &CS, &RD, &ArgsAddresses,
-                          SourceThreadID](CodeGenFunction &CGF, PrePostActionTy &) {
+                          SourceThreadID](CodeGenFunction &CGF,
+                                          PrePostActionTy &) {
     auto &Bld = CGF.Builder;
 
     // In the Level 0 regions, we need to get the record of the master thread.
@@ -1884,7 +1890,8 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
   };
 
   auto &&L1ParallelGen = [this, &DSI, &Ctx, &CS, &RD, &ArgsAddresses,
-                          SourceThreadID](CodeGenFunction &CGF, PrePostActionTy &) {
+                          SourceThreadID](CodeGenFunction &CGF,
+                                          PrePostActionTy &) {
     auto &Bld = CGF.Builder;
 
     // In the Level 1 regions, we need to get the record of the current worker
@@ -2084,7 +2091,8 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
   createDataSharingPerFunctionInfrastructure(CGF);
 
   auto *RTLoc = emitUpdateLocation(CGF, Loc);
-  auto &&L0ParallelGen = [this, WFn, &CapturedVars](CodeGenFunction &CGF, PrePostActionTy &) {
+  auto &&L0ParallelGen = [this, WFn, &CapturedVars](CodeGenFunction &CGF,
+                                                    PrePostActionTy &) {
     CGBuilderTy &Bld = CGF.Builder;
 
     auto ID = Bld.CreateBitOrPointerCast(WFn, CGM.Int8PtrTy);
@@ -2168,8 +2176,8 @@ void CGOpenMPRuntimeNVPTX::emitParallelCall(
     CGF.EmitBlock(DoEndBB);
   };
 
-  auto &&SeqGen = [this, Fn, &CapturedVars, &RTLoc,
-                   &Loc](CodeGenFunction &CGF, PrePostActionTy &) {
+  auto &&SeqGen = [this, Fn, &CapturedVars, &RTLoc, &Loc](CodeGenFunction &CGF,
+                                                          PrePostActionTy &) {
     auto DL = CGM.getDataLayout();
     auto ThreadID = getThreadID(CGF, Loc);
     // Build calls:
@@ -2224,7 +2232,8 @@ void CGOpenMPRuntimeNVPTX::emitSimdCall(CodeGenFunction &CGF,
   Fn->setLinkage(llvm::GlobalValue::InternalLinkage);
   auto *RTLoc = emitUpdateLocation(CGF, Loc);
 
-  auto &&L1SimdGen = [this, WFn, RTLoc, Loc](CodeGenFunction &CGF, PrePostActionTy &) {
+  auto &&L1SimdGen = [this, WFn, RTLoc, Loc](CodeGenFunction &CGF,
+                                             PrePostActionTy &) {
     CGBuilderTy &Bld = CGF.Builder;
     clang::ASTContext &Ctx = CGF.getContext();
 
@@ -2407,7 +2416,8 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
       LastNonAllocaReplacement = cast<llvm::Instruction>(*It);
     }
 
-    // We will start inserting after the first alloca or at the beginning of the function.
+    // We will start inserting after the first alloca or at the beginning of the
+    // function.
     llvm::Instruction *InsertPtr = nullptr;
     if (LastAlloca)
       InsertPtr = LastAlloca->getNextNode();
