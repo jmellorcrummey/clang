@@ -76,33 +76,19 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // \brief Return address of the initial slot that is used to share data.
   LValue getDataSharingRootSlotLValue(CodeGenFunction &CGF, bool IsMaster);
 
-  //  // \brief Return the address where the address of the current slot is
-  //  stored.
-  //  LValue getSharedDataSlotPointerAddrLValue(CodeGenFunction &CGF,
-  //                                            bool IsMaster);
-  //
-  //  // \brief Return the address of the current data sharing slot.
-  //  LValue getSharedDataSlotPointerLValue(CodeGenFunction &CGF, bool
-  //  IsMaster);
-  //
-  //  // \brief Return the address where the address of the current stack
-  //  pointer
-  //  // (in the current slot) is stored.
-  //  LValue getSharedDataStackPointerAddrLValue(CodeGenFunction &CGF,
-  //                                             bool IsMaster);
-  //
-  //  // \brief Return the address of the current data stack pointer.
-  //  LValue getSharedDataStackPointerLValue(CodeGenFunction &CGF, bool
-  //  IsMaster);
+  // \brief Initialize the data sharing slots and pointers and return the
+  // generated call.
+  void initializeDataSharing(CodeGenFunction &CGF, bool IsMaster);
 
   // \brief Initialize the data sharing slots and pointers and return the
   // generated call.
-  llvm::CallInst *initializeSharedData(CodeGenFunction &CGF, bool IsMaster);
+  llvm::Function *createDataSharingInitializerFunction();
 
   // \brief Group the captures information for a given context.
   struct DataSharingInfo {
-    // The local values of the captures.
+    // The local values of the captures. The boolean indicates that what is being shared is a reference and not the variable original storage.
     llvm::SmallVector<const VarDecl *, 8> CapturesValues;
+    llvm::SmallVector<bool, 8> CapturesValuesIsRef;
     // The record type of the sharing region if shared by the master.
     QualType MasterRecordType;
     // The record type of the sharing region if shared by the worker warps.
@@ -116,52 +102,25 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // \brief Obtain the data sharing info for the current context.
   const DataSharingInfo &getDataSharingInfo(const Decl *Context);
 
-  // \brief Map between a function and the local addresses that save the slot
-  // and stack pointers.
-  struct DataSharingSavedAddresses {
-    llvm::Value *SlotPtr;
-    llvm::Value *StackPtr;
-    llvm::Value *FramePtr;
-    llvm::Value *ActiveThreads;
-    DataSharingSavedAddresses(llvm::Value *SlotPtr, llvm::Value *StackPtr,
-                              llvm::Value *FramePtr, llvm::Value *ActiveThreads)
-        : SlotPtr(SlotPtr), StackPtr(StackPtr), FramePtr(FramePtr),
-          ActiveThreads(ActiveThreads) {}
-    DataSharingSavedAddresses()
-        : SlotPtr(nullptr), StackPtr(nullptr), FramePtr(nullptr),
-          ActiveThreads(nullptr) {}
+  // \brief Create the data sharing info for the current context.
+  void createDataSharingInfo(CodeGenFunction &CGF);
+
+  // \brief Set of all functions that are offload entry points.
+  llvm::SmallPtrSet<llvm::Function *, 16> EntryPointFunctionSet;
+
+  // \brief Map between a function and its associated data sharing related values.
+  struct DataSharingFunctionInfo {
+    bool IsEntryPoint;
+    llvm::Function *InitializationFunction;
+    SmallVector<llvm::Value *, 16> ValuesToBeReplaced;
+    DataSharingFunctionInfo() : IsEntryPoint(false), InitializationFunction(nullptr) {}
   };
-  typedef llvm::DenseMap<llvm::Function *, DataSharingSavedAddresses>
-      DataSharingSavedAddressesMapTy;
-  DataSharingSavedAddressesMapTy DataSharingSavedAddressesMap;
-
-  // \brief Map between entry point functions and the data sharing
-  // initialization. This is useful to drive decisions that only make sense for
-  // entry points.
-  llvm::DenseMap<llvm::Function *, llvm::CallInst *> EntryPointDataSharingInit;
-
-  //  // \brief Map between the context and the LLVM function, useful to do the
-  //  post-codegen replacements.
-  //  typedef llvm::DenseMap<llvm::Function *, const Decl *>
-  //  DataSharingFunctionToContextMapTy;
-  //  DataSharingFunctionToContextMapTy DataSharingFunctionToContextMap;
-
-  // \brief Set that keeps the pairs of values that need to be replaced when the
-  // module is released.
-  struct DataSharingReplaceValue {
-    llvm::Value *From;
-    llvm::Value *To;
-    unsigned Align;
-    DataSharingReplaceValue(llvm::Value *From, llvm::Value *To, unsigned Align)
-        : From(From), To(To), Align(Align) {}
-    DataSharingReplaceValue() : From(nullptr), To(nullptr), Align(0u) {}
-  };
-  typedef SmallVector<DataSharingReplaceValue, 8> DataSharingReplaceValuesTy;
-  DataSharingReplaceValuesTy DataSharingReplaceValues;
+  typedef llvm::DenseMap<llvm::Function *, DataSharingFunctionInfo> DataSharingFunctionInfoMapTy;
+  DataSharingFunctionInfoMapTy DataSharingFunctionInfoMap;
 
   // \brief Create the data sharing replacement pairs at the top of a function
   // with parallel regions. If they were created already, do not do anything.
-  void createDataSharingPerFunctionInfrastructure(CodeGenFunction &CGF);
+  void createDataSharingPerFunctionInfrastructure(CodeGenFunction &EnclosingCGF);
 
   // \brief Create the data sharing arguments and call the parallel outlined
   // function.
