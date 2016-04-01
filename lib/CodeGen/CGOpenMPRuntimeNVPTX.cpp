@@ -1849,9 +1849,9 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
   CGF.StartFunction(GlobalDecl(), Ctx.VoidTy, Fn, CGFI, WrapperArgs);
 
   // Get the source thread ID, it is the argument of the current function.
-  auto SourceThreadIDAddr = CGF.GetAddrOfLocalVar(&WrapperArg);
-  auto *SourceThreadID = CGF.EmitLoadOfScalar(
-      SourceThreadIDAddr, /*Volatile=*/false, Int32QTy, SourceLocation());
+  auto SourceLaneIDAddr = CGF.GetAddrOfLocalVar(&WrapperArg);
+  auto *SourceLaneID = CGF.EmitLoadOfScalar(
+      SourceLaneIDAddr, /*Volatile=*/false, Int32QTy, SourceLocation());
 
   // Create temporary variables to contain the new args.
   SmallVector<Address, 32> ArgsAddresses;
@@ -1880,15 +1880,15 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
   auto &DSI = getDataSharingInfo(CurrentContext);
 
   auto &&L0ParallelGen = [this, &DSI, &Ctx, &CS, &RD, &ArgsAddresses,
-                          SourceThreadID](CodeGenFunction &CGF,
-                                          PrePostActionTy &) {
+                          SourceLaneID](CodeGenFunction &CGF,
+                                        PrePostActionTy &) {
     auto &Bld = CGF.Builder;
 
     // In the Level 0 regions, we need to get the record of the master thread.
     auto *DataAddr = Bld.CreateCall(
         createNVPTXRuntimeFunction(
             OMPRTL_NVPTX__kmpc_get_data_sharing_environment_frame),
-        SourceThreadID);
+        getMasterThreadID(CGF));
     auto *RTy = CGF.getTypes().ConvertTypeForMem(DSI.MasterRecordType);
     auto *CastedDataAddr =
         Bld.CreateBitOrPointerCast(DataAddr, RTy->getPointerTo());
@@ -1924,8 +1924,8 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
   };
 
   auto &&L1ParallelGen = [this, &DSI, &Ctx, &CS, &RD, &ArgsAddresses,
-                          SourceThreadID](CodeGenFunction &CGF,
-                                          PrePostActionTy &) {
+                          SourceLaneID](CodeGenFunction &CGF,
+                                        PrePostActionTy &) {
     auto &Bld = CGF.Builder;
 
     // In the Level 1 regions, we need to get the record of the current worker
@@ -1933,14 +1933,10 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
     auto *DataAddr = Bld.CreateCall(
         createNVPTXRuntimeFunction(
             OMPRTL_NVPTX__kmpc_get_data_sharing_environment_frame),
-        SourceThreadID);
+        getNVPTXThreadID(CGF));
     auto *RTy = CGF.getTypes().ConvertTypeForMem(DSI.WorkerWarpRecordType);
     auto *CastedDataAddr =
         Bld.CreateBitOrPointerCast(DataAddr, RTy->getPointerTo());
-
-    // Get the source thread warp ID.
-    auto *SourceThreadWarpID = Bld.CreateAnd(
-        SourceThreadID, Bld.getInt32(DS_Max_Worker_Warp_Size_Log2_Mask));
 
     // For each capture obtain the pointer by calculating the right offset in
     // the host record.
@@ -1957,8 +1953,7 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
           break;
       assert(Idx != DSI.CapturesValues.size() && "Capture must exist!");
 
-      llvm::Value *Idxs[] = {Bld.getInt32(0), Bld.getInt32(Idx),
-                             SourceThreadWarpID};
+      llvm::Value *Idxs[] = {Bld.getInt32(0), Bld.getInt32(Idx), SourceLaneID};
       auto *Arg = Bld.CreateInBoundsGEP(CastedDataAddr, Idxs);
 
       // If the what is being shared is the reference, we should load it.
@@ -2266,6 +2261,11 @@ void CGOpenMPRuntimeNVPTX::emitSimdCall(CodeGenFunction &CGF,
   // Force inline this outlined function at its call site.
   // Fn->addFnAttr(llvm::Attribute::AlwaysInline);
   Fn->setLinkage(llvm::GlobalValue::InternalLinkage);
+
+  // Emit code that does the data sharing changes in the beginning of the
+  // function.
+  createDataSharingPerFunctionInfrastructure(CGF);
+
   auto *RTLoc = emitUpdateLocation(CGF, Loc);
 
   auto &&L1SimdGen = [this, WFn, RTLoc, Loc](CodeGenFunction &CGF,
