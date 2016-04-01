@@ -1304,6 +1304,10 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
       decreaseParallelismLevel(CGF);
     };
 
+    // Save the current parallel context because it may be overwritten by the
+    // innermost regions.
+    const Decl *CurrentContext = CurrentParallelContext;
+
     CGOpenMPOutlinedRegionInfo CGInfo(*CS, ThreadIDVar, CodeGenWithDataSharing,
                                       InnermostKind, HasCancel);
     CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
@@ -1313,7 +1317,8 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
       // and a capture structure created from the captured variables.
       OutlinedFun = CGF.GenerateOpenMPCapturedStmtFunction(*CS);
     }
-    auto *WrapperFun = createDataSharingParallelWrapper(*OutlinedFun, *CS);
+    auto *WrapperFun =
+        createDataSharingParallelWrapper(*OutlinedFun, *CS, CurrentContext);
     WrapperFunctionsMap[OutlinedFun] = WrapperFun;
   }
   return OutlinedFun;
@@ -1335,6 +1340,10 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitSimdOutlinedFunction(
     decreaseParallelismLevel(CGF, /*IsSimd=*/true);
   };
 
+  // Save the current parallel context because it may be overwritten by the
+  // innermost regions.
+  const Decl *CurrentContext = CurrentParallelContext;
+
   CodeGenFunction CGF(CGM, true);
   CGOpenMPSimdOutlinedRegionInfo CGInfo(*CS, LaneIDVar, NumLanesVar,
                                         CodeGenWithDataSharing, InnermostKind);
@@ -1344,8 +1353,8 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitSimdOutlinedFunction(
     OutlinedFun = CGF.GenerateOpenMPCapturedStmtFunction(*CS);
   }
 
-  auto *WrapperFun =
-      createDataSharingParallelWrapper(*OutlinedFun, *CS, /*IsSimd=*/true);
+  auto *WrapperFun = createDataSharingParallelWrapper(
+      *OutlinedFun, *CS, CurrentContext, /*IsSimd=*/true);
   WrapperFunctionsMap[OutlinedFun] = WrapperFun;
   return OutlinedFun;
 }
@@ -1447,9 +1456,8 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
 
       const VarDecl *CurVD = nullptr;
 
-      // See if we are sharing the original storage or a reference. We are
-      // sharing original storage if the address is the result of an alloca.
-      bool IsReference = true;
+      // Track the data sharing type.
+      DataSharingInfo::DataSharingType DST = DataSharingInfo::DST_Val;
 
       if (CurField->hasCapturedVLAType()) {
         assert("VLAs are not yet supported in NVPTX target data sharing!");
@@ -1457,8 +1465,6 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
       } else if (CurCap->capturesThis()) {
         // We use null to indicate 'this'.
         CurVD = nullptr;
-        // We don't expect to have to share the original storage of 'this'.
-        IsReference = true;
       } else if (CurCap->capturesVariableByCopy()) {
         assert("Not expecting to capture variables by copy in NVPTX target "
                "data sharing!");
@@ -1473,8 +1479,12 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
 
         // If we have an alloca for this variable, then we need to share the
         // storage too, not only the reference.
-        IsReference =
-            !isa<llvm::AllocaInst>(CGF.GetAddrOfLocalVar(CurVD).getPointer());
+        auto *Val =
+            cast<llvm::Instruction>(CGF.GetAddrOfLocalVar(CurVD).getPointer());
+        if (isa<llvm::LoadInst>(Val))
+          DST = DataSharingInfo::DST_Ref;
+        else if (isa<llvm::BitCastInst>(Val))
+          DST = DataSharingInfo::DST_Cast;
       }
 
       // Do not insert the same declaration twice.
@@ -1482,12 +1492,10 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
         continue;
 
       AlreadySharedDecls.insert(CurVD);
-
-      Info.CapturesValues.push_back(CurVD);
-      Info.CapturesValuesIsRef.push_back(IsReference);
+      Info.add(CurVD, DST);
 
       QualType ElemTy = (*I)->getType();
-      if (IsReference)
+      if (DST == DataSharingInfo::DST_Ref)
         ElemTy = C.getPointerType(ElemTy);
 
       addFieldToRecordDecl(C, SharedMasterRD, ElemTy);
@@ -1557,20 +1565,20 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
 
   auto *MasterRD = DSI.MasterRecordType->getAs<RecordType>()->getDecl();
   auto CapturesIt = DSI.CapturesValues.begin();
-  auto CapturesIsRefIt = DSI.CapturesValuesIsRef.begin();
   for (auto *F : MasterRD->fields()) {
     QualType ArgTy = F->getType();
 
     // If this is not a reference the right address type is the pointer type of
     // the type that is the record.
-    if (!(*CapturesIsRefIt))
+    if (CapturesIt->second != DataSharingInfo::DST_Ref)
       ArgTy = Ctx.getPointerType(ArgTy);
 
-    StringRef BaseName = (*CapturesIt) ? (*CapturesIt)->getName() : "this";
+    StringRef BaseName =
+        CapturesIt->first ? CapturesIt->first->getName() : "this";
 
     // If this is not a reference, we need to return by reference the new
     // address to be replaced.
-    if (!(*CapturesIsRefIt)) {
+    if (CapturesIt->second != DataSharingInfo::DST_Ref) {
       std::string Name = BaseName;
       Name += ".addr";
       auto &NameID = Ctx.Idents.get(Name);
@@ -1587,7 +1595,6 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
     ArgImplDecls.push_back(OrigD);
 
     ++CapturesIt;
-    ++CapturesIsRefIt;
   }
 
   FunctionArgList ArgList;
@@ -1633,9 +1640,9 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
   SmallVector<Address, 32> NewAddressPtrs;
   SmallVector<Address, 32> OrigAddresses;
   // We iterate two by two.
-  for (auto CapturesIsRefIt = DSI.CapturesValuesIsRef.begin();
-       ArgsIt != ArgList.end(); ++ArgsIt, ++CapturesIsRefIt) {
-    if (!(*CapturesIsRefIt)) {
+  for (auto CapturesIt = DSI.CapturesValues.begin(); ArgsIt != ArgList.end();
+       ++ArgsIt, ++CapturesIt) {
+    if (CapturesIt->second != DataSharingInfo::DST_Ref) {
       NewAddressPtrs.push_back(
           CGF.EmitLoadOfPointer(CGF.GetAddrOfLocalVar(*ArgsIt),
                                 (*ArgsIt)->getType()->getAs<PointerType>()));
@@ -1671,21 +1678,33 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
 
     // For each field, return the address by reference if it is not a reference
     // capture, otherwise copy the original pointer to the shared address space.
+    // If it is a cast, we need to copy the pointee into shared memory.
     auto FI = MasterRD->field_begin();
-    auto CapturesIsRefIt = DSI.CapturesValuesIsRef.begin();
+    auto CapturesIt = DSI.CapturesValues.begin();
     auto NewAddressIt = NewAddressPtrs.begin();
-    for (unsigned i = 0; i < OrigAddresses.size();
-         ++i, ++FI, ++CapturesIsRefIt) {
+    for (unsigned i = 0; i < OrigAddresses.size(); ++i, ++FI, ++CapturesIt) {
       llvm::Value *Idx[] = {Bld.getInt32(0), Bld.getInt32(i)};
       auto *NewAddr = Bld.CreateInBoundsGEP(CasterDataShareAddr, Idx);
 
-      if (*CapturesIsRefIt) {
+      switch (CapturesIt->second) {
+      case DataSharingInfo::DST_Ref: {
         auto Addr = CGF.MakeNaturalAlignAddrLValue(NewAddr, FI->getType());
         CGF.EmitStoreOfScalar(OrigAddresses[i].getPointer(), Addr);
-      } else {
+      } break;
+      case DataSharingInfo::DST_Cast: {
+        // Copy the pointee to the new location.
+        auto *PointeeVal =
+            CGF.EmitLoadOfScalar(OrigAddresses[i], /*Volatiole=*/false,
+                                 FI->getType(), SourceLocation());
+        auto NewAddrLVal =
+            CGF.MakeNaturalAlignAddrLValue(NewAddr, FI->getType());
+        CGF.EmitStoreOfScalar(PointeeVal, NewAddrLVal);
+      } // fallthrough.
+      case DataSharingInfo::DST_Val: {
         CGF.EmitStoreOfScalar(NewAddr, *NewAddressIt, /*Volatile=*/false,
                               Ctx.getPointerType(FI->getType()));
         ++NewAddressIt;
+      } break;
       }
     }
   };
@@ -1720,20 +1739,31 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
     // For each field, generate the shared address and store it in the new
     // addresses array.
     auto FI = MasterRD->field_begin();
-    auto CapturesIsRefIt = DSI.CapturesValuesIsRef.begin();
+    auto CapturesIt = DSI.CapturesValues.begin();
     auto NewAddressIt = NewAddressPtrs.begin();
-    for (unsigned i = 0; i < OrigAddresses.size();
-         ++i, ++FI, ++CapturesIsRefIt) {
+    for (unsigned i = 0; i < OrigAddresses.size(); ++i, ++FI, ++CapturesIt) {
       llvm::Value *Idx[] = {Bld.getInt32(0), Bld.getInt32(i), ThreadWarpID};
       auto *NewAddr = Bld.CreateInBoundsGEP(CasterDataShareAddr, Idx);
 
-      if (*CapturesIsRefIt) {
+      switch (CapturesIt->second) {
+      case DataSharingInfo::DST_Ref: {
         auto Addr = CGF.MakeNaturalAlignAddrLValue(NewAddr, FI->getType());
         CGF.EmitStoreOfScalar(OrigAddresses[i].getPointer(), Addr);
-      } else {
+      } break;
+      case DataSharingInfo::DST_Cast: {
+        // Copy the pointee to the new location.
+        auto *PointeeVal =
+            CGF.EmitLoadOfScalar(OrigAddresses[i], /*Volatiole=*/false,
+                                 FI->getType(), SourceLocation());
+        auto NewAddrLVal =
+            CGF.MakeNaturalAlignAddrLValue(NewAddr, FI->getType());
+        CGF.EmitStoreOfScalar(PointeeVal, NewAddrLVal);
+      } // fallthrough.
+      case DataSharingInfo::DST_Val: {
         CGF.EmitStoreOfScalar(NewAddr, *NewAddressIt, /*Volatile=*/false,
                               Ctx.getPointerType(FI->getType()));
         ++NewAddressIt;
+      } break;
       }
     }
   };
@@ -1742,12 +1772,11 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
                                        PrePostActionTy &) {
     // In the sequential regions, we just use the regular allocas.
     auto FI = MasterRD->field_begin();
-    auto CapturesIsRefIt = DSI.CapturesValuesIsRef.begin();
+    auto CapturesIt = DSI.CapturesValues.begin();
     auto NewAddressIt = NewAddressPtrs.begin();
-    for (unsigned i = 0; i < OrigAddresses.size();
-         ++i, ++FI, ++CapturesIsRefIt) {
+    for (unsigned i = 0; i < OrigAddresses.size(); ++i, ++FI, ++CapturesIt) {
       // If capturing a reference, the original value will be used.
-      if (*CapturesIsRefIt)
+      if (CapturesIt->second == DataSharingInfo::DST_Ref)
         continue;
 
       llvm::Value *OriginalVal = OrigAddresses[i].getPointer();
@@ -1764,9 +1793,9 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
   auto FI = MasterRD->field_begin();
   for (unsigned i = 0; i < OrigAddresses.size(); ++i, ++FI) {
     llvm::Value *OriginalVal = nullptr;
-    if (DSI.CapturesValues[i]) {
-      OriginalVal =
-          EnclosingCGF.GetAddrOfLocalVar(DSI.CapturesValues[i]).getPointer();
+    if (DSI.CapturesValues[i].first) {
+      OriginalVal = EnclosingCGF.GetAddrOfLocalVar(DSI.CapturesValues[i].first)
+                        .getPointer();
     } else
       OriginalVal = CGF.LoadCXXThis();
 
@@ -1786,7 +1815,8 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
 // \brief Create the data sharing arguments and call the parallel outlined
 // function.
 llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
-    llvm::Function &OutlinedParallelFn, const CapturedStmt &CS, bool IsSimd) {
+    llvm::Function &OutlinedParallelFn, const CapturedStmt &CS,
+    const Decl *CurrentContext, bool IsSimd) {
   auto &Ctx = CGM.getContext();
 
   // Create a function that takes as argument the source lane.
@@ -1847,7 +1877,7 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
 
   // Get the data sharing information for the context that encloses the current
   // one.
-  auto &DSI = getDataSharingInfo(CurrentParallelContext);
+  auto &DSI = getDataSharingInfo(CurrentContext);
 
   auto &&L0ParallelGen = [this, &DSI, &Ctx, &CS, &RD, &ArgsAddresses,
                           SourceThreadID](CodeGenFunction &CGF,
@@ -1872,16 +1902,17 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
                                               CE = CS.capture_end();
          CI != CE; ++CI, ++ArgsIdx, ++FI) {
       const VarDecl *VD = CI->capturesThis() ? nullptr : CI->getCapturedVar();
-      auto It =
-          std::find(DSI.CapturesValues.begin(), DSI.CapturesValues.end(), VD);
-      assert(It != DSI.CapturesValues.end() && "Capture must exist!");
-      auto Idx = std::distance(DSI.CapturesValues.begin(), It);
+      unsigned Idx = 0;
+      for (; Idx < DSI.CapturesValues.size(); ++Idx)
+        if (DSI.CapturesValues[Idx].first == VD)
+          break;
+      assert(Idx != DSI.CapturesValues.size() && "Capture must exist!");
 
       llvm::Value *Idxs[] = {Bld.getInt32(0), Bld.getInt32(Idx)};
       auto *Arg = Bld.CreateInBoundsGEP(CastedDataAddr, Idxs);
 
-      // If the what is being shared is the reference, we should load it.
-      if (DSI.CapturesValuesIsRef[Idx]) {
+      // If what is being shared is the reference, we should load it.
+      if (DSI.CapturesValues[Idx].second == DataSharingInfo::DST_Ref) {
         auto Addr = CGF.MakeNaturalAlignAddrLValue(Arg, FI->getType());
         Arg = CGF.EmitLoadOfScalar(Addr, SourceLocation());
         CGF.EmitStoreOfScalar(Arg, ArgsAddresses[ArgsIdx], /*Volatile=*/false,
@@ -1919,17 +1950,19 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
     for (CapturedStmt::const_capture_iterator CI = CS.capture_begin(),
                                               CE = CS.capture_end();
          CI != CE; ++CI, ++ArgsIdx, ++FI) {
-      auto It = std::find(DSI.CapturesValues.begin(), DSI.CapturesValues.end(),
-                          CI->capturesThis() ? nullptr : CI->getCapturedVar());
-      assert(It != DSI.CapturesValues.end() && "Capture must exist!");
-      auto Idx = std::distance(DSI.CapturesValues.begin(), It);
+      const VarDecl *VD = CI->capturesThis() ? nullptr : CI->getCapturedVar();
+      unsigned Idx = 0;
+      for (; Idx < DSI.CapturesValues.size(); ++Idx)
+        if (DSI.CapturesValues[Idx].first == VD)
+          break;
+      assert(Idx != DSI.CapturesValues.size() && "Capture must exist!");
 
       llvm::Value *Idxs[] = {Bld.getInt32(0), Bld.getInt32(Idx),
                              SourceThreadWarpID};
       auto *Arg = Bld.CreateInBoundsGEP(CastedDataAddr, Idxs);
 
       // If the what is being shared is the reference, we should load it.
-      if (DSI.CapturesValuesIsRef[Idx]) {
+      if (DSI.CapturesValues[Idx].second == DataSharingInfo::DST_Ref) {
         auto Addr = CGF.MakeNaturalAlignAddrLValue(Arg, FI->getType());
         Arg = CGF.EmitLoadOfScalar(Addr, SourceLocation());
         CGF.EmitStoreOfScalar(Arg, ArgsAddresses[ArgsIdx], /*Volatile=*/false,
@@ -2460,7 +2493,7 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
     for (auto *R : DSI.ValuesToBeReplaced) {
 
       // Is it a reference? If not, create the address alloca.
-      if (isa<llvm::AllocaInst>(R)) {
+      if (!isa<llvm::LoadInst>(R)) {
         InitArgs.push_back(new llvm::AllocaInst(
             R->getType(), /*ArraySize=*/nullptr, PointerAlign,
             R->getName() + ".shared", InsertPtr));

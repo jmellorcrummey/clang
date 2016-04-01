@@ -88,10 +88,26 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
 
   // \brief Group the captures information for a given context.
   struct DataSharingInfo {
+    enum DataSharingType {
+      // A value allocated in the current function - the alloca has to be
+      // replaced by the address in shared memory.
+      DST_Val,
+      // A reference captured into this function - the reference has to be
+      // shared as is.
+      DST_Ref,
+      // A value allocated in the current function but required a cast in the
+      // header - it has to be replaced by the address in shared memory and the
+      // pointee has to be copied there.
+      DST_Cast,
+    };
     // The local values of the captures. The boolean indicates that what is
     // being shared is a reference and not the variable original storage.
-    llvm::SmallVector<const VarDecl *, 8> CapturesValues;
-    llvm::SmallVector<bool, 8> CapturesValuesIsRef;
+    llvm::SmallVector<std::pair<const VarDecl *, DataSharingType>, 8>
+        CapturesValues;
+    void add(const VarDecl *VD, DataSharingType DST) {
+      CapturesValues.push_back(std::make_pair(VD, DST));
+    }
+
     // The record type of the sharing region if shared by the master.
     QualType MasterRecordType;
     // The record type of the sharing region if shared by the worker warps.
@@ -131,9 +147,9 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
 
   // \brief Create the data sharing arguments and call the parallel outlined
   // function.
-  llvm::Function *
-  createDataSharingParallelWrapper(llvm::Function &OutlinedParallelFn,
-                                   const CapturedStmt &CS, bool IsSimd = false);
+  llvm::Function *createDataSharingParallelWrapper(
+      llvm::Function &OutlinedParallelFn, const CapturedStmt &CS,
+      const Decl *CurrentContext, bool IsSimd = false);
 
   // \brief Map between an outlined function and its data-sharing-wrap version.
   llvm::DenseMap<llvm::Function *, llvm::Function *> WrapperFunctionsMap;
