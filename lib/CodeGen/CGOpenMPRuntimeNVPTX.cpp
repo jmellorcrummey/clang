@@ -2454,9 +2454,6 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
         new llvm::AllocaInst(CGM.Int32Ty, /*ArraySize=*/nullptr, Int32Align,
                              "data_share_active_thd_saved", InsertPtr));
 
-    llvm::errs() << "Values to be replaced " << DSI.ValuesToBeReplaced.size()
-                 << "\n";
-
     // Create the remaining arguments. One if it is a reference sharing (the
     // reference itself), two otherwise (the address of the replacement and the
     // value to be replaced).
