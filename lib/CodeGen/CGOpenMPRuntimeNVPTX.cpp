@@ -2574,6 +2574,7 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
 
     // Do the replacements now.
     for (auto &R : Replacements) {
+      auto *From = R.first;
       auto *To = new llvm::LoadInst(R.second, "", /*isVolatile=*/false,
                                     PointerAlign, InsertPtr);
 
@@ -2583,8 +2584,35 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
       //      llvm::CallInst::Create(createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_samuel_print),
       //      Args, "", InsertPtr);
 
-      R.first->replaceAllUsesWith(To);
-      // Make sure we do the following calls before the following calls.
+      // Check if there are uses of From before To and move them after To. These
+      // are usually the function epilogue stores.
+      for (auto II = HeaderBB.begin(), IE = HeaderBB.end(); II != IE;) {
+        llvm::Instruction *I = &*II;
+        ++II;
+
+        if (I == To)
+          break;
+        if (I == From)
+          continue;
+
+        bool NeedsToMove = false;
+        for (auto *U : From->users()) {
+          // Is this a user of from? If so we need to move it.
+          if (I == U) {
+            NeedsToMove = true;
+            break;
+          }
+        }
+
+        if (!NeedsToMove)
+          continue;
+
+        I->moveBefore(To->getNextNode());
+      }
+
+      From->replaceAllUsesWith(To);
+
+      // Make sure the following calls are inserted before these loads.
       InsertPtr = To;
     }
 
