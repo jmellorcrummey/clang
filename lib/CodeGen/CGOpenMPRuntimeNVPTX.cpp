@@ -61,15 +61,18 @@ enum OpenMPRTLFunctionNVPTX {
   /// \brief Call to void* __kmpc_data_sharing_environment_begin(
   /// __kmpc_data_sharing_slot **SavedSharedSlot, void **SavedSharedStack, void
   /// **SavedSharedFrame, int32_t *SavedActiveThreads, size_t SharingDataSize,
-  /// size_t SharingDefaultDataSize);
+  /// size_t SharingDefaultDataSize, int32_t IsEntryPoint);
   OMPRTL_NVPTX__kmpc_data_sharing_environment_begin,
   /// \brief Call to void __kmpc_data_sharing_environment_end(
   /// __kmpc_data_sharing_slot **SavedSharedSlot, void **SavedSharedStack, void
-  /// **SavedSharedFrame, int32_t *SavedActiveThreads, int32_t DoCleanUp);
+  /// **SavedSharedFrame, int32_t *SavedActiveThreads);
   OMPRTL_NVPTX__kmpc_data_sharing_environment_end,
   /// \brief Call to void* __kmpc_get_data_sharing_environment_frame(int32_t
   /// SourceThreadID);
   OMPRTL_NVPTX__kmpc_get_data_sharing_environment_frame,
+
+  //
+  //  OMPRTL_NVPTX__kmpc_samuel_print
 };
 
 // NVPTX Address space
@@ -374,27 +377,28 @@ void CGOpenMPRuntimeNVPTX::initializeDataSharing(CodeGenFunction &CGF,
 
 // \brief Initialize the data sharing slots and pointers and return the
 // generated call.
-llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingInitializerFunction() {
+llvm::Function *CGOpenMPRuntimeNVPTX::createKernelInitializerFunction(
+    llvm::Function *WorkerFunction) {
   auto &Ctx = CGM.getContext();
 
-  // Check if we have a function already.
-  char Name[] = ".omp_offload_data_sharing_init";
-  llvm::Function *InitFn = CGM.getModule().getFunction(Name);
+  // FIXME: Consider to use name based on the worker function name.
+  char Name[] = "__omp_kernel_initialization";
 
-  if (InitFn)
-    return InitFn;
+  auto RetQTy = Ctx.getCanonicalType(
+      Ctx.getIntTypeForBitwidth(/*DestWidth=*/32, /*Signed=*/false));
+  auto &CGFI = CGM.getTypes().arrangeLLVMFunctionInfo(
+      RetQTy, /*instanceMethod=*/false, /*chainCall=*/false, None,
+      FunctionType::ExtInfo(), {}, RequiredArgs::All);
 
-  auto &CGFI = CGM.getTypes().arrangeNullaryFunction();
-
-  InitFn = llvm::Function::Create(CGM.getTypes().GetFunctionType(CGFI),
-                                  llvm::GlobalValue::InternalLinkage, Name,
-                                  &CGM.getModule());
+  llvm::Function *InitFn = llvm::Function::Create(
+      CGM.getTypes().GetFunctionType(CGFI), llvm::GlobalValue::InternalLinkage,
+      Name, &CGM.getModule());
 
   CGM.SetInternalFunctionAttributes(/*D=*/nullptr, InitFn, CGFI);
   InitFn->setLinkage(llvm::GlobalValue::InternalLinkage);
 
   CodeGenFunction CGF(CGM, /*suppressNewContext=*/true);
-  CGF.StartFunction(GlobalDecl(), Ctx.VoidTy, InitFn, CGFI, {});
+  CGF.StartFunction(GlobalDecl(), RetQTy, InitFn, CGFI, {});
 
   auto &Bld = CGF.Builder;
 
@@ -403,25 +407,33 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingInitializerFunction() {
   llvm::BasicBlock *MasterBB = CGF.createBasicBlock(".master");
   llvm::BasicBlock *ExitBB = CGF.createBasicBlock(".exit");
 
+  auto *RetTy = CGM.Int32Ty;
+  auto *One = llvm::ConstantInt::get(RetTy, 1);
+  auto *Zero = llvm::ConstantInt::get(RetTy, 0);
+  CGF.EmitStoreOfScalar(One, CGF.ReturnValue, /*Volatile=*/false, RetQTy);
+
   auto *IsWorker =
-      Bld.CreateICmpULE(getNVPTXThreadID(CGF), getThreadLimit(CGF));
+      Bld.CreateICmpULT(getNVPTXThreadID(CGF), getThreadLimit(CGF));
   Bld.CreateCondBr(IsWorker, WorkerBB, MasterCheckBB);
 
   CGF.EmitBlock(WorkerBB);
   initializeDataSharing(CGF, /*IsMaster=*/false);
+  Bld.CreateCall(WorkerFunction);
   CGF.EmitBranch(ExitBB);
 
   CGF.EmitBlock(MasterCheckBB);
   auto *IsMaster =
-      Bld.CreateICmpULE(getNVPTXThreadID(CGF), getMasterThreadID(CGF));
+      Bld.CreateICmpEQ(getNVPTXThreadID(CGF), getMasterThreadID(CGF));
   Bld.CreateCondBr(IsMaster, MasterBB, ExitBB);
 
   CGF.EmitBlock(MasterBB);
   initializeDataSharing(CGF, /*IsMaster=*/true);
+  CGF.EmitStoreOfScalar(Zero, CGF.ReturnValue, /*Volatile=*/false, RetQTy);
   CGF.EmitBranch(ExitBB);
 
   CGF.EmitBlock(ExitBB);
   CGF.FinishFunction();
+
   return InitFn;
 }
 
@@ -728,50 +740,56 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
                                            WorkerFunctionState &WST) {
   CGBuilderTy &Bld = CGF.Builder;
 
+  //  // Setup BBs in entry function.
+  //  llvm::BasicBlock *WorkerCheckBB =
+  //  CGF.createBasicBlock(".check.for.worker");
+  //  llvm::BasicBlock *WorkerBB = CGF.createBasicBlock(".worker");
+  //  llvm::BasicBlock *MasterBB = CGF.createBasicBlock(".master");
+  EST.ExitBB = CGF.createBasicBlock(".sleepy.hollow");
+  //
+  //  // Get the thread limit.
+  //  llvm::Value *ThreadLimit = getThreadLimit(CGF);
+  //  // Get the master thread id.
+  //  llvm::Value *MasterID = getMasterThreadID(CGF);
+  //  // Current thread's identifier.
+  //  llvm::Value *ThreadID = getNVPTXThreadID(CGF);
+  //
+  //  // The head (master thread) marches on while its body of companion threads
+  //  in
+  //  // the warp go to sleep.  Also put to sleep threads in excess of the
+  //  // thread_limit value on the teams directive.
+  //  llvm::Value *NotMaster = Bld.CreateICmpNE(ThreadID, MasterID,
+  //  "not_master");
+  //  llvm::Value *ThreadLimitExcess =
+  //      Bld.CreateICmpUGE(ThreadID, ThreadLimit, "thread_limit_excess");
+  //  llvm::Value *ShouldDie =
+  //      Bld.CreateAnd(ThreadLimitExcess, NotMaster, "excess_threads");
+  //  Bld.CreateCondBr(ShouldDie, EST.ExitBB, WorkerCheckBB);
+  //
+  //  // Select worker threads...
+  //  CGF.EmitBlock(WorkerCheckBB);
+  //  llvm::Value *IsWorker = Bld.CreateICmpULT(ThreadID, MasterID,
+  //  "is_worker");
+  //  Bld.CreateCondBr(IsWorker, WorkerBB, MasterBB);
+  //
+  //  // ... and send to worker loop, awaiting parallel invocation.
+  //  CGF.EmitBlock(WorkerBB);
+  //  initializeParallelismLevel(CGF);
+  //  llvm::SmallVector<llvm::Value *, 16> WorkerVars;
+  //  for (auto &I : CGF.CurFn->args()) {
+  //    WorkerVars.push_back(&I);
+  //  }
+  //
+  //  CGF.EmitCallOrInvoke(WST.WorkerFn, None);
+  //  CGF.EmitBranch(EST.ExitBB);
+  //
+  //  // Only master thread executes subsequent serial code.
+  //  CGF.EmitBlock(MasterBB);
+
   // Mark the current function as entry point.
   DataSharingFunctionInfoMap[CGF.CurFn].IsEntryPoint = true;
-
-  // Setup BBs in entry function.
-  llvm::BasicBlock *WorkerCheckBB = CGF.createBasicBlock(".check.for.worker");
-  llvm::BasicBlock *WorkerBB = CGF.createBasicBlock(".worker");
-  llvm::BasicBlock *MasterBB = CGF.createBasicBlock(".master");
-  EST.ExitBB = CGF.createBasicBlock(".sleepy.hollow");
-
-  // Get the thread limit.
-  llvm::Value *ThreadLimit = getThreadLimit(CGF);
-  // Get the master thread id.
-  llvm::Value *MasterID = getMasterThreadID(CGF);
-  // Current thread's identifier.
-  llvm::Value *ThreadID = getNVPTXThreadID(CGF);
-
-  // The head (master thread) marches on while its body of companion threads in
-  // the warp go to sleep.  Also put to sleep threads in excess of the
-  // thread_limit value on the teams directive.
-  llvm::Value *NotMaster = Bld.CreateICmpNE(ThreadID, MasterID, "not_master");
-  llvm::Value *ThreadLimitExcess =
-      Bld.CreateICmpUGE(ThreadID, ThreadLimit, "thread_limit_excess");
-  llvm::Value *ShouldDie =
-      Bld.CreateAnd(ThreadLimitExcess, NotMaster, "excess_threads");
-  Bld.CreateCondBr(ShouldDie, EST.ExitBB, WorkerCheckBB);
-
-  // Select worker threads...
-  CGF.EmitBlock(WorkerCheckBB);
-  llvm::Value *IsWorker = Bld.CreateICmpULT(ThreadID, MasterID, "is_worker");
-  Bld.CreateCondBr(IsWorker, WorkerBB, MasterBB);
-
-  // ... and send to worker loop, awaiting parallel invocation.
-  CGF.EmitBlock(WorkerBB);
-  initializeParallelismLevel(CGF);
-  llvm::SmallVector<llvm::Value *, 16> WorkerVars;
-  for (auto &I : CGF.CurFn->args()) {
-    WorkerVars.push_back(&I);
-  }
-
-  CGF.EmitCallOrInvoke(WST.WorkerFn, None);
-  CGF.EmitBranch(EST.ExitBB);
-
-  // Only master thread executes subsequent serial code.
-  CGF.EmitBlock(MasterBB);
+  DataSharingFunctionInfoMap[CGF.CurFn].EntryWorkerFunction = WST.WorkerFn;
+  DataSharingFunctionInfoMap[CGF.CurFn].EntryExitBlock = EST.ExitBB;
 
   // First action in sequential region:
   // Initialize the state of the OpenMP runtime library on the GPU.
@@ -947,7 +965,7 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
   case OMPRTL_NVPTX__kmpc_data_sharing_environment_end: {
     /// Build void __kmpc_data_sharing_environment_end( __kmpc_data_sharing_slot
     /// **SavedSharedSlot, void **SavedSharedStack, void **SavedSharedFrame,
-    /// int32_t *SavedActiveThreads, int32_t DoCleanUp);
+    /// int32_t *SavedActiveThreads, int32_t IsEntryPoint);
     auto *SlotTy = CGM.getTypes().ConvertTypeForMem(getDataSharingSlotQty());
     llvm::Type *TypeParams[] = {SlotTy->getPointerTo()->getPointerTo(),
                                 CGM.VoidPtrPtrTy, CGM.VoidPtrPtrTy,
@@ -968,6 +986,15 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
         FnTy, "__kmpc_get_data_sharing_environment_frame");
     break;
   }
+    //  case OMPRTL_NVPTX__kmpc_samuel_print: {
+    //    llvm::Type *TypeParams[] = {CGM.Int64Ty};
+    //    llvm::FunctionType *FnTy =
+    //        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/
+    //        false);
+    //    RTLFn = CGM.CreateRuntimeFunction(
+    //        FnTy, "__kmpc_samuel_print");
+    //    break;
+    //  }
   }
   return RTLFn;
 }
@@ -1537,6 +1564,8 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
   if (EnclosingFuncInfo.InitializationFunction)
     return;
 
+  auto IsEntryPoint = EnclosingFuncInfo.IsEntryPoint;
+
   // Create function to do the initialization. The first four arguments are the
   // slot/stack/frame saved addresses and then we have pairs of pointers to the
   // shared address and each declaration to be shared.
@@ -1611,6 +1640,17 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
 
   CodeGenFunction CGF(CGM, /*suppressNewContext=*/true);
   CGF.StartFunction(GlobalDecl(), Ctx.VoidTy, Fn, CGFI, ArgList);
+
+  // If this is an entry point, all the threads except the master should skip
+  // this.
+  auto *ExitBB = CGF.createBasicBlock(".exit");
+  if (IsEntryPoint) {
+    auto *MasterBB = CGF.createBasicBlock(".master");
+    auto *Cond =
+        CGF.Builder.CreateICmpEQ(getMasterThreadID(CGF), getNVPTXThreadID(CGF));
+    CGF.Builder.CreateCondBr(Cond, MasterBB, ExitBB);
+    CGF.EmitBlock(MasterBB);
+  }
 
   // Create the variables to save the slot, stack, frame and active threads.
   auto ArgsIt = ArgList.begin();
@@ -1807,6 +1847,7 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
     //    OriginalVal->dump();
   }
 
+  CGF.EmitBlock(ExitBB);
   CGF.FinishFunction();
 
   EnclosingFuncInfo.InitializationFunction = CGF.CurFn;
@@ -2462,11 +2503,34 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
 
     assert(InsertPtr && "Empty function???");
 
+    // Helper to emit the initializaion code at the provided insertion point.
+    auto &&InitializeEntryPoint = [this, &DSI](llvm::Instruction *&InsertPtr) {
+      assert(DSI.EntryWorkerFunction &&
+             "All entry function are expected to have an worker function.");
+      assert(DSI.EntryExitBlock &&
+             "All entry function are expected to have an exit basic block.");
+
+      auto *ShouldReturnImmediatelly = llvm::CallInst::Create(
+          createKernelInitializerFunction(DSI.EntryWorkerFunction), "",
+          InsertPtr);
+      auto *Cond = llvm::ICmpInst::Create(
+          llvm::CmpInst::ICmp, llvm::CmpInst::ICMP_EQ, ShouldReturnImmediatelly,
+          llvm::Constant::getNullValue(CGM.Int32Ty), "", InsertPtr);
+      auto *CurrentBB = InsertPtr->getParent();
+      auto *MasterBB = CurrentBB->splitBasicBlock(InsertPtr, ".master");
+
+      // Adjust the terminator of the current block.
+      CurrentBB->getTerminator()->eraseFromParent();
+      llvm::BranchInst::Create(MasterBB, DSI.EntryExitBlock, Cond, CurrentBB);
+
+      // Continue inserting in the master basic block.
+      InsertPtr = &*MasterBB->begin();
+    };
+
     // If there is nothing to share, and this is an entry point, we should
     // initialize the data sharing logic anyways.
     if (!DSI.InitializationFunction && DSI.IsEntryPoint) {
-      (void)llvm::CallInst::Create(createDataSharingInitializerFunction(), "",
-                                   InsertPtr);
+      InitializeEntryPoint(InsertPtr);
       continue;
     }
 
@@ -2512,6 +2576,13 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
     for (auto &R : Replacements) {
       auto *To = new llvm::LoadInst(R.second, "", /*isVolatile=*/false,
                                     PointerAlign, InsertPtr);
+
+      //      auto *Arg = llvm::CastInst::CreateBitOrPointerCast(To,
+      //      CGM.Int64Ty, "", InsertPtr);
+      //      llvm::Value *Args[] = { Arg };
+      //      llvm::CallInst::Create(createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_samuel_print),
+      //      Args, "", InsertPtr);
+
       R.first->replaceAllUsesWith(To);
       // Make sure we do the following calls before the following calls.
       InsertPtr = To;
@@ -2519,8 +2590,7 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
 
     // If this is an entry point, we have to initialize the data sharing first.
     if (DSI.IsEntryPoint)
-      (void)llvm::CallInst::Create(createDataSharingInitializerFunction(), "",
-                                   InsertPtr);
+      InitializeEntryPoint(InsertPtr);
     (void)llvm::CallInst::Create(DSI.InitializationFunction, InitArgs, "",
                                  InsertPtr);
 
