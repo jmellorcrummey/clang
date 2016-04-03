@@ -5122,7 +5122,7 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
         Address PAddr(P, Ctx.getTypeAlignInChars(Ctx.VoidPtrTy));
         CGF.Builder.CreateStore(PVal, PAddr);
 
-        if (hasVLACaptures) {
+        if (hasRuntimeEvaluationCaptureSize) {
           llvm::Value *S = CGF.Builder.CreateConstInBoundsGEP2_32(
               llvm::ArrayType::get(CGF.SizeTy, PointerNumVal), SizesArray,
               /*Idx0=*/0,
