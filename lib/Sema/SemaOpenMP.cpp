@@ -114,17 +114,21 @@ private:
     bool CancelRegion;
     unsigned AssociatedLoops;
     SourceLocation InnerTeamsRegionLoc;
+    const DeclContext *ParentDeclContext;
     SharingMapTy(OpenMPDirectiveKind DKind, DeclarationNameInfo Name,
-                 Scope *CurScope, SourceLocation Loc)
+                 Scope *CurScope, SourceLocation Loc,
+                 const DeclContext *ParentDeclContext)
         : SharingMap(), AlignedMap(), LCVMap(), DefaultAttr(DSA_unspecified),
           Directive(DKind), DirectiveName(std::move(Name)), CurScope(CurScope),
           ConstructLoc(Loc), OrderedRegion(), NowaitRegion(false),
-          CancelRegion(false), AssociatedLoops(1), InnerTeamsRegionLoc() {}
+          CancelRegion(false), AssociatedLoops(1), InnerTeamsRegionLoc(),
+          ParentDeclContext(ParentDeclContext) {}
     SharingMapTy()
         : SharingMap(), AlignedMap(), LCVMap(), DefaultAttr(DSA_unspecified),
           Directive(OMPD_unknown), DirectiveName(), CurScope(nullptr),
           ConstructLoc(), OrderedRegion(), NowaitRegion(false),
-          CancelRegion(false), AssociatedLoops(1), InnerTeamsRegionLoc() {}
+          CancelRegion(false), AssociatedLoops(1), InnerTeamsRegionLoc(),
+          ParentDeclContext(nullptr) {}
   };
 
   typedef SmallVector<SharingMapTy, 4> StackTy;
@@ -157,8 +161,10 @@ public:
   void setForceVarCapturing(bool V) { ForceCapturing = V; }
 
   void push(OpenMPDirectiveKind DKind, const DeclarationNameInfo &DirName,
-            Scope *CurScope, SourceLocation Loc) {
-    Stack.push_back(SharingMapTy(DKind, DirName, CurScope, Loc));
+            Scope *CurScope, SourceLocation Loc,
+            const DeclContext *ParentDeclContext) {
+    Stack.push_back(
+        SharingMapTy(DKind, DirName, CurScope, Loc, ParentDeclContext));
     Stack.back().DefaultAttrLoc = Loc;
   }
 
@@ -246,8 +252,9 @@ public:
       return Stack[Stack.size() - 2].Directive;
     return OMPD_unknown;
   }
-  /// \brief Return the directive associated with the provided scope.
-  OpenMPDirectiveKind getDirectiveForScope(const Scope *S) const;
+  /// \brief Return the directive associated with the provided region scope.
+  OpenMPDirectiveKind
+  getDirectiveForRegionScope(const CapturedRegionScopeInfo *RSI) const;
 
   /// \brief Set default data sharing attribute to none.
   void setDefaultDSANone(SourceLocation Loc) {
@@ -786,6 +793,9 @@ bool DSAStackTy::hasExplicitDirective(
 
 template <class NamedDirectivesPredicate>
 bool DSAStackTy::hasDirective(NamedDirectivesPredicate DPred, bool FromParent) {
+  // We look only in the enclosing region.
+  if (Stack.size() < 2)
+    return false;
   auto StartI = std::next(Stack.rbegin());
   auto EndI = std::prev(Stack.rend());
   if (FromParent && StartI != EndI) {
@@ -798,9 +808,16 @@ bool DSAStackTy::hasDirective(NamedDirectivesPredicate DPred, bool FromParent) {
   return false;
 }
 
-OpenMPDirectiveKind DSAStackTy::getDirectiveForScope(const Scope *S) const {
+OpenMPDirectiveKind DSAStackTy::getDirectiveForRegionScope(
+    const CapturedRegionScopeInfo *RSI) const {
+  // Directives are expected to have a context associated.
+  if (!(RSI && RSI->TheCapturedDecl))
+    return OMPD_unknown;
+
+  // A DSA refers to this captured region if the parent contexts match.
+  auto *ParentContext = RSI->TheCapturedDecl->getParent();
   for (auto I = Stack.rbegin(), EE = Stack.rend(); I != EE; ++I)
-    if (I->CurScope == S)
+    if (I->ParentDeclContext == ParentContext)
       return I->Directive;
   return OMPD_unknown;
 }
@@ -868,7 +885,7 @@ bool Sema::IsOpenMPCapturedByRef(ValueDecl *D,
   bool IsByRef = true;
 
   // Find the directive that is associated with the provided scope.
-  auto DKind = DSAStack->getDirectiveForScope(RSI->TheScope);
+  auto DKind = DSAStack->getDirectiveForRegionScope(RSI);
   auto Ty = D->getType();
 
   if (isOpenMPTargetExecutionDirective(DKind)) {
@@ -1008,8 +1025,7 @@ VarDecl *Sema::IsOpenMPCapturedDecl(ValueDecl *D) {
     if (DSAStack->getCurrentDirective() == OMPD_target &&
         !DSAStack->isClauseParsingMode())
       return VD;
-    if (DSAStack->getCurScope() &&
-        DSAStack->hasDirective(
+    if (DSAStack->hasDirective(
             [](OpenMPDirectiveKind K, const DeclarationNameInfo &DNI,
                SourceLocation Loc) -> bool {
               return isOpenMPTargetExecutionDirective(K);
@@ -1058,7 +1074,9 @@ void Sema::DestroyDataSharingAttributesStack() { delete DSAStack; }
 void Sema::StartOpenMPDSABlock(OpenMPDirectiveKind DKind,
                                const DeclarationNameInfo &DirName,
                                Scope *CurScope, SourceLocation Loc) {
-  DSAStack->push(DKind, DirName, CurScope, Loc);
+  // The current Sema declarative context is the parent of the captured region
+  // that refers to this DSA block.
+  DSAStack->push(DKind, DirName, CurScope, Loc, CurContext);
   PushExpressionEvaluationContext(PotentiallyEvaluated);
 }
 
