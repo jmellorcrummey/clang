@@ -715,6 +715,12 @@ def err_objc_root_class_subclass : Error<
 def warn_objc_root_class_missing : Warning<
   "class %0 defined without specifying a base class">,
   InGroup<ObjCRootClass>;
+def err_objc_runtime_visible_category : Error<
+  "cannot implement a category for class %0 that is only visible via the "
+  "Objective-C runtime">;
+def err_objc_runtime_visible_subclass : Error<
+  "cannot implement subclass %0 of a superclass %1 that is only visible via the "
+  "Objective-C runtime">;
 def note_objc_needs_superclass : Note<
   "add a super class to fix this problem">;
 def warn_dup_category_def : Warning<
@@ -2129,7 +2135,7 @@ def err_attribute_bad_neon_vector_size : Error<
 def err_attribute_requires_positive_integer : Error<
   "%0 attribute requires a positive integral compile time constant expression">;
 def err_attribute_requires_opencl_version : Error<
-  "%0 attribute requires OpenCL version %1 or above">;
+  "%0 attribute requires OpenCL version %1%select{| or above}2">;
 def warn_unsupported_target_attribute
     : Warning<"Ignoring unsupported '%0' in the target attribute string">,
     InGroup<IgnoredAttributes>;
@@ -3570,8 +3576,8 @@ def note_template_unnamed_type_here : Note<
   "unnamed type used in template argument was declared here">;
 def err_template_arg_overload_type : Error<
   "template argument is the type of an unresolved overloaded function">;
-def err_template_arg_not_class_template : Error<
-  "template argument does not refer to a class template or template "
+def err_template_arg_not_valid_template : Error<
+  "template argument does not refer to a class or alias template, or template "
   "template parameter">;
 def note_template_arg_refers_here_func : Note<
   "template argument refers to function template %0, here">;
@@ -6491,6 +6497,12 @@ def err_variadic_device_fn : Error<
 def err_va_arg_in_device : Error<
   "CUDA device code does not support va_arg">;
 def err_alias_not_supported_on_nvptx : Error<"CUDA does not support aliases">;
+def err_cuda_unattributed_constexpr_cannot_overload_device : Error<
+  "constexpr function '%0' without __host__ or __device__ attributes cannot "
+  "overload __device__ function with same signature.  Add a __host__ "
+  "attribute, or build with -fno-cuda-host-device-constexpr.">;
+def note_cuda_conflicting_device_function_declared_here : Note<
+  "conflicting __device__ function declared here">;
 def err_dynamic_var_init : Error<
     "dynamic initialization is not supported for "
     "__device__, __constant__, and __shared__ variables.">;
@@ -7769,6 +7781,9 @@ def err_opencl_pointer_to_type : Error<
   "pointer to type %0 is invalid in OpenCL">;
 def err_opencl_type_can_only_be_used_as_function_parameter : Error <
   "type %0 can only be used as a function parameter in OpenCL">;
+def warn_opencl_attr_deprecated_ignored : Warning <
+  "%0 attribute is deprecated and ignored in OpenCL version %1">,
+  InGroup<IgnoredAttributes>;
 
 // OpenCL v2.0 s6.13.6 -- Builtin Pipe Functions
 def err_opencl_builtin_pipe_first_arg : Error<
@@ -7776,7 +7791,7 @@ def err_opencl_builtin_pipe_first_arg : Error<
 def err_opencl_builtin_pipe_arg_num : Error<
   "invalid number of arguments to function: %0">;
 def err_opencl_builtin_pipe_invalid_arg : Error<
-  "invalid argument type to function %0 (expecting %1)">;
+  "invalid argument type to function %0 (expecting %1 having %2)">;
 def err_opencl_builtin_pipe_invalid_access_modifier : Error<
   "invalid pipe access modifier (expecting %0)">;
 
@@ -8039,6 +8054,10 @@ def err_omp_single_copyprivate_with_nowait : Error<
   "the 'copyprivate' clause must not be used with the 'nowait' clause">;
 def note_omp_nowait_clause_here : Note<
   "'nowait' clause is here">;
+def err_omp_single_decl_in_declare_simd : Error<
+  "single declaration is expected after 'declare simd' directive">;
+def err_omp_function_expected : Error<
+  "'#pragma omp declare simd' can only be applied to functions">;
 def err_omp_wrong_cancel_region : Error<
   "one of 'for', 'parallel', 'sections' or 'taskgroup' is expected">;
 def err_omp_parent_cancel_region_nowait : Error<
