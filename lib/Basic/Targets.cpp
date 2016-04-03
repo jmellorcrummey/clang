@@ -1747,10 +1747,6 @@ static const char *const DataLayoutStringR600 =
   "e-p:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128"
   "-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64";
 
-static const char *const DataLayoutStringR600DoubleOps =
-  "e-p:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128"
-  "-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64";
-
 static const char *const DataLayoutStringSI =
   "e-p:32:32-p1:64:64-p2:64:64-p3:32:32-p4:64:64-p5:32:32-p24:64:64"
   "-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128"
@@ -1934,7 +1930,7 @@ public:
     case GK_R700_DOUBLE_OPS:
     case GK_EVERGREEN_DOUBLE_OPS:
     case GK_CAYMAN:
-      resetDataLayout(DataLayoutStringR600DoubleOps);
+      resetDataLayout(DataLayoutStringR600);
       hasFP64 = true;
       hasFMAF = true;
       hasLDEXPF = false;
@@ -2006,7 +2002,7 @@ const char * const AMDGPUTargetInfo::GCCRegNames[] = {
   "s96", "s97", "s98", "s99", "s100", "s101", "s102", "s103",
   "s104", "s105", "s106", "s107", "s108", "s109", "s110", "s111",
   "s112", "s113", "s114", "s115", "s116", "s117", "s118", "s119",
-  "s120", "s121", "s122", "s123", "s124", "s125", "s126", "s127"
+  "s120", "s121", "s122", "s123", "s124", "s125", "s126", "s127",
   "exec", "vcc", "scc", "m0", "flat_scratch", "exec_lo", "exec_hi",
   "vcc_lo", "vcc_hi", "flat_scratch_lo", "flat_scratch_hi"
 };
@@ -2584,6 +2580,9 @@ bool X86TargetInfo::initFeatureMap(
   // X86_64 always has SSE2.
   if (getTriple().getArch() == llvm::Triple::x86_64)
     setFeatureEnabledImpl(Features, "sse2", true);
+
+  // Enable X87 for all X86 processors.
+  setFeatureEnabledImpl(Features, "x87", true);
 
   switch (getCPUKind(CPU)) {
   case CK_Generic:
@@ -4095,6 +4094,8 @@ public:
     case CC_X86VectorCall:
     case CC_IntelOclBicc:
     case CC_X86_64Win64:
+    case CC_PreserveMost:
+    case CC_PreserveAll:
       return CCCR_OK;
     default:
       return CCCR_Warning;
@@ -5545,6 +5546,8 @@ public:
     switch (CC) {
     case CC_C:
     case CC_Swift:
+    case CC_PreserveMost:
+    case CC_PreserveAll:
       return CCCR_OK;
     default:
       return CCCR_Warning;
@@ -5943,6 +5946,111 @@ const Builtin::Info HexagonTargetInfo::BuiltinInfo[] = {
 #include "clang/Basic/BuiltinsHexagon.def"
 };
 
+class LanaiTargetInfo : public TargetInfo {
+  // Class for Lanai (32-bit).
+  // The CPU profiles supported by the Lanai backend
+  enum CPUKind {
+    CK_NONE,
+    CK_V11,
+  } CPU;
+
+  static const TargetInfo::GCCRegAlias GCCRegAliases[];
+  static const char *const GCCRegNames[];
+
+public:
+  LanaiTargetInfo(const llvm::Triple &Triple) : TargetInfo(Triple) {
+    // Description string has to be kept in sync with backend.
+    resetDataLayout("E"        // Big endian
+                    "-m:e"     // ELF name manging
+                    "-p:32:32" // 32 bit pointers, 32 bit aligned
+                    "-i64:64"  // 64 bit integers, 64 bit aligned
+                    "-a:0:32"  // 32 bit alignment of objects of aggregate type
+                    "-n32"     // 32 bit native integer width
+                    "-S64"     // 64 bit natural stack alignment
+                    );
+
+    // Setting RegParmMax equal to what mregparm was set to in the old
+    // toolchain
+    RegParmMax = 4;
+
+    // Set the default CPU to V11
+    CPU = CK_V11;
+
+    // Temporary approach to make everything at least word-aligned and allow for
+    // safely casting between pointers with different alignment requirements.
+    // TODO: Remove this when there are no more cast align warnings on the
+    // firmware.
+    MinGlobalAlign = 32;
+  }
+
+  void getTargetDefines(const LangOptions &Opts,
+                        MacroBuilder &Builder) const override {
+    // Define __lanai__ when building for target lanai.
+    Builder.defineMacro("__lanai__");
+
+    // Set define for the CPU specified.
+    switch (CPU) {
+    case CK_V11:
+      Builder.defineMacro("__LANAI_V11__");
+      break;
+    case CK_NONE:
+      llvm_unreachable("Unhandled target CPU");
+    }
+  }
+
+  bool setCPU(const std::string &Name) override {
+    CPU = llvm::StringSwitch<CPUKind>(Name)
+              .Case("v11", CK_V11)
+              .Default(CK_NONE);
+
+    return CPU != CK_NONE;
+  }
+
+  bool hasFeature(StringRef Feature) const override {
+    return llvm::StringSwitch<bool>(Feature).Case("lanai", true).Default(false);
+  }
+
+  ArrayRef<const char *> getGCCRegNames() const override;
+
+  ArrayRef<TargetInfo::GCCRegAlias> getGCCRegAliases() const override;
+
+  BuiltinVaListKind getBuiltinVaListKind() const override {
+    return TargetInfo::VoidPtrBuiltinVaList;
+  }
+
+  ArrayRef<Builtin::Info> getTargetBuiltins() const override { return None; }
+
+  bool validateAsmConstraint(const char *&Name,
+                             TargetInfo::ConstraintInfo &info) const override {
+    return false;
+  }
+
+  const char *getClobbers() const override { return ""; }
+};
+
+const char *const LanaiTargetInfo::GCCRegNames[] = {
+    "r0",  "r1",  "r2",  "r3",  "r4",  "r5",  "r6",  "r7",  "r8",  "r9",  "r10",
+    "r11", "r12", "r13", "r14", "r15", "r16", "r17", "r18", "r19", "r20", "r21",
+    "r22", "r23", "r24", "r25", "r26", "r27", "r28", "r29", "r30", "r31"};
+
+ArrayRef<const char *> LanaiTargetInfo::getGCCRegNames() const {
+  return llvm::makeArrayRef(GCCRegNames);
+}
+
+const TargetInfo::GCCRegAlias LanaiTargetInfo::GCCRegAliases[] = {
+    {{"pc"}, "r2"},
+    {{"sp"}, "r4"},
+    {{"fp"}, "r5"},
+    {{"rv"}, "r8"},
+    {{"rr1"}, "r10"},
+    {{"rr2"}, "r11"},
+    {{"rca"}, "r15"},
+};
+
+ArrayRef<TargetInfo::GCCRegAlias> LanaiTargetInfo::getGCCRegAliases() const {
+  return llvm::makeArrayRef(GCCRegAliases);
+}
+
 // Shared base class for SPARC v8 (32-bit) and SPARC v9 (64-bit).
 class SparcTargetInfo : public TargetInfo {
   static const TargetInfo::GCCRegAlias GCCRegAliases[];
@@ -6031,7 +6139,9 @@ public:
     CK_NIAGARA,
     CK_NIAGARA2,
     CK_NIAGARA3,
-    CK_NIAGARA4
+    CK_NIAGARA4,
+    CK_MYRIAD2_1,
+    CK_MYRIAD2_2
   } CPU = CK_GENERIC;
 
   enum CPUGeneration {
@@ -6050,6 +6160,8 @@ public:
     case CK_SPARCLITE86X:
     case CK_SPARCLET:
     case CK_TSC701:
+    case CK_MYRIAD2_1:
+    case CK_MYRIAD2_2:
       return CG_V8;
     case CK_V9:
     case CK_ULTRASPARC:
@@ -6080,6 +6192,9 @@ public:
         .Case("niagara2", CK_NIAGARA2)
         .Case("niagara3", CK_NIAGARA3)
         .Case("niagara4", CK_NIAGARA4)
+        .Case("myriad2", CK_MYRIAD2_1)
+        .Case("myriad2.1", CK_MYRIAD2_1)
+        .Case("myriad2.2", CK_MYRIAD2_2)
         .Default(CK_GENERIC);
   }
 
@@ -6176,6 +6291,20 @@ public:
         Builder.defineMacro("__sparc_v9__");
       }
       break;
+    }
+    if (getTriple().getVendor() == llvm::Triple::Myriad) {
+      switch (CPU) {
+      case CK_MYRIAD2_1:
+        Builder.defineMacro("__myriad2", "1");
+        Builder.defineMacro("__myriad2__", "1");
+        break;
+      case CK_MYRIAD2_2:
+        Builder.defineMacro("__myriad2", "2");
+        Builder.defineMacro("__myriad2__", "2");
+        break;
+      default:
+        break;
+      }
     }
   }
 };
@@ -6358,6 +6487,8 @@ public:
 const Builtin::Info SystemZTargetInfo::BuiltinInfo[] = {
 #define BUILTIN(ID, TYPE, ATTRS)                                               \
   { #ID, TYPE, ATTRS, nullptr, ALL_LANGUAGES, nullptr },
+#define TARGET_BUILTIN(ID, TYPE, ATTRS, FEATURE)                               \
+  { #ID, TYPE, ATTRS, nullptr, ALL_LANGUAGES, FEATURE },
 #include "clang/Basic/BuiltinsSystemZ.def"
 };
 
@@ -6766,7 +6897,8 @@ public:
       "$f24", "$f25", "$f26", "$f27", "$f28", "$f29", "$f30", "$f31",
       // Hi/lo and condition register names
       "hi",   "lo",   "",     "$fcc0","$fcc1","$fcc2","$fcc3","$fcc4",
-      "$fcc5","$fcc6","$fcc7",
+      "$fcc5","$fcc6","$fcc7","$ac1hi","$ac1lo","$ac2hi","$ac2lo",
+      "$ac3hi","$ac3lo",
       // MSA register names
       "$w0",  "$w1",  "$w2",  "$w3",  "$w4",  "$w5",  "$w6",  "$w7",
       "$w8",  "$w9",  "$w10", "$w11", "$w12", "$w13", "$w14", "$w15",
@@ -7643,6 +7775,9 @@ static TargetInfo *AllocateTarget(const llvm::Triple &Triple) {
 
   case llvm::Triple::hexagon:
     return new HexagonTargetInfo(Triple);
+
+  case llvm::Triple::lanai:
+    return new LanaiTargetInfo(Triple);
 
   case llvm::Triple::aarch64:
     if (Triple.isOSDarwin())
