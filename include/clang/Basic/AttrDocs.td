@@ -612,6 +612,13 @@ can only be placed before an @protocol or @interface declaration:
     }];
 }
 
+def ObjCRuntimeVisibleDocs : Documentation {
+    let Category = DocCatFunction;
+    let Content = [{
+This attribute specifies that the Objective-C class to which it applies is visible to the Objective-C runtime but not to the linker. Classes annotated with this attribute cannot be subclassed and cannot have categories defined for them.
+    }];
+}
+
 def ObjCBoxableDocs : Documentation {
     let Category = DocCatFunction;
     let Content = [{
@@ -1773,6 +1780,17 @@ cannot point to the private address space.
   }];
 }
 
+def OpenCLNoSVMDocs : Documentation {
+  let Category = DocCatVariable;
+  let Content = [{
+OpenCL 2.0 supports the optional ``__attribute__((nosvm))`` qualifier for
+pointer variable. It informs the compiler that the pointer does not refer
+to a shared virtual memory region. See OpenCL v2.0 s6.7.2 for details.
+
+Since it is not widely used and has been removed from OpenCL 2.1, it is ignored
+by Clang.
+  }];
+}
 def NullabilityDocs : DocumentationCategory<"Nullability Attributes"> {
   let Content = [{
 Whether a particular pointer may be "null" is an important concern when working with pointers in the C family of languages. The various nullability attributes indicate whether a particular pointer can be null or not, which makes APIs more expressive and can help static analysis tools identify bugs involving null pointers. Clang supports several kinds of nullability attributes: the ``nonnull`` and ``returns_nonnull`` attributes indicate which function or method parameters and result types can never be null, while nullability type qualifiers indicate which pointer types can be null (``_Nullable``) or cannot be null (``_Nonnull``). 
@@ -1889,7 +1907,7 @@ arguments, with arbitrary offsets.
 }
 
 def OMPDeclareSimdDocs : Documentation {
-  let Category = DocCatStmt;
+  let Category = DocCatFunction;
   let Heading = "#pragma omp declare simd";
   let Content = [{
 The `declare simd` construct can be applied to a function to enable the creation
