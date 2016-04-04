@@ -4077,4 +4077,72 @@ int explicit_maps_with_inner_lambda(int a){
 // CK25: store i32* [[VAL1]], i32** [[VALADDR1]],
 // CK25: call void {{.*}}[[LAMBDA]]{{.*}}([[CA01]]* [[CA]])
 #endif
+///==========================================================================///
+// RUN: %clang_cc1 -DCK26 -std=c++11 -verify -fopenmp -fomptargets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -emit-llvm %s -o - | FileCheck %s --check-prefix CK26 --check-prefix CK26-64
+// RUN: %clang_cc1 -DCK26 -std=c++11 -fopenmp -fomptargets=powerpc64le-ibm-linux-gnu -x c++ -std=c++11 -triple powerpc64le-unknown-unknown -emit-pch -o %t %s
+// RUN: %clang_cc1 -fopenmp -std=c++11 -fomptargets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -std=c++11 -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s  --check-prefix CK26 --check-prefix CK26-64
+// RUN: %clang_cc1 -DCK26 -std=c++11 -verify -fopenmp -fomptargets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -emit-llvm %s -o - | FileCheck %s  --check-prefix CK26 --check-prefix CK26-32
+// RUN: %clang_cc1 -DCK26 -std=c++11 -fopenmp -fomptargets=i386-pc-linux-gnu -x c++ -std=c++11 -triple i386-unknown-unknown -emit-pch -o %t %s
+// RUN: %clang_cc1 -fopenmp -std=c++11 -fomptargets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -std=c++11 -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s  --check-prefix CK26 --check-prefix CK26-32
+#ifdef CK26
+// CK26: [[ST:%.+]] = type { i32, float }
+// CK26: [[CA00:%.+]] = type { [[ST]]* }
+// CK26: [[CA01:%.+]] = type { i32* }
+
+// CK26: [[SIZE00:@.+]] = private {{.*}}constant [1 x i[[Z:64|32]]] [i[[Z:64|32]] 4]
+// CK26: [[MTYPE00:@.+]] = private {{.*}}constant [1 x i32] [i32 1]
+
+// CK26: [[SIZE01:@.+]] = private {{.*}}constant [1 x i[[Z]]] [i[[Z]] 4]
+// CK26: [[MTYPE01:@.+]] = private {{.*}}constant [1 x i32] [i32 1]
+
+// CK26-LABEL: explicit_maps_with_inner_lambda
+
+struct CC {
+  int A;
+  float B;
+
+
+  CC() {
+    #pragma omp parallel private(A) firstprivate(B)
+    {
+      #pragma omp target map(from:A, B)
+      {
+        A = 123;
+        B = 123.0;
+        bar();
+      }
+    }
+  }
+
+  int foo() {
+    return A;
+  }
+
+  void  bar() {
+    A += 1;
+    B += 1.0;
+  }
+};
+
+int explicit_maps_with_private_class_members(){
+  CC c;
+  return c.foo();
+}
+
+// CK26: define {{.+}}[[CALL00]]([[ST]]* [[VAL:%.+]])
+// CK26: store [[ST]]* [[VAL]], [[ST]]** [[VALADDR:%[^,]+]],
+// CK26: [[VAL1:%.+]] = load [[ST]]*, [[ST]]** [[VALADDR]],
+// CK26: [[VALADDR1:%.+]] = getelementptr inbounds [[CA00]], [[CA00]]* [[CA:%[^,]+]], i32 0, i32 0
+// CK26: store [[ST]]* [[VAL1]], [[ST]]** [[VALADDR1]],
+// CK26: call void {{.*}}[[LAMBDA:@.+]]{{.*}}([[CA00]]* [[CA]])
+
+// CK26: define {{.+}}[[LAMBDA]]
+
+// CK26: define {{.+}}[[CALL01]](i32* {{.*}}[[VAL:%.+]])
+// CK26: store i32* [[VAL]], i32** [[VALADDR:%[^,]+]],
+// CK26: [[VAL1:%.+]] = load i32*, i32** [[VALADDR]],
+// CK26: [[VALADDR1:%.+]] = getelementptr inbounds [[CA01]], [[CA01]]* [[CA:%[^,]+]], i32 0, i32 0
+// CK26: store i32* [[VAL1]], i32** [[VALADDR1]],
+// CK26: call void {{.*}}[[LAMBDA]]{{.*}}([[CA01]]* [[CA]])
+#endif
 #endif
