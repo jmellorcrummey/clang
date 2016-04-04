@@ -61,7 +61,7 @@ int foo(int n) {
   // TCHECK:  [[A_ADDR:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[ATA:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
-  // TCHECK-NOT: store {{.+}}, {{.+}} [[ATE]],
+  // TCHECK-NOT: store {{.+}}, i{{[0-9]+}}* [[ATE]],
   // TCHECK:  ret void  
 
   #pragma omp target private(a)
