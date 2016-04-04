@@ -2485,6 +2485,9 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
       case llvm::Triple::hexagon:
         TC = new toolchains::HexagonToolChain(*this, Target, Args);
         break;
+      case llvm::Triple::lanai:
+        TC = new toolchains::LanaiToolChain(*this, Target, Args);
+        break;
       case llvm::Triple::xcore:
         TC = new toolchains::XCoreToolChain(*this, Target, Args);
         break;
@@ -2557,6 +2560,34 @@ bool Driver::GetReleaseVersion(const char *Str, unsigned &Major,
     return false;
   HadExtra = true;
   return true;
+}
+
+/// Parse digits from a string \p Str and fulfill \p Digits with
+/// the parsed numbers. This method assumes that the max number of
+/// digits to look for is equal to Digits.size().
+///
+/// \return True if the entire string was parsed and there are
+/// no extra characters remaining at the end.
+bool Driver::GetReleaseVersion(const char *Str,
+                               MutableArrayRef<unsigned> Digits) {
+  if (*Str == '\0')
+    return false;
+
+  char *End;
+  unsigned CurDigit = 0;
+  while (CurDigit < Digits.size()) {
+    unsigned Digit = (unsigned)strtol(Str, &End, 10);
+    Digits[CurDigit] = Digit;
+    if (*Str != '\0' && *End == '\0')
+      return true;
+    if (*End != '.' || Str == End)
+      return false;
+    Str = End + 1;
+    CurDigit++;
+  }
+
+  // More digits than requested, bail out...
+  return false;
 }
 
 std::pair<unsigned, unsigned> Driver::getIncludeExcludeOptionFlagMasks() const {

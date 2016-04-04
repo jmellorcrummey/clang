@@ -608,7 +608,7 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
 
   Opts.PrepareForLTO = Args.hasArg(OPT_flto, OPT_flto_EQ);
   const Arg *A = Args.getLastArg(OPT_flto, OPT_flto_EQ);
-  Opts.EmitFunctionSummary = A && A->containsValue("thin");
+  Opts.EmitSummaryIndex = A && A->containsValue("thin");
   if (Arg *A = Args.getLastArg(OPT_fthinlto_index_EQ)) {
     if (IK != IK_LLVM_IR)
       Diags.Report(diag::err_drv_argument_only_allowed_with)
@@ -1051,18 +1051,10 @@ static InputKind ParseFrontendArgs(FrontendOptions &Opts, ArgList &Args,
     Opts.Plugins.emplace_back(A->getValue(0));
     Opts.ProgramAction = frontend::PluginAction;
     Opts.ActionName = A->getValue();
-
-    for (const Arg *AA : Args.filtered(OPT_plugin_arg))
-      if (AA->getValue(0) == Opts.ActionName)
-        Opts.PluginArgs.emplace_back(AA->getValue(1));
   }
-
   Opts.AddPluginActions = Args.getAllArgValues(OPT_add_plugin);
-  Opts.AddPluginArgs.resize(Opts.AddPluginActions.size());
-  for (int i = 0, e = Opts.AddPluginActions.size(); i != e; ++i)
-    for (const Arg *A : Args.filtered(OPT_plugin_arg))
-      if (A->getValue(0) == Opts.AddPluginActions[i])
-        Opts.AddPluginArgs[i].emplace_back(A->getValue(1));
+  for (const Arg *AA : Args.filtered(OPT_plugin_arg))
+    Opts.PluginArgs[AA->getValue(0)].emplace_back(AA->getValue(1));
 
   for (const std::string &Arg :
          Args.getAllArgValues(OPT_ftest_module_file_extension_EQ)) {
@@ -1439,6 +1431,7 @@ void CompilerInvocation::setLangDefaults(LangOptions &Opts, InputKind IK,
     Opts.LaxVectorConversions = 0;
     Opts.DefaultFPContract = 1;
     Opts.NativeHalfType = 1;
+    Opts.NativeHalfArgsAndReturns = 1;
   }
 
   Opts.CUDA = IK == IK_CUDA || IK == IK_PreprocessedCuda ||
@@ -1564,17 +1557,11 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   if (Args.hasArg(OPT_fcuda_is_device))
     Opts.CUDAIsDevice = 1;
 
-  if (Args.hasArg(OPT_fcuda_allow_host_calls_from_host_device))
-    Opts.CUDAAllowHostCallsFromHostDevice = 1;
-
-  if (Args.hasArg(OPT_fcuda_disable_target_call_checks))
-    Opts.CUDADisableTargetCallChecks = 1;
-
-  if (Args.hasArg(OPT_fcuda_target_overloads))
-    Opts.CUDATargetOverloads = 1;
-
   if (Args.hasArg(OPT_fcuda_allow_variadic_functions))
     Opts.CUDAAllowVariadicFunctions = 1;
+
+  if (Args.hasArg(OPT_fno_cuda_host_device_constexpr))
+    Opts.CUDAHostDeviceConstexpr = 0;
 
   if (Opts.ObjC1) {
     if (Arg *arg = Args.getLastArg(OPT_fobjc_runtime_EQ)) {
@@ -1800,7 +1787,11 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   Opts.ModuleFeatures = Args.getAllArgValues(OPT_fmodule_feature);
   std::sort(Opts.ModuleFeatures.begin(), Opts.ModuleFeatures.end());
   Opts.NativeHalfType |= Args.hasArg(OPT_fnative_half_type);
-  Opts.HalfArgsAndReturns = Args.hasArg(OPT_fallow_half_arguments_and_returns);
+  Opts.NativeHalfArgsAndReturns |= Args.hasArg(OPT_fnative_half_arguments_and_returns);
+  // Enable HalfArgsAndReturns if present in Args or if NativeHalfArgsAndReturns
+  // is enabled.
+  Opts.HalfArgsAndReturns = Args.hasArg(OPT_fallow_half_arguments_and_returns)
+                            | Opts.NativeHalfArgsAndReturns;
   Opts.GNUAsm = !Args.hasArg(OPT_fno_gnu_inline_asm);
 
   // __declspec is enabled by default for the PS4 by the driver, and also
@@ -2005,10 +1996,6 @@ static void ParsePreprocessorArgs(PreprocessorOptions &Opts, ArgList &Args,
   for (const Arg *A : Args.filtered(OPT_chain_include))
     Opts.ChainedIncludes.emplace_back(A->getValue());
 
-  // Include 'altivec.h' if -faltivec option present
-  if (Args.hasArg(OPT_faltivec))
-    Opts.Includes.emplace_back("altivec.h");
-
   for (const Arg *A : Args.filtered(OPT_remap_file)) {
     std::pair<StringRef, StringRef> Split = StringRef(A->getValue()).split(';');
 
@@ -2154,10 +2141,12 @@ bool CompilerInvocation::CreateFromArgs(CompilerInvocation &Res,
       Res.getLangOpts()->ObjCExceptions = 1;
   }
 
-  // FIXME: Override value name discarding when sanitizers are used because the
+  // FIXME: Override value name discarding when asan or msan is used because the
   // backend passes depend on the name of the alloca in order to print out
   // names.
-  Res.getCodeGenOpts().DiscardValueNames &= Res.getLangOpts()->Sanitize.empty();
+  Res.getCodeGenOpts().DiscardValueNames &=
+      !Res.getLangOpts()->Sanitize.has(SanitizerKind::Address) &&
+      !Res.getLangOpts()->Sanitize.has(SanitizerKind::Memory);
 
   // FIXME: ParsePreprocessorArgs uses the FileManager to read the contents of
   // PCH file and find the original header name. Remove the need to do that in
@@ -2381,8 +2370,8 @@ createVFSFromCompilerInvocation(const CompilerInvocation &CI,
       return IntrusiveRefCntPtr<vfs::FileSystem>();
     }
 
-    IntrusiveRefCntPtr<vfs::FileSystem> FS =
-        vfs::getVFSFromYAML(std::move(Buffer.get()), /*DiagHandler*/ nullptr);
+    IntrusiveRefCntPtr<vfs::FileSystem> FS = vfs::getVFSFromYAML(
+        std::move(Buffer.get()), /*DiagHandler*/ nullptr, File);
     if (!FS.get()) {
       Diags.Report(diag::err_invalid_vfs_overlay) << File;
       return IntrusiveRefCntPtr<vfs::FileSystem>();

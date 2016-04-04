@@ -57,6 +57,8 @@ static unsigned ClangCallConvToLLVMCallConv(CallingConv CC) {
   case CC_X86VectorCall: return llvm::CallingConv::X86_VectorCall;
   case CC_SpirFunction: return llvm::CallingConv::SPIR_FUNC;
   case CC_SpirKernel: return llvm::CallingConv::SPIR_KERNEL;
+  case CC_PreserveMost: return llvm::CallingConv::PreserveMost;
+  case CC_PreserveAll: return llvm::CallingConv::PreserveAll;
   }
 }
 
@@ -186,6 +188,12 @@ static CallingConv getCallingConventionForDecl(const Decl *D, bool IsWindows) {
 
   if (D->hasAttr<SysVABIAttr>())
     return IsWindows ? CC_X86_64SysV : CC_C;
+
+  if (D->hasAttr<PreserveMostAttr>())
+    return CC_PreserveMost;
+
+  if (D->hasAttr<PreserveAllAttr>())
+    return CC_PreserveAll;
 
   return CC_C;
 }
@@ -3809,7 +3817,9 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
   CS.setAttributes(Attrs);
   CS.setCallingConv(static_cast<llvm::CallingConv::ID>(CallingConv));
 
-  // Insert instrumentation or attach profile metadata at indirect call sites
+  // Insert instrumentation or attach profile metadata at indirect call sites.
+  // For more details, see the comment before the definition of
+  // IPVK_IndirectCallTarget in InstrProfData.inc.
   if (!CS.getCalledFunction())
     PGO.valueProfile(Builder, llvm::IPVK_IndirectCallTarget,
                      CS.getInstruction(), Callee);
