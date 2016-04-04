@@ -84,7 +84,8 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
 
   // \brief Initialize the data sharing slots and pointers and return the
   // generated call.
-  llvm::Function *createDataSharingInitializerFunction();
+  llvm::Function *
+  createKernelInitializerFunction(llvm::Function *WorkerFunction);
 
   // \brief Group the captures information for a given context.
   struct DataSharingInfo {
@@ -131,10 +132,13 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // values.
   struct DataSharingFunctionInfo {
     bool IsEntryPoint;
+    llvm::Function *EntryWorkerFunction;
+    llvm::BasicBlock *EntryExitBlock;
     llvm::Function *InitializationFunction;
     SmallVector<llvm::Value *, 16> ValuesToBeReplaced;
     DataSharingFunctionInfo()
-        : IsEntryPoint(false), InitializationFunction(nullptr) {}
+        : IsEntryPoint(false), EntryWorkerFunction(nullptr),
+          EntryExitBlock(nullptr), InitializationFunction(nullptr) {}
   };
   typedef llvm::DenseMap<llvm::Function *, DataSharingFunctionInfo>
       DataSharingFunctionInfoMapTy;
