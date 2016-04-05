@@ -288,12 +288,46 @@ static bool forwardToGCC(const Option &O) {
          !O.hasFlag(options::DriverOption) && !O.hasFlag(options::LinkerInput);
 }
 
+/// \brief Add the C++ include args of other offloading toolchains. If this is a
+/// host job, the device toolchains are added. If this is a device job, the host
+/// toolchains will be added.
+static void addExtraOffloadCXXStdlibIncludeArgs(Compilation &C,
+                                                const JobAction &JA,
+                                                const ArgList &Args,
+                                                ArgStringList &CmdArgs) {
+
+  if (JA.isHostOffloading(Action::OFK_Cuda))
+    C.getSingleOffloadToolChain<Action::OFK_Cuda>()
+        ->AddClangCXXStdlibIncludeArgs(Args, CmdArgs);
+  else if (JA.isDeviceOffloading(Action::OFK_Cuda))
+    C.getSingleOffloadToolChain<Action::OFK_Host>()
+        ->AddClangCXXStdlibIncludeArgs(Args, CmdArgs);
+
+  // TODO: Add support for other programming models here.
+}
+
+/// \brief Add the include args that are specific of each offloading programming
+/// model.
+static void addExtraOffloadSpecificIncludeArgs(Compilation &C,
+                                               const JobAction &JA,
+                                               const ArgList &Args,
+                                               ArgStringList &CmdArgs) {
+
+  if (JA.isHostOffloading(Action::OFK_Cuda))
+    C.getSingleOffloadToolChain<Action::OFK_Host>()->AddCudaIncludeArgs(
+        Args, CmdArgs);
+  else if (JA.isDeviceOffloading(Action::OFK_Cuda))
+    C.getSingleOffloadToolChain<Action::OFK_Cuda>()->AddCudaIncludeArgs(
+        Args, CmdArgs);
+
+  // TODO: Add support for other programming models here.
+}
+
 void Clang::AddPreprocessingOptions(Compilation &C, const JobAction &JA,
                                     const Driver &D, const ArgList &Args,
                                     ArgStringList &CmdArgs,
                                     const InputInfo &Output,
-                                    const InputInfoList &Inputs,
-                                    const ToolChain *AuxToolChain) const {
+                                    const InputInfoList &Inputs) const {
   Arg *A;
 
   CheckPreprocessingOptions(D, Args);
@@ -550,26 +584,22 @@ void Clang::AddPreprocessingOptions(Compilation &C, const JobAction &JA,
   // OBJCPLUS_INCLUDE_PATH - system includes enabled when compiling ObjC++.
   addDirectoryList(Args, CmdArgs, "-objcxx-isystem", "OBJCPLUS_INCLUDE_PATH");
 
-  // Optional AuxToolChain indicates that we need to include headers
-  // for more than one target. If that's the case, add include paths
-  // from AuxToolChain right after include paths of the same kind for
-  // the current target.
+  // While adding the include arguments, we also attempt to retrieve the
+  // arguments of related offloading toolchains or arguments that are specific
+  // of an offloading programming model.
 
   // Add C++ include arguments, if needed.
   if (types::isCXX(Inputs[0].getType())) {
     getToolChain().AddClangCXXStdlibIncludeArgs(Args, CmdArgs);
-    if (AuxToolChain)
-      AuxToolChain->AddClangCXXStdlibIncludeArgs(Args, CmdArgs);
+    addExtraOffloadCXXStdlibIncludeArgs(C, JA, Args, CmdArgs);
   }
 
   // Add system include arguments.
   getToolChain().AddClangSystemIncludeArgs(Args, CmdArgs);
-  if (AuxToolChain)
-      AuxToolChain->AddClangCXXStdlibIncludeArgs(Args, CmdArgs);
+  addExtraOffloadCXXStdlibIncludeArgs(C, JA, Args, CmdArgs);
 
-  // Add CUDA include arguments, if needed.
-  if (types::isCuda(Inputs[0].getType()))
-    getToolChain().AddCudaIncludeArgs(Args, CmdArgs);
+  // Add offload include arguments, if needed.
+  addExtraOffloadSpecificIncludeArgs(C, JA, Args, CmdArgs);
 }
 
 // FIXME: Move to target hook.
@@ -3614,22 +3644,21 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   CmdArgs.push_back("-triple");
   CmdArgs.push_back(Args.MakeArgString(TripleStr));
 
-  const ToolChain *AuxToolChain = nullptr;
   if (IsCuda) {
-    // FIXME: We need a (better) way to pass information about
-    // particular compilation pass we're constructing here. For now we
-    // can check which toolchain we're using and pick the other one to
-    // extract the triple.
+    // We have to pass the triple of the host if compiling for a CUDA device and
+    // vice-versa.
+    StringRef NormalizedTriple;
     if (JA.isDeviceOffloading(Action::OFK_Cuda))
-      AuxToolChain = C.getSingleOffloadToolChain<Action::OFK_Host>();
-    else {
-      assert(C.isOffloadingHostKind(Action::OFK_Cuda) &&
-             "Expecting CUDA host toolchain.");
-      AuxToolChain = C.getSingleOffloadToolChain<Action::OFK_Cuda>();
-    }
-    assert(AuxToolChain != nullptr && "No aux toolchain.");
+      NormalizedTriple = C.getSingleOffloadToolChain<Action::OFK_Host>()
+                             ->getTriple()
+                             .normalize();
+    else
+      NormalizedTriple = C.getSingleOffloadToolChain<Action::OFK_Cuda>()
+                             ->getTriple()
+                             .normalize();
+
     CmdArgs.push_back("-aux-triple");
-    CmdArgs.push_back(Args.MakeArgString(AuxToolChain->getTriple().str()));
+    CmdArgs.push_back(Args.MakeArgString(NormalizedTriple));
   }
 
   if (Triple.isOSWindows() && (Triple.getArch() == llvm::Triple::arm ||
@@ -4527,8 +4556,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   //
   // FIXME: Support -fpreprocessed
   if (types::getPreprocessedType(InputType) != types::TY_INVALID)
-    AddPreprocessingOptions(C, JA, D, Args, CmdArgs, Output, Inputs,
-                            AuxToolChain);
+    AddPreprocessingOptions(C, JA, D, Args, CmdArgs, Output, Inputs);
 
   // Don't warn about "clang -c -DPIC -fPIC test.i" because libtool.m4 assumes
   // that "The compiler can only warn and ignore the option if not recognized".

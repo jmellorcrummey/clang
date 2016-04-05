@@ -41,15 +41,14 @@ const char *Action::getClassName(ActionClass AC) {
   llvm_unreachable("invalid class");
 }
 
-void Action::propagateDeviceOffloadInfo(OffloadKind OKind,
-                                        const char *OArch) const {
+void Action::propagateDeviceOffloadInfo(OffloadKind OKind, const char *OArch) {
   // Offload action set its own kinds on their dependences.
   if (Kind == OffloadClass)
     return;
 
   assert((OffloadingDeviceKind == OKind || OffloadingDeviceKind == OFK_None) &&
          "Setting device kind to a different device??");
-  assert(!OffloadingHostKind && "Setting a device kind in a host action??");
+  assert(!ActiveOffloadKindMask && "Setting a device kind in a host action??");
   OffloadingDeviceKind = OKind;
   OffloadingArch = OArch;
 
@@ -57,23 +56,22 @@ void Action::propagateDeviceOffloadInfo(OffloadKind OKind,
     A->propagateDeviceOffloadInfo(OffloadingDeviceKind, OArch);
 }
 
-void Action::propagateHostOffloadInfo(unsigned OKinds,
-                                      const char *OArch) const {
+void Action::propagateHostOffloadInfo(unsigned OKinds, const char *OArch) {
   // Offload action set its own kinds on their dependences.
   if (Kind == OffloadClass)
     return;
 
   assert(OffloadingDeviceKind == OFK_None &&
          "Setting a host kind in a device action.");
-  OffloadingHostKind |= OKinds;
+  ActiveOffloadKindMask |= OKinds;
   OffloadingArch = OArch;
 
   for (auto *A : Inputs)
-    A->propagateHostOffloadInfo(OffloadingHostKind, OArch);
+    A->propagateHostOffloadInfo(ActiveOffloadKindMask, OArch);
 }
 
-void Action::propagateOffloadInfo(const Action *A) const {
-  if (unsigned HK = A->getOffloadingHostKinds())
+void Action::propagateOffloadInfo(const Action *A) {
+  if (unsigned HK = A->getOffloadingHostActiveKinds())
     propagateHostOffloadInfo(HK, A->getOffloadingArch());
   else
     propagateDeviceOffloadInfo(A->getOffloadingDeviceKind(),
@@ -93,11 +91,11 @@ std::string Action::getOffloadingKindPrefix() const {
     // TODO: Add other programming models here.
   }
 
-  if (!OffloadingHostKind)
+  if (!ActiveOffloadKindMask)
     return "";
 
   std::string Res("host");
-  if (OffloadingHostKind & OFK_Cuda)
+  if (ActiveOffloadKindMask & OFK_Cuda)
     Res += "-cuda";
 
   // TODO: Add other programming models here.
@@ -105,7 +103,8 @@ std::string Action::getOffloadingKindPrefix() const {
   return Res;
 }
 
-std::string Action::getOffloadingFileNamePrefix(const ToolChain *TC) const {
+std::string
+Action::getOffloadingFileNamePrefix(StringRef NormalizedTriple) const {
   // A file prefix is only generated for device actions and consists of the
   // offload kind and triple.
   if (!OffloadingDeviceKind)
@@ -114,7 +113,7 @@ std::string Action::getOffloadingFileNamePrefix(const ToolChain *TC) const {
   std::string Res("-");
   Res += getOffloadingKindPrefix();
   Res += "-";
-  Res += TC->getTriple().normalize();
+  Res += NormalizedTriple;
   return Res;
 }
 
@@ -134,7 +133,7 @@ void OffloadAction::anchor() {}
 OffloadAction::OffloadAction(const HostDependence &HDep)
     : Action(OffloadClass, HDep.getAction()), HostTC(HDep.getToolChain()) {
   OffloadingArch = HDep.getBoundArch();
-  OffloadingHostKind = HDep.getOffloadKinds();
+  ActiveOffloadKindMask = HDep.getOffloadKinds();
   HDep.getAction()->propagateHostOffloadInfo(HDep.getOffloadKinds(),
                                              HDep.getBoundArch());
 };
@@ -161,7 +160,7 @@ OffloadAction::OffloadAction(const HostDependence &HDep,
       DevToolChains(DDeps.getToolChains()) {
   // We use the kinds of the host dependence for this action.
   OffloadingArch = HDep.getBoundArch();
-  OffloadingHostKind = HDep.getOffloadKinds();
+  ActiveOffloadKindMask = HDep.getOffloadKinds();
   HDep.getAction()->propagateHostOffloadInfo(HDep.getOffloadKinds(),
                                              HDep.getBoundArch());
 
@@ -205,29 +204,39 @@ void OffloadAction::doOnEachDependence(const OffloadActionWorkTy &Work) const {
   doOnEachDeviceDependence(Work);
 }
 
+bool OffloadAction::hasHostDependence() const { return HostTC != nullptr; }
+
 Action *OffloadAction::getHostDependence() const {
+  assert(hasHostDependence() && "Host dependence does not exist!");
   return HostTC ? getInputs().front() : nullptr;
 }
 
-Action *OffloadAction::getSingleDeviceDependence() const {
-  return (!HostTC && getInputs().size() == 1) ? getInputs().front() : nullptr;
+bool OffloadAction::hasSingleDeviceDependence() const {
+  return !HostTC && getInputs().size() == 1;
 }
 
-void OffloadAction::DeviceDependences::add(Action *A, const ToolChain *TC,
+Action *OffloadAction::getSingleDeviceDependence() const {
+  assert(hasSingleDeviceDependence() &&
+         "Single device dependence does not exist!");
+  return getInputs().front();
+}
+
+void OffloadAction::DeviceDependences::add(Action &A, const ToolChain &TC,
                                            const char *BoundArch,
                                            OffloadKind OKind) {
-  AL.push_back(A);
-  TCL.push_back(TC);
-  BAL.push_back(BoundArch);
-  KL.push_back(OKind);
+  DeviceActions.push_back(&A);
+  DeviceToolChains.push_back(&TC);
+  DeviceBoundArchs.push_back(BoundArch);
+  DeviceOffloadKinds.push_back(OKind);
 }
 
-OffloadAction::HostDependence::HostDependence(Action *A, const ToolChain *TC,
+OffloadAction::HostDependence::HostDependence(Action &A, const ToolChain &TC,
                                               const char *BoundArch,
                                               const DeviceDependences &DDeps)
-    : A(A), TC(TC), BoundArch(BoundArch), OffloadKinds(0u) {
+    : HostAction(A), HostToolChain(TC), HostBoundArch(BoundArch),
+      HostOffloadKinds(0u) {
   for (auto K : DDeps.getOffloadKinds())
-    OffloadKinds |= K;
+    HostOffloadKinds |= K;
 }
 
 void JobAction::anchor() {}
