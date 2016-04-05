@@ -71,10 +71,14 @@ public:
   };
 
   // The offloading kind determines if this action is binded to a particular
-  // programming model. Each entry reserves one bit.
+  // programming model. Each entry reserves one bit. We also have a special kind
+  // to designate the host offloading tool chain.
   enum OffloadKind {
-    OFFLOAD_None = 0x00,
-    OFFLOAD_CUDA = 0x01,
+    OFK_None = 0x00,
+    // The host offloading tool chain.
+    OFK_Host = 0x01,
+    // The device offloading tool chains - one bit for each programming model.
+    OFK_Cuda = 0x02,
   };
 
   static const char *getClassName(ActionClass AC);
@@ -105,7 +109,7 @@ protected:
       : Action(Kind, ActionList({Input}), Input->getType()) {}
   Action(ActionClass Kind, const ActionList &Inputs, types::ID Type)
       : Kind(Kind), Type(Type), Inputs(Inputs), OffloadingHostKind(0u),
-        OffloadingDeviceKind(OFFLOAD_None), OffloadingArch(nullptr) {}
+        OffloadingDeviceKind(OFK_None), OffloadingArch(nullptr) {}
 
 public:
   virtual ~Action();

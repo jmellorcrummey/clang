@@ -403,20 +403,21 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
   // CUDA
   //
   // We need to generate a CUDA toolchain if any of the inputs has a CUDA type.
-  for (auto &I : Inputs)
-    // Have we founs a CUDA file? If so generate the toolchain.
-    if (types::isCuda(I.first)) {
-      const ToolChain &TC = getToolChain(
-          C.getInputArgs(),
-          llvm::Triple(C.getOffloadingHostToolChain()->getTriple().isArch64Bit()
-                           ? "nvptx64-nvidia-cuda"
-                           : "nvptx-nvidia-cuda"));
-      C.addOffloadDeviceToolChain(&TC, Action::OFFLOAD_CUDA);
-      break;
-    }
+  if (llvm::any_of(Inputs, [](std::pair<types::ID, const llvm::opt::Arg *> &I) {
+        return types::isCuda(I.first);
+      })) {
+    const ToolChain &TC = getToolChain(
+        C.getInputArgs(),
+        llvm::Triple(C.getSingleOffloadToolChain<Action::OFK_Host>()
+                             ->getTriple()
+                             .isArch64Bit()
+                         ? "nvptx64-nvidia-cuda"
+                         : "nvptx-nvidia-cuda"));
+    C.addOffloadDeviceToolChain(&TC, Action::OFK_Cuda);
+  }
 
   //
-  // Add support for other offloading programming models here.
+  // TODO: Add support for other offloading programming models here.
   //
 
   return;
@@ -540,7 +541,7 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   InputList Inputs;
   BuildInputs(C->getDefaultToolChain(), *TranslatedArgs, Inputs);
 
-  // Get the toolchains for the offloading devices, if any.
+  // Populate the tool chains for the offloading devices, if any.
   CreateOffloadingDeviceToolChains(*C, Inputs);
 
   // Construct the list of abstract actions to perform for this compilation. On
@@ -1358,8 +1359,8 @@ static Action *buildCudaActions(Compilation &C, DerivedArgList &Args,
   if (PartialCompilationArg &&
       PartialCompilationArg->getOption().matches(options::OPT_cuda_host_only)) {
     OffloadAction::HostDependence HDep(
-        HostAction, C.getOffloadingHostToolChain(), /*BoundArch=*/nullptr,
-        Action::OFFLOAD_CUDA);
+        HostAction, C.getSingleOffloadToolChain<Action::OFK_Host>(),
+        /*BoundArch=*/nullptr, Action::OFK_Cuda);
     return C.MakeAction<OffloadAction>(HDep);
   }
 
@@ -1388,8 +1389,7 @@ static Action *buildCudaActions(Compilation &C, DerivedArgList &Args,
   for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I)
     CudaDeviceInputs.push_back(std::make_pair(types::TY_CUDA_DEVICE, InputArg));
 
-  const ToolChain *CudaTC =
-      C.getSingleOffloadDeviceToolChain<Action::OFFLOAD_CUDA>();
+  const ToolChain *CudaTC = C.getSingleOffloadToolChain<Action::OFK_Cuda>();
 
   // Build actions for all device inputs.
   assert(CudaTC && "Missing toolchain for device-side compilation.");
@@ -1422,8 +1422,7 @@ static Action *buildCudaActions(Compilation &C, DerivedArgList &Args,
 
     for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I) {
       OffloadAction::DeviceDependences DDep;
-      DDep.add(CudaDeviceActions[I], CudaTC, GpuArchList[I],
-               Action::OFFLOAD_CUDA);
+      DDep.add(CudaDeviceActions[I], CudaTC, GpuArchList[I], Action::OFK_Cuda);
       Actions.push_back(
           C.MakeAction<OffloadAction>(DDep, CudaDeviceActions[I]->getType()));
     }
@@ -1448,7 +1447,7 @@ static Action *buildCudaActions(Compilation &C, DerivedArgList &Args,
 
     for (auto &A : {AssembleAction, BackendAction}) {
       OffloadAction::DeviceDependences DDep;
-      DDep.add(A, CudaTC, GpuArchList[I], Action::OFFLOAD_CUDA);
+      DDep.add(A, CudaTC, GpuArchList[I], Action::OFK_Cuda);
       DeviceActions.push_back(C.MakeAction<OffloadAction>(DDep, A->getType()));
     }
   }
@@ -1457,11 +1456,11 @@ static Action *buildCudaActions(Compilation &C, DerivedArgList &Args,
 
   // Return a new host action that incorporates original host action and all
   // device actions.
-  OffloadAction::HostDependence HDep(HostAction, C.getOffloadingHostToolChain(),
-                                     /*BoundArch=*/nullptr,
-                                     Action::OFFLOAD_CUDA);
+  OffloadAction::HostDependence HDep(
+      HostAction, C.getSingleOffloadToolChain<Action::OFK_Host>(),
+      /*BoundArch=*/nullptr, Action::OFK_Cuda);
   OffloadAction::DeviceDependences DDep;
-  DDep.add(FatbinAction, CudaTC, /*BoundArch=*/nullptr, Action::OFFLOAD_CUDA);
+  DDep.add(FatbinAction, CudaTC, /*BoundArch=*/nullptr, Action::OFK_Cuda);
   return C.MakeAction<OffloadAction>(HDep, DDep);
 }
 
@@ -2584,6 +2583,9 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
       case llvm::Triple::hexagon:
         TC = new toolchains::HexagonToolChain(*this, Target, Args);
         break;
+      case llvm::Triple::lanai:
+        TC = new toolchains::LanaiToolChain(*this, Target, Args);
+        break;
       case llvm::Triple::xcore:
         TC = new toolchains::XCoreToolChain(*this, Target, Args);
         break;
@@ -2656,6 +2658,34 @@ bool Driver::GetReleaseVersion(const char *Str, unsigned &Major,
     return false;
   HadExtra = true;
   return true;
+}
+
+/// Parse digits from a string \p Str and fulfill \p Digits with
+/// the parsed numbers. This method assumes that the max number of
+/// digits to look for is equal to Digits.size().
+///
+/// \return True if the entire string was parsed and there are
+/// no extra characters remaining at the end.
+bool Driver::GetReleaseVersion(const char *Str,
+                               MutableArrayRef<unsigned> Digits) {
+  if (*Str == '\0')
+    return false;
+
+  char *End;
+  unsigned CurDigit = 0;
+  while (CurDigit < Digits.size()) {
+    unsigned Digit = (unsigned)strtol(Str, &End, 10);
+    Digits[CurDigit] = Digit;
+    if (*Str != '\0' && *End == '\0')
+      return true;
+    if (*End != '.' || Str == End)
+      return false;
+    Str = End + 1;
+    CurDigit++;
+  }
+
+  // More digits than requested, bail out...
+  return false;
 }
 
 std::pair<unsigned, unsigned> Driver::getIncludeExcludeOptionFlagMasks() const {

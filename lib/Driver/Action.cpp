@@ -22,7 +22,8 @@ const char *Action::getClassName(ActionClass AC) {
   switch (AC) {
   case InputClass: return "input";
   case BindArchClass: return "bind-arch";
-  case OffloadClass: return "offload";
+  case OffloadClass:
+    return "offload";
   case PreprocessJobClass: return "preprocessor";
   case PrecompileJobClass: return "precompiler";
   case AnalyzeJobClass: return "analyzer";
@@ -46,9 +47,8 @@ void Action::propagateDeviceOffloadInfo(OffloadKind OKind,
   if (Kind == OffloadClass)
     return;
 
-  assert(
-      (OffloadingDeviceKind == OKind || OffloadingDeviceKind == OFFLOAD_None) &&
-      "Setting device kind to a different device??");
+  assert((OffloadingDeviceKind == OKind || OffloadingDeviceKind == OFK_None) &&
+         "Setting device kind to a different device??");
   assert(!OffloadingHostKind && "Setting a device kind in a host action??");
   OffloadingDeviceKind = OKind;
   OffloadingArch = OArch;
@@ -63,7 +63,7 @@ void Action::propagateHostOffloadInfo(unsigned OKinds,
   if (Kind == OffloadClass)
     return;
 
-  assert(OffloadingDeviceKind == OFFLOAD_None &&
+  assert(OffloadingDeviceKind == OFK_None &&
          "Setting a host kind in a device action.");
   OffloadingHostKind |= OKinds;
   OffloadingArch = OArch;
@@ -82,20 +82,25 @@ void Action::propagateOffloadInfo(const Action *A) const {
 
 std::string Action::getOffloadingKindPrefix() const {
   switch (OffloadingDeviceKind) {
-  case OFFLOAD_None:
+  case OFK_None:
     break;
-  case OFFLOAD_CUDA:
+  case OFK_Host:
+    llvm_unreachable("Host kind is not an offloading device kind.");
+    break;
+  case OFK_Cuda:
     return "device-cuda";
-    // Add other programming models here.
+
+    // TODO: Add other programming models here.
   }
 
   if (!OffloadingHostKind)
     return "";
 
   std::string Res("host");
-  if (OffloadingHostKind & OFFLOAD_CUDA)
+  if (OffloadingHostKind & OFK_Cuda)
     Res += "-cuda";
-  // Add other programming models here.
+
+  // TODO: Add other programming models here.
 
   return Res;
 }
