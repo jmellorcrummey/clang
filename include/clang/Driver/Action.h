@@ -69,14 +69,17 @@ public:
   };
 
   // The offloading kind determines if this action is binded to a particular
-  // programming model. Each entry reserves one bit.
+  // programming model. Each entry reserves one bit. We also have a special kind
+  // to designate the host offloading tool chain.
   //
-  // FIXME: This is currently used to indicate that toolchains are used in a
-  // given programming as well, but will be used here as well once a generic
-  // offloading action is implemented.
+  // FIXME: This is currently used to indicate that tool chains are used in a
+  // given programming, but will be used here as well once a generic offloading
+  // action is implemented.
   enum OffloadKind {
-    OFFLOAD_None = 0x00,
-    OFFLOAD_CUDA = 0x01,
+    // The host offloading tool chain.
+    OFK_Host = 0x00,
+    // The device offloading tool chains - one bit for each programming model.
+    OFK_Cuda = 0x01,
   };
 
   static const char *getClassName(ActionClass AC);
