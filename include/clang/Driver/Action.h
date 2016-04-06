@@ -71,10 +71,14 @@ public:
   };
 
   // The offloading kind determines if this action is binded to a particular
-  // programming model. Each entry reserves one bit.
+  // programming model. Each entry reserves one bit. We also have a special kind
+  // to designate the host offloading tool chain.
   enum OffloadKind {
-    OFFLOAD_None = 0x00,
-    OFFLOAD_CUDA = 0x01,
+    OFK_None = 0x00,
+    // The host offloading tool chain.
+    OFK_Host = 0x01,
+    // The device offloading tool chains - one bit for each programming model.
+    OFK_Cuda = 0x02,
   };
 
   static const char *getClassName(ActionClass AC);
@@ -88,15 +92,15 @@ private:
   ActionList Inputs;
 
 protected:
-  /// Offload information. It has to be mutable as it needs to be adjusted if
-  /// actions are integrated.
+  /// Offload information.
   /// \brief Multiple programming models may be supported simultaneously by the
-  /// same host. Therefore, the host offloading kind is a combination of kinds.
-  mutable unsigned OffloadingHostKind;
+  /// same host. Therefore, the host offloading kind is a combination of kinds
+  /// encoded in a mask.
+  unsigned ActiveOffloadKindMask;
   /// \brief Offloading kind of the device.
-  mutable OffloadKind OffloadingDeviceKind;
+  OffloadKind OffloadingDeviceKind;
   /// \brief The Offloading architecture associated with this action.
-  mutable const char *OffloadingArch;
+  const char *OffloadingArch;
 
   Action(ActionClass Kind, types::ID Type) : Action(Kind, ActionList(), Type) {}
   Action(ActionClass Kind, Action *Input, types::ID Type)
@@ -104,8 +108,8 @@ protected:
   Action(ActionClass Kind, Action *Input)
       : Action(Kind, ActionList({Input}), Input->getType()) {}
   Action(ActionClass Kind, const ActionList &Inputs, types::ID Type)
-      : Kind(Kind), Type(Type), Inputs(Inputs), OffloadingHostKind(0u),
-        OffloadingDeviceKind(OFFLOAD_None), OffloadingArch(nullptr) {}
+      : Kind(Kind), Type(Type), Inputs(Inputs), ActiveOffloadKindMask(0u),
+        OffloadingDeviceKind(OFK_None), OffloadingArch(nullptr) {}
 
 public:
   virtual ~Action();
@@ -130,19 +134,21 @@ public:
   }
 
   std::string getOffloadingKindPrefix() const;
-  std::string getOffloadingFileNamePrefix(const ToolChain *TC) const;
+  std::string getOffloadingFileNamePrefix(StringRef NormalizedTriple) const;
 
   /// \brief Set the device offload info of this action and propagate it to its
   /// dependences.
-  void propagateDeviceOffloadInfo(OffloadKind OKind, const char *OArch) const;
+  void propagateDeviceOffloadInfo(OffloadKind OKind, const char *OArch);
   /// \brief Append the host offload info of this action and propagate it to its
   /// dependences.
-  void propagateHostOffloadInfo(unsigned OKinds, const char *OArch) const;
+  void propagateHostOffloadInfo(unsigned OKinds, const char *OArch);
   /// \brief Set the offload info of this action to be the same as the provided
   /// action, and propagate it to its dependences.
-  void propagateOffloadInfo(const Action *A) const;
+  void propagateOffloadInfo(const Action *A);
 
-  unsigned getOffloadingHostKinds() const { return OffloadingHostKind; }
+  unsigned getOffloadingHostActiveKinds() const {
+    return ActiveOffloadKindMask;
+  }
   OffloadKind getOffloadingDeviceKind() const { return OffloadingDeviceKind; }
   const char *getOffloadingArch() const { return OffloadingArch; }
 
@@ -150,7 +156,7 @@ public:
   /// kinds are only set if the action is a dependence to an host offload
   /// action.
   bool isHostOffloading(OffloadKind OKind) const {
-    return OffloadingHostKind & OKind;
+    return ActiveOffloadKindMask & OKind;
   }
   bool isDeviceOffloading(OffloadKind OKind) const {
     return OffloadingDeviceKind == OKind;
@@ -205,59 +211,67 @@ public:
     typedef SmallVector<OffloadKind, 3> OffloadKindList;
 
   private:
-    /// \brief The dependence action.
-    ActionList AL;
+    // Lists that keep the information for each dependency. All the lists are
+    // meant to be updated in sync. We are adopting separate lists instead of a
+    // list of structs, because that simplifies forwarding the actions list to
+    // initialize the inputs of the base Action class.
+    //
+    /// \brief The dependence actions.
+    ActionList DeviceActions;
     /// \brief The offloading toolchains that should be used with the action.
-    SmallVector<const ToolChain *, 3> TCL;
+    ToolChainList DeviceToolChains;
     /// \brief The architectures that should be used with this action.
-    SmallVector<const char *, 3> BAL;
+    BoundArchList DeviceBoundArchs;
     /// \brief The offload kind of each dependence.
-    SmallVector<OffloadKind, 3> KL;
+    OffloadKindList DeviceOffloadKinds;
 
   public:
     /// \brief Add a action along with the associated toolchain, bound arch, and
     /// offload kind.
-    void add(Action *A, const ToolChain *TC, const char *BoundArch,
+    void add(Action &A, const ToolChain &TC, const char *BoundArch,
              OffloadKind OKind);
 
     /// \brief Get each of the individual arrays.
-    const ActionList &getActions() const { return AL; };
-    const ToolChainList &getToolChains() const { return TCL; };
-    const BoundArchList &getBoundArchs() const { return BAL; };
-    const OffloadKindList &getOffloadKinds() const { return KL; };
+    const ActionList &getActions() const { return DeviceActions; };
+    const ToolChainList &getToolChains() const { return DeviceToolChains; };
+    const BoundArchList &getBoundArchs() const { return DeviceBoundArchs; };
+    const OffloadKindList &getOffloadKinds() const {
+      return DeviceOffloadKinds;
+    };
   };
 
   /// \brief Type used to communicate host actions. It associates bound
-  /// architecture, toolchain, and offload kinds to each action.
+  /// architecture, toolchain, and offload kinds to the host action.
   class HostDependence {
     /// \brief The dependence action.
-    Action *A;
+    Action &HostAction;
     /// \brief The offloading toolchain that should be used with the action.
-    const ToolChain *TC;
+    const ToolChain &HostToolChain;
     /// \brief The architectures that should be used with this action.
-    const char *BoundArch;
+    const char *HostBoundArch;
     /// \brief The offload kind of each dependence.
-    unsigned OffloadKinds;
+    unsigned HostOffloadKinds;
 
   public:
-    HostDependence(Action *A, const ToolChain *TC, const char *BoundArch,
+    HostDependence(Action &A, const ToolChain &TC, const char *BoundArch,
                    const unsigned OffloadKinds)
-        : A(A), TC(TC), BoundArch(BoundArch), OffloadKinds(OffloadKinds){};
+        : HostAction(A), HostToolChain(TC), HostBoundArch(BoundArch),
+          HostOffloadKinds(OffloadKinds){};
     /// \brief Constructor version that obtains the offload kinds from the
     /// device dependencies.
-    HostDependence(Action *A, const ToolChain *TC, const char *BoundArch,
+    HostDependence(Action &A, const ToolChain &TC, const char *BoundArch,
                    const DeviceDependences &DDeps);
-    Action *getAction() const { return A; };
-    const ToolChain *getToolChain() const { return TC; };
-    const char *getBoundArch() const { return BoundArch; };
-    unsigned getOffloadKinds() const { return OffloadKinds; };
+    Action *getAction() const { return &HostAction; };
+    const ToolChain *getToolChain() const { return &HostToolChain; };
+    const char *getBoundArch() const { return HostBoundArch; };
+    unsigned getOffloadKinds() const { return HostOffloadKinds; };
   };
 
   typedef llvm::function_ref<void(Action *, const ToolChain *, const char *)>
       OffloadActionWorkTy;
 
 private:
-  /// \brief The offloading toolchain that should be used with the action.
+  /// \brief The host offloading toolchain that should be used with the action.
   const ToolChain *HostTC;
 
   /// \brief The tool chains associated with the list of actions.
@@ -277,12 +291,18 @@ public:
   /// \brief Execute the work specified in \a Work on each dependence.
   void doOnEachDependence(const OffloadActionWorkTy &Work) const;
 
-  /// \brief Return the host dependence of this action, or null if we don't have
-  /// any.
+  /// \brief Return true if the action has a host dependence.
+  bool hasHostDependence() const;
+
+  /// \brief Return the host dependence of this action. This function is only
+  /// expected to be called if the host dependence exists.
   Action *getHostDependence() const;
 
-  /// \brief Return the single device dependence of this action, or null if we
-  /// don't have one or we have more than one.
+  /// \brief Return true if the action has a single device dependence.
+  bool hasSingleDeviceDependence() const;
+
+  /// \brief Return the single device dependence of this action. This function
+  /// is only expected to be called if a single device dependence exists.
   Action *getSingleDeviceDependence() const;
 
   static bool classof(const Action *A) { return A->getKind() == OffloadClass; }

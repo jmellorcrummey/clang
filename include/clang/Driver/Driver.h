@@ -415,11 +415,11 @@ public:
   /// \param BoundArch - The bound architecture. 
   /// \param AtTopLevel - Whether this is a "top-level" action.
   /// \param MultipleArchs - Whether multiple -arch options were supplied.
-  /// \param TC - Toolchain associated with the output.
+  /// \param NormalizedTriple - The normalized triple of the relevant target.
   const char *GetNamedOutputPath(Compilation &C, const JobAction &JA,
                                  const char *BaseInput, const char *BoundArch,
                                  bool AtTopLevel, bool MultipleArchs,
-                                 const ToolChain *TC) const;
+                                 StringRef NormalizedTriple) const;
 
   /// GetTemporaryPath - Return the pathname of a temporary file to use 
   /// as part of compilation; the file will have the given prefix and suffix.
@@ -479,6 +479,15 @@ public:
   static bool GetReleaseVersion(const char *Str, unsigned &Major,
                                 unsigned &Minor, unsigned &Micro,
                                 bool &HadExtra);
+
+  /// Parse digits from a string \p Str and fulfill \p Digits with
+  /// the parsed numbers. This method assumes that the max number of
+  /// digits to look for is equal to Digits.size().
+  ///
+  /// \return True if the entire string was parsed and there are
+  /// no extra characters remaining at the end.
+  static bool GetReleaseVersion(const char *Str,
+                                MutableArrayRef<unsigned> Digits);
 };
 
 /// \return True if the last defined optimization level is -Ofast.
