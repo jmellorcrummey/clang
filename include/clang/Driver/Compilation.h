@@ -122,22 +122,21 @@ public:
   }
 
   // Return an offload toolchain of the provided kind. Only one is expected to
-  // exist. If we can't match any tool chain, return nullptr.
+  // exist.
   template <Action::OffloadKind Kind>
   const ToolChain *getSingleOffloadToolChain() const {
     auto TCs = getOffloadToolChains<Kind>();
 
-    if (TCs.first != TCs.second) {
-      assert(std::next(TCs.first) == TCs.second &&
-             "More than one tool chain of the this kind exist.");
-      return TCs.first->second;
-    }
-    return nullptr;
+    assert(TCs.first != TCs.second &&
+           "No tool chains of the selected kind exist!");
+    assert(std::next(TCs.first) == TCs.second &&
+           "More than one tool chain of the this kind exist.");
+    return TCs.first->second;
   }
 
   void addOffloadDeviceToolChain(const ToolChain *DeviceToolChain,
                                  Action::OffloadKind OffloadKind) {
-    assert(OffloadKind != Action::OFK_Host &&
+    assert(OffloadKind != Action::OFK_Host && OffloadKind != Action::OFK_None &&
            "This is not a device tool chain!");
 
     // Update the host offload kind to also contain this kind.

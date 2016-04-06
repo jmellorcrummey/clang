@@ -76,10 +76,11 @@ public:
   // given programming, but will be used here as well once a generic offloading
   // action is implemented.
   enum OffloadKind {
+    OFK_None = 0x00,
     // The host offloading tool chain.
-    OFK_Host = 0x00,
+    OFK_Host = 0x01,
     // The device offloading tool chains - one bit for each programming model.
-    OFK_Cuda = 0x01,
+    OFK_Cuda = 0x02,
   };
 
   static const char *getClassName(ActionClass AC);

@@ -27,6 +27,7 @@ Compilation::Compilation(const Driver &D, const ToolChain &_DefaultToolChain,
     : TheDriver(D), DefaultToolChain(_DefaultToolChain), ActiveOffloadMask(0u),
       Args(_Args), TranslatedArgs(_TranslatedArgs), Redirects(nullptr),
       ForDiagnostics(false) {
+  // The offloading host toolchain is the default tool chain.
   OrderedOffloadingToolchains.insert(
       std::make_pair(Action::OFK_Host, &DefaultToolChain));
 }
