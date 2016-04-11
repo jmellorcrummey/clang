@@ -2306,6 +2306,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   // initial value for SimdNumLanes
   int WARP_SIZE = 32; // should obtain from parameters of target function
   int MAX_THREADS_IN_BLOCK = 1024;
+  int MAX_WARP_THREADS = 16;
 
   // Identifier of CUDA thread as a lane
   llvm::AllocaInst *SimdLaneNum;
@@ -2322,6 +2323,12 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   // Outer loop limits
   llvm::AllocaInst *OuterLB;
   llvm::AllocaInst *OuterUB;
+
+  // Warp Id within a block
+  llvm::AllocaInst *WarpId;
+
+  // Number of warps in a block
+  llvm::AllocaInst *NumWarpsInBlock;
 
   llvm::SwitchInst *ControlSwitch;
 
@@ -3802,7 +3809,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
         // Calculate the OMP thread ID of this CUDA thread
         // The OMP thread number is a zero based numbering of threads which will be active in S1.
-        // Since this operaiton is happening for all threads then each group of 32 threads will receive the
+        // Since this operation is happening for all threads then each group of 32 threads will receive the
         // same OMP thread ID. We must be careful to exclude the threads non-warp master threads from
         // executing S1.
         llvm::Value *globalTid = Bld.CreateAdd(Bld.CreateCall(Get_thread_num(), {}), Bld.CreateMul(
@@ -3812,7 +3819,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         Bld.CreateStore(globalTid, CudaGlobalThreadId);
 
         // Get the div of the globalTid with the size of a warp.
-        // llvm::Value *ompTid = Bld.CreateSExt(globalTid, VarTy);
         llvm::Value *ompTid = Bld.CreateAShr(globalTid, const32);
         printf(" Compute OmpTid\n");
         OmpThreadNum = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "OmpThreadNum");
@@ -3828,6 +3834,29 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         printf(" Compute SimdLocalLaneId\n");
         SimdLocalLaneId = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "SimdLocalLaneId");
         Bld.CreateStore(LaneID, SimdLocalLaneId);
+    } else if (CGF.useSubWarps && CGF.distributedParallel){
+        // Warp size
+        llvm::Value *const32 = Bld.getInt32(5); // 2^5
+
+        // Each thread does this.
+        // So now Each Thread will know its lane ID (for the SIMD following)
+        printf(" Compute SimdLaneNum\n");
+        SimdLaneNum = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "SimdLaneNum");
+        Bld.CreateStore(Bld.CreateAnd(Bld.CreateCall(Get_thread_num(), {}),
+                                      Bld.getInt32(31)),
+                        SimdLaneNum);
+
+        // Get the div of the threadIdx.x with the size of a warp.
+        llvm::Value *ompTid = Bld.CreateAShr(Bld.CreateCall(Get_thread_num(), {}), const32);
+        printf(" Compute WarpId\n");
+        WarpId = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "WarpId");
+        Bld.CreateStore(ompTid, WarpId);
+
+        // Get the div of the threadIdx.x with the size of a warp.
+        llvm::Value *warps = Bld.CreateAShr(Bld.CreateCall(Get_num_threads(), {}), const32);
+        printf(" Compute number of warps\n");
+        NumWarpsInBlock = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "NumWarpsInBlock");
+        Bld.CreateStore(warps, NumWarpsInBlock);
     }
 
     // Set up variables for UB and LB
@@ -4150,6 +4179,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // in case we need to choose (currently on the nested loop nest with parallel for
     // on the outer loop and inner SIMD loop uses this flag).
     CGF.useSharedMemory = true;
+
+    // Enables SubWarps.
+    CGF.useSubWarps = true;
+
     //applyNestedSimd = false;
     //applyCombinedConstruct = false;
 
@@ -4162,12 +4195,15 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     //printf("    => SKIND is (OMPD_teams_distribute_parallel_for %d): %d\n", OMPD_teams_distribute_parallel_for, SKind);
     //printf("    => schedule(static, 1): %d\n", StmtHasScheduleStaticOne(S, CGF, SKind));
     //printf("    => Has other OMP pragmas inside. StmtHasOMPPragmas(S, CGF): %d\n", StmtHasOMPPragmas(S, CGF));
-    printf("             => Apply combined: %d\n", CGF.combined);
+    printf("            => Apply combined: %d\n", CGF.combined);
     printf("Conditions for nested construct with SIMD inside:\n");
     //printf("    => Has SIMD pragma inside (not in subblock): %d\n", SIMDinTopBlock(S));
-    printf("             => Apply simd nested parallelism: %d\n", CGF.combinedSimd);
+    printf("            => Apply simd nested parallelism: %d\n", CGF.combinedSimd);
     printf("Conditions for distribute construct with parallel for inside:\n");
-    printf("             => Apply parallel for nested parallelism: %d\n", CGF.distributedParallel);
+    printf("            => Apply parallel for nested parallelism: %d\n", CGF.distributedParallel);
+    printf("Additional options:\n");
+    printf("            Subwarps enabled => %d\n", CGF.useSubWarps);
+    printf("            Shared memory enabled => %d\n", CGF.useSharedMemory);
     printf("End\n");
 
     if (CGF.combined){
@@ -5354,7 +5390,17 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     printf("Setup of IterVar and Qty! Done\n");
 
-    llvm::Value *LB = Builder.CreateCall(Get_thread_num(), {});
+    llvm::Value *ThreadsPerWarpLimit = Builder.getInt32(MAX_WARP_THREADS);
+    llvm::Value *LB;
+    if (CGF.useSubWarps){
+      // Only the first MAX_WARP_THREADS of each warp are used.
+      LB = Builder.CreateAdd(Builder.CreateMul(ThreadsPerWarpLimit,
+                                               Builder.CreateLoad(WarpId)),
+                             Builder.CreateLoad(SimdLaneNum));
+    } else {
+      // This is the case where the entire warp is used.
+      LB = Builder.CreateCall(Get_thread_num(), {});
+    }
 
     printf("Setup of LB! Done\n");
     // Use inner loop upper bound
@@ -5447,7 +5493,20 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // FOR INC: tid += blockDim.x
     Builder.SetInsertPoint(IncCombinedFor);
-    llvm::Value *step = Builder.CreateCall(Get_num_threads(), {});
+
+    // Set up the increment step
+    llvm::Value *step;
+    if (CGF.useSubWarps){
+      // Only first few threads of each warp participate.
+      // FOR INC: tid += MAX_WARP_THREADS * NumWarpsInBlock
+      step = Builder.CreateMul(ThreadsPerWarpLimit,
+                               Builder.CreateLoad(NumWarpsInBlock));
+    } else {
+      // Full warp case.
+      // FOR INC: tid += blockDim.x
+      step = Builder.CreateCall(Get_num_threads(), {});
+    }
+
     Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(InnerPrivate), step),
                                           InnerPrivate);
     Builder.CreateBr(CondCombinedFor);
@@ -5506,7 +5565,19 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         Bld.SetInsertPoint(CGF.EndRegionS1);
         //Bld.CreateCall(Get_memfence());
         Bld.CreateCall(Get_syncthreads());
-        Bld.CreateBr(ParallelRegionCG);
+
+        if (CGF.useSubWarps){
+          // Check if warp lane ID is <= MAX_WARP_THREADS - 1
+          // If false, jump to CGF.SyncAfterParallelForBlock
+          // Signed or unsigned?
+          Bld.CreateCondBr(Bld.CreateICmpSLE(Bld.CreateLoad(SimdLaneNum),
+                                             Bld.CreateSub(Bld.getInt32(MAX_WARP_THREADS),
+                                                           Bld.getInt32(1))),
+                           ParallelRegionCG, CGF.SyncAfterParallelForBlock);
+        } else {
+          Bld.CreateBr(ParallelRegionCG);
+        }
+
         Bld.SetInsertPoint(ParallelRegionCG);
 
         // Call the function which generates the loop for the inner parallel for.
@@ -5792,6 +5863,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
      SimdLocalLaneId = 0;
      OuterLB = 0;
      OuterUB = 0;
+     WarpId = 0;
+     NumWarpsInBlock = 0;
      NextState = 0;
      ControlStateIndex = 0;
      SynchronizeAndNextState = 0;
@@ -5845,7 +5918,8 @@ public:
          ParallelNesting(0), NextState(0), ControlState(0),
          ControlStateIndex(0), CudaThreadsInParallel(0), SimdNumLanes(0), OmpNumThreads(0),
          SimdLaneNum(0), OmpThreadNum(0), ControlSwitch(0), SimdHasReduction(false),
-         ThreadLimitGlobal(0), CudaGlobalThreadId(0), SimdLocalLaneId(0), OuterLB(0), OuterUB(0) {
+         ThreadLimitGlobal(0), CudaGlobalThreadId(0), SimdLocalLaneId(0), OuterLB(0), OuterUB(0),
+         WarpId(0), NumWarpsInBlock(0) {
 
      SimdAndWorksharingNesting.resize(EXPECTED_WS_NESTS);
 

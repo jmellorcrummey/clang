@@ -134,6 +134,7 @@ public:
   bool useSharedMemory = false;
   bool distributedParallel = false;
   bool isSimplifiedConstruct = false;
+  bool useSubWarps = false;
   llvm::AllocaInst *CombinedOuterLoopIndex;
   llvm::BasicBlock *SyncAfterCombinedBlock;
   llvm::BasicBlock *SyncAfterSimdBlock;
