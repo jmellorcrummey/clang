@@ -1877,20 +1877,20 @@ void explicit_maps_single (int ii){
 
   // Multidimensional VLA.
   double mva[23][ii][ii+5];
-  
+
   // Region 30
   // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 4, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], i[[Z]]* [[GEPS:%.+]], {{.+}}getelementptr {{.+}}[4 x i{{.+}}]* [[MTYPE30]]{{.+}})
   // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
   // CK19-DAG: [[GEPP]] = getelementptr inbounds {{.+}}[[P:%[^,]+]]
   // CK19-DAG: [[GEPS]] = getelementptr inbounds {{.+}}[[S:%[^,]+]]
-  // 
+  //
   // CK19-DAG: [[BP0:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 0
   // CK19-DAG: [[P0:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 0
   // CK19-DAG: [[S0:%.+]] = getelementptr inbounds {{.+}}[[S]], i{{.+}} 0, i{{.+}} 0
   // CK19-DAG: store i8* inttoptr (i[[Z]] 23 to i8*), i8** [[BP0]]
   // CK19-DAG: store i8* inttoptr (i[[Z]] 23 to i8*), i8** [[P0]]
   // CK19-DAG: store i[[Z]] {{8|4}}, i[[Z]]* [[S0]]
-  // 
+  //
   // CK19-DAG: [[BP1:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 1
   // CK19-DAG: [[P1:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 1
   // CK19-DAG: [[S1:%.+]] = getelementptr inbounds {{.+}}[[S]], i{{.+}} 0, i{{.+}} 1
@@ -1901,7 +1901,7 @@ void explicit_maps_single (int ii){
   // CK19-DAG: [[CPVAL1]] = inttoptr i[[Z]] [[VAR11:%.+]] to i8*
   // CK19-64-DAG: [[VAR1]] = zext i32 %{{[^,]+}} to i64
   // CK19-64-DAG: [[VAR11]] = zext i32 %{{[^,]+}} to i64
-  // 
+  //
   // CK19-DAG: [[BP2:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 2
   // CK19-DAG: [[P2:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 2
   // CK19-DAG: [[S2:%.+]] = getelementptr inbounds {{.+}}[[S]], i{{.+}} 0, i{{.+}} 2
@@ -1912,7 +1912,7 @@ void explicit_maps_single (int ii){
   // CK19-DAG: [[CPVAL2]] = inttoptr i[[Z]] [[VAR22:%.+]] to i8*
   // CK19-64-DAG: [[VAR2]] = zext i32 %{{[^,]+}} to i64
   // CK19-64-DAG: [[VAR22]] = zext i32 %{{[^,]+}} to i64
-  // 
+  //
   // CK19-DAG: [[BP3:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 3
   // CK19-DAG: [[P3:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 3
   // CK19-DAG: [[S3:%.+]] = getelementptr inbounds {{.+}}[[S]], i{{.+}} 0, i{{.+}} 3
@@ -1922,13 +1922,13 @@ void explicit_maps_single (int ii){
   // CK19-DAG: [[CBPVAL3]] = bitcast double* [[VAR3:%.+]] to i8*
   // CK19-DAG: [[CPVAL3]] = bitcast double* [[VAR3]] to i8*
   // CK19-DAG: [[CSVAL3]] = mul nuw i[[Z]] %{{[^,]+}}, {{8|4}}
-  
+
   // CK19: call void [[CALL30:@.+]](i[[Z]] 23, i[[Z]] %{{[^,]+}}, i[[Z]] %{{[^,]+}}, double* %{{[^,]+}})
   #pragma omp target map(tofrom: mva)
   {
     mva[1][2][3]++;
   }
-  
+
   // Region 31
   // CK19-DAG: call i32 @__tgt_target(i32 {{[^,]+}}, i8* {{[^,]+}}, i32 4, i8** [[GEPBP:%.+]], i8** [[GEPP:%.+]], {{.+}}getelementptr {{.+}}[4 x i{{.+}}]* [[SIZE31]], {{.+}}getelementptr {{.+}}[4 x i{{.+}}]* [[MTYPE31]]{{.+}})
   // CK19-DAG: [[GEPBP]] = getelementptr inbounds {{.+}}[[BP:%[^,]+]]
@@ -1945,14 +1945,14 @@ void explicit_maps_single (int ii){
   // CK19-DAG: store i8* [[CPVAL1:%[^,]+]], i8** [[P1]]
   // CK19-DAG: [[CBPVAL1]] = inttoptr i[[Z]] [[VAR1:%.+]] to i8*
   // CK19-DAG: [[CPVAL1]] = inttoptr i[[Z]] [[VAR11:%.+]] to i8*
-  // 
+  //
   // CK19-DAG: [[BP2:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 2
   // CK19-DAG: [[P2:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 2
   // CK19-DAG: store i8* [[CBPVAL2:%[^,]+]], i8** [[BP2]]
   // CK19-DAG: store i8* [[CPVAL2:%[^,]+]], i8** [[P2]]
   // CK19-DAG: [[CBPVAL2]] = inttoptr i[[Z]] [[VAR2:%.+]] to i8*
   // CK19-DAG: [[CPVAL2]] = inttoptr i[[Z]] [[VAR22:%.+]] to i8*
-  // 
+  //
   // CK19-DAG: [[BP3:%.+]] = getelementptr inbounds {{.+}}[[BP]], i{{.+}} 0, i{{.+}} 3
   // CK19-DAG: [[P3:%.+]] = getelementptr inbounds {{.+}}[[P]], i{{.+}} 0, i{{.+}} 3
   // CK19-DAG: store i8* [[CBPVAL3:%[^,]+]], i8** [[BP3]]
@@ -1964,7 +1964,7 @@ void explicit_maps_single (int ii){
   // CK19-DAG: [[IDX3]] = mul nsw i[[Z]] %{{[^,]+}}, %{{[^,]+}}
   // CK19-DAG: [[SEC333]] = getelementptr {{.*}}double* [[VAR3]], i[[Z]] [[IDX33:%.+]]
   // CK19-DAG: [[IDX33]] = mul nsw i[[Z]] 1, %{{[^,]+}}
-  
+
   // CK19: call void [[CALL31:@.+]](i[[Z]] 23, i[[Z]] %{{[^,]+}}, i[[Z]] %{{[^,]+}}, double* %{{[^,]+}})
   #pragma omp target map(tofrom: mva[1][ii-2][:5])
   {
@@ -4078,12 +4078,12 @@ int explicit_maps_with_inner_lambda(int a){
 // CK25: call void {{.*}}[[LAMBDA]]{{.*}}([[CA01]]* [[CA]])
 #endif
 ///==========================================================================///
-// RUN: %clang_cc1 -DCK26 -std=c++11 -verify -fopenmp -fomptargets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -emit-llvm %s -o - | FileCheck %s --check-prefix CK26 --check-prefix CK26-64
-// RUN: %clang_cc1 -DCK26 -std=c++11 -fopenmp -fomptargets=powerpc64le-ibm-linux-gnu -x c++ -std=c++11 -triple powerpc64le-unknown-unknown -emit-pch -o %t %s
-// RUN: %clang_cc1 -fopenmp -std=c++11 -fomptargets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -std=c++11 -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s  --check-prefix CK26 --check-prefix CK26-64
-// RUN: %clang_cc1 -DCK26 -std=c++11 -verify -fopenmp -fomptargets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -emit-llvm %s -o - | FileCheck %s  --check-prefix CK26 --check-prefix CK26-32
-// RUN: %clang_cc1 -DCK26 -std=c++11 -fopenmp -fomptargets=i386-pc-linux-gnu -x c++ -std=c++11 -triple i386-unknown-unknown -emit-pch -o %t %s
-// RUN: %clang_cc1 -fopenmp -std=c++11 -fomptargets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -std=c++11 -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s  --check-prefix CK26 --check-prefix CK26-32
+// RxUN: %clang_cc1 -DCK26 -std=c++11 -verify -fopenmp -fomptargets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -emit-llvm %s -o - | FileCheck %s --check-prefix CK26 --check-prefix CK26-64
+// RxUN: %clang_cc1 -DCK26 -std=c++11 -fopenmp -fomptargets=powerpc64le-ibm-linux-gnu -x c++ -std=c++11 -triple powerpc64le-unknown-unknown -emit-pch -o %t %s
+// RxUN: %clang_cc1 -fopenmp -std=c++11 -fomptargets=powerpc64le-ibm-linux-gnu -x c++ -triple powerpc64le-unknown-unknown -std=c++11 -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s  --check-prefix CK26 --check-prefix CK26-64
+// RxUN: %clang_cc1 -DCK26 -std=c++11 -verify -fopenmp -fomptargets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -emit-llvm %s -o - | FileCheck %s  --check-prefix CK26 --check-prefix CK26-32
+// RxUN: %clang_cc1 -DCK26 -std=c++11 -fopenmp -fomptargets=i386-pc-linux-gnu -x c++ -std=c++11 -triple i386-unknown-unknown -emit-pch -o %t %s
+// RxUN: %clang_cc1 -fopenmp -std=c++11 -fomptargets=i386-pc-linux-gnu -x c++ -triple i386-unknown-unknown -std=c++11 -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s  --check-prefix CK26 --check-prefix CK26-32
 #ifdef CK26
 // CK26: [[ST:%.+]] = type { i32, float }
 // CK26: [[CA00:%.+]] = type { [[ST]]* }

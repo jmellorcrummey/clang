@@ -4476,7 +4476,7 @@ private:
     // do the calculation based on the length of the section instead of relying
     // on CGF.getTypeSize(E->getType()).
     if (const auto *OAE = dyn_cast<OMPArraySectionExpr>(E)) {
-      auto BaseTy = OMPArraySectionExpr::getBaseOriginalType(
+      QualType BaseTy = OMPArraySectionExpr::getBaseOriginalType(
                         OAE->getBase()->IgnoreParenImpCasts())
                         .getCanonicalType();
 
@@ -4505,12 +4505,6 @@ private:
       return CGF.Builder.CreateNUWMul(LengthVal, ElemSize);
     }
     return CGF.getTypeSize(ExprTy);
-  }
-
-  /// \brief Generate the address of the lower bound of the section defined by
-  /// expression \a E.
-  llvm::Value *getLowerBoundOfElement(const Expr *E) const {
-    return CGF.EmitLValue(E).getPointer();
   }
 
   /// \brief Return the corresponding bits for a given map clause modifier. Add
@@ -4549,6 +4543,43 @@ private:
     if (Entry->MapTypeModifier == OMPC_MAP_always)
       Bits |= OMP_MAP_ALWAYS;
     return Bits;
+  }
+
+  /// \brief Return true if the provided expression is a final array section. A final array section, is one whose length can't be proved to be one.
+  bool isFinalArraySectionExpression(const Expr *E) const {
+    auto *OASE = dyn_cast<OMPArraySectionExpr>(E);
+
+    // It is not an array section and therefore not a unity-size one.
+    if (!OASE)
+      return false;
+
+    // An array section with no colon always refer to a single element.
+    if (OASE->getColonLoc().isInvalid())
+      return false;
+
+    auto *Length = OASE->getLength();
+
+    // If we don't have a length we have to check if the array has size 1
+    // for this dimension. Also, we should always expect a length if the
+    // base type is pointer.
+    if (!Length) {
+      auto BaseQTy = OMPArraySectionExpr::getBaseOriginalType(
+                         OASE->getBase()->IgnoreParenImpCasts())
+                         .getCanonicalType();
+      if (auto *ATy = dyn_cast<ConstantArrayType>(BaseQTy.getTypePtr()))
+        return ATy->getSize().getSExtValue() != 1;
+      // If we don't have a constant dimension length, we have to consider
+      // the current section as having any size, so it is not necessarily
+      // unitary. If it happen to be unity size, that's user fault.
+      return true;
+    }
+
+    // Check if the length evaluates to 1.
+    llvm::APSInt ConstLength;
+    if (!Length->EvaluateAsInt(ConstLength, CGF.getContext()))
+      return true; // Can have more that size 1.
+
+    return ConstLength.getSExtValue() != 1;
   }
 
   /// \brief Generate the base pointers, section pointers, sizes and map type
@@ -4697,7 +4728,7 @@ private:
         if (I->second->getType()->isAnyPointerType() && std::next(I) != CE) {
           auto PtrAddr =
               CGF.MakeNaturalAlignAddrLValue(BP, I->second->getType());
-          BP = CGF.EmitLoadOfLValue(PtrAddr, SourceLocation()).getScalarVal();
+          BP = CGF.EmitLoadOfPointerLValue(PtrAddr.getAddress(), I->second->getType()->getAs<PointerType>()).getPointer();
 
           // We do not need to generate individual map information for the
           // pointer, it can be associated with the combined storage.
@@ -4710,45 +4741,11 @@ private:
 
         // We need to generate the addresses and sizes if this is the last
         // component, if the component is a pointer or if it is an array section
-        // whose length can't be proved to be one. In this is a pointer, it
+        // whose length can't be proved to be one. If this is a pointer, it
         // becomes the base address for the following components.
 
         // A final array section, is one whose length can't be proved to be one.
-        auto IsFinalArraySection = [this](const Expr *E) -> bool {
-          auto *OASE = dyn_cast<OMPArraySectionExpr>(E);
-
-          // It is not an array section and therefore not a unity-size one.
-          if (!OASE)
-            return false;
-
-          // An array section with no colon always refer to a single element.
-          if (OASE->getColonLoc().isInvalid())
-            return false;
-
-          auto *Length = OASE->getLength();
-
-          // If we don't have a length we have to check if the array has size 1
-          // for this dimension. Also, we should always expect a length if the
-          // base type is pointer.
-          if (!Length) {
-            auto BaseQTy = OMPArraySectionExpr::getBaseOriginalType(
-                               OASE->getBase()->IgnoreParenImpCasts())
-                               .getCanonicalType();
-            if (auto *ATy = dyn_cast<ConstantArrayType>(BaseQTy.getTypePtr()))
-              return ATy->getSize().getSExtValue() != 1;
-            // If we don't have a constant dimension length, we have to consider
-            // the current section as having any size, so it is not necessarily
-            // unitary. If it happen to be unity size, that's user fault.
-            return true;
-          }
-
-          // Check if the length evaluates to 1.
-          llvm::APSInt ConstLength;
-          if (!Length->EvaluateAsInt(ConstLength, CGF.getContext()))
-            return true; // Can have more that size 1.
-
-          return ConstLength.getSExtValue() != 1;
-        }(I->first);
+        bool IsFinalArraySection = isFinalArraySectionExpression(I->first);
 
         // Get information on whether the element is a pointer. Have to do a
         // special treatment for array sections given that they are built-in
@@ -4772,7 +4769,7 @@ private:
           // Save the base we are currently using.
           BasePointers.push_back(BP);
 
-          auto *LB = getLowerBoundOfElement(I->first);
+          auto *LB = CGF.EmitLValue(I->first).getPointer();
           auto *Size = getExprTypeSize(I->first);
 
           Pointers.push_back(LB);
@@ -4808,7 +4805,7 @@ public:
 
     // Scan and extract information from the map clauses one by one.
     for (auto *MC : Directive.getClausesOfKind<OMPMapClause>()) {
-      for (auto *RE : MC->getVarRefs()) {
+      for (auto *RE : MC->varlists()) {
         auto *MI = new DeclarationMapInfoEntry(RE, MC->getMapType(),
                                                MC->getMapTypeModifier());
         const auto *D = MI->getAssociatedDecl();
