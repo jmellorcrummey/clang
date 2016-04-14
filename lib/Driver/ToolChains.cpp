@@ -4272,6 +4272,28 @@ CudaToolChain::addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
     CC1Args.push_back("-target-feature");
     CC1Args.push_back("+ptx42");
   }
+  if (getOffloadingKind() == OK_OpenMP_Device) {
+    SmallVector<std::string, 8> LibraryPaths;
+    if (char *env = ::getenv("LIBRARY_PATH")) {
+      StringRef CompilerPath = env;
+      while (!CompilerPath.empty()) {
+        std::pair<StringRef, StringRef> Split =
+            CompilerPath.split(llvm::sys::EnvPathSeparator);
+        LibraryPaths.push_back(Split.first);
+        CompilerPath = Split.second;
+      }
+    }
+
+    std::string LibOmpTargetName = "libomptarget-nvptx.bc";
+    for (std::string LibraryPath : LibraryPaths) {
+      std::string LibOmpTargetFile = LibraryPath + "/" + LibOmpTargetName;
+      if (llvm::sys::fs::exists(LibOmpTargetFile.c_str())) {
+        CC1Args.push_back("-mlink-cuda-bitcode");
+        CC1Args.push_back(DriverArgs.MakeArgString(LibOmpTargetFile));
+        break;
+      }
+    }
+  }
 }
 
 llvm::opt::DerivedArgList *
