@@ -186,113 +186,7 @@ public:
   }
 };
 
-/// \brief This represents clauses with a list of expressions that is mappable.
-/// Examples of these clauses are 'map' in
-/// '#pragma omp target [enter|exit] [data]...' directives, and  'to' and 'from
-/// in '#pragma omp target update...' directives.
-class OMPMappableExprListClause : public OMPClause {
-public:
-  // \brief Class that represents a component of a mappable expression. E.g.
-  // for an expression S.a, the first component is a declaration reference
-  // expression associated with 'S' and the second is a member expression
-  // associated with the field declaration 'a'. If the expression is an array subscript it may not have any associated declaration. In that case the associated declaration is set to nullptr.
-  class MappableComponent {
-    // \brief Expression associated with the component.
-    const Expr *AssociatedExpression;
-    // \brief Declaration associated with the declaration. If the component does not have a declaration (e.g. array subscripts or section), this is set to nullptr.
-    const ValueDecl *AssociatedDeclaration;
-  public:
-    MappableComponent() : AssociatedExpression(nullptr), AssociatedDeclaration(nullptr) {}
-    MappableComponent(const Expr *AssociatedExpression, const ValueDecl *AssociatedDeclaration) : AssociatedExpression(AssociatedExpression), AssociatedDeclaration(AssociatedDeclaration) {}
 
-    const Expr *getAssociatedExpression() const {return AssociatedExpression;}
-    const ValueDecl *getAssociatedDeclaration() const {return AssociatedDeclaration;}
-  };
-
-  // \brief List of components of an expression. This first one is the whole expression and the last one is the base expression.
-  typedef SmallVector<MappableComponent, 8> MappableExprComponentList;
-  typedef ArrayRef<MappableComponent> MappableExprComponentListRef;
-
-  // \brief List of all component lists associated to the same base declaration. E.g. if both 'S.a' and 'S.b' are a mappable expressions, each will have their component list but the same base declaration 'S'.
-  typedef SmallVector<MappableExprComponentList, 8> MappableExprComponentLists;
-  typedef ArrayRef<MappableExprComponentList> MappableExprComponentListsRef;
-
-
-//  class DeclarationMappableComponents {
-//    // \brief The declaration the mappable expression component sets relate to.
-//    const ValueDecl *VD;
-//
-//    // \brief A list of component lists. We have one list for each mappable expression whose base is the current declaration.
-//    SmallVector<MappableExprComponentList, 8> ComponentLists;
-//
-//  };
-//  typedef ArrayRef<MappableComponent> MappableExprComponentsRef;
-//
-//  typedef llvm::SmallVector<MappableExprComponents, 8> MappableExprsComponents;
-
-protected:
-//  /// \brief Fetches list of variables associated with this clause.
-//  MutableArrayRef<Expr *> getVarRefs() {
-//    return MutableArrayRef<Expr *>(
-//        static_cast<T *>(this)->template getTrailingObjects<Expr *>(), NumVars);
-//  }
-//
-//  /// \brief Sets the list of variables for this clause.
-//  void setVarRefs(ArrayRef<Expr *> VL) {
-//    assert(VL.size() == NumVars &&
-//           "Number of variables is not the same as the preallocated buffer");
-//    std::copy(VL.begin(), VL.end(),
-//              static_cast<T *>(this)->template getTrailingObjects<Expr *>());
-//  }
-//
-//  /// \brief Build a clause with \a N variables
-//  ///
-//  /// \param K Kind of the clause.
-//  /// \param StartLoc Starting location of the clause (the clause keyword).
-//  /// \param LParenLoc Location of '('.
-//  /// \param EndLoc Ending location of the clause.
-//  /// \param N Number of the variables in the clause.
-//  ///
-//  OMPMappableVarListClause(OpenMPClauseKind K, SourceLocation StartLoc,
-//                   SourceLocation LParenLoc, SourceLocation EndLoc, unsigned N)
-//      : OMPVarListClause(K, StartLoc, LParenLoc, EndLoc, N) {}
-public:
-
-
-
-//
-//  typedef MutableArrayRef<Expr *>::iterator varlist_iterator;
-//  typedef ArrayRef<const Expr *>::iterator varlist_const_iterator;
-//  typedef llvm::iterator_range<varlist_iterator> varlist_range;
-//  typedef llvm::iterator_range<varlist_const_iterator> varlist_const_range;
-//
-//  unsigned varlist_size() const { return NumVars; }
-//  bool varlist_empty() const { return NumVars == 0; }
-//
-//  varlist_range varlists() {
-//    return varlist_range(varlist_begin(), varlist_end());
-//  }
-//  varlist_const_range varlists() const {
-//    return varlist_const_range(varlist_begin(), varlist_end());
-//  }
-//
-//  varlist_iterator varlist_begin() { return getVarRefs().begin(); }
-//  varlist_iterator varlist_end() { return getVarRefs().end(); }
-//  varlist_const_iterator varlist_begin() const { return getVarRefs().begin(); }
-//  varlist_const_iterator varlist_end() const { return getVarRefs().end(); }
-//
-//  /// \brief Sets the location of '('.
-//  void setLParenLoc(SourceLocation Loc) { LParenLoc = Loc; }
-//  /// \brief Returns the location of '('.
-//  SourceLocation getLParenLoc() const { return LParenLoc; }
-//
-//  /// \brief Fetches list of all variables in the clause.
-//  ArrayRef<const Expr *> getVarRefs() const {
-//    return llvm::makeArrayRef(
-//        static_cast<const T *>(this)->template getTrailingObjects<Expr *>(),
-//        NumVars);
-//  }
-};
 
 /// \brief This represents 'if' clause in the '#pragma omp ...' directive.
 ///
@@ -2795,15 +2689,15 @@ public:
   /// \param LParenLoc Location of '('.
   /// \param EndLoc Ending location of the clause.
   ///
-  OMPDeviceClause(Expr *E, SourceLocation StartLoc, SourceLocation LParenLoc, 
+  OMPDeviceClause(Expr *E, SourceLocation StartLoc, SourceLocation LParenLoc,
                   SourceLocation EndLoc)
-      : OMPClause(OMPC_device, StartLoc, EndLoc), LParenLoc(LParenLoc), 
+      : OMPClause(OMPC_device, StartLoc, EndLoc), LParenLoc(LParenLoc),
         Device(E) {}
 
   /// \brief Build an empty clause.
   ///
   OMPDeviceClause()
-      : OMPClause(OMPC_device, SourceLocation(), SourceLocation()), 
+      : OMPClause(OMPC_device, SourceLocation(), SourceLocation()),
         LParenLoc(SourceLocation()), Device(nullptr) {}
   /// \brief Sets the location of '('.
   void setLParenLoc(SourceLocation Loc) { LParenLoc = Loc; }
@@ -2882,6 +2776,234 @@ public:
   }
 };
 
+
+/// \brief Struct that defines commons infrastructure to to handle mappable expressions used in OpenMP clauses.
+class OMPClauseMappableExprCommon {
+public:
+  // \brief Class that represents a component of a mappable expression. E.g.
+  // for an expression S.a, the first component is a declaration reference
+  // expression associated with 'S' and the second is a member expression
+  // associated with the field declaration 'a'. If the expression is an array subscript it may not have any associated declaration. In that case the associated declaration is set to nullptr.
+  class MappableComponent {
+    // \brief Expression associated with the component.
+    const Expr *AssociatedExpression;
+    // \brief Declaration associated with the declaration. If the component does not have a declaration (e.g. array subscripts or section), this is set to nullptr.
+    const ValueDecl *AssociatedDeclaration;
+  public:
+    MappableComponent() : AssociatedExpression(nullptr), AssociatedDeclaration(nullptr) {}
+    MappableComponent(const Expr *AssociatedExpression, const ValueDecl *AssociatedDeclaration) : AssociatedExpression(AssociatedExpression), AssociatedDeclaration(AssociatedDeclaration) {}
+
+    const Expr *getAssociatedExpression() const {return AssociatedExpression;}
+    const ValueDecl *getAssociatedDeclaration() const {return AssociatedDeclaration;}
+  };
+
+  // \brief List of components of an expression. This first one is the whole expression and the last one is the base expression.
+  typedef SmallVector<MappableComponent, 8> MappableExprComponentList;
+  typedef ArrayRef<MappableComponent> MappableExprComponentListRef;
+
+  typedef MutableArrayRef<MappableComponent>::iterator component_iterator;
+  typedef llvm::iterator_range<component_iterator> component_range;
+  typedef ArrayRef<const MappableComponent>::iterator component_const_iterator;
+  typedef llvm::iterator_range<component_const_iterator> component_const_range;
+
+  // \brief List of all component lists associated to the same base declaration. E.g. if both 'S.a' and 'S.b' are a mappable expressions, each will have their component list but the same base declaration 'S'.
+  typedef SmallVector<MappableExprComponentList, 8> MappableExprComponentLists;
+  typedef ArrayRef<MappableExprComponentList> MappableExprComponentListsRef;
+protected:
+  // \brief Return the total number of elements in a list of component lists.
+  static unsigned getComponentsTotalNumber(MappableExprComponentListsRef ComponentLists) {
+    unsigned TotalNum = 0u;
+    for (auto &C : ComponentLists)
+      TotalNum += C.size();
+    return TotalNum;
+  }
+  // \brief Return the total number of elements in a list of component lists.
+  static unsigned getUniqueDeclarationsTotalNumber(ArrayRef<const VarDecl*> Declarations) {
+    unsigned TotalNum = 0u;
+    llvm::SmallPtrSet<const VarDecl*, 8> Cache;
+    for (auto *D : Declarations) {
+      if (Cache.count(D))
+        continue;
+      ++TotalNum;
+    }
+    return TotalNum;
+  }
+};
+
+/// \brief This represents clauses with a list of expressions that is mappable.
+/// Examples of these clauses are 'map' in
+/// '#pragma omp target [enter|exit] [data]...' directives, and  'to' and 'from
+/// in '#pragma omp target update...' directives.
+template <class T>
+class OMPMappableExprListClause : public OMPClause, public OMPClauseMappableExprCommon {
+  /// \brief Location of '('.
+  SourceLocation LParenLoc;
+
+  /// \brief Number of info entries. We have one for each unique declaration.
+  unsigned NumInfoEntries;
+
+  /// \brief Total number of component lists in this clause.
+  unsigned NumComponentLists;
+
+  /// \brief Total number of components in this clause.
+  unsigned NumComponents;
+
+protected:
+  /// \brief This saves the declaration, the number of component lists, the array of component list sizes, and the array of of components associated with a clause. We will have one information record for each unique declaration used in the clause.
+  struct ClauseMappableExpressionsInfo {
+    // \brief The base declaration of a given mappable expression.
+    const ValueDecl *BaseVD;
+    // \brief The number of component lists associated with this declaration.
+    unsigned NumComponentLists;
+    // \brief An array with the sizes of the different component lists.
+    unsigned *ComponentListSizes;
+    // \brief An array with pointers for each component list.
+    MappableComponent **ComponentLists;
+  };
+
+  /// \brief Get the info entries that should be in the trailing objects of the class.
+  MutableArrayRef<ClauseMappableExpressionsInfo> getInfoEntriesRef() {
+    return MutableArrayRef<ClauseMappableExpressionsInfo>(static_cast<T *>(this)->template getTrailingObjects<ClauseMappableExpressionsInfo>(), NumInfoEntries);
+  }
+  ArrayRef<ClauseMappableExpressionsInfo> getInfoEntriesRef() const {
+    return ArrayRef<ClauseMappableExpressionsInfo>(static_cast<T *>(this)->template getTrailingObjects<ClauseMappableExpressionsInfo>(), NumInfoEntries);
+  }
+
+  /// \brief Get the component lists sizes that should be in the trailing objects of the class.
+  MutableArrayRef<ClauseMappableExpressionsInfo> getComponentListSizesRef() {
+    return MutableArrayRef<ClauseMappableExpressionsInfo>(static_cast<T *>(this)->template getTrailingObjects<unsigned>(), NumComponentLists);
+  }
+  ArrayRef<ClauseMappableExpressionsInfo> getComponentListSizesRef() const {
+    return ArrayRef<ClauseMappableExpressionsInfo>(static_cast<T *>(this)->template getTrailingObjects<unsigned>(), NumComponentLists);
+  }
+
+  /// \brief Get the components that should be in the trailing objects of the class.
+  MutableArrayRef<ClauseMappableExpressionsInfo> getComponentsRef() {
+    return MutableArrayRef<ClauseMappableExpressionsInfo>(static_cast<T *>(this)->template getTrailingObjects<unsigned>(), NumComponents);
+  }
+  ArrayRef<ClauseMappableExpressionsInfo> getComponentsRef() const {
+    return ArrayRef<ClauseMappableExpressionsInfo>(static_cast<T *>(this)->template getTrailingObjects<MappableComponent>(), NumComponents);
+  }
+
+  /// \brief Fill the clause information from the list of declarations and associated component lists.
+  void setClauseInfo(ArrayRef<const VarDecl *> Declarations, MappableExprComponentListsRef ComponentLists) {
+    // Perform some checks to make sure the data sizes are consistent with the information available when the clause was created.
+    assert(getUniqueDeclarationsTotalNumber(Declarations) == NumInfoEntries && "Unexpected number of mappable expression info entries!");
+    assert(getComponentsTotalNumber(ComponentLists) == NumComponents && "Unexpected total number of components!");
+    assert(Declarations.size() == ComponentLists.size() && "Declaration and component lists size is not consistent!");
+    assert(Declarations.size() == NumComponentLists && "Unexpected declaration and component lists size!");
+
+    // Iterators of the input data.
+    auto DeclIt = Declarations.begin();
+    auto CompLstIt = ComponentLists.begin();
+
+    // Iterators of the target storage.
+    auto InfoIt = getInfoEntriesRef().begin();
+    auto SizesIt = getComponentListSizesRef().begin();
+    auto CompIt = getComponentsRef().begin();
+
+    for (; )
+
+
+
+  }
+
+//  /// \brief Return a pointer to the provided declaration info, if it exists. Otherwise, return nullptr.
+//  ClauseMappableExpressionsInfo *getDeclarationInfo(const ValueDecl *VD) const {
+//    ArrayRef<ClauseMappableExpressionsInfo> Info(ClauseInfo, ClauseInfoNumEntries);
+//    auto It = std::find_if(Info.begin(), Info.end(), [](ClauseMappableExpressionsInfo &I) {return I.BaseVD == VD;});
+//    if (It != Info.end())
+//      return *It;
+//    return nullptr;
+//  }
+
+
+//  /// \brief Fetches list of variables associated with this clause.
+//  MutableArrayRef<Expr *> getVarRefs() {
+//    return MutableArrayRef<Expr *>(
+//        static_cast<T *>(this)->template getTrailingObjects<Expr *>(), NumVars);
+//  }
+//
+//  /// \brief Sets the list of variables for this clause.
+//  void setVarRefs(ArrayRef<Expr *> VL) {
+//    assert(VL.size() == NumVars &&
+//           "Number of variables is not the same as the preallocated buffer");
+//    std::copy(VL.begin(), VL.end(),
+//              static_cast<T *>(this)->template getTrailingObjects<Expr *>());
+//  }
+
+  /// \brief Build a clause for \a NumUniqueDeclarations declarations, \a NumComponentLists total component lists, and \a NumComponents total components.
+  ///
+  /// \param K Kind of the clause.
+  /// \param StartLoc Starting location of the clause (the clause keyword).
+  /// \param LParenLoc Location of '('.
+  /// \param EndLoc Ending location of the clause.
+  /// \param NumUniqueDeclarations Number of unique base declarations in this clause.
+  /// \param NumComponentLists Number of component lists in this clause.
+  /// \param NumComponents Total number of expression components in the clause.
+  ///
+  OMPMappableExprListClause(OpenMPClauseKind K, SourceLocation StartLoc,
+                   SourceLocation LParenLoc, SourceLocation EndLoc, unsigned NumUniqueDeclarations, unsigned NumComponentLists, unsigned NumComponents)
+      : OMPClause(K, StartLoc, EndLoc), LParenLoc(LParenLoc), NumInfoEntries(NumUniqueDeclarations), NumComponentLists(NumComponentLists), NumComponents(NumComponents) {}
+public:
+  unsigned getInfoEntriesNum() {return NumInfoEntries;}
+  unsigned getTotalComponentListNum() {return NumComponentLists;}
+  unsigned getTotalComponentsNum() {return NumComponents;}
+
+//  component_range components(const ValueDecl* VD) {
+//    if (auto *I = getDeclarationInfo(VD)) {
+//      MutableArrayRef<ClauseMappableExpressionsInfo> Components(I->Components, I->NumComponents);
+//      component_range(Components.begin(), Components.end());
+//    }
+//    return component_range();
+//  }
+//  component_const_range components(const ValueDecl* VD) const {
+//    if (auto *I = getDeclarationInfo(VD)) {
+//      ArrayRef<ClauseMappableExpressionsInfo> Components(I->Components, I->NumComponents);
+//      component_range(Components.begin(), Components.end());
+//    }
+//    return component_range();
+//  }
+
+//  component_iterator component_begin(const ValueDecl* VD) { return getVarRefs().begin(); }
+//  component_iterator component_end(const ValueDecl* VD) { return getVarRefs().end(); }
+//  component_const_iterator component_begin(const ValueDecl* VD) const { return getVarRefs().begin(); }
+//  component_const_iterator component_end(const ValueDecl* VD) const { return getVarRefs().end(); }
+//
+//
+//  typedef MutableArrayRef<Expr *>::iterator varlist_iterator;
+//  typedef ArrayRef<const Expr *>::iterator varlist_const_iterator;
+//  typedef llvm::iterator_range<varlist_iterator> varlist_range;
+//  typedef llvm::iterator_range<varlist_const_iterator> varlist_const_range;
+//
+//  unsigned varlist_size() const { return NumVars; }
+//  bool varlist_empty() const { return NumVars == 0; }
+//
+//  varlist_range varlists() {
+//    return varlist_range(varlist_begin(), varlist_end());
+//  }
+//  varlist_const_range varlists() const {
+//    return varlist_const_range(varlist_begin(), varlist_end());
+//  }
+//
+//  varlist_iterator varlist_begin() { return getVarRefs().begin(); }
+//  varlist_iterator varlist_end() { return getVarRefs().end(); }
+//  varlist_const_iterator varlist_begin() const { return getVarRefs().begin(); }
+//  varlist_const_iterator varlist_end() const { return getVarRefs().end(); }
+//
+//  /// \brief Sets the location of '('.
+//  void setLParenLoc(SourceLocation Loc) { LParenLoc = Loc; }
+//  /// \brief Returns the location of '('.
+//  SourceLocation getLParenLoc() const { return LParenLoc; }
+//
+//  /// \brief Fetches list of all variables in the clause.
+//  ArrayRef<const Expr *> getVarRefs() const {
+//    return llvm::makeArrayRef(
+//        static_cast<const T *>(this)->template getTrailingObjects<Expr *>(),
+//        NumVars);
+//  }
+};
+
 /// \brief This represents clause 'map' in the '#pragma omp ...'
 /// directives.
 ///
@@ -2891,11 +3013,13 @@ public:
 /// In this example directive '#pragma omp target' has clause 'map'
 /// with the variables 'a' and 'b'.
 ///
-class OMPMapClause final : public OMPVarListClause<OMPMapClause>,
-                           private llvm::TrailingObjects<OMPMapClause, Expr *> {
+class OMPMapClause final : public OMPMappableExprListClause<OMPMapClause>,
+                           private llvm::TrailingObjects<OMPMapClause, OMPMappableExprListClause::ClauseMappableExpressionsInfo, unsigned, OMPMappableExprListClause::MappableComponent> {
   friend TrailingObjects;
-  friend OMPVarListClause;
   friend class OMPClauseReader;
+
+  size_t numTrailingObjects(OverloadToken<OMPMappableExprListClause::ClauseMappableExpressionsInfo>) const { return getInfoEntriesNum(); }
+  size_t numTrailingObjects(OverloadToken<unsigned>) const { return getTotalComponentListNum(); }
 
   /// \brief Map type modifier for the 'map' clause.
   OpenMPMapClauseKind MapTypeModifier;
@@ -2929,7 +3053,7 @@ class OMPMapClause final : public OMPVarListClause<OMPMapClause>,
   /// \brief Set colon location.
   void setColonLoc(SourceLocation Loc) { ColonLoc = Loc; }
 
-  /// \brief Build clause with number of variables \a N.
+  /// \brief Build a clause for \a NumUniqueDeclarations declarations and \a NumComponents expression components.
   ///
   /// \param MapTypeModifier Map type modifier.
   /// \param MapType Map type.
@@ -2937,25 +3061,28 @@ class OMPMapClause final : public OMPVarListClause<OMPMapClause>,
   /// \param MapLoc Location of the map type.
   /// \param StartLoc Starting location of the clause.
   /// \param EndLoc Ending location of the clause.
-  /// \param N Number of the variables in the clause.
+  /// \param NumUniqueDeclarations Number of unique base declarations in this clause.
+  /// \param NumComponentLists Number of component lists in this clause.
+  /// \param NumComponents Total number of expression components in the clause.
   ///
   explicit OMPMapClause(OpenMPMapClauseKind MapTypeModifier,
                         OpenMPMapClauseKind MapType, bool MapTypeIsImplicit,
                         SourceLocation MapLoc, SourceLocation StartLoc,
                         SourceLocation LParenLoc, SourceLocation EndLoc,
-                        unsigned N)
-      : OMPVarListClause<OMPMapClause>(OMPC_map, StartLoc, LParenLoc, EndLoc,
-                                       N),
+                        unsigned NumUniqueDeclarations, unsigned NumComponentLists, unsigned NumComponents)
+      : OMPMappableExprListClause(OMPC_map, StartLoc, LParenLoc, EndLoc,
+          NumUniqueDeclarations, NumComponentLists, NumComponents),
         MapTypeModifier(MapTypeModifier), MapType(MapType),
         MapTypeIsImplicit(MapTypeIsImplicit), MapLoc(MapLoc) {}
 
   /// \brief Build an empty clause.
   ///
-  /// \param N Number of variables.
+  /// \param NumUniqueDeclarations Number of unique base declarations in this clause.
+  /// \param NumComponentLists Number of component lists in this clause.
+  /// \param NumComponents Total number of expression components in the clause.
   ///
-  explicit OMPMapClause(unsigned N)
-      : OMPVarListClause<OMPMapClause>(OMPC_map, SourceLocation(),
-                                       SourceLocation(), SourceLocation(), N),
+  explicit OMPMapClause(unsigned NumUniqueDeclarations, unsigned NumComponentLists, unsigned NumComponents)
+      : OMPMappableExprListClause(OMPC_map, SourceLocation(), SourceLocation(), SourceLocation(), NumUniqueDeclarations, NumComponentLists, NumComponents),
         MapTypeModifier(OMPC_MAP_unknown), MapType(OMPC_MAP_unknown),
         MapTypeIsImplicit(false), MapLoc() {}
 
@@ -2965,7 +3092,8 @@ public:
   /// \param C AST context.
   /// \param StartLoc Starting location of the clause.
   /// \param EndLoc Ending location of the clause.
-  /// \param VL List of references to the variables.
+  /// \param Declarations Declarations used in the clause.
+  /// \param ComponentLists Component lists used in the clause.
   /// \param TypeModifier Map type modifier.
   /// \param Type Map type.
   /// \param TypeIsImplicit Map type is inferred implicitly.
@@ -2973,16 +3101,18 @@ public:
   ///
   static OMPMapClause *Create(const ASTContext &C, SourceLocation StartLoc,
                               SourceLocation LParenLoc, SourceLocation EndLoc,
-                              ArrayRef<Expr *> VL,
+                              ArrayRef<const VarDecl *> Declarations, MappableExprComponentListsRef ComponentLists,
                               OpenMPMapClauseKind TypeModifier,
                               OpenMPMapClauseKind Type, bool TypeIsImplicit,
                               SourceLocation TypeLoc);
-  /// \brief Creates an empty clause with the place for \a N variables.
+  /// \brief Creates an empty clause with the place for for \a NumUniqueDeclarations declarations and \a NumComponents expression components.
   ///
   /// \param C AST context.
-  /// \param N The number of variables.
+  /// \param NumUniqueDeclarations Number of unique base declarations in this clause.
+  /// \param NumComponentLists Number of unique base declarations in this clause.
+  /// \param NumComponents Total number of expression components in the clause.
   ///
-  static OMPMapClause *CreateEmpty(const ASTContext &C, unsigned N);
+  static OMPMapClause *CreateEmpty(const ASTContext &C, unsigned NumUniqueDeclarations, unsigned NumComponentLists, unsigned NumComponents);
 
   /// \brief Fetches mapping kind for the clause.
   OpenMPMapClauseKind getMapType() const LLVM_READONLY { return MapType; }

@@ -530,15 +530,20 @@ OMPDependClause *OMPDependClause::CreateEmpty(const ASTContext &C, unsigned N) {
 
 OMPMapClause *OMPMapClause::Create(const ASTContext &C, SourceLocation StartLoc,
                                    SourceLocation LParenLoc,
-                                   SourceLocation EndLoc, ArrayRef<Expr *> VL,
+                                   SourceLocation EndLoc, ArrayRef<const VarDecl *> Declarations, MappableExprComponentListsRef ComponentLists,
                                    OpenMPMapClauseKind TypeModifier,
                                    OpenMPMapClauseKind Type,
                                    bool TypeIsImplicit,
                                    SourceLocation TypeLoc) {
-  void *Mem = C.Allocate(totalSizeToAlloc<Expr *>(VL.size()));
+
+  unsigned NumUniqueDeclarations = getUniqueDeclarationsTotalNumber(Declarations);
+  unsigned NumComponentLists = ComponentLists.size();
+  unsigned NumComponents = getComponentsTotalNumber(ComponentLists);
+
+  void *Mem = C.Allocate(totalSizeToAlloc<OMPMappableExprListClause::ClauseMappableExpressionsInfo, unsigned, OMPMappableExprListClause::MappableComponent>(NumUniqueDeclarations, NumComponentLists, NumComponents));
   OMPMapClause *Clause =
       new (Mem) OMPMapClause(TypeModifier, Type, TypeIsImplicit, TypeLoc,
-                             StartLoc, LParenLoc, EndLoc, VL.size());
+                             StartLoc, LParenLoc, EndLoc, NumUniqueDeclarations, NumComponentLists, NumComponents);
   Clause->setVarRefs(VL);
   Clause->setMapTypeModifier(TypeModifier);
   Clause->setMapType(Type);
@@ -546,7 +551,7 @@ OMPMapClause *OMPMapClause::Create(const ASTContext &C, SourceLocation StartLoc,
   return Clause;
 }
 
-OMPMapClause *OMPMapClause::CreateEmpty(const ASTContext &C, unsigned N) {
-  void *Mem = C.Allocate(totalSizeToAlloc<Expr *>(N));
-  return new (Mem) OMPMapClause(N);
+OMPMapClause *OMPMapClause::CreateEmpty(const ASTContext &C, unsigned NumUniqueDeclarations, unsigned NumComponentLists, unsigned NumComponents) {
+  void *Mem = C.Allocate(totalSizeToAlloc<OMPMappableExprListClause::ClauseMappableExpressionsInfo, unsigned, OMPMappableExprListClause::MappableComponent>(NumUniqueDeclarations, NumComponentLists, NumComponents));
+  return new (Mem) OMPMapClause(NumUniqueDeclarations, NumComponentLists, NumComponents);
 }

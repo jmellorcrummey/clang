@@ -365,7 +365,7 @@ public:
   }
 
   // Create a new mappable expression component list associated with a given declaration and initialize it with the provided list of components.
-  void addMappableExpressionComponents(ValueDecl *VD, OMPMappableExprListClause::MappableExprComponentListRef Components) {
+  void addMappableExpressionComponents(const ValueDecl *VD, OMPMappableExprListClause::MappableExprComponentListRef Components) {
     assert(Stack.size() > 1 && "Not expecting to retrieve components on a empty stack!");
     auto &MEC = Stack.back().MappedExprComponents[VD];
     // Create new entry and append the new components there.
@@ -373,14 +373,14 @@ public:
     MEC.back().append(Components.begin(), Components.end());
   }
 
-  // Get the mappable expression component lists associated with a given declaration.
-  OMPMappableExprListClause::MappableExprComponentListsRef getMappableExpressionComponents(ValueDecl *VD) {
-    assert(Stack.size() > 1 && "Not expecting to retrieve components on a empty stack!");
-    auto It = Stack.back().MappedExprComponents.find(VD);
-    if (It != Stack.back().MappedExprComponents.end())
-      return It->second;
-    return OMPMappableExprListClause::MappableExprComponentListsRef();
-  }
+//  // Get the mappable expression component lists associated with a given declaration.
+//  OMPMappableExprListClause::MappableExprComponentListsRef getMappableExpressionComponents(ValueDecl *VD) {
+//    assert(Stack.size() > 1 && "Not expecting to retrieve components on a empty stack!");
+//    auto It = Stack.back().MappedExprComponents.find(VD);
+//    if (It != Stack.back().MappedExprComponents.end())
+//      return It->second;
+//    return OMPMappableExprListClause::MappableExprComponentListsRef();
+//  }
 };
 bool isParallelOrTaskRegion(OpenMPDirectiveKind DKind) {
   return isOpenMPParallelDirective(DKind) || DKind == OMPD_task ||
@@ -9691,7 +9691,7 @@ static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E, OMPMappableExp
 
 // Return true if expression E associated with value VD has conflicts with other
 // map information.
-static bool CheckMapConflicts(Sema &SemaRef, DSAStackTy *DSAS, ValueDecl *VD,
+static bool CheckMapConflicts(Sema &SemaRef, DSAStackTy *DSAS, const ValueDecl *VD,
                               Expr *E, bool CurrentRegionOnly, OMPMappableExprListClause::MappableExprComponentListRef CurComponents) {
   assert(VD && E);
   SourceLocation ELoc = E->getExprLoc();
@@ -9868,33 +9868,35 @@ Sema::ActOnOpenMPMapClause(OpenMPMapClauseKind MapTypeModifier,
                            SourceLocation MapLoc, SourceLocation ColonLoc,
                            ArrayRef<Expr *> VarList, SourceLocation StartLoc,
                            SourceLocation LParenLoc, SourceLocation EndLoc) {
-  SmallVector<Expr *, 4> Vars;
 
-//  // Keep track of the mappable components in this clause. Each entry in the list is going to have a set of components associated. We record each set of components (owned by the DSAStack) so that we can build the clause later on.
-//  SmallVector<OMPMappableComponentsHandler::MappableExprComponentsRef, 16> ClauseComponents;
+  // Keep track of the mappable components and base declarations in this clause. Each entry in the list is going to have a list of components associated. We record each set of the components so that we can build the clause later on. In the end we should have the same ammount of delcarations and component lists.
+  OMPMappableExprListClause::MappableExprComponentLists ClauseComponents;
+  SmallVector<const ValueDecl*, 16> ClauseDeclarations;
 
   for (auto &RE : VarList) {
-    // List to save the components for the current mappable list entry.
-    OMPMappableExprListClause::MappableExprComponentList CurComponents;
-
     assert(RE && "Null expr in omp map");
-    if (isa<DependentScopeDeclRefExpr>(RE)) {
+
+    // Grow the components and declarations arrays.
+    ClauseComponents.resize(ClauseComponents.size() + 1);
+    ClauseDeclarations.push_back(nullptr);
+
+    auto &CurComponents = ClauseComponents.back();
+    auto &CurDeclaration = ClauseDeclarations.back();
+
+    if (isa<DependentScopeDeclRefExpr>(RE))
       // It will be analyzed later.
-      Vars.push_back(RE);
       continue;
-    }
+
     SourceLocation ELoc = RE->getExprLoc();
 
     auto *VE = RE->IgnoreParenLValueCasts();
 
     if (VE->isValueDependent() || VE->isTypeDependent() ||
         VE->isInstantiationDependent() ||
-        VE->containsUnexpandedParameterPack()) {
+        VE->containsUnexpandedParameterPack())
       // We can only analyze this information once the missing information is
       // resolved.
-      Vars.push_back(RE);
       continue;
-    }
 
     auto *SimpleExpr = RE->IgnoreParenCasts();
 
@@ -9909,20 +9911,21 @@ Sema::ActOnOpenMPMapClause(OpenMPMapClauseKind MapTypeModifier,
     if (!BE)
       continue;
 
+    assert(!CurComponents.empty() && "Invalid mappable expression information.");
+
     // If the base is a reference to a variable, we rely on that variable for
     // the following checks. If it is a 'this' expression we rely on the field.
-    ValueDecl *D = nullptr;
-    if (auto *DRE = dyn_cast<DeclRefExpr>(BE)) {
-      D = DRE->getDecl();
-    } else {
+    if (auto *DRE = dyn_cast<DeclRefExpr>(BE))
+      CurDeclaration = DRE->getDecl();
+    else {
       auto *ME = cast<MemberExpr>(BE);
       assert(isa<CXXThisExpr>(ME->getBase()) && "Unexpected expression!");
-      D = ME->getMemberDecl();
+      CurDeclaration = ME->getMemberDecl();
     }
-    assert(D && "Null decl on map clause.");
+    assert(CurDeclaration && "Null decl on map clause.");
 
-    auto *VD = dyn_cast<VarDecl>(D);
-    auto *FD = dyn_cast<FieldDecl>(D);
+    auto *VD = dyn_cast<VarDecl>(CurDeclaration);
+    auto *FD = dyn_cast<FieldDecl>(CurDeclaration);
 
     assert((VD || FD) && "Only variables or fields are expected here!");
     (void)FD;
@@ -9947,17 +9950,17 @@ Sema::ActOnOpenMPMapClause(OpenMPMapClauseKind MapTypeModifier,
     // Check conflicts with other map clause expressions. We check the conflicts
     // with the current construct separately from the enclosing data
     // environment, because the restrictions are different.
-    if (CheckMapConflicts(*this, DSAStack, D, SimpleExpr,
+    if (CheckMapConflicts(*this, DSAStack, CurDeclaration, SimpleExpr,
                           /*CurrentRegionOnly=*/true, CurComponents))
       break;
-    if (CheckMapConflicts(*this, DSAStack, D, SimpleExpr,
+    if (CheckMapConflicts(*this, DSAStack, CurDeclaration, SimpleExpr,
                           /*CurrentRegionOnly=*/false, CurComponents))
       break;
 
     // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, C++, p.1]
     //  If the type of a list item is a reference to a type T then the type will
     //  be considered to be T for all purposes of this clause.
-    QualType Type = D->getType().getNonReferenceType();
+    QualType Type = CurDeclaration->getType().getNonReferenceType();
 
     // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, p.9]
     //  A list item must have a mappable type.
@@ -10003,18 +10006,18 @@ Sema::ActOnOpenMPMapClause(OpenMPMapClauseKind MapTypeModifier,
         Diag(ELoc, diag::err_omp_variable_in_map_and_dsa)
             << getOpenMPClauseName(DVar.CKind)
             << getOpenMPDirectiveName(DSAStack->getCurrentDirective());
-        ReportOriginalDSA(*this, DSAStack, D, DVar);
+        ReportOriginalDSA(*this, DSAStack, CurDeclaration, DVar);
         continue;
       }
     }
 
-    Vars.push_back(RE);
-    DSAStack->addMappableExpressionComponents(D, CurComponents);
+    // Store the components in the stack so that they can be used to check against other clauses.
+    DSAStack->addMappableExpressionComponents(CurDeclaration, CurComponents);
   }
 
   // We need to produce a map clause even if we don't have variables so that
   // other diagnostics related with non-existing map clauses are accurate.
-  return OMPMapClause::Create(Context, StartLoc, LParenLoc, EndLoc, Vars,
+  return OMPMapClause::Create(Context, StartLoc, LParenLoc, EndLoc, ClauseDeclarations, ClauseComponents,
                               MapTypeModifier, MapType, IsMapTypeImplicit,
                               MapLoc);
 }
