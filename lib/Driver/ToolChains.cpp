@@ -4291,9 +4291,9 @@ CudaToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
     for (Arg *A : Args)
       DAL->append(A);
     // FIXME: get the right arch from the offloading arguments.
-
 #ifdef OPENMP_NVPTX_COMPUTE_CAPABILITY
-#define OPENMP_NVPTX_COMPUTE_CAPABILITY_STR(X) #X
+#define OPENMP_NVPTX_COMPUTE_CAPABILITY_STR2(X) #X
+#define OPENMP_NVPTX_COMPUTE_CAPABILITY_STR(X) OPENMP_NVPTX_COMPUTE_CAPABILITY_STR2(X)
     DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_march_EQ), "sm_" OPENMP_NVPTX_COMPUTE_CAPABILITY_STR(OPENMP_NVPTX_COMPUTE_CAPABILITY));
 #else
     DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_march_EQ), "sm_35");
