@@ -655,7 +655,7 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
   llvm::BasicBlock *ExecuteBB = CGF.createBasicBlock(".execute.parallel");
   llvm::BasicBlock *TerminateBB = CGF.createBasicBlock(".terminate.parallel");
   llvm::BasicBlock *BarrierBB = CGF.createBasicBlock(".barrier.parallel");
-  llvm::BasicBlock *ExitBB = CGF.createBasicBlock(".sleepy.hollow");
+  llvm::BasicBlock *ExitBB = CGF.createBasicBlock(".exit");
 
   CGF.EmitBranch(AwaitBB);
 

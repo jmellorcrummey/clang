@@ -4158,11 +4158,14 @@ void Linux::AddCudaIncludeArgs(const ArgList &DriverArgs,
   if (DriverArgs.hasArg(options::OPT_nocudainc))
     return;
 
-  if (CudaInstallation.isValid()) {
-    addSystemInclude(DriverArgs, CC1Args, CudaInstallation.getIncludePath());
-    CC1Args.push_back("-include");
-    CC1Args.push_back("__clang_cuda_runtime_wrapper.h");
+  if (!CudaInstallation.isValid()) {
+    getDriver().Diag(diag::err_drv_no_cuda_installation);
+    return;
   }
+
+  addSystemInclude(DriverArgs, CC1Args, CudaInstallation.getIncludePath());
+  CC1Args.push_back("-include");
+  CC1Args.push_back("__clang_cuda_runtime_wrapper.h");
 }
 
 bool Linux::isPIEDefault() const { return getSanitizerArgs().requiresPIE(); }
@@ -4251,12 +4254,14 @@ CudaToolChain::addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
   assert(getOffloadingKind() != OK_OpenMP_Host &&
          "CUDA toolchain not expected for host device.");
   if (getOffloadingKind() == OK_OpenMP_Device) {
-//    // FIXME: Get the GPU version from the offloading options.
-//    LibDeviceFile = CudaInstallation.getLibDeviceFile("sm_35");
     LibDeviceFile = CudaInstallation.getLibDeviceFile(
         DriverArgs.getLastArgValue(options::OPT_march_EQ));
   } else {
     CC1Args.push_back("-fcuda-is-device");
+
+  	if (DriverArgs.hasFlag(options::OPT_fcuda_flush_denormals_to_zero,
+                         options::OPT_fno_cuda_flush_denormals_to_zero, false))
+    	CC1Args.push_back("-fcuda-flush-denormals-to-zero");
 
     if (DriverArgs.hasArg(options::OPT_nocudalib))
       return;
