@@ -4141,7 +4141,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
          ii != ie; ++ii) {
       if (*ii){
         if (isSimdDirective(**ii)){
-           valid_children &= !StmtHasOMPPragmas(**ii);
+           valid_children &= !StmtHasOMPPragmas(**dyn_cast_or_null<OMPExecutableDirective>(ii));
         }
       }
     }
@@ -4178,10 +4178,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
          ii != ie; ++ii) {
       if (*ii){
         if (isParallelForDirective(**ii)){
-           valid_children &= onlySimd(**ii);
+           valid_children &= onlySimd(**dyn_cast_or_null<OMPExecutableDirective>(ii));
         }
         if (isParallelForSimdDirective(**ii) || isSimdDirective(**ii)){
-           valid_children &= !StmtHasOMPPragmas(**ii);
+           valid_children &= !StmtHasOMPPragmas(**dyn_cast_or_null<OMPExecutableDirective>(ii));
         }
       }
     }
