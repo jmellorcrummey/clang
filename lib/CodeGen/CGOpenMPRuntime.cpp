@@ -4066,6 +4066,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
      return isa<OMPParallelForDirective>(S);
   }
 
+  bool isParallelForSimdDirective(const Stmt &S){
+     return isa<OMPParallelForSimdDirective>(S);
+  }
+
   // Look for a parallel for directive in the given code block
   bool OnlyTopBlockHasParallelFor(const Stmt &S) {
     // If the simd directive is a SIMD then return true as long as not in a sub-block.
@@ -4120,6 +4124,82 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     return OnlyTopBlockHasParallelFor(*For->getBody());
   }
 
+  // Look for a parallel for directive in the given code block
+  bool checkSimdPragma(const Stmt &S) {
+    // If the simd directive is a SIMD then return true as long as not in a sub-block.
+    bool valid = isa<OMPSimdDirective>(S);
+    if (isa<OMPExecutableDirective>(S) && !valid){
+        return false;
+    }
+
+    // Traverse all children of the for body.
+    // We allow any number of conforming pragmas.
+    bool valid_children = true;
+
+    // Traverse all the top block statements.
+    for (Stmt::const_child_iterator ii = S.child_begin(), ie = S.child_end();
+         ii != ie; ++ii) {
+      if (*ii){
+        if (isSimdDirective(**ii)){
+           valid_children &= !StmtHasOMPPragmas(**ii);
+        }
+      }
+    }
+
+    // True if only ONE simd pragma exists.
+    return valid_children;
+  }
+
+   bool onlySimd(const OMPExecutableDirective &S){
+    // Search for parallel for or simd pragmas
+    const Stmt *Body = S.getAssociatedStmt();
+    if (const CapturedStmt *CS = dyn_cast_or_null<CapturedStmt>(Body))
+      Body = CS->getCapturedStmt();
+    const ForStmt *For = dyn_cast_or_null<ForStmt>(Body);
+    return checkSimdPragma(*For->getBody());
+  }
+
+  // Look for a parallel for directive in the given code block
+  bool checkParForSimdPragma(const Stmt &S) {
+    // If the simd directive is a SIMD then return true as long as not in a sub-block.
+    bool valid = isa<OMPParallelForDirective>(S) ||
+                 isa<OMPParallelForSimdDirective>(S) ||
+                 isa<OMPSimdDirective>(S);
+    if (isa<OMPExecutableDirective>(S) && !valid){
+        return false;
+    }
+
+    // Traverse all children of the for body.
+    // We allow any number of conforming pragmas.
+    bool valid_children = true;
+
+    // Traverse all the top block statements.
+    for (Stmt::const_child_iterator ii = S.child_begin(), ie = S.child_end();
+         ii != ie; ++ii) {
+      if (*ii){
+        if (isParallelForDirective(**ii)){
+           valid_children &= onlySimd(**ii);
+        }
+        if (isParallelForSimdDirective(**ii) || isSimdDirective(**ii)){
+           valid_children &= !StmtHasOMPPragmas(**ii);
+        }
+      }
+    }
+
+    // True if only ONE simd pragma exists.
+    return valid_children;
+  }
+
+  bool onlyParForSimd(const OMPExecutableDirective &S){
+    // Search for parallel for or simd pragmas
+    const Stmt *Body = S.getAssociatedStmt();
+    if (const CapturedStmt *CS = dyn_cast_or_null<CapturedStmt>(Body))
+      Body = CS->getCapturedStmt();
+    const ForStmt *For = dyn_cast_or_null<ForStmt>(Body);
+    return checkParForSimdPragma(*For->getBody());
+  }
+
+
   // Enter the target loop code generation for NVPTX.
   void EnterTargetLoop(SourceLocation Loc,
       CodeGenFunction &CGF, StringRef TgtFunName, OpenMPDirectiveKind DKind,
@@ -4173,7 +4253,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // 1. The parallel for pragma must be a direct descendant of the outer for loop.
     // 2. No other pragmas or function calls exist in the body of the parallel for.
     CGF.distributedParallel = SKind == OMPD_teams_distribute &&
-                                   ParallelForinTopBlock(S);
+                              ParallelForinTopBlock(S);
+
+    CGF.onlyParallelOmpNodes = (OMPD_teams_distribute && onlyParForSimd(S)) ||
+                               (OMPD_teams_distribute_parallel_for && onlySimd(S));
 
     // Variable that controls which scheme to to use: with or without shared memory
     // in case we need to choose (currently on the nested loop nest with parallel for
