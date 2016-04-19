@@ -2306,7 +2306,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   // initial value for SimdNumLanes
   int WARP_SIZE = 32; // should obtain from parameters of target function
   int MAX_THREADS_IN_BLOCK = 1024;
-  int MAX_WARP_THREADS = 16;
+  int MAX_WARP_THREADS = 8;
 
   // Identifier of CUDA thread as a lane
   llvm::AllocaInst *SimdLaneNum;
@@ -4181,7 +4181,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     CGF.useSharedMemory = true;
 
     // Enables SubWarps.
-    CGF.useSubWarps = true;
+    CGF.useSubWarps = false;
 
     //applyNestedSimd = false;
     //applyCombinedConstruct = false;
