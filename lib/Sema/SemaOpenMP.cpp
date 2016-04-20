@@ -90,7 +90,7 @@ private:
   typedef llvm::DenseMap<ValueDecl *, Expr *> AlignedMapTy;
   typedef std::pair<unsigned, VarDecl *> LCDeclInfo;
   typedef llvm::DenseMap<ValueDecl *, LCDeclInfo> LoopControlVariablesMapTy;
-  typedef llvm::DenseMap<ValueDecl *, OMPMappableExprListClause::MappableExprComponentLists> MappedExprComponentsTy;
+  typedef llvm::DenseMap<ValueDecl *, OMPClauseMappableExprCommon::MappableExprComponentLists> MappedExprComponentsTy;
   typedef llvm::StringMap<std::pair<OMPCriticalDirective *, llvm::APSInt>>
       CriticalsWithHintsTy;
 
@@ -357,7 +357,7 @@ public:
     for (; SI != SE; ++SI) {
       auto MI = SI->MappedExprComponents.find(VD);
       if (MI != SI->MappedExprComponents.end())
-        for (OMPMappableExprListClause::MappableExprComponentList &L : MI->second)
+        for (auto &L : MI->second)
           if (Check(L))
             return true;
     }
@@ -365,8 +365,12 @@ public:
   }
 
   // Create a new mappable expression component list associated with a given declaration and initialize it with the provided list of components.
-  void addMappableExpressionComponents(const ValueDecl *VD, OMPMappableExprListClause::MappableExprComponentListRef Components) {
-    assert(Stack.size() > 1 && "Not expecting to retrieve components on a empty stack!");
+  void addMappableExpressionComponents(ValueDecl *VD, OMPClauseMappableExprCommon::MappableExprComponentListRef Components) {
+    assert(Stack.size() > 1 && "Not expecting to retrieve components from a empty stack!");
+
+//    llvm::errs() << "Stacking " << Components.size() << " components!\n";
+//    VD->dump();
+
     auto &MEC = Stack.back().MappedExprComponents[VD];
     // Create new entry and append the new components there.
     MEC.resize(MEC.size() + 1);
@@ -952,9 +956,9 @@ bool Sema::IsOpenMPCapturedByRef(ValueDecl *D,
     bool IsVariableAssociatedWithSection = false;
 
     DSAStack->checkMappableExprComponentListsForDecl(
-        D, /*CurrentRegionOnly=*/true, [&](OMPMappableExprListClause::MappableExprComponentListRef MapExprComponents) {
+        D, /*CurrentRegionOnly=*/true, [&](OMPClauseMappableExprCommon::MappableExprComponentListRef MapExprComponents) {
 
-          llvm::errs() << "Check mappable!\n";
+//          llvm::errs() << "Check mappable!\n";
 
           auto EI = MapExprComponents.rbegin();
           auto EE = MapExprComponents.rend();
@@ -980,7 +984,7 @@ bool Sema::IsOpenMPCapturedByRef(ValueDecl *D,
           return false;
         });
 
-    llvm::errs() << "Variable in map clause " <<  (IsVariableUsedInMapClause?"Yes":"No") << "\n";
+//    llvm::errs() << "Variable in map clause " <<  (IsVariableUsedInMapClause?"Yes":"No") << "\n";
 
     if (IsVariableUsedInMapClause) {
       // If variable is identified in a map clause it is always captured by
@@ -991,7 +995,7 @@ bool Sema::IsOpenMPCapturedByRef(ValueDecl *D,
       IsByRef = !Ty->isScalarType();
     }
 
-    llvm::errs() << "Variable is captured by " <<  (IsByRef?"ByRef":"ByCopy") << "\n";
+//    llvm::errs() << "Variable is captured by " <<  (IsByRef?"ByRef":"ByCopy") << "\n";
   }
 
   // When passing data by copy, we need to make sure it fits the uintptr size
@@ -7614,7 +7618,7 @@ OMPClause *Sema::ActOnOpenMPPrivateClause(ArrayRef<Expr *> VarList,
     // attribute clause on the same construct
     if (DSAStack->getCurrentDirective() == OMPD_target) {
       if(DSAStack->checkMappableExprComponentListsForDecl(VD, /* CurrentRegionOnly = */ true,
-                                      [&](OMPMappableExprListClause::MappableExprComponentListRef) -> bool {return true;})) {
+                                      [&](OMPClauseMappableExprCommon::MappableExprComponentListRef) -> bool {return true;})) {
         Diag(ELoc, diag::err_omp_variable_in_map_and_dsa)
             << getOpenMPClauseName(OMPC_private)
             << getOpenMPDirectiveName(DSAStack->getCurrentDirective());
@@ -7859,7 +7863,7 @@ OMPClause *Sema::ActOnOpenMPFirstprivateClause(ArrayRef<Expr *> VarList,
       // attribute clause on the same construct
       if (CurrDir == OMPD_target) {
         if(DSAStack->checkMappableExprComponentListsForDecl(VD, /* CurrentRegionOnly = */ true,
-                                        [&](OMPMappableExprListClause::MappableExprComponentListRef) -> bool {return true;})) {
+                                        [&](OMPClauseMappableExprCommon::MappableExprComponentListRef) -> bool {return true;})) {
           Diag(ELoc, diag::err_omp_variable_in_map_and_dsa)
               << getOpenMPClauseName(OMPC_firstprivate)
               << getOpenMPDirectiveName(DSAStack->getCurrentDirective());
@@ -9740,7 +9744,7 @@ static bool CheckArrayExpressionDoesNotReferToUnitySize(Sema &SemaRef,
 // Return the expression of the base of the map clause or null if it cannot
 // be determined and do all the necessary checks to see if the expression is
 // valid as a standalone map clause expression. In the process, record all the components of the expression.
-static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E, OMPMappableExprListClause::MappableExprComponentList &CurComponents) {
+static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E, OMPClauseMappableExprCommon::MappableExprComponentList &CurComponents) {
   SourceLocation ELoc = E->getExprLoc();
   SourceRange ERange = E->getSourceRange();
 
@@ -9942,8 +9946,8 @@ static Expr *CheckMapClauseExpressionBase(Sema &SemaRef, Expr *E, OMPMappableExp
 
 // Return true if expression E associated with value VD has conflicts with other
 // map information.
-static bool CheckMapConflicts(Sema &SemaRef, DSAStackTy *DSAS, const ValueDecl *VD,
-                              Expr *E, bool CurrentRegionOnly, OMPMappableExprListClause::MappableExprComponentListRef CurComponents) {
+static bool CheckMapConflicts(Sema &SemaRef, DSAStackTy *DSAS, ValueDecl *VD,
+                              Expr *E, bool CurrentRegionOnly, OMPClauseMappableExprCommon::MappableExprComponentListRef CurComponents) {
   assert(VD && E);
   SourceLocation ELoc = E->getExprLoc();
   SourceRange ERange = E->getSourceRange();
@@ -9961,7 +9965,7 @@ static bool CheckMapConflicts(Sema &SemaRef, DSAStackTy *DSAS, const ValueDecl *
   const Expr *EnclosingExpr = nullptr;
 
   bool FoundError =
-      DSAS->checkMappableExprComponentListsForDecl(VD, CurrentRegionOnly, [&](OMPMappableExprListClause::MappableExprComponentListRef StackComponents) -> bool {
+      DSAS->checkMappableExprComponentListsForDecl(VD, CurrentRegionOnly, [&](OMPClauseMappableExprCommon::MappableExprComponentListRef StackComponents) -> bool {
 
         assert(!StackComponents.empty() &&
                "Map clause expression with no components!");
@@ -10119,35 +10123,36 @@ Sema::ActOnOpenMPMapClause(OpenMPMapClauseKind MapTypeModifier,
                            SourceLocation MapLoc, SourceLocation ColonLoc,
                            ArrayRef<Expr *> VarList, SourceLocation StartLoc,
                            SourceLocation LParenLoc, SourceLocation EndLoc) {
+  SmallVector<Expr *, 4> Vars;
 
-  // Keep track of the mappable components and base declarations in this clause. Each entry in the list is going to have a list of components associated. We record each set of the components so that we can build the clause later on. In the end we should have the same ammount of delcarations and component lists.
-  OMPMappableExprListClause::MappableExprComponentLists ClauseComponents;
-  SmallVector<const ValueDecl*, 16> ClauseDeclarations;
+  // Keep track of the mappable components and base declarations in this clause. Each entry in the list is going to have a list of components associated. We record each set of the components so that we can build the clause later on. In the end we should have the same amount of declarations and component lists.
+  OMPClauseMappableExprCommon::MappableExprComponentLists ClauseComponents;
+  SmallVector<ValueDecl*, 16> ClauseDeclarations;
+
+  ClauseComponents.reserve(VarList.size());
+  ClauseDeclarations.reserve(VarList.size());
+
+//  llvm::errs() << "Num Vars " << VarList.size() << "\n";
 
   for (auto &RE : VarList) {
     assert(RE && "Null expr in omp map");
-
-    // Grow the components and declarations arrays.
-    ClauseComponents.resize(ClauseComponents.size() + 1);
-    ClauseDeclarations.push_back(nullptr);
-
-    auto &CurComponents = ClauseComponents.back();
-    auto &CurDeclaration = ClauseDeclarations.back();
-
-    if (isa<DependentScopeDeclRefExpr>(RE))
+    if (isa<DependentScopeDeclRefExpr>(RE)) {
       // It will be analyzed later.
+      Vars.push_back(RE);
       continue;
-
+    }
     SourceLocation ELoc = RE->getExprLoc();
 
     auto *VE = RE->IgnoreParenLValueCasts();
 
     if (VE->isValueDependent() || VE->isTypeDependent() ||
         VE->isInstantiationDependent() ||
-        VE->containsUnexpandedParameterPack())
+        VE->containsUnexpandedParameterPack()) {
       // We can only analyze this information once the missing information is
       // resolved.
+      Vars.push_back(RE);
       continue;
+    }
 
     auto *SimpleExpr = RE->IgnoreParenCasts();
 
@@ -10156,6 +10161,11 @@ Sema::ActOnOpenMPMapClause(OpenMPMapClauseKind MapTypeModifier,
           << RE->getSourceRange();
       continue;
     }
+
+    OMPClauseMappableExprCommon::MappableExprComponentList CurComponents;
+    ValueDecl *CurDeclaration = nullptr;
+
+//    llvm::errs() << "Generating components !\n";
 
     // Obtain the array or member expression bases if required. Also, fill the components array with all the components identified in the process.
     auto *BE = CheckMapClauseExpressionBase(*this, SimpleExpr, CurComponents);
@@ -10262,13 +10272,23 @@ Sema::ActOnOpenMPMapClause(OpenMPMapClauseKind MapTypeModifier,
       }
     }
 
-    // Store the components in the stack so that they can be used to check against other clauses.
+		// Save the current expression.
+		Vars.push_back(RE);
+
+    // Store the components in the stack so that they can be used to check against other clauses later on.
     DSAStack->addMappableExpressionComponents(CurDeclaration, CurComponents);
+
+    // Save the components and declaration to create the clause.
+    ClauseComponents.resize(ClauseComponents.size() + 1);
+    ClauseComponents.back().append(CurComponents.begin(), CurComponents.end());
+    ClauseDeclarations.push_back(CurDeclaration);
   }
+
+//  llvm::errs() << "Adding " << ClauseComponents.size() << " lists!\n";
 
   // We need to produce a map clause even if we don't have variables so that
   // other diagnostics related with non-existing map clauses are accurate.
-  return OMPMapClause::Create(Context, StartLoc, LParenLoc, EndLoc, ClauseDeclarations, ClauseComponents,
+  return OMPMapClause::Create(Context, StartLoc, LParenLoc, EndLoc, Vars, ClauseDeclarations, ClauseComponents,
                               MapTypeModifier, MapType, IsMapTypeImplicit,
                               MapLoc);
 }
