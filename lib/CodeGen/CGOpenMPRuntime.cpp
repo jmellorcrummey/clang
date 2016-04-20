@@ -3956,7 +3956,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   }
 
   // Check if the body has any OpenMP pragmas
-  bool StmtHasOMPPragmas(const OMPExecutableDirective &S, CodeGenFunction &CGF){
+  bool StmtHasOMPPragmas(const OMPExecutableDirective &S){
     const Stmt *Body = S.getAssociatedStmt();
     if (const CapturedStmt *CS = dyn_cast_or_null<CapturedStmt>(Body))
       Body = CS->getCapturedStmt();
@@ -4026,6 +4026,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         //printf("Visit top Stmt (%d)\n", isa<OMPSimdDirective>(*ii));
         if (isSimdDirective(**ii)){
            hasSimdPragma++;
+           if (StmtHasOMPPragmas(*dyn_cast_or_null<OMPExecutableDirective>(*ii))){
+              return false;
+           }
            continue;
         }
         // If either another non-simd pragma is encountered in the top block
@@ -4070,6 +4073,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
      return isa<OMPParallelForSimdDirective>(S);
   }
 
+  bool isOpenMPDirective(const Stmt &S){
+     return isa<OMPExecutableDirective>(S);
+  }
+
   // Look for a parallel for directive in the given code block
   bool OnlyTopBlockHasParallelFor(const Stmt &S) {
     // If the simd directive is a SIMD then return true as long as not in a sub-block.
@@ -4088,6 +4095,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         //printf("Visit top Stmt (%d)\n", isa<OMPSimdDirective>(*ii));
         if (isParallelForDirective(**ii)){
            hasParallelForPragma++;
+           if (StmtHasOMPPragmas(*dyn_cast_or_null<OMPExecutableDirective>(*ii))){
+              return false;
+           }
            continue;
         }
         // If either another non-simd pragma is encountered in the top block
@@ -4128,6 +4138,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   bool checkSimdPragma(const Stmt &S) {
     // If the simd directive is a SIMD then return true as long as not in a sub-block.
     bool valid = isa<OMPSimdDirective>(S);
+    //printf("In checkSimdPragma: is OpenMp = %d valid = %d\n", isa<OMPExecutableDirective>(S), valid);
     if (isa<OMPExecutableDirective>(S) && !valid){
         return false;
     }
@@ -4140,8 +4151,13 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     for (Stmt::const_child_iterator ii = S.child_begin(), ie = S.child_end();
          ii != ie; ++ii) {
       if (*ii){
+        //printf("===========> %d\n", isSimdDirective(**ii));
         if (isSimdDirective(**ii)){
-           valid_children &= !StmtHasOMPPragmas(**dyn_cast_or_null<OMPExecutableDirective>(ii));
+           //printf("==========> does not have any other OpenMP pragmas%d\n", !StmtHasOMPPragmas(*dyn_cast_or_null<OMPExecutableDirective>(*ii)));
+           valid_children &= !StmtHasOMPPragmas(*dyn_cast_or_null<OMPExecutableDirective>(*ii));
+        } else if (isOpenMPDirective(**ii)) {
+           valid_children = false;
+           break;
         }
       }
     }
@@ -4165,6 +4181,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     bool valid = isa<OMPParallelForDirective>(S) ||
                  isa<OMPParallelForSimdDirective>(S) ||
                  isa<OMPSimdDirective>(S);
+    //printf("Enter checkParForSimdPragma: isPragma = %d valid = %d\n", isa<OMPExecutableDirective>(S), valid);
     if (isa<OMPExecutableDirective>(S) && !valid){
         return false;
     }
@@ -4177,11 +4194,15 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     for (Stmt::const_child_iterator ii = S.child_begin(), ie = S.child_end();
          ii != ie; ++ii) {
       if (*ii){
+        //printf("===> %d %d\n", isParallelForDirective(**ii), isParallelForSimdDirective(**ii) || isSimdDirective(**ii));
         if (isParallelForDirective(**ii)){
-           valid_children &= onlySimd(**dyn_cast_or_null<OMPExecutableDirective>(ii));
-        }
-        if (isParallelForSimdDirective(**ii) || isSimdDirective(**ii)){
-           valid_children &= !StmtHasOMPPragmas(**dyn_cast_or_null<OMPExecutableDirective>(ii));
+           valid_children &= onlySimd(*dyn_cast_or_null<OMPExecutableDirective>(*ii));
+        } else if (isParallelForSimdDirective(**ii) || isSimdDirective(**ii)){
+           //printf("=====> Does not have any more OpenMP pragmas %d\n", !StmtHasOMPPragmas(*dyn_cast_or_null<OMPExecutableDirective>(*ii)));
+           valid_children &= !StmtHasOMPPragmas(*dyn_cast_or_null<OMPExecutableDirective>(*ii));
+        } else if (isOpenMPDirective(**ii)) {
+           valid_children = false;
+           break;
         }
       }
     }
@@ -4221,7 +4242,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     //    - reduction(+:red)
     CGF.combined = SKind == OMPD_teams_distribute_parallel_for &&
                    StmtHasScheduleStaticOne(S, CGF, SKind) &&
-                   !StmtHasOMPPragmas(S, CGF);
+                   !StmtHasOMPPragmas(S);
 
     // Support for nested constructs with simplified code generation.
     //
@@ -4255,8 +4276,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     CGF.distributedParallel = SKind == OMPD_teams_distribute &&
                               ParallelForinTopBlock(S);
 
-    CGF.onlyParallelOmpNodes = (OMPD_teams_distribute && onlyParForSimd(S)) ||
+    bool onlyParallelOmpNodes = (OMPD_teams_distribute && onlyParForSimd(S)) ||
                                (OMPD_teams_distribute_parallel_for && onlySimd(S));
+    printf("======================>> onlyParallelOmpNodes = %d\n", onlyParallelOmpNodes);
 
     // Variable that controls which scheme to to use: with or without shared memory
     // in case we need to choose (currently on the nested loop nest with parallel for
@@ -4277,7 +4299,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     printf("Considering if combined construct is applicable:\n");
     //printf("    => SKIND is (OMPD_teams_distribute_parallel_for %d): %d\n", OMPD_teams_distribute_parallel_for, SKind);
     //printf("    => schedule(static, 1): %d\n", StmtHasScheduleStaticOne(S, CGF, SKind));
-    //printf("    => Has other OMP pragmas inside. StmtHasOMPPragmas(S, CGF): %d\n", StmtHasOMPPragmas(S, CGF));
+    //printf("    => Has other OMP pragmas inside. StmtHasOMPPragmas(S): %d\n", StmtHasOMPPragmas(S));
     printf("            => Apply combined: %d\n", CGF.combined);
     printf("Conditions for nested construct with SIMD inside:\n");
     //printf("    => Has SIMD pragma inside (not in subblock): %d\n", SIMDinTopBlock(S));
