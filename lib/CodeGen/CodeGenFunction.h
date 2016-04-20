@@ -143,6 +143,7 @@ public:
   llvm::BasicBlock *EndRegionS1;
   std::vector<llvm::AllocaInst*> U;
   std::vector<llvm::AllocaInst*> Tid;
+  std::vector<llvm::AllocaInst*> Uid;
 
   CodeGenModule &CGM;  // Per-module state.
   const TargetInfo &Target;
