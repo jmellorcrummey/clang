@@ -1447,11 +1447,13 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
           isOpenMPSimdDirective(Dir->getDirectiveKind()))
         CapturedStmts.push_back(cast<CapturedStmt>(Dir->getAssociatedStmt()));
       else {
-        // Look into the associated statement of OpenMP directives.
-        const CapturedStmt &CS = *cast<CapturedStmt>(Dir->getAssociatedStmt());
-        CurStmt = CS.getCapturedStmt();
+        if(Dir->hasAssociatedStmt()) {
+          // Look into the associated statement of OpenMP directives.
+          const CapturedStmt &CS = *cast<CapturedStmt>(Dir->getAssociatedStmt());
+          CurStmt = CS.getCapturedStmt();
 
-        WorkList.push_back(CurStmt);
+          WorkList.push_back(CurStmt);
+        }
       }
 
       continue;
