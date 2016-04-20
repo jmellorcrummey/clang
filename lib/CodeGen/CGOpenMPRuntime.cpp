@@ -3929,6 +3929,307 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // under the combinedSimd flag.
   }
 
+  // function which computes the 
+  llvm::Value*
+  createMult(CodeGenFunction &CGF,
+             int kStart, int kEnd){
+    // Compute the number of units of type kEnd contained in a unit of type kStart.
+    GBuilderTy &Bld = CGF.Builder;
+    llvm::Value *res = Bld.getInt32(1);
+    for(int i = kStart + 1; i <= kEnd; i++){
+      res = Bld.CreateMul(res, Bld.CreateLoad(CGF.U[i]));
+    }
+    return res;
+  }
+
+  // Enter preamble region to the loop nest resolution.
+  void
+  EnterParalleLoopNest(OpenMPDirectiveKind DKind,
+                       OpenMPDirectiveKind SKind,
+                       const OMPExecutableDirective &S,
+                       CodeGenFunction &CGF,
+                       StringRef TgtFunName,
+                       bool StmtHasScheduleStaticOne) {
+
+    // Don't use the blocking startegy unless schedule(static,1)
+    if (!StmtHasScheduleStaticOne and CGF.distributedParallel){
+      printf("Warning: Blocking was disabled due to lack of schedule(static,1)");
+    }
+
+    CGBuilderTy &Bld = CGF.Builder;
+
+    // 32 bits should be enough to represent the number of basic
+    // blocks in a target region
+    llvm::IntegerType *VarTy = CGM.Int32Ty;
+
+    // CodeGen for clauses (task init).
+    for (ArrayRef<OMPClause *>::iterator I = S.clauses().begin(), E =
+         S.clauses().end(); I != E; ++I)
+      CGF.EmitInitOMPClause(*(*I), S);
+
+    // Create variable to trace the parallel nesting one is currently in
+    ParallelNesting =
+        Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "ParallelNesting");
+    Bld.CreateStore(Bld.getInt32(0), ParallelNesting);
+
+    // Populate Up using the details of the current architecture.
+    // Since we are running on an NVIDIA device we will only have three
+    // levels of parallelism + one extra for context (p = 4).
+    // This part of the code need to be adapted to every architecture.
+
+    // Number of parallel levels
+    int p = 4
+
+    // Up[0] = number of grids (always 1)
+    llvm::AllocaInst *value0 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uZero");
+    Bld.CreateStore(Bld.getInt32(1), value0);
+    CGF.U.push_back(value0);
+
+    // Up[1] = number of blocks per grid
+    llvm::AllocaInst *value1 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uOne");
+    Bld.CreateStore(Bld.createCall(Get_num_teams(), {}), value1);
+    CGF.U.push_back(value1);
+
+    // Up[2] = number of warps per block
+    llvm::AllocaInst *value2 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uTwo");
+    llvm::Value *const32 = Bld.getInt32(5); // 2^5
+    llvm::Value *NumWarps = Bld.CreateCall(Get_num_threads(), {});
+    NumWarps = Bld.CreateAShr(NumWarps, const32);
+    Bld.CreateStore(NumWarps, value2);
+    CGF.U.push_back(value2);
+
+    // Up[3] = number of threads per warp
+    llvm::AllocaInst *value3 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uThree");
+    Bld.CreateStore(Bld.getInt32(WARP_SIZE), value3);
+    CGF.U.push_back(value3);
+
+    // Compute the thread ID for each parallel level except last
+    // Tid[0] = global thread ID
+    llvm::AllocaInst *tid0 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "tidZero");
+    llvm::Value *globalTid = Bld.CreateAdd(Bld.CreateCall(Get_thread_num(), {}), Bld.CreateMul(
+            Bld.CreateCall(Get_num_threads(), {}), Bld.CreateCall(Get_team_num(), {})));
+    Bld.CreateStore(globalTid, tid0);
+    CGF.Tid.push_back(tid0);
+
+    // Tid[1] = block thread ID
+    llvm::AllocaInst *tid1 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "tidOne");
+    Bld.CreateStore(Bld.CreateCall(Get_thread_num(), {}), tid1);
+    CGF.Tid.push_back(tid1);
+
+    // Tid[2] = warp thread ID
+    llvm::AllocaInst *tid2 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "tidTwo");
+    Bld.CreateStore(Bld.CreateAnd(Bld.CreateCall(Get_thread_num(), {}),
+                                      Bld.getInt32(31)),
+                        tid2);
+    CGF.Tid.push_back(tid2);
+
+    // Compute the unit ID for each parallel level except last
+    // Uid[0] = unit id for the grid, always 0
+    llvm::AllocaInst *uid0 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uidZero");
+    Bld.CreateStore(Bld.getInt32(0), uid0);
+    CGF.Uid.push_back(uid0);
+
+    // Uid[1:p-1] = unit id for the block, warp
+    for(int i = 1; i < p - 1; i++){
+      llvm::AllocaInst *uid = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1));
+      Bld.CreateStore(Bld.CreateUDiv(Bld.CreateLoad(CGF.Tid[i - 1]), CreateMult(CGF.U, k, p - 1)), uid);
+      CGF.Uid.push_back(uid);
+    }
+
+    // Now that the loop nest wide values have been computed we can commence the generation of code.
+    // Note: the architecture specific details are confined to this initilization area.
+    // The algorithm will be based on these data structures.
+
+    // if (CGF.combinedSimd){
+    //     // SIMD related variables, this is for the case when the inner loop
+    //     // is a SIMD pragma.
+    //     char OmpNumThreadsName[] = "__omptgt__OmpNumThreads";
+    //     char SimdNumLanesName[] = "__omptgt__SimdNumLanes";
+    //     char ExecuteSimdName[] = "__omptgt_ExecuteSimd";
+
+    //     if (!SimdNumLanes)
+    //       SimdNumLanes = CGF.CGM.getModule().getGlobalVariable(SimdNumLanesName);
+    //     if (!OmpNumThreads)
+    //       OmpNumThreads = CGF.CGM.getModule().getGlobalVariable(OmpNumThreadsName);
+
+    //     if (!SimdNumLanes)
+    //       SimdNumLanes = new llvm::GlobalVariable(
+    //           CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
+    //           llvm::Constant::getNullValue(VarTy), SimdNumLanesName, 0,
+    //           llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+    //     if (!OmpNumThreads)
+    //       OmpNumThreads = new llvm::GlobalVariable(
+    //           CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
+    //           llvm::Constant::getNullValue(VarTy), OmpNumThreadsName, 0,
+    //           llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+
+    //     // disable simd unless some control flow path takes a thread to it
+    //     if (!ExecuteSimd) {
+    //       llvm::Type *StaticBoolArray = llvm::ArrayType::get(Bld.getInt1Ty(),
+    //         MAX_THREADS_IN_BLOCK/WARP_SIZE);
+    //       ExecuteSimd = new llvm::GlobalVariable(
+    //         CGM.getModule(), StaticBoolArray, false,
+    //         llvm::GlobalValue::CommonLinkage,
+    //         llvm::Constant::getNullValue(StaticBoolArray), ExecuteSimdName, 0,
+    //         llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+    //     }
+
+    //     // team-master sets the initial value for SimdNumLanes
+    //     llvm::BasicBlock *MasterInit = llvm::BasicBlock::Create(
+    //         CGF.CGM.getLLVMContext(), ".master.init.", CGF.CurFn);
+
+    //     llvm::BasicBlock *NonMasterInit = llvm::BasicBlock::Create(
+    //         CGF.CGM.getLLVMContext(), ".nonmaster.init.", CGF.CurFn);
+
+    //     llvm::Value *IsTeamMaster1 =
+    //         Bld.CreateICmpEQ(Bld.CreateCall(Get_thread_num(), {}),
+    //                          Bld.getInt32(MASTER_ID), "IsTeamMaster");
+
+    //     Bld.CreateCondBr(IsTeamMaster1, MasterInit, NonMasterInit);
+
+    //     // Perform in this block, all the work which a thread master
+    //     // should do.
+    //     Bld.SetInsertPoint(MasterInit);
+
+
+    //     // For inner SIMD pragma only
+    //     // Use all CUDA threads but in batches of 32
+    //     Bld.CreateStore(Bld.getInt32(32), SimdNumLanes);
+
+    //     printf("Compute OmpNumThreads\n");
+    //     // Use all cuda threads as lanes - parallel regions will change this
+    //     // ASSUMPTION: thread_limit must be divisible by 32
+    //     llvm::Value *const32 = Bld.getInt32(5); // 2^5
+    //     llvm::Value *NumWarps = Bld.CreateCall(Get_num_threads(), {});
+    //     NumWarps = Bld.CreateAShr(NumWarps, const32);
+    //     Bld.CreateStore(NumWarps, OmpNumThreads);
+
+
+    //     // Carry on with the rest of threads (the non-team-master ones)
+    //     Bld.CreateBr(NonMasterInit);
+    //     Bld.SetInsertPoint(NonMasterInit);
+    //     Bld.CreateCall(Get_syncthreads(), {});
+
+    //     // set initial simd lane num, which could be changed later on
+    //     // depending on safelen and num_threads clauses
+    //     // This performs an AND between the CUDA threadID and the SimdNumLanes to
+    //     // get: threadIdx.x mod SimdNumLanes
+
+    //     // Each thread does this.
+    //     // So now Each Thread will know its lane ID (for the SIMD following)
+    //     printf(" Compute SimdLaneNum\n");
+    //     SimdLaneNum = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "SimdLaneNum");
+    //     Bld.CreateStore(Bld.CreateAnd(Bld.CreateCall(Get_thread_num(), {}),
+    //                                   Bld.CreateSub(Bld.CreateLoad(SimdNumLanes),
+    //                                                 Bld.getInt32(1))),
+    //                     SimdLaneNum);
+
+    //     // Calculate the OMP thread ID of this CUDA thread
+    //     // The OMP thread number is a zero based numbering of threads which will be active in S1.
+    //     // Since this operation is happening for all threads then each group of 32 threads will receive the
+    //     // same OMP thread ID. We must be careful to exclude the threads non-warp master threads from
+    //     // executing S1.
+    //     llvm::Value *globalTid = Bld.CreateAdd(Bld.CreateCall(Get_thread_num(), {}), Bld.CreateMul(
+    //         Bld.CreateCall(Get_num_threads(), {}), Bld.CreateCall(Get_team_num(), {})));
+    //     printf(" Compute globalTid\n");
+    //     CudaGlobalThreadId = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "CudaGlobalThreadId");
+    //     Bld.CreateStore(globalTid, CudaGlobalThreadId);
+
+    //     // Get the div of the globalTid with the size of a warp.
+    //     llvm::Value *ompTid = Bld.CreateAShr(globalTid, const32);
+    //     printf(" Compute OmpTid\n");
+    //     OmpThreadNum = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "OmpThreadNum");
+    //     Bld.CreateStore(ompTid, OmpThreadNum);
+
+    //     // Lane ID: each thread has a lane ID which is between 0 and 31.
+    //     // SimdNumLanes should be 32 to indicate that a SIMD is used.
+    //     // When SimdNumLanes is 1 then it SHOULD mean that all threads are
+    //     // already in use and no actual SIMD-ization is going to happen.
+    //     llvm::Value *LaneID = Bld.CreateSub(globalTid,
+    //                                         Bld.CreateMul(Bld.CreateLoad(OmpThreadNum),
+    //                                         Bld.getInt32(32)));
+    //     printf(" Compute SimdLocalLaneId\n");
+    //     SimdLocalLaneId = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "SimdLocalLaneId");
+    //     Bld.CreateStore(LaneID, SimdLocalLaneId);
+    // } else if (CGF.useSubWarps && CGF.distributedParallel){
+    //     // Warp size
+    //     llvm::Value *const32 = Bld.getInt32(5); // 2^5
+
+    //     // Each thread does this.
+    //     // So now Each Thread will know its lane ID (for the SIMD following)
+    //     printf(" Compute SimdLaneNum\n");
+    //     SimdLaneNum = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "SimdLaneNum");
+    //     Bld.CreateStore(Bld.CreateAnd(Bld.CreateCall(Get_thread_num(), {}),
+    //                                   Bld.getInt32(31)),
+    //                     SimdLaneNum);
+
+    //     // Get the div of the threadIdx.x with the size of a warp.
+    //     llvm::Value *ompTid = Bld.CreateAShr(Bld.CreateCall(Get_thread_num(), {}), const32);
+    //     printf(" Compute WarpId\n");
+    //     WarpId = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "WarpId");
+    //     Bld.CreateStore(ompTid, WarpId);
+
+    //     // Get the div of the threadIdx.x with the size of a warp.
+    //     llvm::Value *warps = Bld.CreateAShr(Bld.CreateCall(Get_num_threads(), {}), const32);
+    //     printf(" Compute number of warps\n");
+    //     NumWarpsInBlock = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "NumWarpsInBlock");
+    //     Bld.CreateStore(warps, NumWarpsInBlock);
+    // }
+
+    
+    // // ============= Finished the Preamble of the Loop Nest ==============
+
+    // if (CGF.combinedSimd){
+
+    //     // ============= Account for parallel region =============
+
+    //     // Handle the existence of the parallel for
+
+    //     OMPRegionTypesStack.push_back(OMP_Parallel);
+
+    //     // // clear up the data structure that will be used to determine the
+    //     // // optimal amount of simd lanes to be used in this region
+    //     SimdAndWorksharingNesting.reset();
+
+    //     // TO DO: figure out the value that goes in here.
+    //     // Bld.CreateStore(PrepareParallel, CudaThreadsInParallel);
+    //     // Builder.CreateStore(Builder.CreateLoad(OmpNumThreads), CudaThreadsInParallel);
+
+    //     // Increment the nesting level
+    //     Bld.CreateStore(
+    //        Bld.CreateAdd(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
+    //        ParallelNesting);
+    // }
+
+    // Call the function which generates the code for the outer loop.
+    // Inside this function resolve the body of the outer loop
+    // which contains the SIMD pragma.
+
+    // Ideally we would have our own way of generating the code so that
+    // we do not depend on the RTL
+
+    // printf(" Emit Combined Nest region\n");
+    // EmitOMPCombinedNestDirectiveLoop(DKind, SKind, S, CGF, TgtFunName,
+    //                                  StmtHasScheduleStaticOne);
+
+    // if (CGF.combinedSimd){
+    //     // ============= Exit parallel region ==============
+
+    //     // Decrement the nesting level
+    //     Bld.CreateStore(
+    //        Bld.CreateSub(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
+    //        ParallelNesting);
+
+    //     assert((OMPRegionTypesStack.back() == OMP_Parallel) &&
+    //            "Exiting a parallel region does not match stack state");
+    //     OMPRegionTypesStack.pop_back();
+
+    //     // we need to inspect the previous layer to understand what type
+    //     // of end we need
+    //     PopParallelRegion();
+    // }
+  }
+
   // Traverse a loop body searching for further pragmas and function calls
   bool CheckOMPPragmas(const Stmt &S) {
     // printf("======> CheckOMPPragmas: %d %d\n", isa<OMPExecutableDirective>(S), isa<CallExpr>(S));
@@ -4276,9 +4577,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     CGF.distributedParallel = SKind == OMPD_teams_distribute &&
                               ParallelForinTopBlock(S);
 
-    bool onlyParallelOmpNodes = (OMPD_teams_distribute && onlyParForSimd(S)) ||
+    CGF.onlyParallelOmpNodes = (OMPD_teams_distribute && onlyParForSimd(S)) ||
                                (OMPD_teams_distribute_parallel_for && onlySimd(S));
-    printf("======================>> onlyParallelOmpNodes = %d\n", onlyParallelOmpNodes);
 
     // Variable that controls which scheme to to use: with or without shared memory
     // in case we need to choose (currently on the nested loop nest with parallel for
@@ -4293,7 +4593,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     CGF.isSimplifiedConstruct = CGF.combined ||
                                 CGF.combinedSimd ||
-                                CGF.distributedParallel;
+                                CGF.distributedParallel ||
+                                CGF.onlyParallelOmpNodes;
 
     //applyNestedSimd = false;
     printf("Considering if combined construct is applicable:\n");
@@ -4309,9 +4610,17 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     printf("Additional options:\n");
     printf("            Subwarps enabled => %d\n", CGF.useSubWarps);
     printf("            Shared memory enabled => %d\n", CGF.useSharedMemory);
+    printf("            Only Parallel OpenMP Nodes = %d\n", CGF.onlyParallelOmpNodes);
     printf("End\n");
 
-    if (CGF.combined){
+    if (CGF.onlyParallelOmpNodes){
+      ThreadLimitGlobal = new llvm::GlobalVariable(
+            CGF.CGM.getModule(), Bld.getInt32Ty(), false,
+            llvm::GlobalValue::ExternalLinkage, Bld.getInt32(0),
+            TgtFunName + Twine("_thread_limit"));
+
+      EnterParalleLoopNest(DKind, SKind, S, CGF, TgtFunName, true);
+    } else if (CGF.combined){
       // If the directives contain a reduction clause then we insert appropriate
       // code before the main loop.
       const OMPClause *reduction_C = StmtHasReductionClause(S, CGF, SKind);

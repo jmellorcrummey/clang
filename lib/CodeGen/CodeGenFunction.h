@@ -135,11 +135,14 @@ public:
   bool distributedParallel = false;
   bool isSimplifiedConstruct = false;
   bool useSubWarps = false;
+  bool onlyParallelOmpNodes = false;
   llvm::AllocaInst *CombinedOuterLoopIndex;
   llvm::BasicBlock *SyncAfterCombinedBlock;
   llvm::BasicBlock *SyncAfterSimdBlock;
   llvm::BasicBlock *SyncAfterParallelForBlock;
   llvm::BasicBlock *EndRegionS1;
+  std::vector<llvm::AllocaInst*> U;
+  std::vector<llvm::AllocaInst*> Tid;
 
   CodeGenModule &CGM;  // Per-module state.
   const TargetInfo &Target;
