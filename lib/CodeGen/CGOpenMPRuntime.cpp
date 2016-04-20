@@ -3934,7 +3934,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   createMult(CodeGenFunction &CGF,
              int kStart, int kEnd){
     // Compute the number of units of type kEnd contained in a unit of type kStart.
-    GBuilderTy &Bld = CGF.Builder;
+    CGBuilderTy &Bld = CGF.Builder;
     llvm::Value *res = Bld.getInt32(1);
     for(int i = kStart + 1; i <= kEnd; i++){
       res = Bld.CreateMul(res, Bld.CreateLoad(CGF.U[i]));
@@ -3977,8 +3977,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // levels of parallelism + one extra for context (p = 4).
     // This part of the code need to be adapted to every architecture.
 
+    printf("Start GPU specific code gen\n");
     // Number of parallel levels
-    int p = 4
+    int p = 4;
 
     // Up[0] = number of grids (always 1)
     llvm::AllocaInst *value0 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uZero");
@@ -3987,7 +3988,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // Up[1] = number of blocks per grid
     llvm::AllocaInst *value1 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uOne");
-    Bld.CreateStore(Bld.createCall(Get_num_teams(), {}), value1);
+    Bld.CreateStore(Bld.CreateCall(Get_num_teams(), {}), value1);
     CGF.U.push_back(value1);
 
     // Up[2] = number of warps per block
@@ -4032,9 +4033,11 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // Uid[1:p-1] = unit id for the block, warp
     for(int i = 1; i < p - 1; i++){
       llvm::AllocaInst *uid = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1));
-      Bld.CreateStore(Bld.CreateUDiv(Bld.CreateLoad(CGF.Tid[i - 1]), CreateMult(CGF.U, k, p - 1)), uid);
+      Bld.CreateStore(Bld.CreateUDiv(Bld.CreateLoad(CGF.Tid[i - 1]), createMult(CGF, i, p - 1)), uid);
       CGF.Uid.push_back(uid);
     }
+
+    printf("End GPU specific code gen\n");
 
     // Now that the loop nest wide values have been computed we can commence the generation of code.
     // Note: the architecture specific details are confined to this initilization area.
