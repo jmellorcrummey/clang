@@ -4441,7 +4441,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // Compute the thread ID for each parallel level except last
     // Tid[0] = global thread ID
-    //llvm::AllocaInst *tid0 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "tidZero");
+    llvm::AllocaInst *tid0 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "tidZero");
     llvm::Value *globalTid = Bld.CreateAdd(Bld.CreateCall(Get_thread_num(), {}), Bld.CreateMul(
             Bld.CreateCall(Get_num_threads(), {}), Bld.CreateCall(Get_team_num(), {})));
     Bld.CreateStore(globalTid, tid0);
