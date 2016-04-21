@@ -3984,20 +3984,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     return res;
   }
 
-  std::string getStringLevel(int k){
-    switch(k){
-      case 0:
-        return "zero";
-      case 1:
-        return "one";
-      case 2:
-        return "two";
-      case 3:
-        return "three";
-    }
-    return "undefined";
-  }
-
 /*
 void EnterParallelRegionInTarget(CodeGenFunction &CGF,
                                     OpenMPDirectiveKind DKind,
@@ -4242,29 +4228,43 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
     // DKind, SKind, S, CGF, TgtFunName, 1, 0
     printf(" In Simplified Loop Nest\n");
 
+    // Implement a new for loop.
+    CGBuilderTy &Builder = CGF.Builder;
+
+    // Close the previous OpenMP region and synchronize threads
+    Builder.CreateBr(CGF.EndOpenMPRegion);
+    //Builder.SetInsertPoint(CGF.EndOpenMPRegion);
+    //Builder.CreateCall(Get_syncthreads(), {});
+
     // Check if there are any more OpenMP pragmas
     bool isNonTerminalOpenMPNode = StmtHasOMPPragmas(S);
     printf("In GenerateSimplifiedLoop: ========> isNonTerminalOpenMPNode = %d\n", isNonTerminalOpenMPNode);
-
-    // Implement a new for loop.
-    CGBuilderTy &Builder = CGF.Builder;
 
     // Set the names of the basic block tags for this loop
     std::string levelStr = std::to_string(CGF.k);
     llvm::BasicBlock *StartCombinedFor = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".start."+levelStr+".for", CGF.CurFn);
+
+    // Connect previous region with the current OpenMP parallel loop.
+    Builder.SetInsertPoint(CGF.EndOpenMPRegion);
+    Builder.CreateCall(Get_syncthreads(), {});
+    // Start populating the basic blocks which perform the init, cond and inc
+    // of the combined construct for loop.
+    Builder.CreateBr(StartCombinedFor);
+
     llvm::BasicBlock *CondCombinedFor = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".cond."+levelStr+".for", CGF.CurFn);
     llvm::BasicBlock *BodyCombinedFor = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".body."+levelStr+".for", CGF.CurFn);
 
     // If this is not a leaf node then we need to include the exclusion of threads
-    llvm::BasicBlock *StartRegionS1 = nullptr;
+    llvm::BasicBlock *StartOpenMPRegion = nullptr;
     if (isNonTerminalOpenMPNode){
-      StartRegionS1 = llvm::BasicBlock::Create(
-          CGF.CGM.getLLVMContext(), ".start.region.s", CGF.CurFn);
-      CGF.EndRegionS1 = llvm::BasicBlock::Create(
-          CGF.CGM.getLLVMContext(), ".end.region.s", CGF.CurFn);
+      CGF.regionID++;
+      StartOpenMPRegion = llvm::BasicBlock::Create(
+          CGF.CGM.getLLVMContext(), ".start.omp.region."+std::to_string(CGF.regionID), CGF.CurFn);
+      CGF.EndOpenMPRegion = llvm::BasicBlock::Create(
+          CGF.CGM.getLLVMContext(), ".end.omp.region."+std::to_string(CGF.regionID), CGF.CurFn);
     }
 
     // Generate the INC block
@@ -4272,21 +4272,21 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
         CGF.CGM.getLLVMContext(), ".inc."+levelStr+".for", CGF.CurFn);
 
     // No sync required at the end for Leaf Nodes
-    if (isNonTerminalOpenMPNode){
-      CGF.SyncAfterCombinedBlock = llvm::BasicBlock::Create(
-          CGF.CGM.getLLVMContext(), ".sync.after."+levelStr, CGF.CurFn);
-    }
+    //if (isNonTerminalOpenMPNode){
+    //  CGF.SyncAfterCombinedBlock = llvm::BasicBlock::Create(
+    //      CGF.CGM.getLLVMContext(), ".sync.after."+levelStr, CGF.CurFn);
+    //}
 
     // For loop end.
-    EndTarget = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".end."+levelStr+".for.and.target", CGF.CurFn);
+    llvm::BasicBlock *EndLoop = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".end."+levelStr+".for", CGF.CurFn);
 
     // For loop Body
     const Stmt *Body = S.getAssociatedStmt();
 
     // Start populating the basic blocks which perform the init, cond and inc
     // of the combined construct for loop.
-    Builder.CreateBr(StartCombinedFor);
+    //Builder.CreateBr(StartCombinedFor);
     Builder.SetInsertPoint(StartCombinedFor);
 
     // Start Generating Loop Nest Components
@@ -4356,7 +4356,7 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
 
     // Setup LB
     // Tid[kparent]
-    llvm::Value *LB = Builder.CreateLoad(CGF.Tid[kparent]);
+    llvm::Value *LB = Builder.CreateLoad(CGF.Tid[CGF.kparent]);
     if (isNonTerminalOpenMPNode){
       // Div(Tid[kparent], numberOfParallelUnits)
       LB = Builder.CreateUDiv(LB, createMult(CGF, CGF.kparent, CGF.k));
@@ -4428,7 +4428,7 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
     // FOR INC: tid += 1 if we are static no-chunk
     Builder.SetInsertPoint(IncCombinedFor);
     llvm::Value *step = createMult(CGF, CGF.kparent, CGF.k);
-    if (isLeafOpenMPNode){
+    if (!isNonTerminalOpenMPNode){
       step = Builder.CreateMul(step, createMult(CGF, CGF.k, CGF.p - 1));
     }
     Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(Private), step),
@@ -4476,11 +4476,11 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
         if (isNonTerminalOpenMPNode){
           // Only allow parallel unit masters to run the region
           // between loops.
-          llvm::Value *isNotExecutingS1 =
-              Builder.CreateICmpNE(Builder.CreateLoad(CGF.Tid[k]),
-                                 Builder.getInt32(0));
-          Builder.CreateCondBr(isNotExecutingS1, CGF.EndRegionS1, StartRegionS1);
-          Builder.SetInsertPoint(StartRegionS1);
+          llvm::Value *isNotExecutingOpenMPRegion =
+              Builder.CreateICmpNE(Builder.CreateLoad(CGF.Tid[CGF.k]),
+                                   Builder.getInt32(0));
+          Builder.CreateCondBr(isNotExecutingOpenMPRegion, CGF.EndOpenMPRegion, StartOpenMPRegion);
+          Builder.SetInsertPoint(StartOpenMPRegion);
         }
 
         // ============= Sequential region =================
@@ -4532,16 +4532,16 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
       // Don't sync or anything, just go ahead computing the INC
       // with all threads!
 
-      if (isNonTerminalOpenMPNode){
-        Builder.CreateBr(CGF.SyncAfterCombinedBlock);
-        Builder.SetInsertPoint(CGF.SyncAfterCombinedBlock);
-        //if (CGF.distributedParallel){
-        //  Builder.CreateCall(Get_syncthreads(), {});
-        //}
-      }
+      //if (isNonTerminalOpenMPNode){
+      //  Builder.CreateBr(CGF.SyncAfterCombinedBlock);
+      //  Builder.SetInsertPoint(CGF.SyncAfterCombinedBlock);
+      //  //if (CGF.distributedParallel){
+      //  //  Builder.CreateCall(Get_syncthreads(), {});
+      //  //}
+      //}
       Builder.CreateBr(IncCombinedFor);
     }
-    Builder.SetInsertPoint(EndTarget);
+    Builder.SetInsertPoint(EndLoop);
   }
 
   // Enter preamble region to the loop nest resolution.
@@ -4685,14 +4685,19 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
     CGF.CGM.OpenMPSupport.setOrdered(false);
     CGF.CGM.OpenMPSupport.setDistribute(true);
 
-    // Open OpenMP region here.
-    // llvm::BasicBlock *StartRegionS1 = nullptr;
-    // if (isNonTerminalOpenMPNode){
-    //   StartRegionS1 = llvm::BasicBlock::Create(
-    //       CGF.CGM.getLLVMContext(), ".start.region.s", CGF.CurFn);
-    //   CGF.EndRegionS1 = llvm::BasicBlock::Create(
-    //       CGF.CGM.getLLVMContext(), ".end.region.s", CGF.CurFn);
-    // }
+    // For loop end.
+    EndTarget = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".end.for.and.target", CGF.CurFn);
+
+    // Open OpenMP region here. This region is not stricly needed but is here for correctness.
+    // This region should match with the closing of an OpenMP region at the start of the
+    // function which generates the simplified loop nest.
+    llvm::BasicBlock *StartOpenMPRegion = llvm::BasicBlock::Create(
+       CGF.CGM.getLLVMContext(), ".start.omp.region."+std::to_string(CGF.regionID), CGF.CurFn);
+    CGF.EndOpenMPRegion = llvm::BasicBlock::Create(
+       CGF.CGM.getLLVMContext(), ".end.omp.region."+std::to_string(CGF.regionID), CGF.CurFn);
+    Bld.CreateBr(StartOpenMPRegion);
+    Bld.SetInsertPoint(StartOpenMPRegion);
 
     CGF.kparent = 0;
     switch (SKind) {
@@ -4716,6 +4721,16 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
         GenerateSimplifiedLoop(DKind, SKind, S, CGF);
         break;
     }
+
+    if (CGF.regionID > 0){
+      // Close the previous OpenMP region and synchronize threads
+      Bld.CreateBr(CGF.EndOpenMPRegion);
+      Bld.SetInsertPoint(CGF.EndOpenMPRegion);
+      Bld.CreateCall(Get_syncthreads(), {});
+    }
+    
+    Bld.CreateBr(EndTarget);
+    Bld.SetInsertPoint(EndTarget);
 
     //Bld.SetInsertPoint(EndTarget);
     CGF.CGM.OpenMPSupport.endOpenMPRegion();
