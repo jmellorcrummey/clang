@@ -4354,9 +4354,10 @@ emitThreadLimitClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
 }
 
 namespace {
-// \brief Utility to extract information from clauses associated with a given
-// construct that use mappable expressions (e.g. map clause, to clause).
-// It provides a convenient interface to obtain the information and generate code for that information.
+// \brief Utility to handle information from clauses associated with a given
+// construct that use mappable expressions (e.g. 'map' clause, 'to' clause).
+// It provides a convenient interface to obtain the information and generate
+// code for that information.
 class MappableExprsHandler {
 public:
   /// \brief Values for bit flags used to specify the mapping type for
@@ -4396,76 +4397,6 @@ private:
   /// \brief Function the directive is being generated for.
   CodeGenFunction &CGF;
 
-//  struct DeclarationMapInfoEntry {
-//    /// \brief Array of components in the map expression.
-//    typedef std::pair<const Expr *, const ValueDecl *> ComponentTy;
-//    typedef llvm::SmallVector<ComponentTy, 4> ComponentsTy;
-//    ComponentsTy Components;
-//
-//    // Map type and modifier associated with this expression.
-//    OpenMPMapClauseKind MapType;
-//    OpenMPMapClauseKind MapTypeModifier;
-//
-//    /// \brief Build and initialize this map information record with information
-//    /// retrieved from the provided map clause expression.
-//    DeclarationMapInfoEntry(const Expr *MCE, OpenMPMapClauseKind MapType,
-//                            OpenMPMapClauseKind MapTypeModifier)
-//        : MapType(MapType), MapTypeModifier(MapTypeModifier) {
-//      assert(MCE && "Invalid expression??");
-//      while (true) {
-//        MCE = MCE->IgnoreParenImpCasts();
-//
-//        if (auto *CurE = dyn_cast<DeclRefExpr>(MCE)) {
-//          Components.push_back(
-//              ComponentTy(CurE, cast<VarDecl>(CurE->getDecl())));
-//          break;
-//        }
-//
-//        if (auto *CurE = dyn_cast<MemberExpr>(MCE)) {
-//          auto *BaseE = CurE->getBase()->IgnoreParenImpCasts();
-//
-//          Components.push_back(
-//              ComponentTy(CurE, cast<FieldDecl>(CurE->getMemberDecl())));
-//          if (isa<CXXThisExpr>(BaseE))
-//            break;
-//
-//          MCE = BaseE;
-//          continue;
-//        }
-//
-//        if (auto *CurE = dyn_cast<ArraySubscriptExpr>(MCE)) {
-//          Components.push_back(ComponentTy(CurE, nullptr));
-//          MCE = CurE->getBase()->IgnoreParenImpCasts();
-//          continue;
-//        }
-//
-//        if (auto *CurE = dyn_cast<OMPArraySectionExpr>(MCE)) {
-//          Components.push_back(ComponentTy(CurE, nullptr));
-//          MCE = CurE->getBase()->IgnoreParenImpCasts();
-//          continue;
-//        }
-//
-//        llvm_unreachable("Invalid map clause expression!");
-//      }
-//    }
-//
-//    /// \brief Return declaration associated with this map information. If it is
-//    /// a field it means the base is 'this'.
-//    const ValueDecl *getAssociatedDecl() const {
-//      assert(!Components.empty() &&
-//             "No expressions to extract declaration from??");
-//      const ValueDecl *D = Components.back().second;
-//      assert(D && "Declaration must exist!");
-//      return D;
-//    }
-//  };
-//
-//  /// \brief Map between a declaration and its associated map information
-//  /// entries. If the map info relates to 'this' we map it to null.
-//  typedef SmallVector<DeclarationMapInfoEntry *, 4> DeclarationMapInfoEntriesTy;
-//  llvm::DenseMap<const ValueDecl *, DeclarationMapInfoEntriesTy>
-//      DeclarationMapInfoMap;
-
   llvm::Value *getExprTypeSize(const Expr *E) const {
     auto ExprTy = E->getType().getCanonicalType();
 
@@ -4478,8 +4409,8 @@ private:
     // on CGF.getTypeSize(E->getType()).
     if (const auto *OAE = dyn_cast<OMPArraySectionExpr>(E)) {
       QualType BaseTy = OMPArraySectionExpr::getBaseOriginalType(
-                        OAE->getBase()->IgnoreParenImpCasts())
-                        .getCanonicalType();
+                            OAE->getBase()->IgnoreParenImpCasts())
+                            .getCanonicalType();
 
       // If there is no length associated with the expression, that means we
       // are using the whole length of the base.
@@ -4511,7 +4442,9 @@ private:
   /// \brief Return the corresponding bits for a given map clause modifier. Add
   /// a flag marking the map as a pointer if requested. Add a flag marking the
   /// map as extra, meaning is not an argument of the kernel.
-  unsigned getMapTypeBits(OpenMPMapClauseKind MapType, OpenMPMapClauseKind MapTypeModifier, bool AddPtrFlag, bool AddExtraFlag) const {
+  unsigned getMapTypeBits(OpenMPMapClauseKind MapType,
+                          OpenMPMapClauseKind MapTypeModifier, bool AddPtrFlag,
+                          bool AddExtraFlag) const {
     unsigned Bits = 0u;
     switch (MapType) {
     case OMPC_MAP_alloc:
@@ -4545,7 +4478,8 @@ private:
     return Bits;
   }
 
-  /// \brief Return true if the provided expression is a final array section. A final array section, is one whose length can't be proved to be one.
+  /// \brief Return true if the provided expression is a final array section. A
+  /// final array section, is one whose length can't be proved to be one.
   bool isFinalArraySectionExpression(const Expr *E) const {
     auto *OASE = dyn_cast<OMPArraySectionExpr>(E);
 
@@ -4583,16 +4517,15 @@ private:
   }
 
   /// \brief Generate the base pointers, section pointers, sizes and map type
-  /// bits for the provided map type, map modifier, and expression components. \a IsFirstComponent should be set to true if the provided set of components is the first associated with a capture.
+  /// bits for the provided map type, map modifier, and expression components.
+  /// \a IsFirstComponent should be set to true if the provided set of
+  /// components is the first associated with a capture.
   void generateInfoForComponentList(
-      OpenMPMapClauseKind MapType,
-      OpenMPMapClauseKind MapTypeModifier,
+      OpenMPMapClauseKind MapType, OpenMPMapClauseKind MapTypeModifier,
       OMPClauseMappableExprCommon::MappableExprComponentListRef Components,
-                              MapValuesArrayTy &BasePointers,
-                              MapValuesArrayTy &Pointers,
-                              MapValuesArrayTy &Sizes,
-                              MapFlagsArrayTy &Types,
-                              bool IsFirstComponentList) const {
+      MapValuesArrayTy &BasePointers, MapValuesArrayTy &Pointers,
+      MapValuesArrayTy &Sizes, MapFlagsArrayTy &Types,
+      bool IsFirstComponentList) const {
 
     // The following summarizes what has to be generated for each map and the
     // types bellow. The generated information is expressed in this order:
@@ -4715,7 +4648,8 @@ private:
     auto CE = Components.rend();
     auto I = CI;
 
-    // Track if the map information being generated is the first for a list of components.
+    // Track if the map information being generated is the first for a list of
+    // components.
     bool IsExpressionFirstInfo = true;
     llvm::Value *BP = nullptr;
 
@@ -4726,15 +4660,21 @@ private:
     } else {
       // The base is the reference to the variable.
       // BP = &Var.
-      BP = CGF.EmitLValue(cast<DeclRefExpr>(I->getAssociatedExpression())).getPointer();
+      BP = CGF.EmitLValue(cast<DeclRefExpr>(I->getAssociatedExpression()))
+               .getPointer();
 
       // If the variable is a pointer and is being dereferenced (i.e. is not
       // the last component), the base has to be the pointer itself, not his
       // reference.
-      if (I->getAssociatedDeclaration()->getType()->isAnyPointerType() && std::next(I) != CE) {
-        auto PtrAddr =
-            CGF.MakeNaturalAlignAddrLValue(BP, I->getAssociatedDeclaration()->getType());
-        BP = CGF.EmitLoadOfPointerLValue(PtrAddr.getAddress(), I->getAssociatedDeclaration()->getType()->getAs<PointerType>()).getPointer();
+      if (I->getAssociatedDeclaration()->getType()->isAnyPointerType() &&
+          std::next(I) != CE) {
+        auto PtrAddr = CGF.MakeNaturalAlignAddrLValue(
+            BP, I->getAssociatedDeclaration()->getType());
+        BP = CGF.EmitLoadOfPointerLValue(PtrAddr.getAddress(),
+                                         I->getAssociatedDeclaration()
+                                             ->getType()
+                                             ->getAs<PointerType>())
+                 .getPointer();
 
         // We do not need to generate individual map information for the
         // pointer, it can be associated with the combined storage.
@@ -4751,23 +4691,27 @@ private:
       // becomes the base address for the following components.
 
       // A final array section, is one whose length can't be proved to be one.
-      bool IsFinalArraySection = isFinalArraySectionExpression(I->getAssociatedExpression());
+      bool IsFinalArraySection =
+          isFinalArraySectionExpression(I->getAssociatedExpression());
 
       // Get information on whether the element is a pointer. Have to do a
       // special treatment for array sections given that they are built-in
       // types.
-      const auto *OASE = dyn_cast<OMPArraySectionExpr>(I->getAssociatedExpression());
-      bool IsPointer = (OASE &&
-                        OMPArraySectionExpr::getBaseOriginalType(OASE)
-                            .getCanonicalType()
-                            ->isAnyPointerType()) ||
-                       I->getAssociatedExpression()->getType()->isAnyPointerType();
+      const auto *OASE =
+          dyn_cast<OMPArraySectionExpr>(I->getAssociatedExpression());
+      bool IsPointer =
+          (OASE &&
+           OMPArraySectionExpr::getBaseOriginalType(OASE)
+               .getCanonicalType()
+               ->isAnyPointerType()) ||
+          I->getAssociatedExpression()->getType()->isAnyPointerType();
 
       if (Next == CE || IsPointer || IsFinalArraySection) {
 
         // If this is not the last component, we expect the pointer to be
         // associated with an array expression or member expression.
-        assert((Next == CE || isa<MemberExpr>(Next->getAssociatedExpression()) ||
+        assert((Next == CE ||
+                isa<MemberExpr>(Next->getAssociatedExpression()) ||
                 isa<ArraySubscriptExpr>(Next->getAssociatedExpression()) ||
                 isa<OMPArraySectionExpr>(Next->getAssociatedExpression())) &&
                "Unexpected expression");
@@ -4784,7 +4728,8 @@ private:
         // same expression except for the first one. We need to add the extra
         // flag for each map that relates with the current capture, except for
         // the first one (there is a set of entries for each capture).
-        Types.push_back(getMapTypeBits(MapType, MapTypeModifier, !IsExpressionFirstInfo,
+        Types.push_back(getMapTypeBits(MapType, MapTypeModifier,
+                                       !IsExpressionFirstInfo,
                                        !IsCaptureFirstInfo));
 
         // If we have a final array section, we are done with this expression.
@@ -4803,30 +4748,8 @@ private:
   }
 
 public:
-  MappableExprsHandler(const OMPExecutableDirective &Dir,
-                         CodeGenFunction &CGF)
-      : Directive(Dir), CGF(CGF) {
-//
-//    // Scan and extract information from the map clauses one by one.
-//    for (auto *MC : Directive.getClausesOfKind<OMPMapClause>()) {
-//      for (auto *RE : MC->varlists()) {
-//        auto *MI = new DeclarationMapInfoEntry(RE, MC->getMapType(),
-//                                               MC->getMapTypeModifier());
-//        const auto *D = MI->getAssociatedDecl();
-//        if (isa<FieldDecl>(D))
-//          DeclarationMapInfoMap[nullptr].push_back(MI);
-//        else
-//          DeclarationMapInfoMap[D].push_back(MI);
-//      }
-//    }
-  }
-
-//  ~MappableExprsHandler() {
-//    // Clear the entries.
-//    for (auto &MapEntries : DeclarationMapInfoMap)
-//      for (auto *MapEntry : MapEntries.second)
-//        delete (MapEntry);
-//  }
+  MappableExprsHandler(const OMPExecutableDirective &Dir, CodeGenFunction &CGF)
+      : Directive(Dir), CGF(CGF) {}
 
   /// \brief Generate all the base pointers, section pointers, sizes and map
   /// types for the extracted mappable expressions.
@@ -4844,18 +4767,25 @@ public:
       OpenMPMapClauseKind MapTypeModifier;
     };
 
-    // We have to process the component lists that relate with the same declaration in a single chunk so that we can generate the map flags correctly. Therefore, we organize all lists in a map.
-    llvm::DenseMap<const ValueDecl*, SmallVector<MapInfo, 8>> Info;
+    // We have to process the component lists that relate with the same
+    // declaration in a single chunk so that we can generate the map flags
+    // correctly. Therefore, we organize all lists in a map.
+    llvm::DenseMap<const ValueDecl *, SmallVector<MapInfo, 8>> Info;
     for (auto *C : Directive.getClausesOfKind<OMPMapClause>())
       for (auto L : C->component_lists())
-        Info[L.first].push_back({L.second, C->getMapType(), C->getMapTypeModifier()});
+        Info[L.first].push_back(
+            {L.second, C->getMapType(), C->getMapTypeModifier()});
 
     for (auto &M : Info) {
-      // We need to know when we generating information for the first component associated with a capture, because the mapping flags depend on it.
+      // We need to know when we generating information for the first component
+      // associated with a capture, because the mapping flags depend on it.
       bool IsFirstComponentList = true;
       for (MapInfo &L : M.second) {
-        assert(!L.Components.empty() && "Not expecting declaration with no component lists.");
-        generateInfoForComponentList(L.MapType, L.MapTypeModifier, L.Components, BasePointers, Pointers, Sizes, Types, IsFirstComponentList);
+        assert(!L.Components.empty() &&
+               "Not expecting declaration with no component lists.");
+        generateInfoForComponentList(L.MapType, L.MapTypeModifier, L.Components,
+                                     BasePointers, Pointers, Sizes, Types,
+                                     IsFirstComponentList);
         IsFirstComponentList = false;
       }
     }
@@ -4878,13 +4808,18 @@ public:
 
     const ValueDecl *VD = Cap->capturesThis() ? nullptr : Cap->getCapturedVar();
 
-    // We need to know when we generating information for the first component associated with a capture, because the mapping flags depend on it.
+    // We need to know when we generating information for the first component
+    // associated with a capture, because the mapping flags depend on it.
     bool IsFirstComponentList = true;
     for (auto *C : Directive.getClausesOfKind<OMPMapClause>())
       for (auto L : C->decl_component_lists(VD)) {
-        assert(L.first == VD && "We got information for the wrong declaration??");
-        assert(!L.second.empty() && "Not expecting declaration with no component lists.");
-        generateInfoForComponentList(C->getMapType(), C->getMapTypeModifier(), L.second, BasePointers, Pointers, Sizes, Types, IsFirstComponentList);
+        assert(L.first == VD &&
+               "We got information for the wrong declaration??");
+        assert(!L.second.empty() &&
+               "Not expecting declaration with no component lists.");
+        generateInfoForComponentList(C->getMapType(), C->getMapTypeModifier(),
+                                     L.second, BasePointers, Pointers, Sizes,
+                                     Types, IsFirstComponentList);
         IsFirstComponentList = false;
       }
 
@@ -4965,7 +4900,7 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
           CurSizes.push_back(CGF.getTypeSize(PtrTy->getPointeeType()));
           // Default map type.
           CurMapTypes.push_back(MappableExprsHandler::OMP_MAP_TO |
-              MappableExprsHandler::OMP_MAP_FROM);
+                                MappableExprsHandler::OMP_MAP_FROM);
         } else if (CI->capturesVariableByCopy()) {
           CurMapTypes.push_back(MappableExprsHandler::OMP_MAP_BYCOPY);
           if (!RI->getType()->isAnyPointerType()) {
@@ -5010,7 +4945,7 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
           // the default is 'tofrom'.
           CurMapTypes.push_back(ElementType->isAggregateType()
                                     ? (MappableExprsHandler::OMP_MAP_TO |
-                                        MappableExprsHandler::OMP_MAP_FROM)
+                                       MappableExprsHandler::OMP_MAP_FROM)
                                     : MappableExprsHandler::OMP_MAP_TO);
         }
       }
@@ -5052,8 +4987,8 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
 
   // Fill up the pointer arrays and transfer execution to the device.
   auto &&ThenGen = [&Ctx, &BasePointers, &Pointers, &Sizes, &MapTypes,
-                    hasRuntimeEvaluationCaptureSize, Device, OutlinedFnID, OffloadError,
-                    OffloadErrorQType,
+                    hasRuntimeEvaluationCaptureSize, Device, OutlinedFnID,
+                    OffloadError, OffloadErrorQType,
                     &D](CodeGenFunction &CGF, PrePostActionTy &) {
     auto &RT = CGF.CGM.getOpenMPRuntime();
     unsigned PointerNumVal = BasePointers.size();

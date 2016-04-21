@@ -1866,7 +1866,8 @@ OMPClause *OMPClauseReader::readClause() {
     unsigned NumDeclarations = Record[Idx++];
     unsigned NumLists = Record[Idx++];
     unsigned NumComponents = Record[Idx++];
-    C = OMPMapClause::CreateEmpty(Context, NumVars, NumDeclarations, NumLists, NumComponents);
+    C = OMPMapClause::CreateEmpty(Context, NumVars, NumDeclarations, NumLists,
+                                  NumComponents);
   } break;
   case OMPC_num_teams:
     C = new (Context) OMPNumTeamsClause();
@@ -2228,36 +2229,44 @@ void OMPClauseReader::VisitOMPMapClause(OMPMapClause *C) {
      static_cast<OpenMPMapClauseKind>(Record[Idx++]));
   C->setMapLoc(Reader->ReadSourceLocation(Record, Idx));
   C->setColonLoc(Reader->ReadSourceLocation(Record, Idx));
-  unsigned NumVars = C->varlist_size();
-  unsigned UniqueDecls = C->getUniqueDeclarationsNum();
-  unsigned TotalLists = C->getTotalComponentListNum();
-  unsigned TotalComponents = C->getTotalComponentsNum();
+  auto NumVars = C->varlist_size();
+  auto UniqueDecls = C->getUniqueDeclarationsNum();
+  auto TotalLists = C->getTotalComponentListNum();
+  auto TotalComponents = C->getTotalComponentsNum();
 
-  SmallVector<Expr *, 16> Vars; Vars.reserve(NumVars);
-  for (unsigned i=0; i<NumVars ;++i)
+  SmallVector<Expr *, 16> Vars;
+  Vars.reserve(NumVars);
+  for (unsigned i = 0; i != NumVars; ++i)
     Vars.push_back(Reader->Reader.ReadSubExpr());
   C->setVarRefs(Vars);
 
-  SmallVector<ValueDecl *, 16> Decls; Decls.reserve(UniqueDecls);
-  for (unsigned i=0; i<UniqueDecls ;++i)
-    Decls.push_back(Reader->Reader.ReadDeclAs<ValueDecl>(Reader->F, Record, Idx));
+  SmallVector<ValueDecl *, 16> Decls;
+  Decls.reserve(UniqueDecls);
+  for (unsigned i = 0; i < UniqueDecls; ++i)
+    Decls.push_back(
+        Reader->Reader.ReadDeclAs<ValueDecl>(Reader->F, Record, Idx));
   C->setUniqueDecls(Decls);
 
-  SmallVector<unsigned, 16> ListsPerDecl; ListsPerDecl.reserve(UniqueDecls);
-  for (unsigned i=0; i<UniqueDecls ;++i)
+  SmallVector<unsigned, 16> ListsPerDecl;
+  ListsPerDecl.reserve(UniqueDecls);
+  for (unsigned i = 0; i < UniqueDecls; ++i)
     ListsPerDecl.push_back(Record[Idx++]);
   C->setDeclNumLists(ListsPerDecl);
 
-  SmallVector<unsigned, 32> ListSizes; ListSizes.reserve(TotalLists);
-  for (unsigned i=0; i<TotalLists ;++i)
+  SmallVector<unsigned, 32> ListSizes;
+  ListSizes.reserve(TotalLists);
+  for (unsigned i = 0; i < TotalLists; ++i)
     ListSizes.push_back(Record[Idx++]);
   C->setComponentListSizes(ListSizes);
 
-  SmallVector<OMPClauseMappableExprCommon::MappableComponent, 32> Components; Components.reserve(TotalComponents);
-  for (unsigned i=0; i<TotalComponents ;++i) {
+  SmallVector<OMPClauseMappableExprCommon::MappableComponent, 32> Components;
+  Components.reserve(TotalComponents);
+  for (unsigned i = 0; i < TotalComponents; ++i) {
     Expr *AssociatedExpr = Reader->Reader.ReadSubExpr();
-    ValueDecl *AssociatedDecl = Reader->Reader.ReadDeclAs<ValueDecl>(Reader->F, Record, Idx);
-    Components.push_back(OMPClauseMappableExprCommon::MappableComponent(AssociatedExpr, AssociatedDecl));
+    ValueDecl *AssociatedDecl =
+        Reader->Reader.ReadDeclAs<ValueDecl>(Reader->F, Record, Idx);
+    Components.push_back(OMPClauseMappableExprCommon::MappableComponent(
+        AssociatedExpr, AssociatedDecl));
   }
   C->setComponents(Components, ListSizes);
 }

@@ -2033,11 +2033,11 @@ void OMPClauseWriter::VisitOMPMapClause(OMPMapClause *C) {
     Record.AddStmt(E);
   for (auto *D : C->all_decls())
     Record.AddDeclRef(D);
-  for (auto N: C->all_num_lists())
+  for (auto N : C->all_num_lists())
     Record.push_back(N);
-  for (auto N: C->all_lists_sizes())
+  for (auto N : C->all_lists_sizes())
     Record.push_back(N);
-  for (auto &M: C->all_components()) {
+  for (auto &M : C->all_components()) {
     Record.AddStmt(M.getAssociatedExpression());
     Record.AddDeclRef(M.getAssociatedDeclaration());
   }
