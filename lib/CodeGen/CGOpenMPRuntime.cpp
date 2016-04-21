@@ -3995,7 +3995,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       case 3:
         return "three";
     }
-    return "undefined"
+    return "undefined";
   }
 
   // Main function which generates the code
@@ -4048,14 +4048,14 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     Expr *UBExpr = nullptr;
     ArrayRef<Expr *> Arr = nullptr;
     unsigned numCollapsed = 0;
-    if (const OMPTargetTeamsDistributeParallelForDirective *D =
-         dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S) ||
-        const OMPTargetTeamsDistributeDirective *D =
-         dyn_cast<OMPTargetTeamsDistributeDirective>(&S) ||
-        const OMPTargetTeamsDistributeSimdDirective *D =
-         dyn_cast<OMPTargetTeamsDistributeSimdDirective>(&S) ||
-        const OMPTargetTeamsDistributeParallelForSimdDirective *D =
-         dyn_cast<OMPTargetTeamsDistributeParallelForSimdDirective>(&S)){
+    if ((const OMPTargetTeamsDistributeParallelForDirective *D =
+         dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S)) ||
+        (const OMPTargetTeamsDistributeDirective *D =
+         dyn_cast<OMPTargetTeamsDistributeDirective>(&S)) ||
+        (const OMPTargetTeamsDistributeSimdDirective *D =
+         dyn_cast<OMPTargetTeamsDistributeSimdDirective>(&S)) ||
+        (const OMPTargetTeamsDistributeParallelForSimdDirective *D =
+         dyn_cast<OMPTargetTeamsDistributeParallelForSimdDirective>(&S))){
       IterVar = D->getNewIterVar();
       UBExpr = D->getNewIterEnd();
       Arr = D->getCounters();
