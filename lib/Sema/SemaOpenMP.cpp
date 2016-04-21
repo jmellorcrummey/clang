@@ -10127,10 +10127,10 @@ Sema::ActOnOpenMPMapClause(OpenMPMapClauseKind MapTypeModifier,
 
   // Keep track of the mappable components and base declarations in this clause. Each entry in the list is going to have a list of components associated. We record each set of the components so that we can build the clause later on. In the end we should have the same amount of declarations and component lists.
   OMPClauseMappableExprCommon::MappableExprComponentLists ClauseComponents;
-  SmallVector<ValueDecl*, 16> ClauseDeclarations;
+  SmallVector<ValueDecl*, 16> ClauseBaseDeclarations;
 
   ClauseComponents.reserve(VarList.size());
-  ClauseDeclarations.reserve(VarList.size());
+  ClauseBaseDeclarations.reserve(VarList.size());
 
 //  llvm::errs() << "Num Vars " << VarList.size() << "\n";
 
@@ -10278,17 +10278,17 @@ Sema::ActOnOpenMPMapClause(OpenMPMapClauseKind MapTypeModifier,
     // Store the components in the stack so that they can be used to check against other clauses later on.
     DSAStack->addMappableExpressionComponents(CurDeclaration, CurComponents);
 
-    // Save the components and declaration to create the clause.
+    // Save the components and declaration to create the clause. For purposes of the clause creation, any component list that has has base 'this' uses null has
     ClauseComponents.resize(ClauseComponents.size() + 1);
     ClauseComponents.back().append(CurComponents.begin(), CurComponents.end());
-    ClauseDeclarations.push_back(CurDeclaration);
+    ClauseBaseDeclarations.push_back(isa<MemberExpr>(BE) ? nullptr : CurDeclaration);
   }
 
 //  llvm::errs() << "Adding " << ClauseComponents.size() << " lists!\n";
 
   // We need to produce a map clause even if we don't have variables so that
   // other diagnostics related with non-existing map clauses are accurate.
-  return OMPMapClause::Create(Context, StartLoc, LParenLoc, EndLoc, Vars, ClauseDeclarations, ClauseComponents,
+  return OMPMapClause::Create(Context, StartLoc, LParenLoc, EndLoc, Vars, ClauseBaseDeclarations, ClauseComponents,
                               MapTypeModifier, MapType, IsMapTypeImplicit,
                               MapLoc);
 }

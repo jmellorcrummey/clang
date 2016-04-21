@@ -2996,82 +2996,138 @@ public:
   /// \brief Return the total number of components in all lists derived from the clause.
   unsigned getTotalComponentsNum() const {return NumComponents;}
 
-  /// \brief Iterator that looks for components of a given declaration and iterates over the associated component lists.
-  class const_decls_component_iterator
-      : public llvm::iterator_adaptor_base<const_decls_component_iterator,
+  /// \brief Iterator that browse the components by lists. It also allows browsing components of a single declaration.
+  class const_component_lists_iterator
+      : public llvm::iterator_adaptor_base<const_component_lists_iterator,
         MappableExprComponentListRef::const_iterator,
             std::forward_iterator_tag, MappableComponent, ptrdiff_t,
             MappableComponent, MappableComponent> {
+    // The declaration the iterator currently refers to.
+    ArrayRef<const ValueDecl *>::iterator DeclCur;
+
+    // The list number associated with the current declaration.
+    ArrayRef<const unsigned>::iterator NumListsCur;
+
+    // Remaining lists for the current declaration.
+    unsigned RemainingLists;
 
     // The cumulative size of the previous list, or zero if there is no previous list.
     unsigned PrevListSize;
 
-    // The cumulative size of the current list.
-    ArrayRef<unsigned>::const_iterator CurListSize;
+    // The cumulative sizes of the current list - it will delimit the remaining range of interest.
+    ArrayRef<unsigned>::const_iterator ListSizeCur;
+    ArrayRef<unsigned>::const_iterator ListSizeEnd;
+
+    // Iterator to the end of the components storage.
+    MappableExprComponentListRef::const_iterator End;
 
   public:
-    explicit const_decls_component_iterator(
-        const ValueDecl *Declaration,
+    /// \brief Construct an iterator that scans all lists.
+    explicit const_component_lists_iterator(
         ArrayRef<const ValueDecl *> UniqueDecls,
         ArrayRef<unsigned> DeclsListNum,
         ArrayRef<unsigned> CumulativeListSizes,
         MappableExprComponentListRef Components)
-        : const_decls_component_iterator::iterator_adaptor_base(Components.begin()), PrevListSize(0u), CurListSize(CumulativeListSizes.begin()) {
+        : const_component_lists_iterator::iterator_adaptor_base(Components.begin()), DeclCur(UniqueDecls.begin()), NumListsCur(DeclsListNum.begin()), RemainingLists(0u), PrevListSize(0u), ListSizeCur(CumulativeListSizes.begin()), ListSizeEnd(CumulativeListSizes.end()), End(Components.end()) {
+      assert(UniqueDecls.size() == DeclsListNum.size() && "Inconsistent number of declarations and list sizes!");
+      if (!DeclsListNum.empty())
+        RemainingLists = *NumListsCur;
+    }
 
-      // We don't have a declaration to look for, advance the iterator to after the last component.
-      if (!Declaration) {
-        std::advance(this->I, Components.size());
-        return;
-      }
+    /// \brief Construct an iterator that scan lists for a given declaration \a Declaration.
+    explicit const_component_lists_iterator(
+        const ValueDecl *Declaration,
+        ArrayRef<const ValueDecl *> UniqueDecls,
+        ArrayRef<unsigned> DeclsListNum,
+        ArrayRef<unsigned> CumulativeListSizes,
+        MappableExprComponentListRef Components) : const_component_lists_iterator(UniqueDecls, DeclsListNum, CumulativeListSizes, Components) {
 
       // Look for the desired declaration. While we are looking for it, we update the state so that we know the component where a given list starts.
-      auto ListNumIt = DeclsListNum.begin();
-      for (auto *D: UniqueDecls) {
-        if (D == Declaration)
+      for (; DeclCur != UniqueDecls.end(); ++DeclCur, ++NumListsCur) {
+        if (*DeclCur == Declaration)
           break;
 
-        assert(*ListNumIt > 0 && "No lists associated with declaration??");
+        assert(*NumListsCur > 0 && "No lists associated with declaration??");
 
         // Skip the lists associated with the current declaration, but save the last list size that was skipped.
-        std::advance(CurListSize, *ListNumIt-1);
-        ++ListNumIt;
-
-        PrevListSize = *CurListSize;
-        ++CurListSize;
+        std::advance(ListSizeCur, *NumListsCur-1);
+        PrevListSize = *ListSizeCur;
+        ++ListSizeCur;
       }
 
-      // If we didn't find any declaration, advance the iterator to after the last component.
-      if (CurListSize == CumulativeListSizes.end()) {
-        std::advance(this->I, Components.size());
+      // If we didn't find any declaration, advance the iterator to after the last component and set remaining lists to zero.
+      if (ListSizeCur == CumulativeListSizes.end()) {
+        this->I = End;
+        RemainingLists = 0u;
         return;
       }
 
-      // Initialize the remaining iterator state. Given that the list sizes are cumulative, the index of the component that start the list is the size of the previous list.
+      // Set the remaining lists with the total number of lists of the current declaration.
+      RemainingLists = *NumListsCur;
+
+      // Adjust the list size end iterator to the end of the relevant range.
+      ListSizeEnd = ListSizeCur;
+      std::advance(ListSizeEnd, RemainingLists);
+
+      // Given that the list sizes are cumulative, the index of the component that start the list is the size of the previous list.
       std::advance(this->I, PrevListSize);
     }
 
     // Return the array with the current list. The sizes are cumulative, so the array size is the difference between the current size and previous one.
-    MappableExprComponentListRef operator*() const { return MappableExprComponentListRef(&this->I->first, *CurListSize-PrevListSize); }
-    MappableExprComponentListRef operator->() const { return **this; }
+    std::pair<const ValueDecl*, MappableExprComponentListRef> operator*() const {
+      assert(ListSizeCur != ListSizeEnd && "Invalid iterator!");
+      return std::make_pair(*DeclCur, MappableExprComponentListRef(&*this->I, *ListSizeCur-PrevListSize));
+    }
+    std::pair<const ValueDecl*, MappableExprComponentListRef> operator->() const { return **this; }
 
     // Skip the components of the current list.
-    const_decls_component_iterator &operator++() {
-      std::advance(this->I, *CurListSize-PrevListSize);
-      PrevListSize = *CurListSize;
-      ++CurListSize;
+    const_component_lists_iterator &operator++() {
+      assert(ListSizeCur != ListSizeEnd && RemainingLists && "Invalid iterator!");
+
+      // If we don't have more lists just skip all the components. Otherwise, advance the iterator by the number of components in the current list.
+      if (std::next(ListSizeCur) == ListSizeEnd) {
+        this->I = End;
+        RemainingLists = 0;
+      } else {
+        std::advance(this->I, *ListSizeCur-PrevListSize);
+        PrevListSize = *ListSizeCur;
+
+        // We are done with a declaration, move to the next one.
+        if(!(--RemainingLists)) {
+          ++DeclCur;
+          ++NumListsCur;
+          RemainingLists = *NumListsCur;
+          assert(RemainingLists && "No lists in the following declaration??");
+        }
+      }
+
+      ++ListSizeCur;
       return *this;
     }
   };
 
-  typedef llvm::iterator_range<const_decls_component_iterator> const_decls_component_range;
+  typedef llvm::iterator_range<const_component_lists_iterator> const_component_lists_range;
 
-  /// \brief Return a range of component lists associated with the provided declaration.
-  const_decls_component_range components(const ValueDecl *VD) const {
-    auto Components = getComponentsRef();
-    return {
-      const_decls_component_iterator(VD, getUniqueDeclsRef(), getDeclNumListsRef(), getComponentListSizesRef(), Components),
-      const_decls_component_iterator(/*VD=*/nullptr, ArrayRef<const VarDecl *>(), ArrayRef<unsigned>(), ArrayRef<unsigned>(), Components)
-    };
+  /// \brief Iterators for all component lists.
+  const_component_lists_iterator component_lists_begin() const {
+    return const_component_lists_iterator(getUniqueDeclsRef(), getDeclNumListsRef(), getComponentListSizesRef(), getComponentsRef());
+  }
+  const_component_lists_iterator component_lists_end() const {
+    return const_component_lists_iterator(ArrayRef<const ValueDecl *>(), ArrayRef<unsigned>(), ArrayRef<unsigned>(), MappableExprComponentListRef(getComponentsRef().end(), getComponentsRef().end()));
+  }
+  const_component_lists_range component_lists() const {
+    return { component_lists_begin(), component_lists_end() };
+  }
+
+  /// \brief Iterators for component lists associated with the provided declaration.
+  const_component_lists_iterator decl_component_lists_begin(const ValueDecl *VD) const {
+    return const_component_lists_iterator(VD, getUniqueDeclsRef(), getDeclNumListsRef(), getComponentListSizesRef(), getComponentsRef());
+  }
+  const_component_lists_iterator decl_component_lists_end() const {
+    return component_lists_end();
+  }
+  const_component_lists_range decl_component_lists(const ValueDecl *VD) const {
+    return { decl_component_lists_begin(VD), decl_component_lists_end() };
   }
 
   /// Iterators to access all the declarations, number of lists, list sizes, and components.

@@ -544,7 +544,7 @@ OMPMapClause *OMPMapClause::Create(const ASTContext &C, SourceLocation StartLoc,
   unsigned NumComponents = getComponentsTotalNumber(ComponentLists);
 
   // We need to allocate:
-  // NumVars x Expr* - we have an original list expression for each component list.
+  // NumVars x Expr* - we have an original list expression for each clause list entry.
   // NumUniqueDeclarations x ValueDecl* - unique base declarations associated with each component list.
   // (NumUniqueDeclarations + NumComponentLists) x unsigned - we specify the number of lists for each unique declaration and the size of each component list.
   // NumComponents x MappableComponent - the total of all the components in all the lists.
