@@ -136,6 +136,7 @@ public:
   bool isSimplifiedConstruct = false;
   bool useSubWarps = false;
   bool onlyParallelOmpNodes = false;
+  unsigned int p = 0;
   llvm::AllocaInst *CombinedOuterLoopIndex;
   llvm::BasicBlock *SyncAfterCombinedBlock;
   llvm::BasicBlock *SyncAfterSimdBlock;

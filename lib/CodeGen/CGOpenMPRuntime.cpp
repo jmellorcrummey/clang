@@ -3929,6 +3929,48 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // under the combinedSimd flag.
   }
 
+  // Traverse a loop body searching for further pragmas and function calls
+  bool CheckOMPPragmas(const Stmt &S) {
+    // For LULESH assume that there are never any pragmas inside:
+    if(isa<OMPExecutableDirective>(S)) return true;
+
+    // if we see a function call, we will not look for its body and just
+    // assume that it contains openmp pragmas
+
+    // TODO: re-enable this for non-Firedrake runs.
+    //if(isa<CallExpr>(S)){
+    //   return true;
+    //}
+
+    // check all children recursively
+    bool ChildrenHaveOmp = false;
+    for(Stmt::const_child_iterator ii=S.child_begin(), ie=S.child_end();
+        ii != ie; ++ii){
+      if (!*ii)
+        ChildrenHaveOmp |= false;
+      else
+        ChildrenHaveOmp |= CheckOMPPragmas(**ii);
+    }
+    return ChildrenHaveOmp;
+  }
+
+  // Check if the body has any OpenMP pragmas
+  bool StmtHasOMPPragmas(const OMPExecutableDirective &S){
+    const Stmt *Body = S.getAssociatedStmt();
+    if (const CapturedStmt *CS = dyn_cast_or_null<CapturedStmt>(Body))
+      Body = CS->getCapturedStmt();
+    const ForStmt *For = dyn_cast_or_null<ForStmt>(Body);
+    return CheckOMPPragmas(*For->getBody());
+  }
+
+  // ======================================================================
+  // ======================================================================
+  //
+  //                  Generate Simplified Loop Nest Code
+  // 
+  // ======================================================================
+  // ======================================================================
+
   // function which computes the 
   llvm::Value*
   createMult(CodeGenFunction &CGF,
@@ -3940,6 +3982,334 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       res = Bld.CreateMul(res, Bld.CreateLoad(CGF.U[i]));
     }
     return res;
+  }
+
+  std::string getStringLevel(int k){
+    switch(k){
+      case 0:
+        return "zero";
+      case 1:
+        return "one";
+      case 2:
+        return "two";
+      case 3:
+        return "three";
+    }
+    return "undefined"
+  }
+
+  // Main function which generates the code
+  void
+  GenerateSimplifiedLoop(OpenMPDirectiveKind DKind,
+                         OpenMPDirectiveKind SKind,
+                         const OMPExecutableDirective &S,
+                         CodeGenFunction &CGF,
+                         int k, int kparent){
+    // DKind, SKind, S, CGF, TgtFunName, 1, 0
+    printf(" In Simplified Loop Nest\n");
+
+    // Implement a new for loop.
+    CGBuilderTy &Builder = CGF.Builder;
+
+    // Set the names of the basic block tags for this loop
+    std::string levelStr = getStringLevel(k);
+    llvm::BasicBlock *StartCombinedFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".start."+levelStr+".for", CGF.CurFn);
+    llvm::BasicBlock *CondCombinedFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".cond."+levelStr+".for", CGF.CurFn);
+    llvm::BasicBlock *BodyCombinedFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".body."+levelStr+".for", CGF.CurFn);
+    llvm::BasicBlock *StartRegionS1 = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".start.region.s.one", CGF.CurFn);
+    CGF.EndRegionS1 = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".end.region.s.one", CGF.CurFn);
+    llvm::BasicBlock *IncCombinedFor = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".inc."+levelStr+".for", CGF.CurFn);
+    CGF.SyncAfterCombinedBlock = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".sync.after."+levelStr, CGF.CurFn);
+    EndTarget = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".end."+levelStr+".for.and.target", CGF.CurFn);
+
+    // For loop Body
+    const Stmt *Body = S.getAssociatedStmt();
+
+    // Check if there are any more OpenMP pragmas
+    bool isLeafOpenMPNode = StmtHasOMPPragmas(S);
+
+    // Start populating the basic blocks which perform the init, cond and inc
+    // of the combined construct for loop.
+    Builder.CreateBr(StartCombinedFor);
+    Builder.SetInsertPoint(StartCombinedFor);
+
+    // generating:
+    // for (int idx = threadIdx.x + blockIdx.x * blockDim.x ;
+    //          idx < UB; idx += blockDim.x * gridDim.x)
+    Expr *IterVar = nullptr;
+    Expr *UBExpr = nullptr;
+    ArrayRef<Expr *> Arr = nullptr;
+    unsigned numCollapsed = 0;
+    if (const OMPTargetTeamsDistributeParallelForDirective *D =
+         dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S) ||
+        const OMPTargetTeamsDistributeDirective *D =
+         dyn_cast<OMPTargetTeamsDistributeDirective>(&S) ||
+        const OMPTargetTeamsDistributeSimdDirective *D =
+         dyn_cast<OMPTargetTeamsDistributeSimdDirective>(&S) ||
+        const OMPTargetTeamsDistributeParallelForSimdDirective *D =
+         dyn_cast<OMPTargetTeamsDistributeParallelForSimdDirective>(&S)){
+      IterVar = D->getNewIterVar();
+      UBExpr = D->getNewIterEnd();
+      Arr = D->getCounters();
+      numCollapsed = D->getCollapsedNumber();
+    } else {
+      assert(0 && "generating combined construct for an unsupported pragma sequence\n");
+    }
+
+    //Get expressions for-loop components
+    QualType QTy = IterVar->getType();
+    uint64_t TypeSize = 32;
+    if (CGF.getContext().getTypeSize(QTy) > TypeSize)
+      TypeSize = 64;
+    bool isSigned = true;
+    if (QTy->hasUnsignedIntegerRepresentation())
+      isSigned = false;
+    llvm::Type *VarTy = TypeSize == 32 ? Builder.getInt32Ty() :
+        Builder.getInt64Ty();
+
+    // Compute the lower and upper bounds that this thread will access.
+    //     Assume: a non-chunked schedule static is used.
+
+    // Setup LB
+    // Tid[kparent]
+    llvm::Value *LB = Builder.CreateLoad(CGF.Tid[kparent]);
+    if (!isLeafOpenMPNode){
+      // Div(Tid[kparent], numberOfParallelUnits)
+      LB = Builder.CreateUDiv(LB, createMult(CGF, kparent, k));
+    }
+
+    // Init UB based on the value in the loop
+    llvm::Value * UB = CGF.EmitScalarExpr(UBExpr);
+    UB = Builder.CreateIntCast(UB, VarTy, isSigned);
+
+    // Init Private var for loop IDX
+    llvm::AllocaInst *Private = CGF.CreateMemTemp(QTy, ".idx.");
+
+    // Traverse any collapsed loops
+    if (const CapturedStmt *CS = dyn_cast_or_null<CapturedStmt>(Body))
+      Body = CS->getCapturedStmt();
+    const VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(IterVar)->getDecl());
+    CGF.CGM.OpenMPSupport.addOpenMPPrivateVar(VD, Private);
+    for (unsigned I = 0; I < numCollapsed; ++I) {
+      CodeGenFunction::RunCleanupsScope InitScope(CGF);
+      const VarDecl *VD = cast<VarDecl>(cast<DeclRefExpr>(Arr[I])->getDecl());
+      bool SkippedContainers = false;
+      while (!SkippedContainers) {
+        if (const AttributedStmt *AS = dyn_cast_or_null<AttributedStmt>(Body))
+          Body = AS->getSubStmt();
+        else if (const CompoundStmt *CS =
+                     dyn_cast_or_null<CompoundStmt>(Body)) {
+          if (CS->size() != 1) {
+            SkippedContainers = true;
+          } else {
+            Body = CS->body_back();
+          }
+        } else
+          SkippedContainers = true;
+      }
+      const ForStmt *For = dyn_cast_or_null<ForStmt>(Body);
+      Body = For->getBody();
+      if (CGF.CGM.OpenMPSupport.getTopOpenMPPrivateVar(VD))
+        continue;
+      QualType QTy = Arr[I]->getType();
+      llvm::AllocaInst *Private =
+          CGF.CreateMemTemp(QTy, CGF.CGM.getMangledName(VD) + ".private.");
+      CGF.CGM.OpenMPSupport.addOpenMPPrivateVar(VD, Private);
+      llvm::BasicBlock *PrecondBB = llvm::BasicBlock::Create(
+              CGF.CGM.getLLVMContext(), "omp.loop.precond");
+      if (isa<DeclStmt>(For->getInit()))
+        CGF.EmitAnyExprToMem(VD->getAnyInitializer(), Private,
+                         VD->getType().getQualifiers(), true);
+      else
+        CGF.EmitStmt(For->getInit());
+      CGF.EmitBranchOnBoolExpr(For->getCond(), PrecondBB, EndTarget, 0);
+      CGF.EmitBlock(PrecondBB);
+    }
+
+    // if (!StmtHasScheduleStaticOne){
+    //   // Start computing the new LB and UB for each thread.
+    //   llvm::Value *LoopSize = Builder.CreateSub(UB, LB);
+    //   LoopSize = Builder.CreateAdd(LoopSize, Builder.getInt32(1));
+
+    //   printf("Set LB and UB for nochunk\n");
+    //   // Compute Chunk Size
+    //   llvm::Value *chunk = Builder.CreateUDiv(LoopSize,
+    //                                           Builder.CreateLoad(OmpNumThreads));
+
+    //   // Leftover
+    //   llvm::Value *Remainder = Builder.CreateSub(LoopSize,
+    //       Builder.CreateMul(chunk, Builder.CreateLoad(OmpNumThreads)));
+
+    //   // Add the leftover to the LB
+    //   // lb += leftover
+    //   LB = Builder.CreateAdd(LB, Remainder);
+    //   LB = Builder.CreateAdd(LB, Builder.CreateMul(Builder.CreateLoad(OmpThreadNum), chunk));
+    //   Builder.CreateStore(LB, OuterLB);
+
+    //   UB = Builder.CreateAdd(LB, Builder.CreateSub(chunk, Builder.getInt32(1)));
+    //   Builder.CreateStore(UB, OuterUB);
+
+    //   // if OMP thread ID is less than Remainder then the chunk needs to have
+    //   // one extra entry
+    //   llvm::Value *AddOne = Builder.CreateICmpULT(Builder.CreateLoad(OmpThreadNum),
+    //                                               Remainder);
+    //   Builder.CreateCondBr(AddOne, AddOneToChunk, AfterAddOneToChunk);
+
+    //   Builder.SetInsertPoint(AddOneToChunk);
+
+    //   // Add one to chunk: chunk++
+    //   //chunk = Builder.CreateAdd(chunk, Builder.getInt32(1));
+
+    //   llvm::Value *NewLB = Builder.CreateAdd(Builder.CreateLoad(OmpThreadNum),
+    //                                          Builder.CreateLoad(OuterLB));
+    //   Builder.CreateStore(NewLB, OuterLB);
+
+    //   llvm::Value *NewUB = Builder.CreateAdd(Builder.CreateLoad(OuterUB),
+    //                                          Builder.getInt32(1));
+    //   Builder.CreateStore(NewUB, OuterUB);
+
+    //   // In the case of the larger chunk we need to subtract back what we added
+    //   // so that we avoid explicitely writing an else case.
+    //   // lb -= leftover;
+    //   Builder.CreateBr(AfterAddOneToChunk);
+
+    //   Builder.SetInsertPoint(AfterAddOneToChunk);
+    //   Builder.CreateCall(Get_memfence(), {});
+    //   //chunk = Builder.CreateAdd(chunk, ChunkIncrement);
+    //   //LB = Builder.CreateSub(LB, LBDecrement);
+
+    //   // all threads do: lb = lb + entityId * chunk;
+    //   //LB = Builder.CreateAdd(LB, Builder.CreateMul(Builder.CreateLoad(OmpThreadNum), chunk));
+    //   LB = Builder.CreateLoad(OuterLB);
+
+    //   // ub = lb + chunk - 1
+    //   //UB = Builder.CreateAdd(LB, Builder.CreateSub(chunk, Builder.getInt32(1)));
+    //   UB = Builder.CreateLoad(OuterUB);
+    // }
+
+    // Update private with the value of the LB
+    Builder.CreateStore(LB, Private);
+    Builder.CreateBr(CondCombinedFor);
+
+    // FOR COND: tid <= N
+    Builder.SetInsertPoint(CondCombinedFor);
+    if (isSigned){
+      Builder.CreateCondBr(Builder.CreateICmpSLE(Builder.CreateLoad(Private), UB),
+                           BodyCombinedFor, EndTarget);
+    }
+    else {
+      Builder.CreateCondBr(Builder.CreateICmpULE(Builder.CreateLoad(Private), UB),
+                           BodyCombinedFor, EndTarget);
+    }
+
+    // FOR INC: tid += 1 if we are static no-chunk
+    Builder.SetInsertPoint(IncCombinedFor);
+    llvm::Value *step = createMult(CGF, kparent, k);
+    if (isLeafOpenMPNode){
+      step = Builder.CreateMul(step, createMult(CGF, k, CGF.p - 1));
+    }
+    Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(Private), step),
+                                          Private);
+    Builder.CreateBr(CondCombinedFor);
+
+    // FOR BODY
+    Builder.SetInsertPoint(BodyCombinedFor);
+
+    //RunCleanupsScope ThenScope(*this);
+    Expr *InitExpr = nullptr;
+    if (const OMPTargetTeamsDistributeParallelForDirective *D =
+         dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S) ||
+        const OMPTargetTeamsDistributeDirective *D =
+         dyn_cast<OMPTargetTeamsDistributeDirective>(&S) ||
+        const OMPTargetTeamsDistributeSimdDirective *D =
+         dyn_cast<OMPTargetTeamsDistributeSimdDirective>(&S) ||
+        const OMPTargetTeamsDistributeParallelForSimdDirective *D =
+         dyn_cast<OMPTargetTeamsDistributeParallelForSimdDirective>(&S)){
+      InitExpr = D->getInit();
+    } else {
+      assert(0 && "generating combined construct for an unsupported pragma sequence\n");
+    }
+
+    {
+      // FIXME: do we need all these clean ups?
+      CodeGenFunction::RunCleanupsScope ThenScope(CGF);
+      CGF.EmitStmt(InitExpr);
+      {
+        CGF.CombinedOuterLoopIndex = Private;
+        CodeGenFunction::RunCleanupsScope BodyScope(CGF);
+
+        // Only allow parallel unit masters to run the region
+        // between loops.
+        llvm::Value *isNotExecutingS1 =
+            Builder.CreateICmpNE(Builder.CreateLoad(CGF.Tid[k]),
+                                 Builder.getInt32(0));
+        Builder.CreateCondBr(isNotExecutingS1, CGF.EndRegionS1, StartRegionS1);
+        Builder.SetInsertPoint(StartRegionS1);
+
+        // ============= Sequential region =================
+
+        // Add global for thread_limit that is kept updated by the CUDA offloading
+        // RTL (one per kernel)
+        // init to value (0) that will provoke default being used
+        // this needs to happen for both combined constructs and control loop cases
+        //ThreadLimitGlobal = new llvm::GlobalVariable(
+        //   CGF.CGM.getModule(), Builder.getInt32Ty(), false,
+        //   llvm::GlobalValue::ExternalLinkage, Builder.getInt32(0),
+        //   TgtFunName + Twine("_thread_limit"));
+
+        // first thing of sequential region:
+        // initialize the state of the OpenMP rt library on the GPU
+        // and pass thread limit global content to initialize thread_limit_var ICV
+        // llvm::Value *InitArg[] = {OmpHandle,
+        //   Builder.CreateLoad(ThreadLimitGlobal)};
+        // CGF.EmitRuntimeCall(OPENMPRTL_FUNC(kernel_init), makeArrayRef(InitArg));
+
+        // ============= Enter parallel region =============
+/*
+        // Handle the existence of the parallel for
+
+        OMPRegionTypesStack.push_back(OMP_Parallel);
+
+        // // clear up the data structure that will be used to determine the
+        // // optimal amount of simd lanes to be used in this region
+        SimdAndWorksharingNesting.reset();
+
+        // TO DO: figure out the value that goes in here.
+        // Bld.CreateStore(PrepareParallel, CudaThreadsInParallel);
+        Builder.CreateStore(Builder.CreateCall(Get_num_threads(), {}), CudaThreadsInParallel);
+
+        // Increment the nesting level
+        Builder.CreateStore(
+           Builder.CreateAdd(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
+           ParallelNesting);
+*/
+        // if (CGF.combinedSimd){
+        //   PushNewParallelRegion(true);
+        // }
+
+        printf(" In Combined Nest region: Emit Body\n");
+        // Emit Body
+        CGF.EmitStmt(Body);
+      }
+      // After Emiting the body I need to create the sync point.
+      // Don't sync or anything, just go ahead computing the INC
+      // with all threads!
+
+      Builder.CreateBr(CGF.SyncAfterCombinedBlock);
+      Builder.SetInsertPoint(CGF.SyncAfterCombinedBlock);
+      if (CGF.distributedParallel){
+        Builder.CreateCall(Get_syncthreads(), {});
+      }
+      Builder.CreateBr(IncCombinedFor);
+    }
   }
 
   // Enter preamble region to the loop nest resolution.
@@ -3978,8 +4348,23 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // This part of the code need to be adapted to every architecture.
 
     printf("Start GPU specific code gen\n");
-    // Number of parallel levels
-    int p = 4;
+    // Number of parallel levels for an NVIDIA GPU
+    CGF.p = 4;
+
+    //team-master sets the initial value for the data structures declared as AllcaInst
+    llvm::BasicBlock *MasterInit = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".master.init.", CGF.CurFn);
+
+    llvm::BasicBlock *NonMasterInit = llvm::BasicBlock::Create(
+        CGF.CGM.getLLVMContext(), ".nonmaster.init.", CGF.CurFn);
+
+    llvm::Value *IsTeamMaster1 =
+        Bld.CreateICmpEQ(Bld.CreateCall(Get_thread_num(), {}),
+                         Bld.getInt32(MASTER_ID), "IsTeamMaster");
+
+    // Branch to the master only region
+    Bld.CreateCondBr(IsTeamMaster1, MasterInit, NonMasterInit);
+    Bld.SetInsertPoint(MasterInit);
 
     // Up[0] = number of grids (always 1)
     llvm::AllocaInst *value0 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uZero");
@@ -4033,15 +4418,48 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // Uid[1:p-1] = unit id for the block, warp
     for(int i = 1; i < p - 1; i++){
       llvm::AllocaInst *uid = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1));
-      Bld.CreateStore(Bld.CreateUDiv(Bld.CreateLoad(CGF.Tid[i - 1]), createMult(CGF, i, p - 1)), uid);
+      Bld.CreateStore(Bld.CreateUDiv(Bld.CreateLoad(CGF.Tid[i - 1]), createMult(CGF, i, CGF.p - 1)), uid);
       CGF.Uid.push_back(uid);
     }
+
+    // Carry on with the rest of threads (the non-team-master ones)
+    Bld.CreateBr(NonMasterInit);
+    Bld.SetInsertPoint(NonMasterInit);
+    Bld.CreateCall(Get_syncthreads(), {});
 
     printf("End GPU specific code gen\n");
 
     // Now that the loop nest wide values have been computed we can commence the generation of code.
     // Note: the architecture specific details are confined to this initilization area.
     // The algorithm will be based on these data structures.
+
+    // Set distribute
+    CGF.CGM.OpenMPSupport.startOpenMPRegion(false);
+    CGF.CGM.OpenMPSupport.setNoWait(false);
+    CGF.CGM.OpenMPSupport.setMergeable(true);
+    CGF.CGM.OpenMPSupport.setOrdered(false);
+    CGF.CGM.OpenMPSupport.setDistribute(true);
+
+    switch (SKind) {
+      default:
+        llvm_unreachable("Unexpected target directive subkind");
+        break;
+      case OMPD_teams_distribute:
+        GenerateSimplifiedLoop(DKind, SKind, S, CGF, 1, 0);
+        break;
+      case OMPD_teams_distribute_parallel_for:
+        GenerateSimplifiedLoop(DKind, SKind, S, CGF, 2, 0);
+        break;
+      case OMPD_teams_distribute_parallel_for_simd:
+        GenerateSimplifiedLoop(DKind, SKind, S, CGF, 3, 0);
+        break;
+      case OMPD_teams_distribute_simd:
+        GenerateSimplifiedLoop(DKind, SKind, S, CGF, 3, 0);
+        break;
+    }
+
+    Builder.SetInsertPoint(EndTarget);
+    CGF.CGM.OpenMPSupport.endOpenMPRegion();
 
     // if (CGF.combinedSimd){
     //     // SIMD related variables, this is for the case when the inner loop
@@ -4231,41 +4649,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     //     // of end we need
     //     PopParallelRegion();
     // }
-  }
-
-  // Traverse a loop body searching for further pragmas and function calls
-  bool CheckOMPPragmas(const Stmt &S) {
-    // printf("======> CheckOMPPragmas: %d %d\n", isa<OMPExecutableDirective>(S), isa<CallExpr>(S));
-    // For LULESH assume that there are never any pragmas inside:
-    if(isa<OMPExecutableDirective>(S)) return true;
-
-    // if we see a function call, we will not look for its body and just
-    // assume that it contains openmp pragmas
-
-    // TODO: re-enable this for non-Firedrake runs.
-    //if(isa<CallExpr>(S)){
-    //   return true;
-    //}
-
-    // check all children recursively
-    bool ChildrenHaveOmp = false;
-    for(Stmt::const_child_iterator ii=S.child_begin(), ie=S.child_end();
-        ii != ie; ++ii){
-      if (!*ii)
-        ChildrenHaveOmp |= false;
-      else
-        ChildrenHaveOmp |= CheckOMPPragmas(**ii);
-    }
-    return ChildrenHaveOmp;
-  }
-
-  // Check if the body has any OpenMP pragmas
-  bool StmtHasOMPPragmas(const OMPExecutableDirective &S){
-    const Stmt *Body = S.getAssociatedStmt();
-    if (const CapturedStmt *CS = dyn_cast_or_null<CapturedStmt>(Body))
-      Body = CS->getCapturedStmt();
-    const ForStmt *For = dyn_cast_or_null<ForStmt>(Body);
-    return CheckOMPPragmas(*For->getBody());
   }
 
   // Check if an OpenMP set of directives contains a static schedule
