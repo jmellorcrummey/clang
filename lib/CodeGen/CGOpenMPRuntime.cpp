@@ -4041,21 +4041,31 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     Builder.CreateBr(StartCombinedFor);
     Builder.SetInsertPoint(StartCombinedFor);
 
-    // generating:
-    // for (int idx = threadIdx.x + blockIdx.x * blockDim.x ;
-    //          idx < UB; idx += blockDim.x * gridDim.x)
+    // Start Generating Loop Nest Components
     Expr *IterVar = nullptr;
     Expr *UBExpr = nullptr;
     ArrayRef<Expr *> Arr = nullptr;
     unsigned numCollapsed = 0;
-    if ((const OMPTargetTeamsDistributeParallelForDirective *D =
-         dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S)) ||
-        (const OMPTargetTeamsDistributeDirective *D =
-         dyn_cast<OMPTargetTeamsDistributeDirective>(&S)) ||
-        (const OMPTargetTeamsDistributeSimdDirective *D =
-         dyn_cast<OMPTargetTeamsDistributeSimdDirective>(&S)) ||
-        (const OMPTargetTeamsDistributeParallelForSimdDirective *D =
-         dyn_cast<OMPTargetTeamsDistributeParallelForSimdDirective>(&S))){
+    if (const OMPTargetTeamsDistributeParallelForDirective *D =
+         dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S)){
+      IterVar = D->getNewIterVar();
+      UBExpr = D->getNewIterEnd();
+      Arr = D->getCounters();
+      numCollapsed = D->getCollapsedNumber();
+    } else if (const OMPTargetTeamsDistributeDirective *D =
+         dyn_cast<OMPTargetTeamsDistributeDirective>(&S)){
+      IterVar = D->getNewIterVar();
+      UBExpr = D->getNewIterEnd();
+      Arr = D->getCounters();
+      numCollapsed = D->getCollapsedNumber();
+    } else if (const OMPTargetTeamsDistributeSimdDirective *D =
+         dyn_cast<OMPTargetTeamsDistributeSimdDirective>(&S)) {
+      IterVar = D->getNewIterVar();
+      UBExpr = D->getNewIterEnd();
+      Arr = D->getCounters();
+      numCollapsed = D->getCollapsedNumber();
+    } else if (const OMPTargetTeamsDistributeParallelForSimdDirective *D =
+         dyn_cast<OMPTargetTeamsDistributeParallelForSimdDirective>(&S)){
       IterVar = D->getNewIterVar();
       UBExpr = D->getNewIterEnd();
       Arr = D->getCounters();
@@ -4416,7 +4426,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     CGF.Uid.push_back(uid0);
 
     // Uid[1:p-1] = unit id for the block, warp
-    for(int i = 1; i < p - 1; i++){
+    for(int i = 1; i < CGF.p - 1; i++){
       llvm::AllocaInst *uid = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1));
       Bld.CreateStore(Bld.CreateUDiv(Bld.CreateLoad(CGF.Tid[i - 1]), createMult(CGF, i, CGF.p - 1)), uid);
       CGF.Uid.push_back(uid);
@@ -4458,7 +4468,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         break;
     }
 
-    Builder.SetInsertPoint(EndTarget);
+    Bld.SetInsertPoint(EndTarget);
     CGF.CGM.OpenMPSupport.endOpenMPRegion();
 
     // if (CGF.combinedSimd){
