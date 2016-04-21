@@ -4008,6 +4008,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // DKind, SKind, S, CGF, TgtFunName, 1, 0
     printf(" In Simplified Loop Nest\n");
 
+    // Check if there are any more OpenMP pragmas
+    bool isLeafOpenMPNode = !StmtHasOMPPragmas(S);
+    printf("In GenerateSimplifiedLoop: Leaf Node => %d\n", isLeafOpenMPNode);
+
     // Implement a new for loop.
     CGBuilderTy &Builder = CGF.Builder;
 
@@ -4019,22 +4023,32 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         CGF.CGM.getLLVMContext(), ".cond."+levelStr+".for", CGF.CurFn);
     llvm::BasicBlock *BodyCombinedFor = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".body."+levelStr+".for", CGF.CurFn);
-    llvm::BasicBlock *StartRegionS1 = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".start.region.s.one", CGF.CurFn);
-    CGF.EndRegionS1 = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".end.region.s.one", CGF.CurFn);
+
+    // If this is not a leaf node then we need to include the exclusion of threads
+    llvm::BasicBlock *StartRegionS1 = nullptr;
+    if (!isLeafOpenMPNode){
+      StartRegionS1 = llvm::BasicBlock::Create(
+          CGF.CGM.getLLVMContext(), ".start.region.s.one", CGF.CurFn);
+      CGF.EndRegionS1 = llvm::BasicBlock::Create(
+          CGF.CGM.getLLVMContext(), ".end.region.s.one", CGF.CurFn);
+    }
+
+    // Generate the other blocks
     llvm::BasicBlock *IncCombinedFor = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".inc."+levelStr+".for", CGF.CurFn);
-    CGF.SyncAfterCombinedBlock = llvm::BasicBlock::Create(
-        CGF.CGM.getLLVMContext(), ".sync.after."+levelStr, CGF.CurFn);
+
+    // No sync required at the end for Leaf Nodes
+    if (!isLeafOpenMPNode){
+      CGF.SyncAfterCombinedBlock = llvm::BasicBlock::Create(
+          CGF.CGM.getLLVMContext(), ".sync.after."+levelStr, CGF.CurFn);
+    }
+
+    // For loop end.
     EndTarget = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".end."+levelStr+".for.and.target", CGF.CurFn);
 
     // For loop Body
     const Stmt *Body = S.getAssociatedStmt();
-
-    // Check if there are any more OpenMP pragmas
-    bool isLeafOpenMPNode = StmtHasOMPPragmas(S);
 
     // Start populating the basic blocks which perform the init, cond and inc
     // of the combined construct for loop.
@@ -4236,14 +4250,17 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     //RunCleanupsScope ThenScope(*this);
     Expr *InitExpr = nullptr;
     if (const OMPTargetTeamsDistributeParallelForDirective *D =
-         dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S) ||
-        const OMPTargetTeamsDistributeDirective *D =
-         dyn_cast<OMPTargetTeamsDistributeDirective>(&S) ||
-        const OMPTargetTeamsDistributeSimdDirective *D =
-         dyn_cast<OMPTargetTeamsDistributeSimdDirective>(&S) ||
-        const OMPTargetTeamsDistributeParallelForSimdDirective *D =
+         dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S)){
+       InitExpr = D->getInit();
+    } else if (const OMPTargetTeamsDistributeDirective *D =
+         dyn_cast<OMPTargetTeamsDistributeDirective>(&S)){
+       InitExpr = D->getInit();
+    } else if (const OMPTargetTeamsDistributeSimdDirective *D =
+         dyn_cast<OMPTargetTeamsDistributeSimdDirective>(&S)){
+       InitExpr = D->getInit();
+    } else if (const OMPTargetTeamsDistributeParallelForSimdDirective *D =
          dyn_cast<OMPTargetTeamsDistributeParallelForSimdDirective>(&S)){
-      InitExpr = D->getInit();
+       InitExpr = D->getInit();
     } else {
       assert(0 && "generating combined construct for an unsupported pragma sequence\n");
     }
@@ -4256,13 +4273,15 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         CGF.CombinedOuterLoopIndex = Private;
         CodeGenFunction::RunCleanupsScope BodyScope(CGF);
 
-        // Only allow parallel unit masters to run the region
-        // between loops.
-        llvm::Value *isNotExecutingS1 =
-            Builder.CreateICmpNE(Builder.CreateLoad(CGF.Tid[k]),
+        if (!isLeafOpenMPNode){
+          // Only allow parallel unit masters to run the region
+          // between loops.
+          llvm::Value *isNotExecutingS1 =
+              Builder.CreateICmpNE(Builder.CreateLoad(CGF.Tid[k]),
                                  Builder.getInt32(0));
-        Builder.CreateCondBr(isNotExecutingS1, CGF.EndRegionS1, StartRegionS1);
-        Builder.SetInsertPoint(StartRegionS1);
+          Builder.CreateCondBr(isNotExecutingS1, CGF.EndRegionS1, StartRegionS1);
+          Builder.SetInsertPoint(StartRegionS1);
+        }
 
         // ============= Sequential region =================
 
@@ -4313,13 +4332,16 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       // Don't sync or anything, just go ahead computing the INC
       // with all threads!
 
-      Builder.CreateBr(CGF.SyncAfterCombinedBlock);
-      Builder.SetInsertPoint(CGF.SyncAfterCombinedBlock);
-      if (CGF.distributedParallel){
-        Builder.CreateCall(Get_syncthreads(), {});
+      if (!isLeafOpenMPNode){
+        Builder.CreateBr(CGF.SyncAfterCombinedBlock);
+        Builder.SetInsertPoint(CGF.SyncAfterCombinedBlock);
+        //if (CGF.distributedParallel){
+        //  Builder.CreateCall(Get_syncthreads(), {});
+        //}
       }
       Builder.CreateBr(IncCombinedFor);
     }
+    Builder.SetInsertPoint(EndTarget);
   }
 
   // Enter preamble region to the loop nest resolution.
@@ -4327,20 +4349,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   EnterParalleLoopNest(OpenMPDirectiveKind DKind,
                        OpenMPDirectiveKind SKind,
                        const OMPExecutableDirective &S,
-                       CodeGenFunction &CGF,
-                       StringRef TgtFunName,
-                       bool StmtHasScheduleStaticOne) {
-
-    // Don't use the blocking startegy unless schedule(static,1)
-    if (!StmtHasScheduleStaticOne and CGF.distributedParallel){
-      printf("Warning: Blocking was disabled due to lack of schedule(static,1)");
-    }
+                       CodeGenFunction &CGF) {
 
     CGBuilderTy &Bld = CGF.Builder;
-
-    // 32 bits should be enough to represent the number of basic
-    // blocks in a target region
-    llvm::IntegerType *VarTy = CGM.Int32Ty;
 
     // CodeGen for clauses (task init).
     for (ArrayRef<OMPClause *>::iterator I = S.clauses().begin(), E =
@@ -4426,7 +4437,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     CGF.Uid.push_back(uid0);
 
     // Uid[1:p-1] = unit id for the block, warp
-    for(int i = 1; i < CGF.p - 1; i++){
+    for(unsigned int i = 1; i < CGF.p - 1; i++){
       llvm::AllocaInst *uid = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1));
       Bld.CreateStore(Bld.CreateUDiv(Bld.CreateLoad(CGF.Tid[i - 1]), createMult(CGF, i, CGF.p - 1)), uid);
       CGF.Uid.push_back(uid);
@@ -4468,7 +4479,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         break;
     }
 
-    Bld.SetInsertPoint(EndTarget);
+    //Bld.SetInsertPoint(EndTarget);
     CGF.CGM.OpenMPSupport.endOpenMPRegion();
 
     // if (CGF.combinedSimd){
@@ -5015,7 +5026,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
             llvm::GlobalValue::ExternalLinkage, Bld.getInt32(0),
             TgtFunName + Twine("_thread_limit"));
 
-      EnterParalleLoopNest(DKind, SKind, S, CGF, TgtFunName, true);
+      EnterParalleLoopNest(DKind, SKind, S, CGF);
     } else if (CGF.combined){
       // If the directives contain a reduction clause then we insert appropriate
       // code before the main loop.
