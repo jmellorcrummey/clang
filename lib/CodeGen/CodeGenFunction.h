@@ -142,7 +142,7 @@ public:
   llvm::BasicBlock *SyncAfterSimdBlock;
   llvm::BasicBlock *SyncAfterParallelForBlock;
   llvm::BasicBlock *EndRegionS1;
-  std::vector<llvm::AllocaInst*> U;
+  std::vector<llvm::GlobalVariable*> U;
   std::vector<llvm::AllocaInst*> Tid;
   std::vector<llvm::AllocaInst*> Uid;
 

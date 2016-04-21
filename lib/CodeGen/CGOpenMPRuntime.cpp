@@ -4353,6 +4353,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     CGBuilderTy &Bld = CGF.Builder;
 
+    // 32 bits should be enough to represent the number of basic
+    // blocks in a target region
+    llvm::IntegerType *VarTy = CGM.Int32Ty;
+
     // CodeGen for clauses (task init).
     for (ArrayRef<OMPClause *>::iterator I = S.clauses().begin(), E =
          S.clauses().end(); I != E; ++I)
@@ -4372,6 +4376,26 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // Number of parallel levels for an NVIDIA GPU
     CGF.p = 4;
 
+    llvm::GlobalVariable *value0 = new llvm::GlobalVariable(
+              CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
+              llvm::Constant::getNullValue(VarTy), "uZero", 0,
+              llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+
+    llvm::GlobalVariable *value1 = new llvm::GlobalVariable(
+              CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
+              llvm::Constant::getNullValue(VarTy), "uOne", 0,
+              llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+
+    llvm::GlobalVariable *value2 = new llvm::GlobalVariable(
+              CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
+              llvm::Constant::getNullValue(VarTy), "uTwo", 0,
+              llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+
+    llvm::GlobalVariable *value3 = new llvm::GlobalVariable(
+              CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
+              llvm::Constant::getNullValue(VarTy), "uThree", 0,
+              llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+
     //team-master sets the initial value for the data structures declared as AllcaInst
     llvm::BasicBlock *MasterInit = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".master.init.", CGF.CurFn);
@@ -4388,17 +4412,17 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     Bld.SetInsertPoint(MasterInit);
 
     // Up[0] = number of grids (always 1)
-    llvm::AllocaInst *value0 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uZero");
+    //llvm::AllocaInst *value0 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uZero");
     Bld.CreateStore(Bld.getInt32(1), value0);
     CGF.U.push_back(value0);
 
     // Up[1] = number of blocks per grid
-    llvm::AllocaInst *value1 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uOne");
+    //llvm::AllocaInst *value1 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uOne");
     Bld.CreateStore(Bld.CreateCall(Get_num_teams(), {}), value1);
     CGF.U.push_back(value1);
 
     // Up[2] = number of warps per block
-    llvm::AllocaInst *value2 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uTwo");
+    //llvm::AllocaInst *value2 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uTwo");
     llvm::Value *const32 = Bld.getInt32(5); // 2^5
     llvm::Value *NumWarps = Bld.CreateCall(Get_num_threads(), {});
     NumWarps = Bld.CreateAShr(NumWarps, const32);
@@ -4406,13 +4430,18 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     CGF.U.push_back(value2);
 
     // Up[3] = number of threads per warp
-    llvm::AllocaInst *value3 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uThree");
+    //llvm::AllocaInst *value3 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uThree");
     Bld.CreateStore(Bld.getInt32(WARP_SIZE), value3);
     CGF.U.push_back(value3);
 
+    // Carry on with the rest of threads (the non-team-master ones)
+    Bld.CreateBr(NonMasterInit);
+    Bld.SetInsertPoint(NonMasterInit);
+    Bld.CreateCall(Get_syncthreads(), {});
+
     // Compute the thread ID for each parallel level except last
     // Tid[0] = global thread ID
-    llvm::AllocaInst *tid0 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "tidZero");
+    //llvm::AllocaInst *tid0 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "tidZero");
     llvm::Value *globalTid = Bld.CreateAdd(Bld.CreateCall(Get_thread_num(), {}), Bld.CreateMul(
             Bld.CreateCall(Get_num_threads(), {}), Bld.CreateCall(Get_team_num(), {})));
     Bld.CreateStore(globalTid, tid0);
@@ -4442,11 +4471,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       Bld.CreateStore(Bld.CreateUDiv(Bld.CreateLoad(CGF.Tid[i - 1]), createMult(CGF, i, CGF.p - 1)), uid);
       CGF.Uid.push_back(uid);
     }
-
-    // Carry on with the rest of threads (the non-team-master ones)
-    Bld.CreateBr(NonMasterInit);
-    Bld.SetInsertPoint(NonMasterInit);
-    Bld.CreateCall(Get_syncthreads(), {});
 
     printf("End GPU specific code gen\n");
 
