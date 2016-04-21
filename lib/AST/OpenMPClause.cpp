@@ -530,6 +530,24 @@ OMPDependClause *OMPDependClause::CreateEmpty(const ASTContext &C, unsigned N) {
   return new (Mem) OMPDependClause(N);
 }
 
+unsigned OMPClauseMappableExprCommon::getComponentsTotalNumber(MappableExprComponentListsRef ComponentLists) {
+  unsigned TotalNum = 0u;
+  for (auto &C : ComponentLists)
+    TotalNum += C.size();
+  return TotalNum;
+}
+
+unsigned OMPClauseMappableExprCommon::getUniqueDeclarationsTotalNumber(ArrayRef<ValueDecl*> Declarations) {
+  unsigned TotalNum = 0u;
+  llvm::SmallPtrSet<const ValueDecl*, 8> Cache;
+  for (auto *D : Declarations) {
+    if (Cache.count(D))
+      continue;
+    ++TotalNum;
+  }
+  return TotalNum;
+}
+
 OMPMapClause *OMPMapClause::Create(const ASTContext &C, SourceLocation StartLoc,
                                    SourceLocation LParenLoc,
                                    SourceLocation EndLoc, ArrayRef<Expr *> Vars, ArrayRef<ValueDecl *> Declarations, MappableExprComponentListsRef ComponentLists,

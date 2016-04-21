@@ -2799,33 +2799,15 @@ public:
   typedef SmallVector<MappableComponent, 8> MappableExprComponentList;
   typedef ArrayRef<MappableComponent> MappableExprComponentListRef;
 
-//  typedef MutableArrayRef<MappableComponent>::iterator component_iterator;
-//  typedef llvm::iterator_range<component_iterator> component_range;
-//  typedef ArrayRef<const MappableComponent>::iterator component_const_iterator;
-//  typedef llvm::iterator_range<component_const_iterator> component_const_range;
-
   // \brief List of all component lists associated to the same base declaration. E.g. if both 'S.a' and 'S.b' are a mappable expressions, each will have their component list but the same base declaration 'S'.
   typedef SmallVector<MappableExprComponentList, 8> MappableExprComponentLists;
   typedef ArrayRef<MappableExprComponentList> MappableExprComponentListsRef;
 protected:
   // \brief Return the total number of elements in a list of component lists.
-  static unsigned getComponentsTotalNumber(MappableExprComponentListsRef ComponentLists) {
-    unsigned TotalNum = 0u;
-    for (auto &C : ComponentLists)
-      TotalNum += C.size();
-    return TotalNum;
-  }
+  static unsigned getComponentsTotalNumber(MappableExprComponentListsRef ComponentLists);
+
   // \brief Return the total number of elements in a list of component lists.
-  static unsigned getUniqueDeclarationsTotalNumber(ArrayRef<ValueDecl*> Declarations) {
-    unsigned TotalNum = 0u;
-    llvm::SmallPtrSet<const ValueDecl*, 8> Cache;
-    for (auto *D : Declarations) {
-      if (Cache.count(D))
-        continue;
-      ++TotalNum;
-    }
-    return TotalNum;
-  }
+  static unsigned getUniqueDeclarationsTotalNumber(ArrayRef<ValueDecl*> Declarations);
 };
 
 /// \brief This represents clauses with a list of expressions that is mappable.
@@ -3027,8 +3009,7 @@ public:
         ArrayRef<const ValueDecl *> UniqueDecls,
         ArrayRef<unsigned> DeclsListNum,
         ArrayRef<unsigned> CumulativeListSizes,
-        MappableExprComponentListRef Components)
-        : const_component_lists_iterator::iterator_adaptor_base(Components.begin()), DeclCur(UniqueDecls.begin()), NumListsCur(DeclsListNum.begin()), RemainingLists(0u), PrevListSize(0u), ListSizeCur(CumulativeListSizes.begin()), ListSizeEnd(CumulativeListSizes.end()), End(Components.end()) {
+        MappableExprComponentListRef Components) : const_component_lists_iterator::iterator_adaptor_base(Components.begin()), DeclCur(UniqueDecls.begin()), NumListsCur(DeclsListNum.begin()), RemainingLists(0u), PrevListSize(0u), ListSizeCur(CumulativeListSizes.begin()), ListSizeEnd(CumulativeListSizes.end()), End(Components.end()) {
       assert(UniqueDecls.size() == DeclsListNum.size() && "Inconsistent number of declarations and list sizes!");
       if (!DeclsListNum.empty())
         RemainingLists = *NumListsCur;
