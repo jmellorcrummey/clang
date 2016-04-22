@@ -2786,17 +2786,16 @@ public:
   // associated declaration is set to nullptr.
   class MappableComponent {
     // \brief Expression associated with the component.
-    Expr *AssociatedExpression;
+    Expr *AssociatedExpression = nullptr;
     // \brief Declaration associated with the declaration. If the component does
     // not have a declaration (e.g. array subscripts or section), this is set to
     // nullptr.
-    ValueDecl *AssociatedDeclaration;
+    ValueDecl *AssociatedDeclaration = nullptr;
 
   public:
-    MappableComponent()
-        : AssociatedExpression(nullptr), AssociatedDeclaration(nullptr) {}
-    MappableComponent(Expr *AssociatedExpression,
-                      ValueDecl *AssociatedDeclaration)
+    explicit MappableComponent() {}
+    explicit MappableComponent(Expr *AssociatedExpression,
+                               ValueDecl *AssociatedDeclaration)
         : AssociatedExpression(AssociatedExpression),
           AssociatedDeclaration(AssociatedDeclaration) {}
 
@@ -2856,8 +2855,8 @@ protected:
 
   /// \brief Get the unique declarations that are in the trailing objects of the
   /// class.
-  ArrayRef<const ValueDecl *> getUniqueDeclsRef() const {
-    return ArrayRef<const ValueDecl *>(
+  ArrayRef<ValueDecl *> getUniqueDeclsRef() const {
+    return ArrayRef<ValueDecl *>(
         static_cast<const T *>(this)
             ->template getTrailingObjects<ValueDecl *>(),
         NumUniqueDeclarations);
@@ -3066,10 +3065,10 @@ public:
             std::forward_iterator_tag, MappableComponent, ptrdiff_t,
             MappableComponent, MappableComponent> {
     // The declaration the iterator currently refers to.
-    ArrayRef<const ValueDecl *>::iterator DeclCur;
+    ArrayRef<ValueDecl *>::iterator DeclCur;
 
     // The list number associated with the current declaration.
-    ArrayRef<const unsigned>::iterator NumListsCur;
+    ArrayRef<unsigned>::iterator NumListsCur;
 
     // Remaining lists for the current declaration.
     unsigned RemainingLists;
@@ -3089,8 +3088,8 @@ public:
   public:
     /// \brief Construct an iterator that scans all lists.
     explicit const_component_lists_iterator(
-        ArrayRef<const ValueDecl *> UniqueDecls,
-        ArrayRef<unsigned> DeclsListNum, ArrayRef<unsigned> CumulativeListSizes,
+        ArrayRef<ValueDecl *> UniqueDecls, ArrayRef<unsigned> DeclsListNum,
+        ArrayRef<unsigned> CumulativeListSizes,
         MappableExprComponentListRef Components)
         : const_component_lists_iterator::iterator_adaptor_base(
               Components.begin()),
@@ -3107,7 +3106,7 @@ public:
     /// \brief Construct an iterator that scan lists for a given declaration \a
     /// Declaration.
     explicit const_component_lists_iterator(
-        const ValueDecl *Declaration, ArrayRef<const ValueDecl *> UniqueDecls,
+        const ValueDecl *Declaration, ArrayRef<ValueDecl *> UniqueDecls,
         ArrayRef<unsigned> DeclsListNum, ArrayRef<unsigned> CumulativeListSizes,
         MappableExprComponentListRef Components)
         : const_component_lists_iterator(UniqueDecls, DeclsListNum,
@@ -3203,8 +3202,7 @@ public:
   }
   const_component_lists_iterator component_lists_end() const {
     return const_component_lists_iterator(
-        ArrayRef<const ValueDecl *>(), ArrayRef<unsigned>(),
-        ArrayRef<unsigned>(),
+        ArrayRef<ValueDecl *>(), ArrayRef<unsigned>(), ArrayRef<unsigned>(),
         MappableExprComponentListRef(getComponentsRef().end(),
                                      getComponentsRef().end()));
   }
@@ -3229,7 +3227,7 @@ public:
 
   /// Iterators to access all the declarations, number of lists, list sizes, and
   /// components.
-  typedef ArrayRef<const ValueDecl *>::iterator const_all_decls_iterator;
+  typedef ArrayRef<ValueDecl *>::iterator const_all_decls_iterator;
   typedef llvm::iterator_range<const_all_decls_iterator> const_all_decls_range;
   const_all_decls_range all_decls() const {
     auto A = getUniqueDeclsRef();

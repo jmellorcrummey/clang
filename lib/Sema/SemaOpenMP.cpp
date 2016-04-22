@@ -340,12 +340,12 @@ public:
   Scope *getCurScope() { return Stack.back().CurScope; }
   SourceLocation getConstructLoc() { return Stack.back().ConstructLoc; }
 
-  // Do the check specified in MappableExprComponentListCheck and return true if
-  // any issue is found.
-  template <class MappableExprComponentListCheck>
-  bool
-  checkMappableExprComponentListsForDecl(ValueDecl *VD, bool CurrentRegionOnly,
-                                         MappableExprComponentListCheck Check) {
+  // Do the check specified in \a Check to all component lists and return true
+  // if any issue is found.
+  bool checkMappableExprComponentListsForDecl(
+      ValueDecl *VD, bool CurrentRegionOnly,
+      const llvm::function_ref<bool(
+          OMPClauseMappableExprCommon::MappableExprComponentListRef)> &Check) {
     auto SI = Stack.rbegin();
     auto SE = Stack.rend();
 
@@ -1656,12 +1656,11 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
     QualType CopyFnType = Context.getFunctionType(Context.VoidTy, Args, EPI);
     Sema::CapturedParamNameType Params[] = {
         std::make_pair(".global_tid.", KmpInt32Ty),
-        std::make_pair(".part_id.", KmpInt32Ty),
-        std::make_pair(".privates.",
-                       Context.VoidPtrTy.withConst().withRestrict()),
-        std::make_pair(
-            ".copy_fn.",
-            Context.getPointerType(CopyFnType).withConst().withRestrict()),
+        std::make_pair(".part_id.", Context.getPointerType(KmpInt32Ty)),
+        std::make_pair(".privates.", Context.VoidPtrTy.withConst()),
+        std::make_pair(".copy_fn.",
+                       Context.getPointerType(CopyFnType).withConst()),
+        std::make_pair(".task_t.", Context.VoidPtrTy.withConst()),
         std::make_pair(StringRef(), QualType()) // __context with shared vars
     };
     ActOnCapturedRegionStart(DSAStack->getConstructLoc(), CurScope, CR_OpenMP,
@@ -9749,7 +9748,8 @@ static Expr *CheckMapClauseExpressionBase(
       AllowWholeSizeArraySection = false;
 
       // Record the component.
-      CurComponents.push_back({CurE, CurE->getDecl()});
+      CurComponents.push_back(OMPClauseMappableExprCommon::MappableComponent(
+          CurE, CurE->getDecl()));
       continue;
     }
 
@@ -9806,7 +9806,8 @@ static Expr *CheckMapClauseExpressionBase(
       AllowWholeSizeArraySection = false;
 
       // Record the component.
-      CurComponents.push_back({CurE, FD});
+      CurComponents.push_back(
+          OMPClauseMappableExprCommon::MappableComponent(CurE, FD));
       continue;
     }
 
@@ -9827,7 +9828,8 @@ static Expr *CheckMapClauseExpressionBase(
         AllowWholeSizeArraySection = false;
 
       // Record the component - we don't have any declaration associated.
-      CurComponents.push_back({CurE, nullptr});
+      CurComponents.push_back(
+          OMPClauseMappableExprCommon::MappableComponent(CurE, nullptr));
       continue;
     }
 
@@ -9875,7 +9877,8 @@ static Expr *CheckMapClauseExpressionBase(
       }
 
       // Record the component - we don't have any declaration associated.
-      CurComponents.push_back({CurE, nullptr});
+      CurComponents.push_back(
+          OMPClauseMappableExprCommon::MappableComponent(CurE, nullptr));
       continue;
     }
 
