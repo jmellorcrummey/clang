@@ -923,11 +923,20 @@ void CodeGenFunction::EmitOMPCancelBarrier(SourceLocation L, unsigned Flags,
 void CodeGenFunction::EmitOMPDirectiveWithParallel(OpenMPDirectiveKind DKind,
     ArrayRef<OpenMPDirectiveKind> SKinds, const OMPExecutableDirective &S) {
 
-  if (CGM.getOpenMPRuntime().requiresMicroTaskForParallel())
-    EmitOMPDirectiveWithParallelMicrotask(DKind, SKinds, S);
-  else
-    EmitOMPDirectiveWithParallelNoMicrotask(DKind, SKinds, S);
+  bool IsNvptxTarget =
+      CGM.getLangOpts().OpenMPTargetMode &&
+      (CGM.getTarget().getTriple().getArch() == llvm::Triple::nvptx ||
+       CGM.getTarget().getTriple().getArch() == llvm::Triple::nvptx64);
 
+  if (IsNvptxTarget && this.onlyParallelOmpNodes){
+    // This handles the parallel node.
+    CGM.getOpenMPRuntime().ParallelOpenMPNode(*this, DKind, S);
+  } else {
+    if (CGM.getOpenMPRuntime().requiresMicroTaskForParallel())
+      EmitOMPDirectiveWithParallelMicrotask(DKind, SKinds, S);
+    else
+      EmitOMPDirectiveWithParallelNoMicrotask(DKind, SKinds, S);
+  }
 }
 
 void CodeGenFunction::EmitOMPDirectiveWithParallelNoMicrotask(
