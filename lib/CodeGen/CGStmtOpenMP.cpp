@@ -2620,7 +2620,7 @@ void CodeGenFunction::EmitOMPDistributeLoop(const OMPDistributeDirective &S) {
       }
       EmitOMPPrivateClause(S, LoopScope);
       EmitOMPPrivateLoopCounters(S, LoopScope);
-      emitPrivateLinearVars(*this, S, LoopScope);
+      EmitOMPLinearClause(S, LoopScope);
       (void)LoopScope.Privatize();
 
       // Detect the distribute schedule kind and chunk.
