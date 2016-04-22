@@ -1941,6 +1941,23 @@ where clause is one of the following:
   }];
 }
 
+def OMPDeclareTargetDocs : Documentation {
+  let Category = DocCatFunction;
+  let Heading = "#pragma omp declare target";
+  let Content = [{
+The `declare target` directive specifies that variables and functions are mapped
+to a device for OpenMP offload mechanism.
+
+The syntax of the declare target directive is as follows:
+
+  .. code-block:: c
+
+  #pragma omp declare target new-line
+  declarations-definition-seq
+  #pragma omp end declare target new-line
+  }];
+}
+
 def NotTailCalledDocs : Documentation {
   let Category = DocCatFunction;
   let Content = [{
@@ -2339,5 +2356,18 @@ emitting the warning; the second one enables the compiler to provide a Fix-It
 to replace the deprecated name with a new name. Otherwise, when spelled as
 `[[gnu::deprecated]] or [[deprecated]]`, the attribute can have one optional
 string argument which is the message to display when emitting the warning.
+  }];
+}
+
+def IFuncDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+``__attribute__((ifunc("resolver")))`` is used to mark that the address of a declaration should be resolved at runtime by calling a resolver function.
+
+The symbol name of the resolver function is given in quotes.  A function with this name (after mangling) must be defined in the current translation unit; it may be ``static``.  The resolver function should take no arguments and return a pointer.
+
+The ``ifunc`` attribute may only be used on a function declaration.  A function declaration with an ``ifunc`` attribute is considered to be a definition of the declared entity.  The entity must not have weak linkage; for example, in C++, it cannot be applied to a declaration if a definition at that location would be considered inline.
+
+Not all targets support this attribute.  ELF targets support this attribute when using binutils v2.20.1 or higher and glibc v2.11.1 or higher.  Non-ELF targets currently do not support this attribute.
   }];
 }

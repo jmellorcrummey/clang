@@ -2362,6 +2362,7 @@ void CodeGenFunction::EmitOMPTaskDirective(const OMPTaskDirective &S) {
   auto CapturedStruct = GenerateCapturedStmtArgument(*CS);
   auto *I = CS->getCapturedDecl()->param_begin();
   auto *PartId = std::next(I);
+  auto *TaskT = std::next(I, 4);
   // The first function argument for tasks is a thread id, the second one is a
   // part id (0 for tied tasks, >=0 for untied task).
   llvm::DenseSet<const VarDecl *> EmittedAsPrivate;
@@ -2406,53 +2407,52 @@ void CodeGenFunction::EmitOMPTaskDirective(const OMPTaskDirective &S) {
       Dependences.push_back(std::make_pair(C->getDependencyKind(), IRef));
     }
   }
-  auto &&CodeGen = [PartId, &S, &PrivateVars, &FirstprivateVars](
-      CodeGenFunction &CGF, PrePostActionTy &) {
+  auto &&CodeGen = [&S, &PrivateVars, &FirstprivateVars](
+      CodeGenFunction &CGF, PrePostActionTy &Action) {
+    OMPPrivateScope Scope(CGF);
     // Set proper addresses for generated private copies.
     auto *CS = cast<CapturedStmt>(S.getAssociatedStmt());
-    {
-      OMPPrivateScope Scope(CGF);
-      if (!PrivateVars.empty() || !FirstprivateVars.empty()) {
-        auto *CopyFn = CGF.Builder.CreateLoad(
-            CGF.GetAddrOfLocalVar(CS->getCapturedDecl()->getParam(3)));
-        auto *PrivatesPtr = CGF.Builder.CreateLoad(
-            CGF.GetAddrOfLocalVar(CS->getCapturedDecl()->getParam(2)));
-        // Map privates.
-        llvm::SmallVector<std::pair<const VarDecl *, Address>, 16> PrivatePtrs;
-        llvm::SmallVector<llvm::Value *, 16> CallArgs;
-        CallArgs.push_back(PrivatesPtr);
-        for (auto *E : PrivateVars) {
-          auto *VD = cast<VarDecl>(cast<DeclRefExpr>(E)->getDecl());
-          Address PrivatePtr =
-              CGF.CreateMemTemp(CGF.getContext().getPointerType(E->getType()));
-          PrivatePtrs.push_back(std::make_pair(VD, PrivatePtr));
-          CallArgs.push_back(PrivatePtr.getPointer());
-        }
-        for (auto *E : FirstprivateVars) {
-          auto *VD = cast<VarDecl>(cast<DeclRefExpr>(E)->getDecl());
-          Address PrivatePtr =
-              CGF.CreateMemTemp(CGF.getContext().getPointerType(E->getType()));
-          PrivatePtrs.push_back(std::make_pair(VD, PrivatePtr));
-          CallArgs.push_back(PrivatePtr.getPointer());
-        }
-        CGF.EmitRuntimeCall(CopyFn, CallArgs);
-        for (auto &&Pair : PrivatePtrs) {
-          Address Replacement(CGF.Builder.CreateLoad(Pair.second),
-                              CGF.getContext().getDeclAlign(Pair.first));
-          Scope.addPrivate(Pair.first, [Replacement]() { return Replacement; });
-        }
+    if (!PrivateVars.empty() || !FirstprivateVars.empty()) {
+      auto *CopyFn = CGF.Builder.CreateLoad(
+          CGF.GetAddrOfLocalVar(CS->getCapturedDecl()->getParam(3)));
+      auto *PrivatesPtr = CGF.Builder.CreateLoad(
+          CGF.GetAddrOfLocalVar(CS->getCapturedDecl()->getParam(2)));
+      // Map privates.
+      llvm::SmallVector<std::pair<const VarDecl *, Address>, 16> PrivatePtrs;
+      llvm::SmallVector<llvm::Value *, 16> CallArgs;
+      CallArgs.push_back(PrivatesPtr);
+      for (auto *E : PrivateVars) {
+        auto *VD = cast<VarDecl>(cast<DeclRefExpr>(E)->getDecl());
+        Address PrivatePtr = CGF.CreateMemTemp(
+            CGF.getContext().getPointerType(E->getType()), ".priv.ptr.addr");
+        PrivatePtrs.push_back(std::make_pair(VD, PrivatePtr));
+        CallArgs.push_back(PrivatePtr.getPointer());
       }
-      (void)Scope.Privatize();
-      if (*PartId) {
-        // TODO: emit code for untied tasks.
+      for (auto *E : FirstprivateVars) {
+        auto *VD = cast<VarDecl>(cast<DeclRefExpr>(E)->getDecl());
+        Address PrivatePtr =
+            CGF.CreateMemTemp(CGF.getContext().getPointerType(E->getType()),
+                              ".firstpriv.ptr.addr");
+        PrivatePtrs.push_back(std::make_pair(VD, PrivatePtr));
+        CallArgs.push_back(PrivatePtr.getPointer());
       }
-      CGF.EmitStmt(CS->getCapturedStmt());
+      CGF.EmitRuntimeCall(CopyFn, CallArgs);
+      for (auto &&Pair : PrivatePtrs) {
+        Address Replacement(CGF.Builder.CreateLoad(Pair.second),
+                            CGF.getContext().getDeclAlign(Pair.first));
+        Scope.addPrivate(Pair.first, [Replacement]() { return Replacement; });
+      }
     }
+    (void)Scope.Privatize();
+
+    Action.Enter(CGF);
+    CGF.EmitStmt(CS->getCapturedStmt());
   };
-  auto OutlinedFn = CGM.getOpenMPRuntime().emitTaskOutlinedFunction(
-      S, *I, OMPD_task, CodeGen);
   // Check if we should emit tied or untied task.
   bool Tied = !S.getSingleClause<OMPUntiedClause>();
+  unsigned NumberOfParts;
+  auto OutlinedFn = CGM.getOpenMPRuntime().emitTaskOutlinedFunction(
+      S, *I, *PartId, *TaskT, OMPD_task, CodeGen, Tied, NumberOfParts);
   // Check if the task is final
   llvm::PointerIntPair<llvm::Value *, 1, bool> Final;
   if (const auto *Clause = S.getSingleClause<OMPFinalClause>()) {
@@ -2479,9 +2479,9 @@ void CodeGenFunction::EmitOMPTaskDirective(const OMPTaskDirective &S) {
   }
   OMPLexicalScope Scope(*this, S);
   CGM.getOpenMPRuntime().emitTaskCall(
-      *this, S.getLocStart(), S, Tied, Final, OutlinedFn, SharedsTy,
-      CapturedStruct, IfCond, PrivateVars, PrivateCopies, FirstprivateVars,
-      FirstprivateCopies, FirstprivateInits, Dependences);
+      *this, S.getLocStart(), S, Tied, Final, NumberOfParts, OutlinedFn,
+      SharedsTy, CapturedStruct, IfCond, PrivateVars, PrivateCopies,
+      FirstprivateVars, FirstprivateCopies, FirstprivateInits, Dependences);
 }
 
 void CodeGenFunction::EmitOMPTaskyieldDirective(
@@ -2730,8 +2730,9 @@ static void emitSimpleAtomicStore(CodeGenFunction &CGF, bool IsSeqCst,
   if (LVal.isGlobalReg()) {
     CGF.EmitStoreThroughGlobalRegLValue(RVal, LVal);
   } else {
-    CGF.EmitAtomicStore(RVal, LVal, IsSeqCst ? llvm::SequentiallyConsistent
-                                             : llvm::Monotonic,
+    CGF.EmitAtomicStore(RVal, LVal,
+                        IsSeqCst ? llvm::AtomicOrdering::SequentiallyConsistent
+                                 : llvm::AtomicOrdering::Monotonic,
                         LVal.isVolatile(), /*IsInit=*/false);
   }
 }
@@ -2764,10 +2765,11 @@ static void EmitOMPAtomicReadExpr(CodeGenFunction &CGF, bool IsSeqCst,
   LValue VLValue = CGF.EmitLValue(V);
   RValue Res = XLValue.isGlobalReg()
                    ? CGF.EmitLoadOfLValue(XLValue, Loc)
-                   : CGF.EmitAtomicLoad(XLValue, Loc,
-                                        IsSeqCst ? llvm::SequentiallyConsistent
-                                                 : llvm::Monotonic,
-                                        XLValue.isVolatile());
+                   : CGF.EmitAtomicLoad(
+                         XLValue, Loc,
+                         IsSeqCst ? llvm::AtomicOrdering::SequentiallyConsistent
+                                  : llvm::AtomicOrdering::Monotonic,
+                         XLValue.isVolatile());
   // OpenMP, 2.12.6, atomic Construct
   // Any atomic construct with a seq_cst clause forces the atomically
   // performed operation to include an implicit flush operation without a
@@ -2923,7 +2925,8 @@ static void EmitOMPAtomicUpdateExpr(CodeGenFunction &CGF, bool IsSeqCst,
   assert(X->isLValue() && "X of 'omp atomic update' is not lvalue");
   LValue XLValue = CGF.EmitLValue(X);
   RValue ExprRValue = CGF.EmitAnyExpr(E);
-  auto AO = IsSeqCst ? llvm::SequentiallyConsistent : llvm::Monotonic;
+  auto AO = IsSeqCst ? llvm::AtomicOrdering::SequentiallyConsistent
+                     : llvm::AtomicOrdering::Monotonic;
   auto *LHS = cast<OpaqueValueExpr>(BOUE->getLHS()->IgnoreImpCasts());
   auto *RHS = cast<OpaqueValueExpr>(BOUE->getRHS()->IgnoreImpCasts());
   auto *XRValExpr = IsXLHSInRHSPart ? LHS : RHS;
@@ -2972,7 +2975,8 @@ static void EmitOMPAtomicCaptureExpr(CodeGenFunction &CGF, bool IsSeqCst,
   LValue VLValue = CGF.EmitLValue(V);
   LValue XLValue = CGF.EmitLValue(X);
   RValue ExprRValue = CGF.EmitAnyExpr(E);
-  auto AO = IsSeqCst ? llvm::SequentiallyConsistent : llvm::Monotonic;
+  auto AO = IsSeqCst ? llvm::AtomicOrdering::SequentiallyConsistent
+                     : llvm::AtomicOrdering::Monotonic;
   QualType NewVValType;
   if (UE) {
     // 'x' is updated with some additional value.
@@ -3100,6 +3104,7 @@ static void EmitOMPAtomicExpr(CodeGenFunction &CGF, OpenMPClauseKind Kind,
   case OMPC_hint:
   case OMPC_dist_schedule:
   case OMPC_defaultmap:
+  case OMPC_uniform:
     llvm_unreachable("Clause is not allowed in 'omp atomic'.");
   }
 }
@@ -3388,4 +3393,3 @@ void CodeGenFunction::EmitOMPTaskLoopSimdDirective(
             cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
       });
 }
-
