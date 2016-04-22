@@ -4276,13 +4276,6 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
     // Implement a new for loop.
     CGBuilderTy &Builder = CGF.Builder;
 
-    if (CGF.kparent > 0){
-      // Increment the nesting level
-      Builder.CreateStore(
-          Builder.CreateAdd(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
-          ParallelNesting);
-    }
-
     // Close the previous OpenMP region and synchronize threads
     Builder.CreateBr(CGF.EndOpenMPRegion);
 
@@ -4302,7 +4295,6 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
     // Start populating the basic blocks which perform the init, cond and inc
     // of the combined construct for loop.
     Builder.CreateBr(StartCombinedFor);
-    printf("   =====> Start Loop Component Generation (Level = %d)\n", CGF.k);
 
     llvm::BasicBlock *CondCombinedFor = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".cond."+levelRegion+".for", CGF.CurFn);
@@ -4340,6 +4332,15 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
     // of the combined construct for loop.
     //Builder.CreateBr(StartCombinedFor);
     Builder.SetInsertPoint(StartCombinedFor);
+
+    if (CGF.kparent > 0){
+      // Increment the nesting level
+      printf("Increment nesting level\n");
+      Builder.CreateStore(
+          Builder.CreateAdd(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
+          ParallelNesting);
+    }
+    printf("   =====> Start Loop Component Generation (Level = %d)\n", CGF.k);
 
     // Start Generating Loop Nest Components
     Expr *IterVar = nullptr;
@@ -4576,7 +4577,14 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
       // Sync all threads
       Builder.SetInsertPoint(CGF.EndOpenMPRegion);
       Builder.CreateCall(Get_syncthreads(), {});
-      printf("   =====> End OpenMP Region %d\n", CGF.regionID);
+      printf("   =====> End OpenMP Region %d\n", CGF.regionID - 1);
+    }
+
+    if (CGF.kparent > 0){
+      // Decrement the nesting level
+      Builder.CreateStore(
+          Builder.CreateSub(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
+          ParallelNesting);
     }
 
     // Save new end region block.
@@ -4590,13 +4598,6 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
     Builder.CreateCondBr(isNotExecutingOpenMPRegion, CGF.EndOpenMPRegion, StartOpenMPRegion);
     Builder.SetInsertPoint(StartOpenMPRegion);
     printf("   =====> Start OpenMP Region %d\n", CGF.regionID);
-
-    if (CGF.kparent > 0){
-      // Decrement the nesting level
-      Builder.CreateStore(
-          Builder.CreateSub(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
-          ParallelNesting);
-    }
   }
 
   // Enter preamble region to the loop nest resolution.
