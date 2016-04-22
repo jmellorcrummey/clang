@@ -4294,9 +4294,11 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
     // Connect previous region with the current OpenMP parallel loop.
     Builder.SetInsertPoint(CGF.EndOpenMPRegion);
     Builder.CreateCall(Get_syncthreads(), {});
+    printf("   =====> End OpenMP Region %d\n", CGF.regionID);
     // Start populating the basic blocks which perform the init, cond and inc
     // of the combined construct for loop.
     Builder.CreateBr(StartCombinedFor);
+    printf("   =====> Start Loop Component Generation (Level = %d)\n", CGF.k);
 
     llvm::BasicBlock *CondCombinedFor = llvm::BasicBlock::Create(
         CGF.CGM.getLLVMContext(), ".cond."+levelRegion+".for", CGF.CurFn);
@@ -4519,6 +4521,7 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
         CGF.CombinedOuterLoopIndex = Private;
         CodeGenFunction::RunCleanupsScope BodyScope(CGF);
 
+        printf("   =====> End Loop Component Generation (Level = %d)\n", CGF.k);
         if (isNonTerminalOpenMPNode){
           // Only allow parallel unit masters to run the region
           // between loops.
@@ -4527,6 +4530,7 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
                                    Builder.getInt32(0));
           Builder.CreateCondBr(isNotExecutingOpenMPRegion, CGF.EndOpenMPRegion, StartOpenMPRegion);
           Builder.SetInsertPoint(StartOpenMPRegion);
+          printf("   =====> Start OpenMP Region %d\n", CGF.regionID);
         }
 
         printf(" In Combined Nest region: Emit Body\n");
@@ -4568,6 +4572,7 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
       // Sync all threads
       Builder.SetInsertPoint(CGF.EndOpenMPRegion);
       Builder.CreateCall(Get_syncthreads(), {});
+      printf("   =====> End OpenMP Region %d\n", CGF.regionID);
     }
 
     // Save new end region block.
@@ -4580,6 +4585,7 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
                              Builder.getInt32(0));
     Builder.CreateCondBr(isNotExecutingOpenMPRegion, CGF.EndOpenMPRegion, StartOpenMPRegion);
     Builder.SetInsertPoint(StartOpenMPRegion);
+    printf("   =====> Start OpenMP Region %d\n", CGF.regionID);
 
     if (CGF.kparent > 0){
       // Decrement the nesting level
@@ -4741,8 +4747,14 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
        CGF.CGM.getLLVMContext(), ".start.omp.region."+std::to_string(CGF.regionID), CGF.CurFn);
     CGF.EndOpenMPRegion = llvm::BasicBlock::Create(
        CGF.CGM.getLLVMContext(), ".end.omp.region."+std::to_string(CGF.regionID), CGF.CurFn);
-    Bld.CreateBr(StartOpenMPRegion);
+
+    llvm::Value *isNotExecutingOpenMPRegion =
+        Builder.CreateICmpNE(Builder.CreateLoad(CGF.Tid[0]),
+                             Builder.getInt32(0));
+    Builder.CreateCondBr(isNotExecutingOpenMPRegion, CGF.EndOpenMPRegion, StartOpenMPRegion);
+    //Bld.CreateBr(StartOpenMPRegion);
     Bld.SetInsertPoint(StartOpenMPRegion);
+    printf("   =====> Start OpeMP Region %d\n", CGF.regionID);
 
     CGF.kparent = 0;
     switch (SKind) {
@@ -4767,12 +4779,13 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
         break;
     }
 
-    if (CGF.regionID > 0){
-      // Close the previous OpenMP region and synchronize threads
-      Bld.CreateBr(CGF.EndOpenMPRegion);
-      Bld.SetInsertPoint(CGF.EndOpenMPRegion);
-      Bld.CreateCall(Get_syncthreads(), {});
-    }
+    //if (CGF.regionID > 0){
+    // Close the previous OpenMP region and synchronize threads
+    Bld.CreateBr(CGF.EndOpenMPRegion);
+    Bld.SetInsertPoint(CGF.EndOpenMPRegion);
+    Bld.CreateCall(Get_syncthreads(), {});
+    //}
+    printf("   =====> End OpeMP Region %d\n", CGF.regionID);
     
     Bld.CreateBr(EndTarget);
     Bld.SetInsertPoint(EndTarget);
