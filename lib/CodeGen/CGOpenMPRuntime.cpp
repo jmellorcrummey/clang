@@ -4227,8 +4227,13 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
                           OpenMPDirectiveKind DKind,
                           const OMPExecutableDirective &S) {
 
+    CGBuilderTy &Builder = CGF.Builder;
+
     //Push parallel region on stack
     OMPRegionTypesStack.push_back(OMP_Parallel);
+    Builder.CreateStore(
+          Builder.CreateAdd(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
+          ParallelNesting);
     PushNewParallelRegion(true);
 
     int prev_k = CGF.k;
@@ -4259,6 +4264,10 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
     assert((OMPRegionTypesStack.back() == OMP_Parallel) &&
             "Exiting a parallel region does not match stack state");
     OMPRegionTypesStack.pop_back();
+
+    Builder.CreateStore(
+          Builder.CreateSub(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
+          ParallelNesting);
 
     // we need to inspect the previous layer to understand what type
     // of end we need
@@ -4333,13 +4342,13 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
     //Builder.CreateBr(StartCombinedFor);
     Builder.SetInsertPoint(StartCombinedFor);
 
-    if (CGF.kparent > 0){
-      // Increment the nesting level
-      printf("Increment nesting level\n");
-      Builder.CreateStore(
-          Builder.CreateAdd(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
-          ParallelNesting);
-    }
+    // if (CGF.kparent > 0){
+    //   // Increment the nesting level
+    //   printf("Increment nesting level\n");
+    //   Builder.CreateStore(
+    //       Builder.CreateAdd(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
+    //       ParallelNesting);
+    // }
     printf("   =====> Start Loop Component Generation (Level = %d)\n", CGF.k);
 
     // Start Generating Loop Nest Components
@@ -4580,12 +4589,12 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
       printf("   =====> End OpenMP Region %d\n", CGF.regionID - 1);
     }
 
-    if (CGF.kparent > 0){
-      // Decrement the nesting level
-      Builder.CreateStore(
-          Builder.CreateSub(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
-          ParallelNesting);
-    }
+    // if (CGF.kparent > 0){
+    //   // Decrement the nesting level
+    //   Builder.CreateStore(
+    //       Builder.CreateSub(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
+    //       ParallelNesting);
+    // }
 
     // Save new end region block.
     CGF.EndOpenMPRegion = endOpenMPRegion;
