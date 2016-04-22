@@ -546,6 +546,7 @@ unsigned OMPClauseMappableExprCommon::getUniqueDeclarationsTotalNumber(
     if (Cache.count(D))
       continue;
     ++TotalNum;
+    Cache.insert(D);
   }
   return TotalNum;
 }

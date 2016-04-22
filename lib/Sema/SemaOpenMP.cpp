@@ -340,12 +340,12 @@ public:
   Scope *getCurScope() { return Stack.back().CurScope; }
   SourceLocation getConstructLoc() { return Stack.back().ConstructLoc; }
 
-  // Do the check specified in MappableExprComponentListCheck and return true if
-  // any issue is found.
-  template <class MappableExprComponentListCheck>
-  bool
-  checkMappableExprComponentListsForDecl(ValueDecl *VD, bool CurrentRegionOnly,
-                                         MappableExprComponentListCheck Check) {
+  // Do the check specified in \a Check to all component lists and return true
+  // if any issue is found.
+  bool checkMappableExprComponentListsForDecl(
+      ValueDecl *VD, bool CurrentRegionOnly,
+      const llvm::function_ref<bool(
+          OMPClauseMappableExprCommon::MappableExprComponentListRef)> &Check) {
     auto SI = Stack.rbegin();
     auto SE = Stack.rend();
 
@@ -9708,7 +9708,8 @@ static Expr *CheckMapClauseExpressionBase(
       AllowWholeSizeArraySection = false;
 
       // Record the component.
-      CurComponents.push_back({CurE, CurE->getDecl()});
+      CurComponents.push_back(OMPClauseMappableExprCommon::MappableComponent(
+          CurE, CurE->getDecl()));
       continue;
     }
 
@@ -9765,7 +9766,8 @@ static Expr *CheckMapClauseExpressionBase(
       AllowWholeSizeArraySection = false;
 
       // Record the component.
-      CurComponents.push_back({CurE, FD});
+      CurComponents.push_back(
+          OMPClauseMappableExprCommon::MappableComponent(CurE, FD));
       continue;
     }
 
@@ -9786,7 +9788,8 @@ static Expr *CheckMapClauseExpressionBase(
         AllowWholeSizeArraySection = false;
 
       // Record the component - we don't have any declaration associated.
-      CurComponents.push_back({CurE, nullptr});
+      CurComponents.push_back(
+          OMPClauseMappableExprCommon::MappableComponent(CurE, nullptr));
       continue;
     }
 
@@ -9834,7 +9837,8 @@ static Expr *CheckMapClauseExpressionBase(
       }
 
       // Record the component - we don't have any declaration associated.
-      CurComponents.push_back({CurE, nullptr});
+      CurComponents.push_back(
+          OMPClauseMappableExprCommon::MappableComponent(CurE, nullptr));
       continue;
     }
 

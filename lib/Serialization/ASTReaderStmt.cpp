@@ -1868,7 +1868,8 @@ OMPClause *OMPClauseReader::readClause() {
     unsigned NumComponents = Record[Idx++];
     C = OMPMapClause::CreateEmpty(Context, NumVars, NumDeclarations, NumLists,
                                   NumComponents);
-  } break;
+    break;
+  }
   case OMPC_num_teams:
     C = new (Context) OMPNumTeamsClause();
     break;
