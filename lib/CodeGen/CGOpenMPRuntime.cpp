@@ -1475,6 +1475,10 @@ void CGOpenMPRuntime::EnterParallelRegionInTarget(
     CodeGenFunction &CGF, OpenMPDirectiveKind DKind,
     ArrayRef<OpenMPDirectiveKind> SKinds, const OMPExecutableDirective &S) {}
 
+void CGOpenMPRuntime::ParallelOpenMPNode(CodeGenFunction &CGF,
+                                         OpenMPDirectiveKind DKind,
+                                         const OMPExecutableDirective &S) {}
+
 void CGOpenMPRuntime::ExitParallelRegionInTarget(CodeGenFunction &CGF) {}
 
 void CGOpenMPRuntime::SupportCritical (const OMPCriticalDirective &S,
@@ -4749,9 +4753,9 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
        CGF.CGM.getLLVMContext(), ".end.omp.region."+std::to_string(CGF.regionID), CGF.CurFn);
 
     llvm::Value *isNotExecutingOpenMPRegion =
-        Builder.CreateICmpNE(Builder.CreateLoad(CGF.Tid[0]),
-                             Builder.getInt32(0));
-    Builder.CreateCondBr(isNotExecutingOpenMPRegion, CGF.EndOpenMPRegion, StartOpenMPRegion);
+        Bld.CreateICmpNE(Bld.CreateLoad(CGF.Tid[0]),
+                         Bld.getInt32(0));
+    Bld.CreateCondBr(isNotExecutingOpenMPRegion, CGF.EndOpenMPRegion, StartOpenMPRegion);
     //Bld.CreateBr(StartOpenMPRegion);
     Bld.SetInsertPoint(StartOpenMPRegion);
     printf("   =====> Start OpeMP Region %d\n", CGF.regionID);

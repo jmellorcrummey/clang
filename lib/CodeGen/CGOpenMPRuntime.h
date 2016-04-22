@@ -700,6 +700,10 @@ public:
                                            ArrayRef<OpenMPDirectiveKind> SKinds,
                                            const OMPExecutableDirective &S);
 
+  virtual void ParallelOpenMPNode(CodeGenFunction &CGF,
+                                  OpenMPDirectiveKind DKind,
+                                  const OMPExecutableDirective &S);
+
   virtual void ExitParallelRegionInTarget(CodeGenFunction &CGF);
 
   virtual void SupportCritical (const OMPCriticalDirective &S,

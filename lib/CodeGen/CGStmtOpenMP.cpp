@@ -928,7 +928,7 @@ void CodeGenFunction::EmitOMPDirectiveWithParallel(OpenMPDirectiveKind DKind,
       (CGM.getTarget().getTriple().getArch() == llvm::Triple::nvptx ||
        CGM.getTarget().getTriple().getArch() == llvm::Triple::nvptx64);
 
-  if (IsNvptxTarget && this.onlyParallelOmpNodes){
+  if (IsNvptxTarget && this->onlyParallelOmpNodes){
     // This handles the parallel node.
     CGM.getOpenMPRuntime().ParallelOpenMPNode(*this, DKind, S);
   } else {
