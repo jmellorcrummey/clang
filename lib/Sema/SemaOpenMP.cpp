@@ -1144,9 +1144,9 @@ void Sema::EndOpenMPDSABlock(Stmt *CurDirective) {
   PopExpressionEvaluationContext();
 }
 
-static bool
-FinishOpenMPLinearClause(OMPLinearClause &Clause, DeclRefExpr *IV,
-                         Expr *NumIterations, Sema &SemaRef, Scope *S);
+static bool FinishOpenMPLinearClause(OMPLinearClause &Clause, DeclRefExpr *IV,
+                                     Expr *NumIterations, Sema &SemaRef,
+                                     Scope *S, DSAStackTy *Stack);
 
 namespace {
 
@@ -3639,8 +3639,8 @@ public:
   Expr *BuildPreCond(Scope *S, Expr *Cond,
                      llvm::MapVector<Expr *, DeclRefExpr *> &Captures) const;
   /// \brief Build reference expression to the counter be used for codegen.
-  DeclRefExpr *
-  BuildCounterVar(llvm::MapVector<Expr *, DeclRefExpr *> &Captures) const;
+  DeclRefExpr *BuildCounterVar(llvm::MapVector<Expr *, DeclRefExpr *> &Captures,
+                               DSAStackTy &DSA) const;
   /// \brief Build reference expression to the private counter be used for
   /// codegen.
   Expr *BuildPrivateCounterVar() const;
@@ -4179,13 +4179,17 @@ Expr *OpenMPIterationSpaceChecker::BuildPreCond(
 
 /// \brief Build reference expression to the counter be used for codegen.
 DeclRefExpr *OpenMPIterationSpaceChecker::BuildCounterVar(
-    llvm::MapVector<Expr *, DeclRefExpr *> &Captures) const {
+    llvm::MapVector<Expr *, DeclRefExpr *> &Captures, DSAStackTy &DSA) const {
   auto *VD = dyn_cast<VarDecl>(LCDecl);
   if (!VD) {
     VD = SemaRef.IsOpenMPCapturedDecl(LCDecl);
     auto *Ref = buildDeclRefExpr(
         SemaRef, VD, VD->getType().getNonReferenceType(), DefaultLoc);
-    Captures.insert(std::make_pair(LCRef, Ref));
+    DSAStackTy::DSAVarData Data = DSA.getTopDSA(LCDecl, /*FromParent=*/false);
+    // If the loop control decl is explicitly marked as private, do not mark it
+    // as captured again.
+    if (!isOpenMPPrivate(Data.CKind) || !Data.RefExpr)
+      Captures.insert(std::make_pair(LCRef, Ref));
     return Ref;
   }
   return buildDeclRefExpr(SemaRef, VD, VD->getType().getNonReferenceType(),
@@ -4399,7 +4403,7 @@ static bool CheckOpenMPIterationSpace(
       (isOpenMPWorksharingDirective(DKind) ||
        isOpenMPTaskLoopDirective(DKind) || isOpenMPDistributeDirective(DKind)),
       Captures);
-  ResultIterSpace.CounterVar = ISC.BuildCounterVar(Captures);
+  ResultIterSpace.CounterVar = ISC.BuildCounterVar(Captures, DSA);
   ResultIterSpace.PrivateCounterVar = ISC.BuildPrivateCounterVar();
   ResultIterSpace.CounterInit = ISC.BuildCounterInit();
   ResultIterSpace.CounterStep = ISC.BuildCounterStep();
@@ -4923,10 +4927,10 @@ CheckOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
       }
 
       // Build update: IS.CounterVar(Private) = IS.Start + Iter * IS.Step
-      auto *CounterVar = buildDeclRefExpr(
-          SemaRef, cast<VarDecl>(cast<DeclRefExpr>(IS.CounterVar)->getDecl()),
-          IS.CounterVar->getType(), IS.CounterVar->getExprLoc(),
-          /*RefersToCapture=*/true);
+      auto *VD = cast<VarDecl>(cast<DeclRefExpr>(IS.CounterVar)->getDecl());
+      auto *CounterVar = buildDeclRefExpr(SemaRef, VD, IS.CounterVar->getType(),
+                                          IS.CounterVar->getExprLoc(),
+                                          /*RefersToCapture=*/true);
       ExprResult Init = BuildCounterInit(SemaRef, CurScope, UpdLoc, CounterVar,
                                          IS.CounterInit, Captures);
       if (!Init.isUsable()) {
@@ -5075,7 +5079,8 @@ StmtResult Sema::ActOnOpenMPSimdDirective(
     for (auto C : Clauses) {
       if (auto LC = dyn_cast<OMPLinearClause>(C))
         if (FinishOpenMPLinearClause(*LC, cast<DeclRefExpr>(B.IterationVarRef),
-                                     B.NumIterations, *this, CurScope))
+                                     B.NumIterations, *this, CurScope,
+                                     DSAStack))
           return StmtError();
     }
   }
@@ -5128,7 +5133,8 @@ StmtResult Sema::ActOnOpenMPForDirective(
     for (auto C : Clauses) {
       if (auto LC = dyn_cast<OMPLinearClause>(C))
         if (FinishOpenMPLinearClause(*LC, cast<DeclRefExpr>(B.IterationVarRef),
-                                     B.NumIterations, *this, CurScope))
+                                     B.NumIterations, *this, CurScope,
+                                     DSAStack))
           return StmtError();
     }
   }
@@ -5164,7 +5170,8 @@ StmtResult Sema::ActOnOpenMPForSimdDirective(
     for (auto C : Clauses) {
       if (auto LC = dyn_cast<OMPLinearClause>(C))
         if (FinishOpenMPLinearClause(*LC, cast<DeclRefExpr>(B.IterationVarRef),
-                                     B.NumIterations, *this, CurScope))
+                                     B.NumIterations, *this, CurScope,
+                                     DSAStack))
           return StmtError();
     }
   }
@@ -5380,7 +5387,8 @@ StmtResult Sema::ActOnOpenMPParallelForDirective(
     for (auto C : Clauses) {
       if (auto LC = dyn_cast<OMPLinearClause>(C))
         if (FinishOpenMPLinearClause(*LC, cast<DeclRefExpr>(B.IterationVarRef),
-                                     B.NumIterations, *this, CurScope))
+                                     B.NumIterations, *this, CurScope,
+                                     DSAStack))
           return StmtError();
     }
   }
@@ -5421,7 +5429,8 @@ StmtResult Sema::ActOnOpenMPParallelForSimdDirective(
     for (auto C : Clauses) {
       if (auto LC = dyn_cast<OMPLinearClause>(C))
         if (FinishOpenMPLinearClause(*LC, cast<DeclRefExpr>(B.IterationVarRef),
-                                     B.NumIterations, *this, CurScope))
+                                     B.NumIterations, *this, CurScope,
+                                     DSAStack))
           return StmtError();
     }
   }
@@ -6393,7 +6402,8 @@ StmtResult Sema::ActOnOpenMPTargetParallelForDirective(
     for (auto C : Clauses) {
       if (auto LC = dyn_cast<OMPLinearClause>(C))
         if (FinishOpenMPLinearClause(*LC, cast<DeclRefExpr>(B.IterationVarRef),
-                                     B.NumIterations, *this, CurScope))
+                                     B.NumIterations, *this, CurScope,
+                                     DSAStack))
           return StmtError();
     }
   }
@@ -6616,7 +6626,8 @@ StmtResult Sema::ActOnOpenMPTaskLoopSimdDirective(
     for (auto C : Clauses) {
       if (auto LC = dyn_cast<OMPLinearClause>(C))
         if (FinishOpenMPLinearClause(*LC, cast<DeclRefExpr>(B.IterationVarRef),
-                                     B.NumIterations, *this, CurScope))
+                                     B.NumIterations, *this, CurScope,
+                                     DSAStack))
           return StmtError();
     }
   }
@@ -9106,9 +9117,9 @@ OMPClause *Sema::ActOnOpenMPLinearClause(
                                  buildPostUpdate(*this, ExprPostUpdates));
 }
 
-static bool
-FinishOpenMPLinearClause(OMPLinearClause &Clause, DeclRefExpr *IV,
-                         Expr *NumIterations, Sema &SemaRef, Scope *S) {
+static bool FinishOpenMPLinearClause(OMPLinearClause &Clause, DeclRefExpr *IV,
+                                     Expr *NumIterations, Sema &SemaRef,
+                                     Scope *S, DSAStackTy *Stack) {
   // Walk the vars and build update/final expressions for the CodeGen.
   SmallVector<Expr *, 8> Updates;
   SmallVector<Expr *, 8> Finals;
@@ -9126,10 +9137,27 @@ FinishOpenMPLinearClause(OMPLinearClause &Clause, DeclRefExpr *IV,
   auto CurPrivate = Clause.privates().begin();
   auto LinKind = Clause.getModifier();
   for (auto &RefExpr : Clause.varlists()) {
+    SourceLocation ELoc;
+    SourceRange ERange;
+    Expr *SimpleRefExpr = RefExpr;
+    auto Res = getPrivateItem(SemaRef, SimpleRefExpr, ELoc, ERange,
+                              /*AllowArraySection=*/false);
+    ValueDecl *D = Res.first;
+    if (Res.second || !D) {
+      Updates.push_back(nullptr);
+      Finals.push_back(nullptr);
+      HasErrors = true;
+      continue;
+    }
+    if (auto *CED = dyn_cast<OMPCapturedExprDecl>(D)) {
+      D = cast<MemberExpr>(CED->getInit()->IgnoreParenImpCasts())
+              ->getMemberDecl();
+    }
+    auto &&Info = Stack->isLoopControlVariable(D);
     Expr *InitExpr = *CurInit;
 
     // Build privatized reference to the current linear var.
-    auto DE = cast<DeclRefExpr>(RefExpr);
+    auto DE = cast<DeclRefExpr>(SimpleRefExpr);
     Expr *CapturedRef;
     if (LinKind == OMPC_LINEAR_uval)
       CapturedRef = cast<VarDecl>(DE->getDecl())->getInit();
@@ -9140,18 +9168,27 @@ FinishOpenMPLinearClause(OMPLinearClause &Clause, DeclRefExpr *IV,
                            /*RefersToCapture=*/true);
 
     // Build update: Var = InitExpr + IV * Step
-    ExprResult Update =
-        BuildCounterUpdate(SemaRef, S, RefExpr->getExprLoc(), *CurPrivate,
-                           InitExpr, IV, Step, /* Subtract */ false);
+    ExprResult Update;
+    if (!Info.first) {
+      Update =
+          BuildCounterUpdate(SemaRef, S, RefExpr->getExprLoc(), *CurPrivate,
+                             InitExpr, IV, Step, /* Subtract */ false);
+    } else
+      Update = *CurPrivate;
     Update = SemaRef.ActOnFinishFullExpr(Update.get(), DE->getLocStart(),
                                          /*DiscardedValue=*/true);
 
     // Build final: Var = InitExpr + NumIterations * Step
-    ExprResult Final =
-        BuildCounterUpdate(SemaRef, S, RefExpr->getExprLoc(), CapturedRef,
-                           InitExpr, NumIterations, Step, /* Subtract */ false);
+    ExprResult Final;
+    if (!Info.first) {
+      Final = BuildCounterUpdate(SemaRef, S, RefExpr->getExprLoc(), CapturedRef,
+                                 InitExpr, NumIterations, Step,
+                                 /* Subtract */ false);
+    } else
+      Final = *CurPrivate;
     Final = SemaRef.ActOnFinishFullExpr(Final.get(), DE->getLocStart(),
                                         /*DiscardedValue=*/true);
+
     if (!Update.isUsable() || !Final.isUsable()) {
       Updates.push_back(nullptr);
       Finals.push_back(nullptr);
