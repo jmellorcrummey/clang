@@ -930,6 +930,10 @@ void CodeGenFunction::EmitOMPDirectiveWithParallel(OpenMPDirectiveKind DKind,
 
   if (IsNvptxTarget && this->onlyParallelOmpNodes){
     // This handles the parallel node.
+    CapturedStmt *CS = cast<CapturedStmt>(S.getAssociatedStmt());
+    OpenMPRegionRAII OMPRegion(*this, S, *CS, nullptr,
+                               OpenMPRegionRAII::OMPRegionType_Shared_Parallel);
+
     CGM.getOpenMPRuntime().ParallelOpenMPNode(*this, DKind, S);
   } else {
     if (CGM.getOpenMPRuntime().requiresMicroTaskForParallel())
