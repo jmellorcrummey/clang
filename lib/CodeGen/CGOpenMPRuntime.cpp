@@ -4418,10 +4418,11 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
 
     // Setup LB
     // Tid[kparent]
+    printf("     ===> LB: CGF.k = %d, CGF.kparent = %d\n", CGF.k, CGF.kparent);
     llvm::Value *LB = Builder.CreateLoad(CGF.Tid[CGF.kparent]);
     if (isNonTerminalOpenMPNode){
       // Div(Tid[kparent], numberOfParallelUnits)
-      LB = Builder.CreateUDiv(LB, createMult(CGF, CGF.kparent, CGF.k));
+      LB = Builder.CreateUDiv(LB, createMult(CGF, CGF.k, CGF.p - 1));
     }
 
     // Init UB based on the value in the loop
