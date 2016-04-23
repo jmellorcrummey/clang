@@ -4551,6 +4551,16 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
         printf(" In Combined Nest region: Emit Body\n");
         // Emit Body
         CGF.EmitStmt(Body);
+
+        if (isNonTerminalOpenMPNode){
+          // We need to close previous region.
+          Builder.CreateBr(CGF.EndOpenMPRegion);
+
+          // Sync all threads
+          Builder.SetInsertPoint(CGF.EndOpenMPRegion);
+          Builder.CreateCall(Get_syncthreads(), {});
+          printf("   =====> End OpenMP Region %d\n", CGF.regionID);
+        }
       }
       // After Emiting the body I need to create the sync point.
       // Don't sync or anything, just go ahead computing the INC
@@ -4580,15 +4590,15 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
     // if we are on a leaf OpenMP node: we need to open a new Region
     // if not we need to close previous region and open a new one
     // with the correct thread exclusion.
-    if (isNonTerminalOpenMPNode){
-      // We need to close previous region.
-      Builder.CreateBr(CGF.EndOpenMPRegion);
+    // if (isNonTerminalOpenMPNode){
+    //   // We need to close previous region.
+    //   Builder.CreateBr(CGF.EndOpenMPRegion);
 
-      // Sync all threads
-      Builder.SetInsertPoint(CGF.EndOpenMPRegion);
-      Builder.CreateCall(Get_syncthreads(), {});
-      printf("   =====> End OpenMP Region %d\n", CGF.regionID - 1);
-    }
+    //   // Sync all threads
+    //   Builder.SetInsertPoint(CGF.EndOpenMPRegion);
+    //   Builder.CreateCall(Get_syncthreads(), {});
+    //   printf("   =====> End OpenMP Region %d\n", CGF.regionID - 1);
+    // }
 
     // if (CGF.kparent > 0){
     //   // Decrement the nesting level
