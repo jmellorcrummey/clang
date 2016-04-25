@@ -5043,12 +5043,15 @@ public:
     // correctly. Therefore, we organize all lists in a map.
     llvm::DenseMap<const ValueDecl *, SmallVector<MapInfo, 8>> Info;
     for (auto *C : Directive.getClausesOfKind<OMPMapClause>())
-      for (auto L : C->component_lists())
-        Info[L.first].push_back(
+      for (auto L : C->component_lists()) {
+        const ValueDecl *VD =
+            L.first ? cast<ValueDecl>(L.first->getCanonicalDecl()) : nullptr;
+        Info[VD].push_back(
             {L.second, C->getMapType(), C->getMapTypeModifier()});
+      }
 
     for (auto &M : Info) {
-      // We need to know when we generating information for the first component
+      // We need to know when we generate information for the first component
       // associated with a capture, because the mapping flags depend on it.
       bool IsFirstComponentList = true;
       for (MapInfo &L : M.second) {
@@ -5077,7 +5080,10 @@ public:
     Sizes.clear();
     Types.clear();
 
-    const ValueDecl *VD = Cap->capturesThis() ? nullptr : Cap->getCapturedVar();
+    const ValueDecl *VD =
+        Cap->capturesThis()
+            ? nullptr
+            : cast<ValueDecl>(Cap->getCapturedVar()->getCanonicalDecl());
 
     // We need to know when we generating information for the first component
     // associated with a capture, because the mapping flags depend on it.
