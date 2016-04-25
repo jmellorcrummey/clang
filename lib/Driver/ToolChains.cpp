@@ -4297,8 +4297,9 @@ CudaToolChain::addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
 
     std::string LibOmpTargetName = "libomptarget-nvptx.bc";
     for (std::string LibraryPath : LibraryPaths) {
-      std::string LibOmpTargetFile = LibraryPath + "/" + LibOmpTargetName;
-      if (llvm::sys::fs::exists(LibOmpTargetFile.c_str())) {
+      SmallString<128> LibOmpTargetFile(LibraryPath);
+      llvm::sys::path::append(LibOmpTargetFile, LibOmpTargetName);
+      if (llvm::sys::fs::exists(LibOmpTargetFile)) {
         CC1Args.push_back("-mlink-cuda-bitcode");
         CC1Args.push_back(DriverArgs.MakeArgString(LibOmpTargetFile));
         break;
