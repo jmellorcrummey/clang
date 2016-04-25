@@ -2797,7 +2797,10 @@ public:
     explicit MappableComponent(Expr *AssociatedExpression,
                                ValueDecl *AssociatedDeclaration)
         : AssociatedExpression(AssociatedExpression),
-          AssociatedDeclaration(AssociatedDeclaration) {}
+          AssociatedDeclaration(
+              AssociatedDeclaration
+                  ? cast<ValueDecl>(AssociatedDeclaration->getCanonicalDecl())
+                  : nullptr) {}
 
     Expr *getAssociatedExpression() const { return AssociatedExpression; }
     ValueDecl *getAssociatedDeclaration() const {
@@ -2821,7 +2824,8 @@ protected:
   static unsigned
   getComponentsTotalNumber(MappableExprComponentListsRef ComponentLists);
 
-  // \brief Return the total number of elements in a list of component lists.
+  // \brief Return the total number of elements in a list of declarations. All
+  // declarations are expected to be canonical.
   static unsigned
   getUniqueDeclarationsTotalNumber(ArrayRef<ValueDecl *> Declarations);
 };

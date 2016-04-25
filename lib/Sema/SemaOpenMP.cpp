@@ -9980,7 +9980,6 @@ static bool CheckMapConflicts(
             SemaRef.Diag(CI->getAssociatedExpression()->getExprLoc(),
                          diag::err_omp_multiple_array_items_in_map_clause)
                 << CI->getAssociatedExpression()->getSourceRange();
-            ;
             SemaRef.Diag(SI->getAssociatedExpression()->getExprLoc(),
                          diag::note_used_here)
                 << SI->getAssociatedExpression()->getSourceRange();
@@ -10025,8 +10024,7 @@ static bool CheckMapConflicts(
         // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, C++, p.1]
         //  If the type of a list item is a reference to a type T then the type
         //  will be considered to be T for all purposes of this clause.
-        if (DerivedType->isReferenceType())
-          DerivedType = DerivedType->getPointeeType();
+        DerivedType = DerivedType.getNonReferenceType();
 
         // OpenMP 4.5 [2.15.5.1, map Clause, Restrictions, C/C++, p.1]
         //  A variable for which the type is pointer and an array section
@@ -10165,16 +10163,14 @@ Sema::ActOnOpenMPMapClause(OpenMPMapClauseKind MapTypeModifier,
     assert(!CurComponents.empty() &&
            "Invalid mappable expression information.");
 
-    // If the base is a reference to a variable, we rely on that variable for
-    // the following checks. If it is a 'this' expression we rely on the field.
-    if (auto *DRE = dyn_cast<DeclRefExpr>(BE))
-      CurDeclaration = DRE->getDecl();
-    else {
-      auto *ME = cast<MemberExpr>(BE);
-      assert(isa<CXXThisExpr>(ME->getBase()) && "Unexpected expression!");
-      CurDeclaration = ME->getMemberDecl();
-    }
+    // For the following checks, we rely on the base declaration which is
+    // expected to be associated with the last component. The declaration is
+    // expected to be a variable or a field (if 'this' is being mapped).
+    CurDeclaration = CurComponents.back().getAssociatedDeclaration();
     assert(CurDeclaration && "Null decl on map clause.");
+    assert(
+        CurDeclaration->isCanonicalDecl() &&
+        "Expecting components to have associated only canonical declarations.");
 
     auto *VD = dyn_cast<VarDecl>(CurDeclaration);
     auto *FD = dyn_cast<FieldDecl>(CurDeclaration);

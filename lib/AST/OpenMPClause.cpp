@@ -543,6 +543,9 @@ unsigned OMPClauseMappableExprCommon::getUniqueDeclarationsTotalNumber(
   unsigned TotalNum = 0u;
   llvm::SmallPtrSet<const ValueDecl *, 8> Cache;
   for (auto *D : Declarations) {
+    assert(
+        (!D || D->isCanonicalDecl()) &&
+        "Mappable expression info should only rely on canonical declarations.");
     if (Cache.count(D))
       continue;
     ++TotalNum;
