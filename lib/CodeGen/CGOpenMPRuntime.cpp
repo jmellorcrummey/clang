@@ -5841,15 +5841,15 @@ void CGOpenMPRuntime::emitTargetEnterDataCall(CodeGenFunction &CGF,
     return;
 
   // Generate the code for the opening of the data environment.
-  auto &&ThenGen = [this, &D, &CGF, Device](CodeGenFunction &CGF) {
+  auto &&ThenGen = [&D, &CGF, Device](CodeGenFunction &CGF, PrePostActionTy &) {
     // Fill up the arrays with all the mapped variables.
-    OpenMPMapClauseHandler::MapValuesArrayTy BasePointers;
-    OpenMPMapClauseHandler::MapValuesArrayTy Pointers;
-    OpenMPMapClauseHandler::MapValuesArrayTy Sizes;
-    OpenMPMapClauseHandler::MapFlagsArrayTy MapTypes;
+    MappableExprsHandler::MapValuesArrayTy BasePointers;
+    MappableExprsHandler::MapValuesArrayTy Pointers;
+    MappableExprsHandler::MapValuesArrayTy Sizes;
+    MappableExprsHandler::MapFlagsArrayTy MapTypes;
 
     // Get map clause information.
-    OpenMPMapClauseHandler MCHandler(D, CGF);
+    MappableExprsHandler MCHandler(D, CGF);
     MCHandler.generateAllInfo(BasePointers, Pointers, Sizes, MapTypes);
 
     llvm::Value *BasePointersArrayArg = nullptr;
@@ -5870,7 +5870,7 @@ void CGOpenMPRuntime::emitTargetEnterDataCall(CodeGenFunction &CGF,
     llvm::Value *DeviceID = nullptr;
     if (Device)
       DeviceID = CGF.Builder.CreateIntCast(CGF.EmitScalarExpr(Device),
-                                           CGM.Int32Ty, /*isSigned=*/true);
+                                           CGF.Int32Ty, /*isSigned=*/true);
     else
       DeviceID = CGF.Builder.getInt32(OMP_DEVICEID_UNDEF);
 
@@ -5880,18 +5880,19 @@ void CGOpenMPRuntime::emitTargetEnterDataCall(CodeGenFunction &CGF,
     llvm::Value *OffloadingArgs[] = {
         DeviceID,         PointerNum,    BasePointersArrayArg,
         PointersArrayArg, SizesArrayArg, MapTypesArrayArg};
-    CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL__tgt_target_data_begin),
+    auto &RT = CGF.CGM.getOpenMPRuntime();
+    CGF.EmitRuntimeCall(RT.createRuntimeFunction(OMPRTL__tgt_target_data_begin),
                         OffloadingArgs);
   };
 
   // In the event we get an if clause, we don't have to take any action on the
   // else side.
-  auto &&ElseGen = [](CodeGenFunction &CGF) {};
+  auto &&ElseGen = [](CodeGenFunction &CGF, PrePostActionTy &) {};
 
   if (IfCond) {
     emitOMPIfClause(CGF, IfCond, ThenGen, ElseGen);
   } else {
-    CodeGenFunction::RunCleanupsScope Scope(CGF);
-    ThenGen(CGF);
+    RegionCodeGenTy ThenGenRCG(ThenGen);
+    ThenGenRCG(CGF);
   }
 }
