@@ -8,6 +8,7 @@ set(files
   avx512cdintrin.h
   avx512erintrin.h
   avx512fintrin.h
+  avx512pfintrin.h
   avx512vlbwintrin.h
   avx512vlintrin.h
   avx512dqintrin.h
@@ -19,6 +20,7 @@ set(files
   bmi2intrin.h
   bmiintrin.h
   __clang_cuda_cmath.h
+  __clang_cuda_math_forward_declares.h
   __clang_cuda_runtime_wrapper.h
   cpuid.h
   cuda_builtin_vars.h

@@ -2299,7 +2299,7 @@ static void checkNewAttributesAfterDef(Sema &S, Decl *New, const Decl *Old) {
   for (unsigned I = 0, E = NewAttributes.size(); I != E;) {
     const Attr *NewAttribute = NewAttributes[I];
 
-    if (isa<AliasAttr>(NewAttribute)) {
+    if (isa<AliasAttr>(NewAttribute) || isa<IFuncAttr>(NewAttribute)) {
       if (FunctionDecl *FD = dyn_cast<FunctionDecl>(New)) {
         Sema::SkipBodyInfo SkipBody;
         S.CheckForFunctionRedefinition(FD, cast<FunctionDecl>(Def), &SkipBody);
@@ -5052,6 +5052,9 @@ NamedDecl *Sema::HandleDeclarator(Scope *S, Declarator &D,
       CurContext->addHiddenDecl(New);
   }
 
+  if (isInOpenMPDeclareTargetContext())
+    checkDeclIsAllowedInOpenMPTarget(nullptr, New);
+
   return New;
 }
 
@@ -5461,7 +5464,7 @@ static void checkAttributesAfterMerging(Sema &S, NamedDecl &ND) {
       if (const auto *Attr = VD->getAttr<AliasAttr>()) {
         assert(VD->isThisDeclarationADefinition() &&
                !VD->isExternallyVisible() && "Broken AliasAttr handled late!");
-        S.Diag(Attr->getLocation(), diag::err_alias_is_definition) << VD;
+        S.Diag(Attr->getLocation(), diag::err_alias_is_definition) << VD << 0;
         VD->dropAttr<AliasAttr>();
       }
     }
@@ -5648,10 +5651,9 @@ static bool isIncompleteDeclExternC(Sema &S, const T *D) {
     if (!D->isInExternCContext() || D->template hasAttr<OverloadableAttr>())
       return false;
 
-    // So do CUDA's host/device attributes if overloading is enabled.
-    if (S.getLangOpts().CUDA && S.getLangOpts().CUDATargetOverloads &&
-        (D->template hasAttr<CUDADeviceAttr>() ||
-         D->template hasAttr<CUDAHostAttr>()))
+    // So do CUDA's host/device attributes.
+    if (S.getLangOpts().CUDA && (D->template hasAttr<CUDADeviceAttr>() ||
+                                 D->template hasAttr<CUDAHostAttr>()))
       return false;
   }
   return D->isExternC();
@@ -6283,6 +6285,25 @@ Sema::ActOnVariableDeclarator(Scope *S, Declarator &D, DeclContext *DC,
     if (!IsVariableTemplateSpecialization)
       D.setRedeclaration(CheckVariableDeclaration(NewVD, Previous));
 
+    // C++ Concepts TS [dcl.spec.concept]p7: A program shall not declare [...]
+    // an explicit specialization (14.8.3) or a partial specialization of a
+    // concept definition.
+    if (IsVariableTemplateSpecialization &&
+        !D.getDeclSpec().isConceptSpecified() && !Previous.empty() &&
+        Previous.isSingleResult()) {
+      NamedDecl *PreviousDecl = Previous.getFoundDecl();
+      if (VarTemplateDecl *VarTmpl = dyn_cast<VarTemplateDecl>(PreviousDecl)) {
+        if (VarTmpl->isConcept()) {
+          Diag(NewVD->getLocation(), diag::err_concept_specialized)
+              << 1                            /*variable*/
+              << (IsPartialSpecialization ? 2 /*partially specialized*/
+                                          : 1 /*explicitly specialized*/);
+          Diag(VarTmpl->getLocation(), diag::note_previous_declaration);
+          NewVD->setInvalidDecl();
+        }
+      }
+    }
+
     if (NewTemplate) {
       VarTemplateDecl *PrevVarTemplate =
           NewVD->getPreviousDecl()
@@ -6423,16 +6444,20 @@ void Sema::CheckShadow(Scope *S, VarDecl *D, const LookupResult& R) {
   }
 
   // Determine what kind of declaration we're shadowing.
-  unsigned Kind;
+
+  // The order must be consistent with the %select in the warning message.
+  enum ShadowedDeclKind { Local, Global, StaticMember, Field };
+  ShadowedDeclKind Kind;
   if (isa<RecordDecl>(OldDC)) {
     if (isa<FieldDecl>(ShadowedDecl))
-      Kind = 3; // field
+      Kind = Field;
     else
-      Kind = 2; // static data member
-  } else if (OldDC->isFileContext())
-    Kind = 1; // global
-  else
-    Kind = 0; // local
+      Kind = StaticMember;
+  } else if (OldDC->isFileContext()) {
+    Kind = Global;
+  } else {
+    Kind = Local;
+  }
 
   DeclarationName Name = R.getLookupName();
 
@@ -7817,6 +7842,8 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
       if (isFunctionTemplateSpecialization) {
         Diag(D.getDeclSpec().getConceptSpecLoc(),
              diag::err_concept_specified_specialization) << 1;
+        NewFD->setInvalidDecl(true);
+        return NewFD;
       }
     }
 
@@ -8005,6 +8032,9 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
 
   // Handle attributes.
   ProcessDeclAttributes(S, NewFD, D);
+
+  if (getLangOpts().CUDA)
+    maybeAddCUDAHostDeviceAttrs(S, NewFD, Previous);
 
   if (getLangOpts().OpenCL) {
     // OpenCL v1.1 s6.5: Using an address space qualifier in a function return
@@ -8341,6 +8371,28 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
         isExplicitSpecialization || isFunctionTemplateSpecialization);
   }
 
+  if (getLangOpts().CUDA) {
+    IdentifierInfo *II = NewFD->getIdentifier();
+    if (II && II->isStr("cudaConfigureCall") && !NewFD->isInvalidDecl() &&
+        NewFD->getDeclContext()->getRedeclContext()->isTranslationUnit()) {
+      if (!R->getAs<FunctionType>()->getReturnType()->isScalarType())
+        Diag(NewFD->getLocation(), diag::err_config_scalar_return);
+
+      Context.setcudaConfigureCallDecl(NewFD);
+    }
+
+    // Variadic functions, other than a *declaration* of printf, are not allowed
+    // in device-side CUDA code, unless someone passed
+    // -fcuda-allow-variadic-functions.
+    if (!getLangOpts().CUDAAllowVariadicFunctions && NewFD->isVariadic() &&
+        (NewFD->hasAttr<CUDADeviceAttr>() ||
+         NewFD->hasAttr<CUDAGlobalAttr>()) &&
+        !(II && II->isStr("printf") && NewFD->isExternC() &&
+          !D.isFunctionDefinition())) {
+      Diag(NewFD->getLocation(), diag::err_variadic_device_fn);
+    }
+  }
+
   if (getLangOpts().CPlusPlus) {
     if (FunctionTemplate) {
       if (NewFD->isInvalidDecl())
@@ -8389,28 +8441,6 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
   }
 
   MarkUnusedFileScopedDecl(NewFD);
-
-  if (getLangOpts().CUDA) {
-    IdentifierInfo *II = NewFD->getIdentifier();
-    if (II && II->isStr("cudaConfigureCall") && !NewFD->isInvalidDecl() &&
-        NewFD->getDeclContext()->getRedeclContext()->isTranslationUnit()) {
-      if (!R->getAs<FunctionType>()->getReturnType()->isScalarType())
-        Diag(NewFD->getLocation(), diag::err_config_scalar_return);
-
-      Context.setcudaConfigureCallDecl(NewFD);
-    }
-
-    // Variadic functions, other than a *declaration* of printf, are not allowed
-    // in device-side CUDA code, unless someone passed
-    // -fcuda-allow-variadic-functions.
-    if (!getLangOpts().CUDAAllowVariadicFunctions && NewFD->isVariadic() &&
-        (NewFD->hasAttr<CUDADeviceAttr>() ||
-         NewFD->hasAttr<CUDAGlobalAttr>()) &&
-        !(II && II->isStr("printf") && NewFD->isExternC() &&
-          !D.isFunctionDefinition())) {
-      Diag(NewFD->getLocation(), diag::err_variadic_device_fn);
-    }
-  }
 
   // Here we have an function template explicit specialization at class scope.
   // The actually specialization will be postponed to template instatiation
@@ -8600,6 +8630,14 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
           NewTemplateDecl->getInstantiatedFromMemberTemplate()) {
         NewTemplateDecl->setMemberSpecialization();
         assert(OldTemplateDecl->isMemberSpecialization());
+        // Explicit specializations of a member template do not inherit deleted
+        // status from the parent member template that they are specializing.
+        if (OldTemplateDecl->getTemplatedDecl()->isDeleted()) {
+          FunctionDecl *const OldTemplatedDecl =
+              OldTemplateDecl->getTemplatedDecl();
+          assert(OldTemplatedDecl->getCanonicalDecl() == OldTemplatedDecl);
+          OldTemplatedDecl->setDeletedAsWritten(false);
+        }
       }
       
     } else {
@@ -10872,8 +10910,8 @@ Sema::ActOnStartOfFunctionDef(Scope *FnBodyScope, Declarator &D,
   return ActOnStartOfFunctionDef(FnBodyScope, DP, SkipBody);
 }
 
-void Sema::ActOnFinishInlineMethodDef(CXXMethodDecl *D) {
-  Consumer.HandleInlineMethodDefinition(D);
+void Sema::ActOnFinishInlineFunctionDef(FunctionDecl *D) {
+  Consumer.HandleInlineFunctionDefinition(D);
 }
 
 static bool ShouldWarnAboutMissingPrototype(const FunctionDecl *FD, 
@@ -11663,12 +11701,11 @@ void Sema::AddKnownFunctionAttributes(FunctionDecl *FD) {
       FD->addAttr(NoThrowAttr::CreateImplicit(Context, FD->getLocation()));
     if (Context.BuiltinInfo.isConst(BuiltinID) && !FD->hasAttr<ConstAttr>())
       FD->addAttr(ConstAttr::CreateImplicit(Context, FD->getLocation()));
-    if (getLangOpts().CUDA && getLangOpts().CUDATargetOverloads &&
-        Context.BuiltinInfo.isTSBuiltin(BuiltinID) &&
+    if (getLangOpts().CUDA && Context.BuiltinInfo.isTSBuiltin(BuiltinID) &&
         !FD->hasAttr<CUDADeviceAttr>() && !FD->hasAttr<CUDAHostAttr>()) {
-      // Assign appropriate attribute depending on CUDA compilation
-      // mode and the target builtin belongs to. E.g. during host
-      // compilation, aux builtins are __device__, the rest are __host__.
+      // Add the appropriate attribute, depending on the CUDA compilation mode
+      // and which target the builtin belongs to. For example, during host
+      // compilation, aux builtins are __device__, while the rest are __host__.
       if (getLangOpts().CUDAIsDevice !=
           Context.BuiltinInfo.isAuxBuiltinID(BuiltinID))
         FD->addAttr(CUDADeviceAttr::CreateImplicit(Context, FD->getLocation()));
@@ -14142,7 +14179,10 @@ EnumConstantDecl *Sema::CheckEnumConstant(EnumDecl *Enum,
             } else
               Diag(IdLoc, diag::err_enumerator_too_large) << EltTy;
           } else
-            Val = ImpCastExprToType(Val, EltTy, CK_IntegralCast).get();
+            Val = ImpCastExprToType(Val, EltTy,
+                                    EltTy->isBooleanType() ?
+                                    CK_IntegralToBoolean : CK_IntegralCast)
+                    .get();
         } else if (getLangOpts().CPlusPlus) {
           // C++11 [dcl.enum]p5:
           //   If the underlying type is not fixed, the type of each enumerator
