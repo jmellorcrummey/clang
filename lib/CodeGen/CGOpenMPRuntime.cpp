@@ -5732,7 +5732,7 @@ void CGOpenMPRuntime::emitTargetDataCalls(CodeGenFunction &CGF,
   // closing of the region.
   auto &&BeginThenGen = [&D, &CGF, &BasePointersArray, &PointersArray,
                          &SizesArray, &MapTypesArray, Device,
-                         &NumOfPtrs](CodeGenFunction &CGF, PrePostActionTy&) {
+                         &NumOfPtrs](CodeGenFunction &CGF, PrePostActionTy &) {
     // Fill up the arrays with all the mapped variables.
     MappableExprsHandler::MapValuesArrayTy BasePointers;
     MappableExprsHandler::MapValuesArrayTy Pointers;
@@ -5778,8 +5778,8 @@ void CGOpenMPRuntime::emitTargetDataCalls(CodeGenFunction &CGF,
   };
 
   // Generate code for the closing of the data region.
-  auto &&EndThenGen = [&CGF, &BasePointersArray, &PointersArray,
-                       &SizesArray, &MapTypesArray, Device,
+  auto &&EndThenGen = [&CGF, &BasePointersArray, &PointersArray, &SizesArray,
+                       &MapTypesArray, Device,
                        &NumOfPtrs](CodeGenFunction &CGF, PrePostActionTy &) {
     assert(BasePointersArray && PointersArray && SizesArray && MapTypesArray &&
            NumOfPtrs && "Invalid data environment closing arguments.");

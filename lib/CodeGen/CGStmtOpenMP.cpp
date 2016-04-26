@@ -3217,9 +3217,8 @@ void CodeGenFunction::EmitOMPTargetDataDirective(
 
   // The target data enclosed region is implemented just by emitting the
   // statement.
-  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy&) {
-    CGF.EmitStmt(
-            cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+    CGF.EmitStmt(cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
   };
 
   // If we don't have target devices, don't bother emitting the data mapping
