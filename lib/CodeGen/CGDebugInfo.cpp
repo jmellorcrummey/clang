@@ -1014,6 +1014,8 @@ void CGDebugInfo::CollectRecordFields(
     // the corresponding declarations in the source program.
     for (const auto *I : record->decls())
       if (const auto *V = dyn_cast<VarDecl>(I)) {
+        if (V->hasAttr<NoDebugAttr>())
+          continue;
         // Reuse the existing static member declaration if one exists
         auto MI = StaticDataMemberCache.find(V->getCanonicalDecl());
         if (MI != StaticDataMemberCache.end()) {
@@ -1516,26 +1518,25 @@ static bool hasExplicitMemberDefinition(CXXRecordDecl::method_iterator I,
 
 /// Does a type definition exist in an imported clang module?
 static bool isDefinedInClangModule(const RecordDecl *RD) {
-  if (!RD->isFromASTFile())
-    return false;
-  if (!RD->getDefinition())
+  if (!RD || !RD->isFromASTFile())
     return false;
   if (!RD->isExternallyVisible() && RD->getName().empty())
     return false;
-  if (auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(RD)) {
-    if (!CTSD->isCompleteDefinition())
-      return false;
-    // Make sure the instantiation is actually in a module.
-    if (CTSD->field_begin() != CTSD->field_end())
-      return CTSD->field_begin()->isFromASTFile();
+  if (auto *CXXDecl = dyn_cast<CXXRecordDecl>(RD)) {
+    assert(CXXDecl->isCompleteDefinition() && "incomplete record definition");
+    if (CXXDecl->getTemplateSpecializationKind() != TSK_Undeclared)
+      // Make sure the instantiation is actually in a module.
+      if (CXXDecl->field_begin() != CXXDecl->field_end())
+        return CXXDecl->field_begin()->isFromASTFile();
   }
+
   return true;
 }
 
 static bool shouldOmitDefinition(codegenoptions::DebugInfoKind DebugKind,
                                  bool DebugTypeExtRefs, const RecordDecl *RD,
                                  const LangOptions &LangOpts) {
-  if (DebugTypeExtRefs && isDefinedInClangModule(RD))
+  if (DebugTypeExtRefs && isDefinedInClangModule(RD->getDefinition()))
     return true;
 
   if (DebugKind > codegenoptions::LimitedDebugInfo)
@@ -3391,6 +3392,8 @@ llvm::DIGlobalVariable *CGDebugInfo::CollectAnonRecordDecls(
 void CGDebugInfo::EmitGlobalVariable(llvm::GlobalVariable *Var,
                                      const VarDecl *D) {
   assert(DebugKind >= codegenoptions::LimitedDebugInfo);
+  if (D->hasAttr<NoDebugAttr>())
+    return;
   // Create global variable debug descriptor.
   llvm::DIFile *Unit = nullptr;
   llvm::DIScope *DContext = nullptr;
@@ -3423,6 +3426,8 @@ void CGDebugInfo::EmitGlobalVariable(llvm::GlobalVariable *Var,
 void CGDebugInfo::EmitGlobalVariable(const ValueDecl *VD,
                                      llvm::Constant *Init) {
   assert(DebugKind >= codegenoptions::LimitedDebugInfo);
+  if (VD->hasAttr<NoDebugAttr>())
+    return;
   // Create the descriptor for the variable.
   llvm::DIFile *Unit = getOrCreateFile(VD->getLocation());
   StringRef Name = VD->getName();
