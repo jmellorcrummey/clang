@@ -7634,7 +7634,19 @@ void CodeGenFunction::EmitOMPTeamsDirective(const OMPTeamsDirective &S) {
 void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
 
   printf("======> Inside EmitOMPSimdDirective\n");
-  if (this->combinedSimd && !this->useSharedMemory){
+  if (this->onlyParallelOmpNodes){
+    printf("======> Inside EmitOMPSimdDirective: onlyParallelOmpNodes\n");
+    InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
+    RunCleanupsScope ExecutedScope(*this);
+    // CGPragmaOmpSimd Wrapper(&S);
+
+    // ArrayRef<OMPClause *> clauses =
+    //   isa<OMPExecutableDirective>(Wrapper.getStmt())
+    //       ? cast<OMPExecutableDirective>(Wrapper.getStmt())->clauses()
+    //       : nullptr;
+
+    CGM.getOpenMPRuntime().SimdOpenMPNode(*this, S);
+  } else if (this->combinedSimd && !this->useSharedMemory){
     printf("======> Inside EmitOMPSimdDirective: This is where we need to jump to Emiting new Inner SIMD LOOP!!!\n");
     //InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
     //RunCleanupsScope ExecutedScope(*this);

@@ -3988,239 +3988,46 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     return res;
   }
 
-/*
-void EnterParallelRegionInTarget(CodeGenFunction &CGF,
-                                    OpenMPDirectiveKind DKind,
-                                    ArrayRef<OpenMPDirectiveKind> SKinds,
-                                    const OMPExecutableDirective &S) {
- 
-     printf("===> EnterParallelRegionInTarget 1\n");
-     OMPRegionTypesStack.push_back(OMP_Parallel);
-     CGBuilderTy &Bld = CGF.Builder;
+  // Function which redirects the CG flow towards our function.
+  void SimdOpenMPNode(CodeGenFunction &CGF,
+                      const OMPExecutableDirective &S) {
 
-     if (CGF.distributedParallel){
-        printf("===> EnterParallelRegionInTarget 2\n");
-        const std::string SyncAfterParallelForName = ".sync.after.parallel.for";
-        CGF.SyncAfterParallelForBlock = llvm::BasicBlock::Create(
-            CGM.getLLVMContext(), SyncAfterParallelForName, CGF.CurFn);
+    CGBuilderTy &Builder = CGF.Builder;
 
-        // Increment the nesting level
-        Bld.CreateStore(
-            Bld.CreateAdd(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
-            ParallelNesting);
+    //Push parallel region on stack
+    OMPRegionTypesStack.push_back(OMP_Simd);
 
-        llvm::BasicBlock *ParallelRegionCG = llvm::BasicBlock::Create(
-            CGM.getLLVMContext(), ".par.reg.code", CGF.CurFn);
+    // can only use 32 lanes if there is no reduction clause
+    AddSimdPragmaToCurrentWorkshare();
 
-        // Insert memfence here.
-        Bld.CreateBr(CGF.EndRegionS1);
-        Bld.SetInsertPoint(CGF.EndRegionS1);
-        //Bld.CreateCall(Get_memfence());
-        Bld.CreateCall(Get_syncthreads());
+    Builder.CreateStore(
+          Builder.CreateAdd(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
+          ParallelNesting);
 
-        if (CGF.useSubWarps){
-          // Check if warp lane ID is <= MAX_WARP_THREADS - 1
-          // If false, jump to CGF.SyncAfterParallelForBlock
-          // Signed or unsigned?
-          Bld.CreateCondBr(Bld.CreateICmpSLE(Bld.CreateLoad(SimdLaneNum),
-                                             Bld.CreateSub(Bld.getInt32(MAX_WARP_THREADS),
-                                                           Bld.getInt32(1))),
-                           ParallelRegionCG, CGF.SyncAfterParallelForBlock);
-        } else {
-          Bld.CreateBr(ParallelRegionCG);
-        }
+    int prev_k = CGF.k;
+    int prev_kparent = CGF.kparent;
 
-        Bld.SetInsertPoint(ParallelRegionCG);
+    // Sanity check
+    if (prev_k > 2){
+      assert(0 && "If a parallel for is found then k cannot be greater than 1.\n");
+    }
 
-        // Call the function which generates the loop for the inner parallel for.
-        EmitOMPInnerParallelForLoop(S, CGF);
-     } else if (!NestedParallelStack.back()) { // not already in a parallel region
+    CGF.kparent = prev_k;
+    CGF.k++;
 
-       // clear up the data structure that will be used to determine the
-       // optimal amount of simd lanes to be used in this region
-       SimdAndWorksharingNesting.reset();
+    GenerateSimplifiedLoop(S, CGF);
 
-       // now done after codegen for #parallel region
-       // analyze parallel region and calculate best number of lanes
-       llvm::Instruction *LoadSimdNumLanes = Bld.CreateLoad(SimdNumLanes);
+    CGF.k = prev_k;
+    CGF.kparent = prev_kparent;
 
-       // remember insert point to set optimal number of lanes after codegen
-       // for the #parallel region
-       OptimalNumLanesSetPoint = LoadSimdNumLanes;
-
-       llvm::Value *PrepareParallelArgs[] = {
-           Bld.CreateCall(Get_num_threads(), {}), LoadSimdNumLanes};
-
-       llvm::CallInst *PrepareParallel = CGF.EmitRuntimeCall(
-           OPENMPRTL_FUNC(kernel_prepare_parallel), PrepareParallelArgs);
-
-
-       Bld.CreateStore(PrepareParallel, CudaThreadsInParallel);
-
-       CGM.getOpenMPRuntime().GenerateNextLabel(CGF, false, true);
-
-       // Increment the nesting level
-       Bld.CreateStore(
-           Bld.CreateAdd(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
-           ParallelNesting);
-
-       // check if thread does not act either as a lane or as a thread (called
-       // excluded from parallel region)
-       llvm::Value *MyThreadId = Bld.CreateCall(Get_thread_num(), {});
-       llvm::Value *AmINotInParallel =
-           Bld.CreateICmpSGE(MyThreadId, Bld.CreateLoad(CudaThreadsInParallel));
-
-       llvm::BasicBlock *IfIsNoLaneNoParallelThread = llvm::BasicBlock::Create(
-           CGM.getLLVMContext(), ".if.is.excluded", CGF.CurFn);
-
-       llvm::BasicBlock *IfIsParallelThreadOrLane = llvm::BasicBlock::Create(
-           CGM.getLLVMContext(), ".if.is.parthread.or.lane", CGF.CurFn);
-
-       Bld.CreateCondBr(AmINotInParallel, IfIsNoLaneNoParallelThread,
-                        IfIsParallelThreadOrLane);
-
-       Bld.SetInsertPoint(IfIsNoLaneNoParallelThread);
-
-       // this makes sure no extra thread that was started by a kernel
-       // will participate in the parallel region, including simd or
-       // nested parallelism
-       Bld.CreateStore(Bld.CreateLoad(SimdNumLanes), SimdLaneNum);
-
-       Bld.CreateBr(SynchronizeAndNextState);
-
-       Bld.SetInsertPoint(IfIsParallelThreadOrLane);
-
-       // calculate my simd lane num to exclude cuda threads that will
-       // only act as simd lanes and not parallel threads
-       Bld.CreateStore(Bld.CreateAnd(Bld.CreateCall(Get_thread_num(), {}),
-                                     Bld.CreateSub(Bld.CreateLoad(SimdNumLanes),
-                                                   Bld.getInt32(1))),
-                       SimdLaneNum);
-
-       llvm::Value *InitParallelArgs[] = {Bld.CreateLoad(SimdNumLanes)};
-
-       CGF.EmitRuntimeCall(OPENMPRTL_FUNC(kernel_parallel), InitParallelArgs);
-
-       // only lane id 0 (lane master) is a thread in parallel
-
-       llvm::BasicBlock *ParallelRegionCG = llvm::BasicBlock::Create(
-           CGM.getLLVMContext(), ".par.reg.code", CGF.CurFn);
-
-       Bld.CreateCondBr(
-           Bld.CreateICmpNE(Bld.CreateLoad(SimdLaneNum), Bld.getInt32(0)),
-           SynchronizeAndNextState, ParallelRegionCG);
-
-       Bld.SetInsertPoint(ParallelRegionCG);
-
-     } else { // nested parallel region: serialize!
-       CallSerializedParallelStart (CGF);
-     }
-
-     PushNewParallelRegion(true);
-   }
-
-   void ExitParallelRegionInTarget(CodeGenFunction &CGF) {
-     printf("===> ExitParallelRegionInTarget 1\n");
-     CGBuilderTy &Bld = CGF.Builder;
-     // Decrement the nesting level
-     Bld.CreateStore(
-         Bld.CreateSub(Bld.CreateLoad(ParallelNesting), Bld.getInt32(1)),
-         ParallelNesting);
-
-     assert((OMPRegionTypesStack.back() == OMP_Parallel) &&
+    assert((OMPRegionTypesStack.back() == OMP_Simd) &&
             "Exiting a parallel region does not match stack state");
-     OMPRegionTypesStack.pop_back();
+    OMPRegionTypesStack.pop_back();
 
-     // we need to inspect the previous layer to understand what type
-     // of end we need
-     PopParallelRegion();
-     // check if we are in a nested parallel region
-     if (CGF.distributedParallel){
-       printf("===> ExitParallelRegionInTarget 2\n");
-       Bld.CreateBr(CGF.SyncAfterParallelForBlock);
-       Bld.SetInsertPoint(CGF.SyncAfterParallelForBlock);
-       // Do nothing for now but maybe a syncthreads will be needed
-       Bld.CreateCall(Get_syncthreads(), {});
-     } else if (!NestedParallelStack.back()) { // not nested parallel
-       // we are now able to determine the optimal amount of lanes to be
-       // used in this #parallel region and add the amount setting in the right
-       // place, just before we start the region
-       int OptimalNumLanes = CalculateNumLanes();
-       llvm::Instruction *StoreOptimalLanes =
-           new llvm::StoreInst(Bld.getInt32(OptimalNumLanes), SimdNumLanes);
-       OptimalNumLanesSetPoint->getParent()->getInstList().insert(
-           OptimalNumLanesSetPoint, StoreOptimalLanes);
-
-       // signal runtime that we are closing the parallel region and
-       // switch to new team-sequential label
-       CallParallelRegionEnd(CGF);
-       CGM.getOpenMPRuntime().GenerateNextLabel(CGF, true, false);
-
-       // update the global target optimal number of simd lanes to be used
-       // with information from this: currently calculate maximum over all
-       // parallel regions
-       int8_t CurrentOptimalSimdLanes =
-           (GetNumSimdLanesPerTargetRegion() < OptimalNumLanes)
-               ? OptimalNumLanes
-               : GetNumSimdLanesPerTargetRegion();
-       SetNumSimdLanesPerTargetRegion(CurrentOptimalSimdLanes);
-     } else { // nested parallel region: close serialize
-       CallSerializedParallelEnd (CGF);
-     }
-   }
-
-   void SupportCritical (const OMPCriticalDirective &S, CodeGenFunction &CGF,
-       llvm::Function * CurFn, llvm::GlobalVariable *Lck) {
-     CGBuilderTy &Builder = CGF.Builder;
-     llvm::Value *Loc = CreateIntelOpenMPRTLLoc(S.getLocStart(), CGF, 0);
-
-
-       //  OPENMPRTL_LOC(S.getLocStart(), CGF);
-     llvm::Value *GTid = Builder.CreateCall(Get_thread_num(), {});
-     llvm::Value *RealArgs[] = { Loc, GTid, Lck };
-
-     llvm::BasicBlock * preLoopBlock = Builder.GetInsertBlock();
-     llvm::BasicBlock * criticalLoopBlock =
-         llvm::BasicBlock::Create(CGM.getLLVMContext(), ".critical.loop",
-             CurFn);
-       llvm::BasicBlock * criticalExecBlock =
-           llvm::BasicBlock::Create(CGM.getLLVMContext(), ".critical.exec",
-               CurFn);
-       llvm::BasicBlock * criticalSkipBlock =
-           llvm::BasicBlock::Create(CGM.getLLVMContext(), ".critical.skip");
-       llvm::BasicBlock * criticalLoopEndBlock =
-           llvm::BasicBlock::Create(CGM.getLLVMContext(), ".critical.loop.end");
-       llvm::Value *laneIndex = llvm::CastInst::CreateZExtOrBitCast(
-           Builder.CreateAnd(GTid,0x1f),llvm::Type::getInt64Ty(
-               CGM.getLLVMContext()),"laneIndex",preLoopBlock);
-       Builder.CreateBr(criticalLoopBlock);
-       Builder.SetInsertPoint(criticalLoopBlock);
-       llvm::PHINode *loopiv = Builder.CreatePHI(llvm::Type::getInt64Ty(
-           CGM.getLLVMContext()),2,"critical_loop_iv");
-       llvm::Value *init = llvm::ConstantInt::get(llvm::Type::getInt64Ty(
-           CGM.getLLVMContext()),0);
-       loopiv->addIncoming(init,preLoopBlock);
-       llvm::Value *myturn = Builder.CreateICmpEQ(laneIndex,loopiv,"myturn");
-       Builder.CreateCondBr(myturn,criticalExecBlock,criticalSkipBlock);
-       Builder.SetInsertPoint(criticalExecBlock);
-       CGF.EmitRuntimeCall(OPENMPRTL_FUNC(critical), RealArgs);
-       CGF.EmitOMPCapturedBodyHelper(S);
-       CGF.EmitRuntimeCall(OPENMPRTL_FUNC(end_critical), RealArgs);
-       Builder.CreateBr(criticalSkipBlock);
-       CurFn->getBasicBlockList().push_back(criticalSkipBlock);
-       Builder.SetInsertPoint(criticalSkipBlock);
-       llvm::Value *bump = llvm::ConstantInt::get(llvm::Type::getInt64Ty(CGM.getLLVMContext()),1);
-       llvm::Value *bumpedIv = Builder.CreateAdd(loopiv,bump,"bumpediv");
-       loopiv->addIncoming(bumpedIv,criticalSkipBlock);
-       //llvm::Value *limit = llvm::ConstantInt::get(llvm::Type::getInt64Ty(CGM.getLLVMContext()),32);
-       //llvm::Value *finished = Builder.CreateICmpULT(bumpedIv,limit,"finished");
-       llvm::Value *limit = llvm::ConstantInt::get(llvm::Type::getInt64Ty(CGM.getLLVMContext()),31);
-       llvm::Value *finished = Builder.CreateICmpULT(limit,bumpedIv,"finished");
-       Builder.CreateCondBr(finished,criticalLoopEndBlock,criticalLoopBlock);
-       CurFn->getBasicBlockList().push_back(criticalLoopEndBlock);
-       Builder.SetInsertPoint(criticalLoopEndBlock);
-   }
-*/
+    Builder.CreateStore(
+          Builder.CreateSub(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
+          ParallelNesting);
+  }
 
   // Function which redirects the CG flow towards our function.
   void ParallelOpenMPNode(CodeGenFunction &CGF,
@@ -4256,7 +4063,7 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
         assert(0 && "DKind is not a valid parallel pragma combination.\n");
     }
 
-    GenerateSimplifiedLoop(DKind, S, CGF);
+    GenerateSimplifiedLoop(S, CGF);
 
     CGF.k = prev_k;
     CGF.kparent = prev_kparent;
@@ -4276,10 +4083,9 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
 
   // Main function which generates the code
   void
-  GenerateSimplifiedLoop(OpenMPDirectiveKind DKind,
-                         const OMPExecutableDirective &S,
+  GenerateSimplifiedLoop(const OMPExecutableDirective &S,
                          CodeGenFunction &CGF){
-    // DKind, SKind, S, CGF, TgtFunName, 1, 0
+    // S, CGF
     printf(" In Simplified Loop Nest\n");
 
     // Implement a new for loop.
@@ -4788,19 +4594,19 @@ void EnterParallelRegionInTarget(CodeGenFunction &CGF,
         break;
       case OMPD_teams_distribute:
         CGF.k = 1;
-        GenerateSimplifiedLoop(DKind, S, CGF);
+        GenerateSimplifiedLoop(S, CGF);
         break;
       case OMPD_teams_distribute_parallel_for:
         CGF.k = 2;
-        GenerateSimplifiedLoop(DKind, S, CGF);
+        GenerateSimplifiedLoop(S, CGF);
         break;
       case OMPD_teams_distribute_parallel_for_simd:
         CGF.k = 3;
-        GenerateSimplifiedLoop(DKind, S, CGF);
+        GenerateSimplifiedLoop(S, CGF);
         break;
       case OMPD_teams_distribute_simd:
         CGF.k = 3;
-        GenerateSimplifiedLoop(DKind, S, CGF);
+        GenerateSimplifiedLoop(S, CGF);
         break;
     }
 
