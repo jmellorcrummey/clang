@@ -4696,9 +4696,9 @@ private:
         return CGF.getTypeSize(BaseTy);
 
       llvm::Value *ElemSize;
-      if (auto *PTy = BaseTy->getAs<PointerType>()) {
+      if (auto *PTy = BaseTy->getAs<PointerType>())
         ElemSize = CGF.getTypeSize(PTy->getPointeeType().getCanonicalType());
-      } else {
+      else {
         auto *ATy = cast<ArrayType>(BaseTy.getTypePtr());
         assert(ATy && "Expecting array type if not a pointer type.");
         ElemSize = CGF.getTypeSize(ATy->getElementType().getCanonicalType());
