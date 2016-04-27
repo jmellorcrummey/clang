@@ -3107,11 +3107,20 @@ static NamedDecl *getDeclForLocalLookup(const LangOptions &LangOpts,
   if (Decl *Redecl = D->getPreviousDecl()) {
     // For Redeclarable decls, a prior declaration might be local.
     for (; Redecl; Redecl = Redecl->getPreviousDecl()) {
-      if (!Redecl->isFromASTFile())
+      // If we find a local decl, we're done.
+      if (!Redecl->isFromASTFile()) {
+        // Exception: in very rare cases (for injected-class-names), not all
+        // redeclarations are in the same semantic context. Skip ones in a
+        // different context. They don't go in this lookup table at all.
+        if (!Redecl->getDeclContext()->getRedeclContext()->Equals(
+                D->getDeclContext()->getRedeclContext()))
+          continue;
         return cast<NamedDecl>(Redecl);
+      }
+
       // If we find a decl from a (chained-)PCH stop since we won't find a
       // local one.
-      if (D->getOwningModuleID() == 0)
+      if (Redecl->getOwningModuleID() == 0)
         break;
     }
   } else if (Decl *First = D->getCanonicalDecl()) {
@@ -5775,8 +5784,13 @@ void ASTWriter::AddedObjCCategoryToInterface(const ObjCCategoryDecl *CatD,
 
 void ASTWriter::DeclarationMarkedUsed(const Decl *D) {
   assert(!WritingAST && "Already writing the AST!");
-  if (!D->isFromASTFile())
-    return;
+
+  // If there is *any* declaration of the entity that's not from an AST file,
+  // we can skip writing the update record. We make sure that isUsed() triggers
+  // completion of the redeclaration chain of the entity.
+  for (auto Prev = D->getMostRecentDecl(); Prev; Prev = Prev->getPreviousDecl())
+    if (IsLocalDecl(Prev))
+      return;
 
   DeclUpdates[D].push_back(DeclUpdate(UPD_DECL_MARKED_USED));
 }
