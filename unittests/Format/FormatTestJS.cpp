@@ -136,6 +136,9 @@ TEST_F(FormatTestJS, ReservedWords) {
                "};");
   verifyFormat("var struct = 2;");
   verifyFormat("var union = 2;");
+  verifyFormat("var interface = 2;");
+  verifyFormat("interface = 2;");
+  verifyFormat("x = interface instanceof y;");
 }
 
 TEST_F(FormatTestJS, CppKeywords) {
@@ -315,6 +318,40 @@ TEST_F(FormatTestJS, FormatsFreestandingFunctions) {
                "  inner2(a, b);\n"
                "}");
   verifyFormat("function f() {}");
+}
+
+TEST_F(FormatTestJS, GeneratorFunctions) {
+  verifyFormat("function* f() {\n"
+               "  let x = 1;\n"
+               "  yield x;\n"
+               "  yield* something();\n"
+               "}");
+  verifyFormat("function*\n"
+               "    f() {\n"
+               "}",
+               getGoogleJSStyleWithColumns(8));
+  verifyFormat("export function* f() {\n"
+               "  yield 1;\n"
+               "}\n");
+  verifyFormat("class X {\n"
+               "  * generatorMethod() { yield x; }\n"
+               "}");
+}
+
+TEST_F(FormatTestJS, AsyncFunctions) {
+  verifyFormat("async function f() {\n"
+               "  let x = 1;\n"
+               "  return fetch(x);\n"
+               "}");
+  verifyFormat("async function* f() {\n"
+               "  yield fetch(x);\n"
+               "}");
+  verifyFormat("export async function f() {\n"
+               "  return fetch(x);\n"
+               "}");
+  verifyFormat("class X {\n"
+               "  async asyncMethod() { return fetch(1); }\n"
+               "}");
 }
 
 TEST_F(FormatTestJS, ArrayLiterals) {
@@ -686,6 +723,8 @@ TEST_F(FormatTestJS, AutomaticSemicolonInsertionHeuristic) {
   verifyFormat("x instanceof String", "x\n"
                                       "instanceof\n"
                                       "String");
+  verifyFormat("function f(@Foo bar) {}", "function f(@Foo\n"
+                                          "  bar) {}");
 }
 
 TEST_F(FormatTestJS, ClosureStyleCasts) {
@@ -934,29 +973,31 @@ TEST_F(FormatTestJS, MetadataAnnotations) {
                "    return 'y';\n"
                "  }\n"
                "}");
+  verifyFormat("class C {\n"
+               "  private x(@A x: string) {}\n"
+               "}");
   verifyFormat("class X {}\n"
                "class Y {}");
+}
+
+TEST_F(FormatTestJS, TypeAliases) {
+  verifyFormat("type X = number;\n"
+               "class C {}");
+  verifyFormat("type X<Y> = Z<Y>;");
+  verifyFormat("type X = {\n"
+               "  y: number\n"
+               "};\n"
+               "class C {}");
 }
 
 TEST_F(FormatTestJS, Modules) {
   verifyFormat("import SomeThing from 'some/module.js';");
   verifyFormat("import {X, Y} from 'some/module.js';");
   verifyFormat("import a, {X, Y} from 'some/module.js';");
-  verifyFormat("import {\n"
-               "  VeryLongImportsAreAnnoying,\n"
-               "  VeryLongImportsAreAnnoying,\n"
-               "  VeryLongImportsAreAnnoying,\n"
-               "  VeryLongImportsAreAnnoying\n"
+  verifyFormat("import {VeryLongImportsAreAnnoying, VeryLongImportsAreAnnoying,"
+               " VeryLongImportsAreAnnoying, VeryLongImportsAreAnnoying"
                "} from 'some/module.js';");
-  verifyFormat("import {\n"
-               "  X,\n"
-               "  Y,\n"
-               "} from 'some/module.js';");
-  verifyFormat("import {\n"
-               "  X,\n"
-               "  Y,\n"
-               "} from\n    'some/long/module.js';",
-               getGoogleJSStyleWithColumns(20));
+  verifyFormat("import {X, Y,} from 'some/module.js';");
   verifyFormat("import {X as myLocalX, Y as myLocalY} from 'some/module.js';");
   verifyFormat("import * as lib from 'some/module.js';");
   verifyFormat("var x = {import: 1};\nx.import = 2;");
@@ -967,13 +1008,26 @@ TEST_F(FormatTestJS, Modules) {
   verifyFormat("export function A() {}\n"
                "export default function B() {}\n"
                "export function C() {}");
+  verifyFormat("export default () => {\n"
+               "  let x = 1;\n"
+               "  return x;\n"
+               "}");
   verifyFormat("export const x = 12;");
   verifyFormat("export default class X {}");
   verifyFormat("export {X, Y} from 'some/module.js';");
+  verifyFormat("export {X, Y,} from 'some/module.js';");
+  verifyFormat("export {SomeVeryLongExport as X, "
+               "SomeOtherVeryLongExport as Y} from 'some/module.js';");
+  // export without 'from' is wrapped.
+  verifyFormat("export let someRatherLongVariableName =\n"
+               "    someSurprisinglyLongVariable + someOtherRatherLongVar;");
+  // ... but not if from is just an identifier.
   verifyFormat("export {\n"
-               "  X,\n"
-               "  Y,\n"
-               "} from 'some/module.js';");
+               "  from as from,\n"
+               "  someSurprisinglyLongVariable\n"
+               "      as from\n"
+               "};",
+               getGoogleJSStyleWithColumns(20));
   verifyFormat("export class C {\n"
                "  x: number;\n"
                "  y: string;\n"
@@ -1088,7 +1142,10 @@ TEST_F(FormatTestJS, TemplateStrings) {
                "var y;");
 }
 
-TEST_F(FormatTestJS, CastSyntax) { verifyFormat("var x = <type>foo;"); }
+TEST_F(FormatTestJS, CastSyntax) {
+  verifyFormat("var x = <type>foo;");
+  verifyFormat("var x = foo as type;");
+}
 
 TEST_F(FormatTestJS, TypeArguments) {
   verifyFormat("class X<Y> {}");
