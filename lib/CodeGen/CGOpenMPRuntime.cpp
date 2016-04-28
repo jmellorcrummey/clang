@@ -5496,7 +5496,7 @@ adjustMapModifiersForPrivateClauses(const OMPExecutableDirective &D,
       // A private variable captured by reference will use only the 'private
       // ptr' flag.
       if (CurVD == VD)
-        return OpenMPMapClauseHandler::OMP_MAP_PRIVATE_PTR;
+        return MappableExprsHandler::OMP_MAP_PRIVATE_PTR;
     }
   }
 
@@ -5509,8 +5509,8 @@ adjustMapModifiersForPrivateClauses(const OMPExecutableDirective &D,
       // A first private variable captured by reference will use only the
       // 'private ptr' and 'map to' flag.
       if (CurVD == VD)
-        return OpenMPMapClauseHandler::OMP_MAP_PRIVATE_PTR |
-               OpenMPMapClauseHandler::OMP_MAP_TO;
+        return MappableExprsHandler::OMP_MAP_PRIVATE_PTR |
+               MappableExprsHandler::OMP_MAP_TO;
     }
   }
 
