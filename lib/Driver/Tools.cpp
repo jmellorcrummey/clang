@@ -6175,11 +6175,13 @@ void Clang::AddClangCLArgs(const ArgList &Args, types::ID InputType,
     if (Args.hasArg(options::OPT__SLASH_LDd))
       CmdArgs.push_back("-D_DEBUG");
     CmdArgs.push_back("-D_MT");
+    CmdArgs.push_back("-flto-visibility-public-std");
     FlagForCRT = "--dependent-lib=libcmt";
     break;
   case options::OPT__SLASH_MTd:
     CmdArgs.push_back("-D_DEBUG");
     CmdArgs.push_back("-D_MT");
+    CmdArgs.push_back("-flto-visibility-public-std");
     FlagForCRT = "--dependent-lib=libcmtd";
     break;
   default:
@@ -6478,6 +6480,72 @@ void ClangAs::ConstructJob(Compilation &C, const JobAction &JA,
       getToolChain().getTriple().isOSLinux())
     SplitDebugInfo(getToolChain(), C, *this, JA, Args, Output,
                    SplitDebugName(Args, Input));
+}
+
+void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
+                                  const InputInfo &Output,
+                                  const InputInfoList &Inputs,
+                                  const llvm::opt::ArgList &TCArgs,
+                                  const char *LinkingOutput) const {
+
+  // The (un)bundling command looks like this:
+  // clang-offload-bundler -type=bc
+  //   -fomptargets=host-triple,device-triple1,device-triple2
+  //   -inputs=input_file
+  //   -outputs=unbundle_file_host,unbundle_file_tgt1,unbundle_file_tgt2"
+  //   (-unbundle)
+
+  auto BundledFile = Output;
+  auto UnbundledFiles = Inputs;
+
+  bool IsUnbundle = isa<OffloadUnbundlingJobAction>(JA);
+
+  ArgStringList CmdArgs;
+
+  // Get the type.
+  CmdArgs.push_back(TCArgs.MakeArgString(
+      Twine("-type=") + types::getTypeTempSuffix(BundledFile.getType())));
+
+  // Get the triples. The order is the same that comes in fomptargets option.
+  {
+    SmallString<128> Triples;
+    Triples += "-targets=offload-host-";
+    Triples += getToolChain().getTripleString();
+
+    Arg *TargetsArg = TCArgs.getLastArg(options::OPT_fomptargets_EQ);
+    for (auto *A : TargetsArg->getValues()) {
+      // We have to use the string that exactly matches the triple here.
+      llvm::Triple T(A);
+      Triples += ",offload-device-";
+      Triples += T.getTriple();
+    }
+    CmdArgs.push_back(TCArgs.MakeArgString(Triples));
+  }
+
+  // Get bundled file command.
+  CmdArgs.push_back(
+      TCArgs.MakeArgString(Twine(IsUnbundle ? "-inputs=" : "-outputs=") +
+                           BundledFile.getFilename()));
+
+  // Get unbundled files command.
+  {
+    SmallString<128> UB(IsUnbundle ? "-outputs=" : "-inputs=");
+    for (unsigned i = 0; i < UnbundledFiles.size(); ++i) {
+      if (i)
+        UB += ',';
+      UB += UnbundledFiles[i].getFilename();
+    }
+    CmdArgs.push_back(TCArgs.MakeArgString(UB));
+  }
+
+  if (IsUnbundle)
+    CmdArgs.push_back("-unbundle");
+
+  // All the inputs are encoded as commands.
+  C.addCommand(llvm::make_unique<Command>(
+      JA, *this,
+      TCArgs.MakeArgString(getToolChain().GetProgramPath(getShortName())),
+      CmdArgs, None));
 }
 
 void GnuTool::anchor() {}
@@ -9405,6 +9473,8 @@ void gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
           // Already diagnosed.
           break;
         }
+        if (getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Host)
+          CmdArgs.push_back("-lomptarget");
       }
 
       AddRunTimeLibs(ToolChain, D, CmdArgs, Args);
@@ -9438,6 +9508,9 @@ void gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
         CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("crtn.o")));
     }
   }
+
+  // Add OpenMP offloading linker script args if required.
+  AddOpenMPLinkerScript(getToolChain(), C, Output, Inputs, Args, CmdArgs);
 
   C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, Inputs));
 }
@@ -11136,6 +11209,10 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-O0");
   }
 
+  // Pass -v to ptxas if it was passed to the driver.
+  if (Args.hasArg(options::OPT_v))
+    CmdArgs.push_back("-v");
+
   CmdArgs.push_back("--gpu-name");
   CmdArgs.push_back(Args.MakeArgString(gpu_arch));
   CmdArgs.push_back("--output-file");
@@ -11145,6 +11222,10 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
 
   for (const auto& A : Args.getAllArgValues(options::OPT_Xcuda_ptxas))
     CmdArgs.push_back(Args.MakeArgString(A));
+
+  // In OpenMP we need to generate relocatable code.
+  if (getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Device)
+    CmdArgs.push_back("-c");
 
   const char *Exec = Args.MakeArgString(TC.GetProgramPath("ptxas"));
   C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, Inputs));
@@ -11163,6 +11244,92 @@ void NVPTX::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   assert(TC.getTriple().isNVPTX() && "Wrong platform");
 
   ArgStringList CmdArgs;
+
+  // OpenMP uses nvlink to link cubin files. The result will be embedded in the
+  // host binary by the host linker.
+  assert(TC.getOffloadingKind() != ToolChain::OK_OpenMP_Host &&
+         "CUDA toolchain not expected for an OpenMP host device.");
+  if (TC.getOffloadingKind() == ToolChain::OK_OpenMP_Device) {
+
+    if (Output.isFilename()) {
+      CmdArgs.push_back("-o");
+      CmdArgs.push_back(Output.getFilename());
+    } else {
+      assert(Output.isNothing() && "Invalid output.");
+    }
+
+    if (Args.hasArg(options::OPT_g_Flag))
+      CmdArgs.push_back("-g");
+
+    if (Args.hasArg(options::OPT_v))
+      CmdArgs.push_back("-v");
+
+    std::vector<std::string> gpu_archs =
+        Args.getAllArgValues(options::OPT_march_EQ);
+    assert(gpu_archs.size() == 1 && "Exactly one GPU Arch required for ptxas.");
+    const std::string &gpu_arch = gpu_archs[0];
+
+    CmdArgs.push_back("-arch");
+    CmdArgs.push_back(Args.MakeArgString(gpu_arch));
+
+    // add linking against library implementing OpenMP calls on NVPTX target
+    CmdArgs.push_back("-lomptarget-nvptx");
+
+    // nvlink relies on the extension used by the input files
+    // to decide what to do. Given that ptxas produces cubin files
+    // we need to copy the input files to a new file with the right
+    // extension.
+    // FIXME: this can be efficiently done by specifying a new
+    // output type for the assembly action, however this would expose
+    // the target details to the driver and maybe we do not want to do
+    // that
+    for (const auto &II : Inputs) {
+
+      if (II.getType() == types::TY_LLVM_IR ||
+          II.getType() == types::TY_LTO_IR ||
+          II.getType() == types::TY_LTO_BC ||
+          II.getType() == types::TY_LLVM_BC) {
+        C.getDriver().Diag(diag::err_drv_no_linker_llvm_support)
+            << getToolChain().getTripleString();
+        continue;
+      }
+
+      // Currently, we only pass the input files to the linker, we do not pass
+      // any libraries that may be valid only for the host.
+      if (!II.isFilename())
+        continue;
+
+      StringRef Name = llvm::sys::path::filename(II.getFilename());
+      std::pair<StringRef, StringRef> Split = Name.rsplit('.');
+      std::string TmpName =
+          C.getDriver().GetTemporaryPath(Split.first, "cubin");
+
+      const char *CubinF =
+          C.addTempFile(C.getArgs().MakeArgString(TmpName.c_str()));
+
+      const char *CopyExec = Args.MakeArgString(getToolChain().GetProgramPath(
+          C.getDriver().IsCLMode() ? "copy" : "cp"));
+
+      ArgStringList CopyCmdArgs;
+      CopyCmdArgs.push_back(II.getFilename());
+      CopyCmdArgs.push_back(CubinF);
+      C.addCommand(
+          llvm::make_unique<Command>(JA, *this, CopyExec, CopyCmdArgs, Inputs));
+
+      CmdArgs.push_back(CubinF);
+    }
+
+    AddOpenMPLinkerScript(getToolChain(), C, Output, Inputs, Args, CmdArgs);
+
+    // add paths specified in LIBRARY_PATH environment variable as -L options
+    addDirectoryList(Args, CmdArgs, "-L", "LIBRARY_PATH");
+
+    const char *Exec =
+        Args.MakeArgString(getToolChain().GetProgramPath("nvlink"));
+    C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, Inputs));
+    return;
+  }
+
   CmdArgs.push_back("--cuda");
   CmdArgs.push_back(TC.getTriple().isArch64Bit() ? "-64" : "-32");
   CmdArgs.push_back(Args.MakeArgString("--create"));
