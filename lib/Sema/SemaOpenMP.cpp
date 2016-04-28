@@ -838,55 +838,6 @@ void Sema::InitDataSharingAttributesStack() {
 
 #define DSAStack static_cast<DSAStackTy *>(VarDataSharingAttributesStack)
 
-namespace {
-// Types used to organize the components of a valid map clause.
-typedef std::pair<Expr *, ValueDecl *> MapExpressionComponent;
-typedef SmallVector<MapExpressionComponent, 4> MapExpressionComponents;
-}
-
-// Helper to extract the components in the map clause expression \a E and store
-// them into \a MEC. This assumes that \a E is a valid map clause expression,
-// i.e. it has already passed the single clause checks.
-static void ExtractMapExpressionComponents(Expr *TE,
-                                           MapExpressionComponents &MEC) {
-  while (true) {
-    TE = TE->IgnoreParenImpCasts();
-
-    if (auto *CurE = dyn_cast<DeclRefExpr>(TE)) {
-      MEC.push_back(
-          MapExpressionComponent(CurE, cast<VarDecl>(CurE->getDecl())));
-      break;
-    }
-
-    if (auto *CurE = dyn_cast<MemberExpr>(TE)) {
-      auto *BaseE = CurE->getBase()->IgnoreParenImpCasts();
-
-      MEC.push_back(
-          MapExpressionComponent(CurE, cast<FieldDecl>(CurE->getMemberDecl())));
-      if (isa<CXXThisExpr>(BaseE))
-        break;
-
-      TE = BaseE;
-      continue;
-    }
-
-    if (auto *CurE = dyn_cast<ArraySubscriptExpr>(TE)) {
-      MEC.push_back(MapExpressionComponent(CurE, nullptr));
-      TE = CurE->getBase()->IgnoreParenImpCasts();
-      continue;
-    }
-
-    if (auto *CurE = dyn_cast<OMPArraySectionExpr>(TE)) {
-      MEC.push_back(MapExpressionComponent(CurE, nullptr));
-      TE = CurE->getBase()->IgnoreParenImpCasts();
-      continue;
-    }
-
-    llvm_unreachable(
-        "Expecting only valid map clause expressions at this point!");
-  }
-}
-
 bool Sema::IsOpenMPCapturedByRef(ValueDecl *D,
                                  const CapturedRegionScopeInfo *RSI) {
   assert(LangOpts.OpenMP && "OpenMP is not allowed");
@@ -957,36 +908,32 @@ bool Sema::IsOpenMPCapturedByRef(ValueDecl *D,
     if (Ty->isReferenceType())
       Ty = Ty->castAs<ReferenceType>()->getPointeeType();
 
-    // FIXME: Right now, only some of the maps are implemented. Properly mapping
-    // values requires having the private, and firstprivate clauses SEMA
-    // and parsing in place, which we don't yet.
-
     // Locate map clauses and see if the variable being captured is referred to
     // in any of those clauses. Here we only care about variables, not fields,
     // because fields are part of aggregates.
     bool IsVariableUsedInMapClause = false;
     bool IsVariableAssociatedWithSection = false;
 
-    DSAStack->checkMapInfoForVar(
-        D, /*CurrentRegionOnly=*/true, [&](Expr *MapExpr) {
-          MapExpressionComponents MapExprComponents;
-          ExtractMapExpressionComponents(MapExpr, MapExprComponents);
+    DSAStack->checkMappableExprComponentListsForDecl(
+        D, /*CurrentRegionOnly=*/true,
+        [&](OMPClauseMappableExprCommon::MappableExprComponentListRef
+                MapExprComponents) {
 
           auto EI = MapExprComponents.rbegin();
           auto EE = MapExprComponents.rend();
 
           assert(EI != EE && "Invalid map expression!");
 
-          if (isa<DeclRefExpr>(EI->first))
-            IsVariableUsedInMapClause |= EI->second == D;
+          if (isa<DeclRefExpr>(EI->getAssociatedExpression()))
+            IsVariableUsedInMapClause |= EI->getAssociatedDeclaration() == D;
 
           ++EI;
           if (EI == EE)
             return false;
 
-          if (isa<ArraySubscriptExpr>(EI->first) ||
-              isa<OMPArraySectionExpr>(EI->first) ||
-              isa<MemberExpr>(EI->first)) {
+          if (isa<ArraySubscriptExpr>(EI->getAssociatedExpression()) ||
+              isa<OMPArraySectionExpr>(EI->getAssociatedExpression()) ||
+              isa<MemberExpr>(EI->getAssociatedExpression())) {
             IsVariableAssociatedWithSection = true;
             // There is nothing more we need to know about this variable.
             return true;

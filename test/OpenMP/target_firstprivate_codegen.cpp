@@ -35,8 +35,7 @@ struct TT{
 // CHECK-DAG:  [[SIZET:@.+]] = private unnamed_addr constant [1 x i{{32|64}}] [i[[SZ:32|64]] 4]
 // CHECK:  [[MAPT:@.+]] = private unnamed_addr constant [1 x i32] [i32 288]
 // CHECK-DAG:  [[MAPT2:@.+]] = private unnamed_addr constant [9 x i32] [i32 288, i32 161, i32 288, i32 161, i32 161, i32 288, i32 288, i32 161, i32 161]
-// CHECK-64-DAG:  [[SIZET3:@.+]] = private unnamed_addr constant [1 x i{{32|64}}]
-// CHECK-32-DAG:  [[SIZET3:@.+]] = private unnamed_addr constant [1 x i32]
+// CHECK-DAG:  [[SIZET3:@.+]] = private unnamed_addr constant [1 x i{{32|64}}] zeroinitializer
 // CHECK-DAG:  [[MAPT3:@.+]] = private unnamed_addr constant [1 x i32] [i32 32]
 // CHECK-DAG:  [[MAPT4:@.+]] = private unnamed_addr constant [5 x i32] [i32 35, i32 288, i32 288, i32 288, i32 161]
 // CHECK-DAG:  [[SIZET5:@.+]] = private unnamed_addr constant [3 x i{{32|64}}] [i[[SZ]] 4, i[[SZ]] 1, i[[SZ]] 40]

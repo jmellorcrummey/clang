@@ -3370,19 +3370,17 @@ CodeGenFunction::getOMPCancelDestination(OpenMPDirectiveKind Kind) {
 // Generate the instructions for '#pragma omp target data' directive.
 void CodeGenFunction::EmitOMPTargetDataDirective(
     const OMPTargetDataDirective &S) {
-  // emit the code inside the construct for now
-  auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
-
   // The target data enclosed region is implemented just by emitting the
   // statement.
-  auto &&CodeGen = [&CS](CodeGenFunction &CGF, PrePostActionTy &) {
-    CGF.EmitStmt(CS->getCapturedStmt());
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+    CGF.EmitStmt(cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
   };
 
   // If we don't have target devices, don't bother emitting the data mapping
   // code.
   if (CGM.getLangOpts().OMPTargetTriples.empty()) {
     OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
+
     CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_target_data,
                                                 CodeGen);
     return;
