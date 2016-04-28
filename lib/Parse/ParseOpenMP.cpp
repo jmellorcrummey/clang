@@ -38,7 +38,8 @@ enum OpenMPDirectiveKindEx {
   OMPD_point,
   OMPD_reduction,
   OMPD_target_enter,
-  OMPD_target_exit
+  OMPD_target_exit,
+  OMPD_distribute_parallel
 };
 } // namespace
 
@@ -70,6 +71,8 @@ static OpenMPDirectiveKind ParseOpenMPDirectiveKind(Parser &P) {
     { OMPD_declare, OMPD_reduction, OMPD_declare_reduction },
     { OMPD_declare, OMPD_simd, OMPD_declare_simd },
     { OMPD_declare, OMPD_target, OMPD_declare_target },
+    { OMPD_distribute, OMPD_parallel, OMPD_distribute_parallel },
+    { OMPD_distribute_parallel, OMPD_for, OMPD_distribute_parallel_for },
     { OMPD_end, OMPD_declare, OMPD_end_declare },
     { OMPD_end_declare, OMPD_target, OMPD_end_declare_target },
     { OMPD_target, OMPD_data, OMPD_target_data },
@@ -83,7 +86,7 @@ static OpenMPDirectiveKind ParseOpenMPDirectiveKind(Parser &P) {
     { OMPD_parallel, OMPD_sections, OMPD_parallel_sections },
     { OMPD_taskloop, OMPD_simd, OMPD_taskloop_simd },
     { OMPD_target, OMPD_parallel, OMPD_target_parallel },
-    { OMPD_target_parallel, OMPD_for, OMPD_target_parallel_for }
+    { OMPD_target_parallel, OMPD_for, OMPD_target_parallel_for}
   };
   enum { CancellationPoint = 0, DeclareReduction = 1, TargetData = 2 };
   auto Tok = P.getCurToken();
@@ -679,6 +682,7 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
   case OMPD_taskloop_simd:
   case OMPD_distribute:
   case OMPD_end_declare_target:
+  case OMPD_distribute_parallel_for:
     Diag(Tok, diag::err_omp_unexpected_directive)
         << getOpenMPDirectiveName(DKind);
     break;
@@ -709,7 +713,8 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
 ///         'for simd' | 'parallel for simd' | 'target' | 'target data' |
 ///         'taskgroup' | 'teams' | 'taskloop' | 'taskloop simd' |
 ///         'distribute' | 'target enter data' | 'target exit data' |
-///         'target parallel' | 'target parallel for' {clause}
+///         'target parallel' | 'target parallel for' |
+///         'distribute parallel for' {clause}
 ///         annot_pragma_openmp_end
 ///
 StmtResult Parser::ParseOpenMPDeclarativeOrExecutableDirective(
@@ -811,7 +816,8 @@ StmtResult Parser::ParseOpenMPDeclarativeOrExecutableDirective(
   case OMPD_target_parallel_for:
   case OMPD_taskloop:
   case OMPD_taskloop_simd:
-  case OMPD_distribute: {
+  case OMPD_distribute:
+  case OMPD_distribute_parallel_for: {
     ConsumeToken();
     // Parse directive name of the 'critical' directive if any.
     if (DKind == OMPD_critical) {

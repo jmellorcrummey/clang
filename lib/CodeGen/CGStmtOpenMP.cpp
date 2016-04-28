@@ -2736,6 +2736,11 @@ void CodeGenFunction::EmitOMPDistributeDirective(
                                               false);
 }
 
+void CodeGenFunction::EmitOMPDistributeParallelForDirective(
+    const OMPDistributeParallelForDirective &S) {
+  // TODO: codegen for distribute parallel for.
+}
+
 static llvm::Function *emitOutlinedOrderedFunction(CodeGenModule &CGM,
                                                    const CapturedStmt *S) {
   CodeGenFunction CGF(CGM, /*suppressNewContext=*/true);
