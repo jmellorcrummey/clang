@@ -4003,6 +4003,28 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // can only use 32 lanes if there is no reduction clause
     AddSimdPragmaToCurrentWorkshare();
 
+    // char SimdNumLanesName[] = "__omptgt__SimdNumLanes";
+    // // char ExecuteSimdName[] = "__omptgt_ExecuteSimd";
+
+    // if (!SimdNumLanes)
+    //   SimdNumLanes = CGF.CGM.getModule().getGlobalVariable(SimdNumLanesName);
+    // // if (!OmpNumThreads)
+    // //   OmpNumThreads = CGF.CGM.getModule().getGlobalVariable(OmpNumThreadsName);
+
+    // if (!SimdNumLanes)
+    //   SimdNumLanes = new llvm::GlobalVariable(
+    //       CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
+    //       llvm::Constant::getNullValue(VarTy), SimdNumLanesName, 0,
+    //       llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+    // // if (!OmpNumThreads)
+    // //   OmpNumThreads = new llvm::GlobalVariable(
+    // //       CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
+    // //       llvm::Constant::getNullValue(VarTy), OmpNumThreadsName, 0,
+    // //       llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
+
+    // // Use all CUDA threads but in batches of 32
+    // Bld.CreateStore(Bld.getInt32(32), SimdNumLanes);
+
     Builder.CreateStore(
           Builder.CreateAdd(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
           ParallelNesting);

@@ -7636,6 +7636,10 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
   printf("======> Inside EmitOMPSimdDirective\n");
   if (this->onlyParallelOmpNodes){
     printf("======> Inside EmitOMPSimdDirective: onlyParallelOmpNodes\n");
+    OpenMPRegionRAII SharingRegion(
+          *this, S, *cast<CapturedStmt>(S.getAssociatedStmt()), nullptr,
+          OpenMPRegionRAII::OMPRegionType_Shared_Simd);
+
     InlinedOpenMPRegion Region(*this, S.getAssociatedStmt());
     RunCleanupsScope ExecutedScope(*this);
     // CGPragmaOmpSimd Wrapper(&S);
