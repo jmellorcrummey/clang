@@ -1479,6 +1479,9 @@ void CGOpenMPRuntime::ParallelOpenMPNode(CodeGenFunction &CGF,
                                          OpenMPDirectiveKind DKind,
                                          const OMPExecutableDirective &S) {}
 
+void CGOpenMPRuntime::SimdOpenMPNode(CodeGenFunction &CGF,
+                                     const OMPExecutableDirective &S) {}
+
 void CGOpenMPRuntime::ExitParallelRegionInTarget(CodeGenFunction &CGF) {}
 
 void CGOpenMPRuntime::SupportCritical (const OMPCriticalDirective &S,

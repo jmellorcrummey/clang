@@ -704,6 +704,9 @@ public:
                                   OpenMPDirectiveKind DKind,
                                   const OMPExecutableDirective &S);
 
+  virtual void SimdOpenMPNode(CodeGenFunction &CGF,
+                              const OMPExecutableDirective &S);
+
   virtual void ExitParallelRegionInTarget(CodeGenFunction &CGF);
 
   virtual void SupportCritical (const OMPCriticalDirective &S,
