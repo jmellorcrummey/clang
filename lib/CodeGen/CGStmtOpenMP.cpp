@@ -2773,6 +2773,11 @@ void CodeGenFunction::EmitOMPOrderedDirective(const OMPOrderedDirective &S) {
   CGM.getOpenMPRuntime().emitOrderedRegion(*this, CodeGen, S.getLocStart(), !C);
 }
 
+void CodeGenFunction::EmitOMPTargetTeamsDirective(
+    const OMPTargetTeamsDirective &S) {
+  // TODO: codegen for target teams
+}
+
 static llvm::Value *convertToScalarValue(CodeGenFunction &CGF, RValue Val,
                                          QualType SrcType, QualType DestType,
                                          SourceLocation Loc) {

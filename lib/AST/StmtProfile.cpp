@@ -661,6 +661,11 @@ void StmtProfiler::VisitOMPDistributeParallelForDirective(
   VisitOMPLoopDirective(S);
 }
 
+void StmtProfiler::VisitOMPTargetTeamsDirective(
+    const OMPTargetTeamsDirective *S) {
+  VisitOMPExecutableDirective(S);
+}
+
 void StmtProfiler::VisitExpr(const Expr *S) {
   VisitStmt(S);
 }

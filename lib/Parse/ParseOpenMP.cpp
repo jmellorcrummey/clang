@@ -80,13 +80,14 @@ static OpenMPDirectiveKind ParseOpenMPDirectiveKind(Parser &P) {
     { OMPD_target, OMPD_exit, OMPD_target_exit },
     { OMPD_target_enter, OMPD_data, OMPD_target_enter_data },
     { OMPD_target_exit, OMPD_data, OMPD_target_exit_data },
+    { OMPD_target, OMPD_teams, OMPD_target_teams },
     { OMPD_for, OMPD_simd, OMPD_for_simd },
     { OMPD_parallel, OMPD_for, OMPD_parallel_for },
     { OMPD_parallel_for, OMPD_simd, OMPD_parallel_for_simd },
     { OMPD_parallel, OMPD_sections, OMPD_parallel_sections },
     { OMPD_taskloop, OMPD_simd, OMPD_taskloop_simd },
     { OMPD_target, OMPD_parallel, OMPD_target_parallel },
-    { OMPD_target_parallel, OMPD_for, OMPD_target_parallel_for}
+    { OMPD_target_parallel, OMPD_for, OMPD_target_parallel_for }
   };
   enum { CancellationPoint = 0, DeclareReduction = 1, TargetData = 2 };
   auto Tok = P.getCurToken();
@@ -683,6 +684,7 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
   case OMPD_distribute:
   case OMPD_end_declare_target:
   case OMPD_distribute_parallel_for:
+  case OMPD_target_teams:
     Diag(Tok, diag::err_omp_unexpected_directive)
         << getOpenMPDirectiveName(DKind);
     break;
@@ -714,7 +716,7 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
 ///         'taskgroup' | 'teams' | 'taskloop' | 'taskloop simd' |
 ///         'distribute' | 'target enter data' | 'target exit data' |
 ///         'target parallel' | 'target parallel for' |
-///         'distribute parallel for' {clause}
+///         'distribute parallel for' | 'target teams' {clause}
 ///         annot_pragma_openmp_end
 ///
 StmtResult Parser::ParseOpenMPDeclarativeOrExecutableDirective(
@@ -817,7 +819,8 @@ StmtResult Parser::ParseOpenMPDeclarativeOrExecutableDirective(
   case OMPD_taskloop:
   case OMPD_taskloop_simd:
   case OMPD_distribute:
-  case OMPD_distribute_parallel_for: {
+  case OMPD_distribute_parallel_for:
+  case OMPD_target_teams: {
     ConsumeToken();
     // Parse directive name of the 'critical' directive if any.
     if (DKind == OMPD_critical) {

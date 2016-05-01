@@ -1076,3 +1076,27 @@ OMPDistributeParallelForDirective::CreateEmpty(const ASTContext &C,
           numLoopChildren(CollapsedNum, OMPD_distribute_parallel_for));
   return new (Mem) OMPDistributeParallelForDirective(CollapsedNum, NumClauses);
 }
+
+OMPTargetTeamsDirective *OMPTargetTeamsDirective::Create(
+    const ASTContext &C, SourceLocation StartLoc, SourceLocation EndLoc,
+    ArrayRef<OMPClause *> Clauses, Stmt *AssociatedStmt) {
+  unsigned Size = llvm::alignTo(sizeof(OMPTargetTeamsDirective),
+                                llvm::alignOf<OMPClause *>());
+  void *Mem =
+      C.Allocate(Size + sizeof(OMPClause *) * Clauses.size() + sizeof(Stmt *));
+  OMPTargetTeamsDirective *Dir =
+      new (Mem) OMPTargetTeamsDirective(StartLoc, EndLoc, Clauses.size());
+  Dir->setClauses(Clauses);
+  Dir->setAssociatedStmt(AssociatedStmt);
+  return Dir;
+}
+
+OMPTargetTeamsDirective *
+OMPTargetTeamsDirective::CreateEmpty(const ASTContext &C, unsigned NumClauses,
+                                     EmptyShell) {
+  unsigned Size = llvm::alignTo(sizeof(OMPTargetTeamsDirective),
+                                llvm::alignOf<OMPClause *>());
+  void *Mem =
+      C.Allocate(Size + sizeof(OMPClause *) * NumClauses + sizeof(Stmt *));
+  return new (Mem) OMPTargetTeamsDirective(NumClauses);
+}

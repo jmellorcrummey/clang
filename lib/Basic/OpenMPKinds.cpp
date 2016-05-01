@@ -562,6 +562,16 @@ bool clang::isAllowedClauseForDirective(OpenMPDirectiveKind DKind,
       break;
     }
     break;
+  case OMPD_target_teams:
+    switch (CKind) {
+#define OPENMP_TARGET_TEAMS_CLAUSE(Name)                                       \
+  case OMPC_##Name:                                                            \
+    return true;
+#include "clang/Basic/OpenMPKinds.def"
+    default:
+      break;
+    }
+    break;
   case OMPD_declare_target:
   case OMPD_end_declare_target:
   case OMPD_unknown:
@@ -611,7 +621,7 @@ bool clang::isOpenMPParallelDirective(OpenMPDirectiveKind DKind) {
 bool clang::isOpenMPTargetExecutionDirective(OpenMPDirectiveKind DKind) {
   // TODO add next directives.
   return DKind == OMPD_target || DKind == OMPD_target_parallel ||
-         DKind == OMPD_target_parallel_for;
+         DKind == OMPD_target_parallel_for || DKind == OMPD_target_teams;
 }
 
 bool clang::isOpenMPTargetDataManagementDirective(OpenMPDirectiveKind DKind) {
@@ -621,7 +631,8 @@ bool clang::isOpenMPTargetDataManagementDirective(OpenMPDirectiveKind DKind) {
 }
 
 bool clang::isOpenMPTeamsDirective(OpenMPDirectiveKind DKind) {
-  return DKind == OMPD_teams; // TODO add next directives.
+  return DKind == OMPD_teams ||
+         DKind == OMPD_target_teams; // TODO add next directives.
 }
 
 bool clang::isOpenMPSimdDirective(OpenMPDirectiveKind DKind) {
