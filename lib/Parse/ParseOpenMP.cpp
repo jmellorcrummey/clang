@@ -40,6 +40,7 @@ enum OpenMPDirectiveKindEx {
   OMPD_target_enter,
   OMPD_target_exit,
   OMPD_distribute_parallel,
+  OMPD_teams_distribute,
   OMPD_teams_distribute_parallel
 };
 } // namespace
@@ -89,6 +90,8 @@ static OpenMPDirectiveKind ParseOpenMPDirectiveKind(Parser &P) {
     { OMPD_taskloop, OMPD_simd, OMPD_taskloop_simd },
     { OMPD_target, OMPD_parallel, OMPD_target_parallel },
     { OMPD_target_parallel, OMPD_for, OMPD_target_parallel_for },
+    { OMPD_teams, OMPD_distribute, OMPD_teams_distribute },
+    { OMPD_teams_distribute, OMPD_parallel, OMPD_teams_distribute_parallel },
     { OMPD_teams_distribute_parallel, OMPD_for,
      OMPD_teams_distribute_parallel_for} };
   enum { CancellationPoint = 0, DeclareReduction = 1, TargetData = 2 };
