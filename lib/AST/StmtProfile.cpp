@@ -656,6 +656,16 @@ void OMPClauseProfiler::VisitOMPDistScheduleClause(
 
 void OMPClauseProfiler::VisitOMPDefaultmapClause(const OMPDefaultmapClause *) {}
 
+void StmtProfiler::VisitOMPDistributeParallelForDirective(
+    const OMPDistributeParallelForDirective *S) {
+  VisitOMPLoopDirective(S);
+}
+
+void StmtProfiler::VisitOMPTargetTeamsDirective(
+    const OMPTargetTeamsDirective *S) {
+  VisitOMPExecutableDirective(S);
+}
+
 void StmtProfiler::VisitExpr(const Expr *S) {
   VisitStmt(S);
 }

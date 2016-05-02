@@ -2736,6 +2736,11 @@ void CodeGenFunction::EmitOMPDistributeDirective(
                                               false);
 }
 
+void CodeGenFunction::EmitOMPDistributeParallelForDirective(
+    const OMPDistributeParallelForDirective &S) {
+  // TODO: codegen for distribute parallel for.
+}
+
 static llvm::Function *emitOutlinedOrderedFunction(CodeGenModule &CGM,
                                                    const CapturedStmt *S) {
   CodeGenFunction CGF(CGM, /*suppressNewContext=*/true);
@@ -2766,6 +2771,11 @@ void CodeGenFunction::EmitOMPOrderedDirective(const OMPOrderedDirective &S) {
   };
   OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
   CGM.getOpenMPRuntime().emitOrderedRegion(*this, CodeGen, S.getLocStart(), !C);
+}
+
+void CodeGenFunction::EmitOMPTargetTeamsDirective(
+    const OMPTargetTeamsDirective &S) {
+  // TODO: codegen for target teams
 }
 
 static llvm::Value *convertToScalarValue(CodeGenFunction &CGF, RValue Val,
