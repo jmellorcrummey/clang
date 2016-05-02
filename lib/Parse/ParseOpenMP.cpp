@@ -39,7 +39,8 @@ enum OpenMPDirectiveKindEx {
   OMPD_reduction,
   OMPD_target_enter,
   OMPD_target_exit,
-  OMPD_distribute_parallel
+  OMPD_distribute_parallel,
+  OMPD_teams_distribute_parallel
 };
 } // namespace
 
@@ -87,8 +88,9 @@ static OpenMPDirectiveKind ParseOpenMPDirectiveKind(Parser &P) {
     { OMPD_parallel, OMPD_sections, OMPD_parallel_sections },
     { OMPD_taskloop, OMPD_simd, OMPD_taskloop_simd },
     { OMPD_target, OMPD_parallel, OMPD_target_parallel },
-    { OMPD_target_parallel, OMPD_for, OMPD_target_parallel_for }
-  };
+    { OMPD_target_parallel, OMPD_for, OMPD_target_parallel_for },
+    { OMPD_teams_distribute_parallel, OMPD_for,
+     OMPD_teams_distribute_parallel_for} };
   enum { CancellationPoint = 0, DeclareReduction = 1, TargetData = 2 };
   auto Tok = P.getCurToken();
   unsigned DKind =
@@ -685,6 +687,7 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
   case OMPD_end_declare_target:
   case OMPD_distribute_parallel_for:
   case OMPD_target_teams:
+  case OMPD_teams_distribute_parallel_for:
     Diag(Tok, diag::err_omp_unexpected_directive)
         << getOpenMPDirectiveName(DKind);
     break;
@@ -820,7 +823,8 @@ StmtResult Parser::ParseOpenMPDeclarativeOrExecutableDirective(
   case OMPD_taskloop_simd:
   case OMPD_distribute:
   case OMPD_distribute_parallel_for:
-  case OMPD_target_teams: {
+  case OMPD_target_teams:
+  case OMPD_teams_distribute_parallel_for: {
     ConsumeToken();
     // Parse directive name of the 'critical' directive if any.
     if (DKind == OMPD_critical) {
