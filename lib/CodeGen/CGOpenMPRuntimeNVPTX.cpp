@@ -23,8 +23,7 @@ using namespace CodeGen;
 
 namespace {
 enum OpenMPRTLFunctionNVPTX {
-  /// \brief Call to void __kmpc_kernel_init(kmp_int32 omp_handle,
-  /// kmp_int32 thread_limit);
+  /// \brief Call to void __kmpc_kernel_init(kmp_int32 thread_limit);
   OMPRTL_NVPTX__kmpc_kernel_init,
   /// \brief Call to void __kmpc_kernel_deinit();
   OMPRTL_NVPTX__kmpc_kernel_deinit,
@@ -738,8 +737,6 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
 void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
                                            EntryFunctionState &EST,
                                            WorkerFunctionState &WST) {
-  CGBuilderTy &Bld = CGF.Builder;
-
   //  // Setup BBs in entry function.
   //  llvm::BasicBlock *WorkerCheckBB =
   //  CGF.createBasicBlock(".check.for.worker");
@@ -793,7 +790,7 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
 
   // First action in sequential region:
   // Initialize the state of the OpenMP runtime library on the GPU.
-  llvm::Value *Args[] = {Bld.getInt32(/*OmpHandle=*/0), getThreadLimit(CGF)};
+  llvm::Value *Args[] = {getThreadLimit(CGF)};
   CGF.EmitRuntimeCall(
       createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_init), Args);
 }
@@ -824,9 +821,8 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
   llvm::Constant *RTLFn = nullptr;
   switch (static_cast<OpenMPRTLFunctionNVPTX>(Function)) {
   case OMPRTL_NVPTX__kmpc_kernel_init: {
-    // Build void __kmpc_kernel_init(kmp_int32 omp_handle,
-    // kmp_int32 thread_limit);
-    llvm::Type *TypeParams[] = {CGM.Int32Ty, CGM.Int32Ty};
+    // Build void __kmpc_kernel_init(kmp_int32 thread_limit);
+    llvm::Type *TypeParams[] = {CGM.Int32Ty};
     llvm::FunctionType *FnTy =
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_init");
