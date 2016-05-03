@@ -2779,6 +2779,11 @@ void CodeGenFunction::EmitOMPTeamsDistributeParallelForDirective(
   // TODO: codegen for teams distribute parallel for
 }
 
+void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForDirective(
+    const OMPTargetTeamsDistributeParallelForDirective &S) {
+  // TODO: codegen for target teams distribute parallel for
+}
+
 static llvm::Value *convertToScalarValue(CodeGenFunction &CGF, RValue Val,
                                          QualType SrcType, QualType DestType,
                                          SourceLocation Loc) {

@@ -639,6 +639,9 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
   case Stmt::OMPTeamsDistributeParallelForDirectiveClass:
     K = CXCursor_OMPTeamsDistributeParallelForDirective;
     break;
+  case Stmt::OMPTargetTeamsDistributeParallelForDirectiveClass:
+    K = CXCursor_OMPTargetTeamsDistributeParallelForDirective;
+    break;
   }
 
   CXCursor C = { K, 0, { Parent, S, TU } };
