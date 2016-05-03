@@ -2845,7 +2845,7 @@ public:
   }
 };
 
-/// \brief This represents '#pragma omp distribute parallel for' composite
+/// \brief This represents '#pragma omp teams distribute parallel for' composite
 ///  directive.
 ///
 /// \code
