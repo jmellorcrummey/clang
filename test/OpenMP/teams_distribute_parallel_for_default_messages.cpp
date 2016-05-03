@@ -19,7 +19,7 @@ T tmain(T argc) {
     foo();
 #pragma omp target
 #pragma omp teams distribute parallel for default(none // expected-error {{expected ')'}} expected-note {{to match this '('}}
-  for (i = 0; i < argc; ++i) // expected-error {{variable 'argc' must have explicitly specified data sharing attributes}}
+  for (i = 0; i < argc; ++i) // expected-error 2 {{variable 'argc' must have explicitly specified data sharing attributes}}
     foo();
 #pragma omp target
 #pragma omp teams distribute parallel for default(shared), default(shared) // expected-error {{directive '#pragma omp teams distribute parallel for' cannot contain more than one 'default' clause}}
@@ -31,7 +31,7 @@ T tmain(T argc) {
     foo();
 #pragma omp target
 #pragma omp teams distribute parallel for default(none)
-  for (i = 0; i < argc; ++i)  // expected-error {{variable 'argc' must have explicitly specified data sharing attributes}}
+  for (i = 0; i < argc; ++i)  // expected-error 2 {{variable 'argc' must have explicitly specified data sharing attributes}}
     foo();
 
 #pragma omp parallel default(none)
@@ -80,5 +80,5 @@ int main(int argc, char **argv) {
   for (i = 0; i < argc; ++i)
     foo();
 
-  return (tmain<int, 5>(argc) + tmain<char, 1>(argv[0][0]));
+  return (tmain<int, 5>(argc) + tmain<char, 1>(argv[0][0])); // expected-note {{in instantiation of function template specialization 'tmain<int, 5>' requested here}} expected-note {{in instantiation of function template specialization 'tmain<char, 1>' requested here}}
 }
