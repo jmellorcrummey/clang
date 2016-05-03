@@ -352,6 +352,14 @@ def warn_decl_shadow :
           "static data member of %2|"
           "field of %2}1">,
   InGroup<Shadow>, DefaultIgnore;
+def warn_ctor_parm_shadows_field:
+  Warning<"constructor parameter %0 shadows the field %1 of %2">,
+  InGroup<ShadowFieldInConstructor>, DefaultIgnore;
+def warn_modifying_shadowing_decl :
+  Warning<"modifying constructor parameter %0 that shadows a "
+          "field of %1">,
+  InGroup<ShadowFieldInConstructorModified>, DefaultIgnore;
+
 
 // C++ using declarations
 def err_using_requires_qualname : Error<
@@ -1667,7 +1675,7 @@ def warn_maybe_uninit_var : Warning<
   "variable %0 may be uninitialized when "
   "%select{used here|captured by block}1">,
   InGroup<UninitializedMaybe>, DefaultIgnore;
-def note_uninit_var_def : Note<"variable %0 is declared here">;
+def note_var_declared_here : Note<"variable %0 is declared here">;
 def note_uninit_var_use : Note<
   "%select{uninitialized use occurs|variable is captured by block}0 here">;
 def warn_uninit_byref_blockvar_captured_by_block : Warning<
@@ -2504,9 +2512,6 @@ def warn_type_attribute_wrong_type : Warning<
 def warn_incomplete_encoded_type : Warning<
   "encoding of %0 type is incomplete because %1 component has unknown encoding">,
   InGroup<DiagGroup<"encode-type">>;
-def warn_attribute_requires_functions_or_static_globals : Warning<
-  "%0 only applies to variables with static storage duration and functions">,
-  InGroup<IgnoredAttributes>;
 def warn_gnu_inline_attribute_requires_inline : Warning<
   "'gnu_inline' attribute requires function to be marked 'inline',"
   " attribute ignored">,
@@ -5764,9 +5769,6 @@ def err_static_downcast_via_virtual : Error<
   "cannot cast %0 to %1 via virtual base %2">;
 def err_downcast_from_inaccessible_base : Error<
   "cannot cast %select{private|protected}2 base class %1 to %0">;
-def ext_ms_downcast_from_inaccessible_base : ExtWarn<
-  "casting from %select{private|protected}2 base class %1 to derived class %0 is a Microsoft extension">,
-  InGroup<MicrosoftCast>;
 def err_upcast_to_inaccessible_base : Error<
   "cannot cast %0 to its %select{private|protected}2 base class %1">;
 def err_bad_dynamic_cast_not_ref_or_ptr : Error<

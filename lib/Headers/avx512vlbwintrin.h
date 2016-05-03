@@ -3358,6 +3358,88 @@ _mm256_mask_permutexvar_epi16 (__m256i __W, __mmask16 __M, __m256i __A,
                  (__mmask16) __M);
 }
 
+#define _mm_mask_alignr_epi8( __W, __U, __A, __B, __N) __extension__ ({ \
+__builtin_ia32_palignr128_mask ((__v2di)( __A),\
+               (__v2di)( __B),\
+               ( __N) * 8,\
+               (__v2di)( __W),\
+               (__mmask16)( __U));\
+})
+
+#define _mm_maskz_alignr_epi8( __U, __A, __B, __N) __extension__ ({ \
+__builtin_ia32_palignr128_mask ((__v2di)( __A),\
+               (__v2di)( __B),\
+               ( __N) * 8,\
+               (__v2di)\
+               _mm_setzero_si128 (),\
+               (__mmask16)( __U));\
+})
+
+#define _mm256_mask_alignr_epi8( __W, __U, __A, __B, __N) __extension__ ({ \
+__builtin_ia32_palignr256_mask ((__v4di)( __A),\
+               (__v4di)( __B),\
+               ( __N) * 8,\
+               (__v4di)( __W),\
+               (__mmask32)( __U));\
+})
+
+#define _mm256_maskz_alignr_epi8( __U, __A, __B, __N) __extension__ ({ \
+__builtin_ia32_palignr256_mask ((__v4di)( __A),\
+               (__v4di)( __B),\
+               ( __N) * 8,\
+               (__v4di)\
+               _mm256_setzero_si256 (),\
+               (__mmask32)( __U));\
+})
+
+#define _mm_dbsad_epu8( __A, __B, __imm) __extension__ ({ \
+__builtin_ia32_dbpsadbw128_mask ((__v16qi)( __A),\
+                (__v16qi)( __B),\
+                ( __imm),\
+                (__v8hi) _mm_setzero_hi (),\
+                (__mmask8) -1);\
+})
+
+#define _mm_mask_dbsad_epu8( __W, __U, __A, __B, __imm) __extension__ ({ \
+__builtin_ia32_dbpsadbw128_mask ((__v16qi)( __A),\
+                (__v16qi)( __B),\
+                ( __imm),\
+                (__v8hi)( __W),\
+                (__mmask8)( __U));\
+})
+
+#define _mm_maskz_dbsad_epu8( __U, __A, __B, __imm) __extension__ ({ \
+__builtin_ia32_dbpsadbw128_mask ((__v16qi)( __A),\
+                (__v16qi)( __B),\
+                ( __imm),\
+                (__v8hi) _mm_setzero_si128 (),\
+                (__mmask8)( __U));\
+})
+
+#define _mm256_dbsad_epu8( __A, __B, __imm) __extension__ ({ \
+__builtin_ia32_dbpsadbw256_mask ((__v32qi)( __A),\
+                (__v32qi)( __B),\
+                ( __imm),\
+                (__v16hi) _mm256_setzero_si256 (),\
+                (__mmask16) -1);\
+})
+
+#define _mm256_mask_dbsad_epu8( __W, __U, __A, __B, __imm) __extension__ ({ \
+__builtin_ia32_dbpsadbw256_mask ((__v32qi)( __A),\
+                (__v32qi)( __B),\
+                ( __imm),\
+                (__v16hi)( __W),\
+                (__mmask16)( __U));\
+})
+
+#define _mm256_maskz_dbsad_epu8( __U, __A, __B, __imm) __extension__ ({ \
+__builtin_ia32_dbpsadbw256_mask ((__v32qi)( __A),\
+                (__v32qi)( __B),\
+                ( __imm),\
+                (__v16hi) _mm256_setzero_si256 (),\
+                (__mmask16)( __U));\
+})
+
 #undef __DEFAULT_FN_ATTRS
 
 #endif /* __AVX512VLBWINTRIN_H */

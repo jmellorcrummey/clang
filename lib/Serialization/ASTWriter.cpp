@@ -4387,6 +4387,19 @@ uint64_t ASTWriter::WriteASTCore(Sema &SemaRef, StringRef isysroot,
     }
   }
 
+  // For method pool in the module, if it contains an entry for a selector,
+  // the entry should be complete, containing everything introduced by that
+  // module and all modules it imports. It's possible that the entry is out of
+  // date, so we need to pull in the new content here.
+
+  // It's possible that updateOutOfDateSelector can update SelectorIDs. To be
+  // safe, we copy all selectors out.
+  llvm::SmallVector<Selector, 256> AllSelectors;
+  for (auto &SelectorAndID : SelectorIDs)
+    AllSelectors.push_back(SelectorAndID.first);
+  for (auto &Selector : AllSelectors)
+    SemaRef.updateOutOfDateSelector(Selector);
+
   // Form the record of special types.
   RecordData SpecialTypes;
   AddTypeRef(Context.getRawCFConstantStringType(), SpecialTypes);
@@ -5784,8 +5797,13 @@ void ASTWriter::AddedObjCCategoryToInterface(const ObjCCategoryDecl *CatD,
 
 void ASTWriter::DeclarationMarkedUsed(const Decl *D) {
   assert(!WritingAST && "Already writing the AST!");
-  if (!D->isFromASTFile())
-    return;
+
+  // If there is *any* declaration of the entity that's not from an AST file,
+  // we can skip writing the update record. We make sure that isUsed() triggers
+  // completion of the redeclaration chain of the entity.
+  for (auto Prev = D->getMostRecentDecl(); Prev; Prev = Prev->getPreviousDecl())
+    if (IsLocalDecl(Prev))
+      return;
 
   DeclUpdates[D].push_back(DeclUpdate(UPD_DECL_MARKED_USED));
 }

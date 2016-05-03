@@ -2430,18 +2430,30 @@ void CodeGenFunction::EmitOMPParallelSectionsDirective(
 void CodeGenFunction::EmitOMPTaskBasedDirective(const OMPExecutableDirective &S,
                                                 const RegionCodeGenTy &BodyGen,
                                                 const TaskGenTy &TaskGen,
-                                                bool Tied) {
+                                                OMPTaskDataTy &Data) {
   // Emit outlined function for task construct.
   auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
   auto *I = CS->getCapturedDecl()->param_begin();
   auto *PartId = std::next(I);
   auto *TaskT = std::next(I, 4);
+  // Check if the task is final
+  if (const auto *Clause = S.getSingleClause<OMPFinalClause>()) {
+    // If the condition constant folds and can be elided, try to avoid emitting
+    // the condition and the dead arm of the if/else.
+    auto *Cond = Clause->getCondition();
+    bool CondConstant;
+    if (ConstantFoldsToSimpleInteger(Cond, CondConstant))
+      Data.Final.setInt(CondConstant);
+    else
+      Data.Final.setPointer(EvaluateExprAsBool(Cond));
+  } else {
+    // By default the task is not final.
+    Data.Final.setInt(/*IntVal=*/false);
+  }
   // The first function argument for tasks is a thread id, the second one is a
   // part id (0 for tied tasks, >=0 for untied task).
   llvm::DenseSet<const VarDecl *> EmittedAsPrivate;
   // Get list of private variables.
-  OMPPrivateDataTy Data;
-  Data.Tied = Tied;
   for (const auto *C : S.getClausesOfKind<OMPPrivateClause>()) {
     auto IRef = C->varlist_begin();
     for (auto *IInit : C->private_copies()) {
@@ -2524,23 +2536,6 @@ void CodeGenFunction::EmitOMPTaskDirective(const OMPTaskDirective &S) {
   // Emit outlined function for task construct.
   auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
   auto CapturedStruct = GenerateCapturedStmtArgument(*CS);
-  // Check if we should emit tied or untied task.
-  bool Tied = !S.getSingleClause<OMPUntiedClause>();
-  // Check if the task is final
-  llvm::PointerIntPair<llvm::Value *, 1, bool> Final;
-  if (const auto *Clause = S.getSingleClause<OMPFinalClause>()) {
-    // If the condition constant folds and can be elided, try to avoid emitting
-    // the condition and the dead arm of the if/else.
-    auto *Cond = Clause->getCondition();
-    bool CondConstant;
-    if (ConstantFoldsToSimpleInteger(Cond, CondConstant))
-      Final.setInt(CondConstant);
-    else
-      Final.setPointer(EvaluateExprAsBool(Cond));
-  } else {
-    // By default the task is not final.
-    Final.setInt(/*IntVal=*/false);
-  }
   auto SharedsTy = getContext().getRecordType(CS->getCapturedRecordDecl());
   const Expr *IfCond = nullptr;
   for (const auto *C : S.getClausesOfKind<OMPIfClause>()) {
@@ -2551,19 +2546,20 @@ void CodeGenFunction::EmitOMPTaskDirective(const OMPTaskDirective &S) {
     }
   }
 
+  OMPTaskDataTy Data;
+  // Check if we should emit tied or untied task.
+  Data.Tied = !S.getSingleClause<OMPUntiedClause>();
   auto &&BodyGen = [CS](CodeGenFunction &CGF, PrePostActionTy &) {
     CGF.EmitStmt(CS->getCapturedStmt());
   };
-  auto &&TaskGen = [&S, &Final, SharedsTy, CapturedStruct,
+  auto &&TaskGen = [&S, SharedsTy, CapturedStruct,
                     IfCond](CodeGenFunction &CGF, llvm::Value *OutlinedFn,
-                            const OMPPrivateDataTy &Data) {
-    CGF.CGM.getOpenMPRuntime().emitTaskCall(
-        CGF, S.getLocStart(), S, Data.Tied, Final, Data.NumberOfParts,
-        OutlinedFn, SharedsTy, CapturedStruct, IfCond, Data.PrivateVars,
-        Data.PrivateCopies, Data.FirstprivateVars, Data.FirstprivateCopies,
-        Data.FirstprivateInits, Data.Dependences);
+                            const OMPTaskDataTy &Data) {
+    CGF.CGM.getOpenMPRuntime().emitTaskCall(CGF, S.getLocStart(), S, OutlinedFn,
+                                            SharedsTy, CapturedStruct, IfCond,
+                                            Data);
   };
-  EmitOMPTaskBasedDirective(S, BodyGen, TaskGen, Tied);
+  EmitOMPTaskBasedDirective(S, BodyGen, TaskGen, Data);
 }
 
 void CodeGenFunction::EmitOMPTaskyieldDirective(
@@ -3489,22 +3485,21 @@ void CodeGenFunction::EmitOMPTaskLoopBasedDirective(const OMPLoopDirective &S) {
       break;
     }
   }
-  bool Nogroup = S.getSingleClause<OMPNogroupClause>();
+
+  OMPTaskDataTy Data;
+  // Check if taskloop must be emitted without taskgroup.
+  Data.Nogroup = S.getSingleClause<OMPNogroupClause>();
   // TODO: Check if we should emit tied or untied task.
-  // Check if the task is final
-  llvm::PointerIntPair<llvm::Value *, 1, bool> Final;
-  if (const auto *Clause = S.getSingleClause<OMPFinalClause>()) {
-    // If the condition constant folds and can be elided, try to avoid emitting
-    // the condition and the dead arm of the if/else.
-    auto *Cond = Clause->getCondition();
-    bool CondConstant;
-    if (ConstantFoldsToSimpleInteger(Cond, CondConstant))
-      Final.setInt(CondConstant);
-    else
-      Final.setPointer(EvaluateExprAsBool(Cond));
-  } else {
-    // By default the task is not final.
-    Final.setInt(/*IntVal=*/false);
+  Data.Tied = true;
+  // Set scheduling for taskloop
+  if (const auto* Clause = S.getSingleClause<OMPGrainsizeClause>()) {
+    // grainsize clause
+    Data.Schedule.setInt(/*IntVal=*/false);
+    Data.Schedule.setPointer(EmitScalarExpr(Clause->getGrainsize()));
+  } else if (const auto* Clause = S.getSingleClause<OMPNumTasksClause>()) {
+    // num_tasks clause
+    Data.Schedule.setInt(/*IntVal=*/true);
+    Data.Schedule.setPointer(EmitScalarExpr(Clause->getNumTasks()));
   }
 
   auto &&BodyGen = [CS, &S](CodeGenFunction &CGF, PrePostActionTy &) {
@@ -3531,6 +3526,9 @@ void CodeGenFunction::EmitOMPTaskLoopBasedDirective(const OMPLoopDirective &S) {
       CGF.EmitBlock(ThenBlock);
       CGF.incrementProfileCounter(&S);
     }
+
+    if (isOpenMPSimdDirective(S.getDirectiveKind()))
+      CGF.EmitOMPSimdInit(S);
 
     OMPPrivateScope LoopScope(CGF);
     // Emit helper vars inits.
@@ -3577,21 +3575,19 @@ void CodeGenFunction::EmitOMPTaskLoopBasedDirective(const OMPLoopDirective &S) {
       CGF.EmitBlock(ContBlock, true);
     }
   };
-  auto &&TaskGen = [&S, SharedsTy, CapturedStruct, IfCond, &Final,
-                    Nogroup](CodeGenFunction &CGF, llvm::Value *OutlinedFn,
-                             const OMPPrivateDataTy &Data) {
+  auto &&TaskGen = [&S, SharedsTy, CapturedStruct,
+                    IfCond](CodeGenFunction &CGF, llvm::Value *OutlinedFn,
+                            const OMPTaskDataTy &Data) {
     auto &&CodeGen = [&](CodeGenFunction &CGF, PrePostActionTy &) {
       OMPLoopScope PreInitScope(CGF, S);
-      CGF.CGM.getOpenMPRuntime().emitTaskLoopCall(
-          CGF, S.getLocStart(), S, Data.Tied, Final, Nogroup,
-          Data.NumberOfParts, OutlinedFn, SharedsTy, CapturedStruct, IfCond,
-          Data.PrivateVars, Data.PrivateCopies, Data.FirstprivateVars,
-          Data.FirstprivateCopies, Data.FirstprivateInits);
+      CGF.CGM.getOpenMPRuntime().emitTaskLoopCall(CGF, S.getLocStart(), S,
+                                                  OutlinedFn, SharedsTy,
+                                                  CapturedStruct, IfCond, Data);
     };
     CGF.CGM.getOpenMPRuntime().emitInlinedDirective(CGF, OMPD_taskloop,
                                                     CodeGen);
   };
-  EmitOMPTaskBasedDirective(S, BodyGen, TaskGen, /*Tied=*/true);
+  EmitOMPTaskBasedDirective(S, BodyGen, TaskGen, Data);
 }
 
 void CodeGenFunction::EmitOMPTaskLoopDirective(const OMPTaskLoopDirective &S) {
@@ -3600,12 +3596,5 @@ void CodeGenFunction::EmitOMPTaskLoopDirective(const OMPTaskLoopDirective &S) {
 
 void CodeGenFunction::EmitOMPTaskLoopSimdDirective(
     const OMPTaskLoopSimdDirective &S) {
-  // emit the code inside the construct for now
-  OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
-  CGM.getOpenMPRuntime().emitInlinedDirective(
-      *this, OMPD_taskloop_simd, [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-        OMPLoopScope PreInitScope(CGF, S);
-        CGF.EmitStmt(
-            cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
-      });
+  EmitOMPTaskLoopBasedDirective(S);
 }
