@@ -2940,7 +2940,7 @@ class OMPTargetTeamsDistributeParallelForDirective : public OMPLoopDirective {
                                                SourceLocation EndLoc,
                                                unsigned CollapsedNum,
                                                unsigned NumClauses)
-      : OMPLoopDirective(this, OMPTargetTeamsDistributeParallelForDirective,
+      : OMPLoopDirective(this, OMPTargetTeamsDistributeParallelForDirectiveClass,
                          OMPD_target_teams_distribute_parallel_for, StartLoc,
                          EndLoc, CollapsedNum, NumClauses) {}
 
@@ -2951,7 +2951,7 @@ class OMPTargetTeamsDistributeParallelForDirective : public OMPLoopDirective {
   ///
   explicit OMPTargetTeamsDistributeParallelForDirective(unsigned CollapsedNum,
                                                         unsigned NumClauses)
-      : OMPLoopDirective(this, OMPTargetTeamsDistributeParallelForDirective,
+      : OMPLoopDirective(this, OMPTargetTeamsDistributeParallelForDirectiveClass,
                          OMPD_target_teams_distribute_parallel_for,
                          SourceLocation(), SourceLocation(), CollapsedNum,
                          NumClauses) {}
