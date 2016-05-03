@@ -2309,7 +2309,7 @@ enum CXCursorKind {
    */
   CXCursor_OMPTargetTeamsDirective = 266,
 
-  /** \brief OpenMP target teams directive.
+  /** \brief OpenMP teams distribute parallel for directive.
    */
   CXCursor_OMPTeamsDistributeParallelForDirective = 267,
 
