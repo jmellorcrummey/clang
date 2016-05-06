@@ -136,6 +136,7 @@ public:
   bool isSimplifiedConstruct = false;
   bool useSubWarps = false;
   bool onlyParallelOmpNodes = false;
+  bool hasSimd = false;
   unsigned int p = 0;
   int k = 0;
   int kparent = 0;

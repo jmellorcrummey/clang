@@ -5009,7 +5009,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     return OnlyTopBlockHasParallelFor(*For->getBody());
   }
 
-  // Look for a parallel for directive in the given code block
+  // Look for a simd directive in the given code block
   bool checkSimdPragma(const Stmt &S) {
     // If the simd directive is a SIMD then return true as long as not in a sub-block.
     bool valid = isa<OMPSimdDirective>(S);
@@ -5154,6 +5154,8 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     CGF.onlyParallelOmpNodes = (OMPD_teams_distribute && onlyParForSimd(S)) ||
                                (OMPD_teams_distribute_parallel_for && onlySimd(S));
 
+    CGF.hasSimd = onlySimd(S);
+
     // Variable that controls which scheme to to use: with or without shared memory
     // in case we need to choose (currently on the nested loop nest with parallel for
     // on the outer loop and inner SIMD loop uses this flag).
@@ -5185,6 +5187,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     printf("            Subwarps enabled => %d\n", CGF.useSubWarps);
     printf("            Shared memory enabled => %d\n", CGF.useSharedMemory);
     printf("            Only Parallel OpenMP Nodes = %d\n", CGF.onlyParallelOmpNodes);
+    printf("            Has a simd pragma inside = %d\n", CGF.hasSimd);
     printf("End\n");
 
     if (CGF.onlyParallelOmpNodes){
