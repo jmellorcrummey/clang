@@ -5300,7 +5300,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // of lanes to be used and thus set a global variable that communicates
     // to the RTL on the host the exact number of CUDA threads to launch
     // This is constant at runtime
-    if (!CGF.combinedSimd) {
+    if (!CGF.combinedSimd && !CGF.hasSimd) {
       new llvm::GlobalVariable(CGF.CGM.getModule(), Bld.getInt8Ty(), true,
                                llvm::GlobalValue::ExternalLinkage,
                                Bld.getInt8(GetNumSimdLanesPerTargetRegion()),
