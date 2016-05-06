@@ -2522,6 +2522,8 @@ void CodeGenModule::EmitGlobalVarDefinition(const VarDecl *D,
         Linkage = llvm::GlobalValue::InternalLinkage;
     }
   }
+  if(OpenMPRuntime)
+    OpenMPRuntime->registerTargetVariableDefinition(D, GV);
   GV->setInitializer(Init);
 
   // If it is safe to mark the global 'constant', do so now.
@@ -2862,6 +2864,9 @@ void CodeGenModule::EmitGlobalFunctionDefinition(GlobalDecl GD,
   // Already emitted.
   if (!GV->isDeclaration())
     return;
+
+  if(OpenMPRuntime)
+    OpenMPRuntime->registerTargetFunctionDefinition(GD);
 
   // We need to set linkage and visibility on the function before
   // generating code for it because various parts of IR generation

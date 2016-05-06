@@ -973,12 +973,10 @@ VarDecl *Sema::IsOpenMPCapturedDecl(ValueDecl *D) {
   // If we are attempting to capture a global variable in a directive with
   // 'target' we return true so that this global is also mapped to the device.
   //
-  // FIXME: If the declaration is enclosed in a 'declare target' directive,
-  // then it should not be captured. Therefore, an extra check has to be
-  // inserted here once support for 'declare target' is added.
+  // If the variable is enclosed ina declare target directive, that is not required.
   //
   auto *VD = dyn_cast<VarDecl>(D);
-  if (VD && !VD->hasLocalStorage()) {
+  if (VD && !VD->hasLocalStorage() && !VD->hasAttr<OMPDeclareTargetDeclAttr>()) {
     if (isOpenMPTargetExecutionDirective(DSAStack->getCurrentDirective()) &&
         !DSAStack->isClauseParsingMode())
       return VD;

@@ -626,13 +626,14 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
     if (!Actions.ActOnStartOpenMPDeclareTargetDirective(DTLoc))
       return DeclGroupPtrTy();
 
+    SmallVector<Decl*, 32> Decls;
     DKind = ParseOpenMPDirectiveKind(*this);
     while (DKind != OMPD_end_declare_target && DKind != OMPD_declare_target &&
            Tok.isNot(tok::eof) && Tok.isNot(tok::r_brace)) {
       ParsedAttributesWithRange attrs(AttrFactory);
       MaybeParseCXX11Attributes(attrs);
       MaybeParseMicrosoftAttributes(attrs);
-      ParseExternalDeclaration(attrs);
+      DeclGroupPtrTy Ptr = ParseExternalDeclaration(attrs);
       if (Tok.isAnnotation() && Tok.is(tok::annot_pragma_openmp)) {
         TentativeParsingAction TPA(*this);
         ConsumeToken();
@@ -642,6 +643,9 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
         else
           TPA.Commit();
       }
+      // Save the declaration so tha twe can create the declare target group later on.
+      if (Ptr)
+        Decls.push_back(Ptr.get().getSingleDecl());
     }
 
     if (DKind == OMPD_end_declare_target) {
@@ -656,8 +660,15 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
     } else {
       Diag(Tok, diag::err_expected_end_declare_target);
       Diag(DTLoc, diag::note_matching) << "'#pragma omp declare target'";
+      // We have an error, so we don't have to attempt to generate code for the declarations.
+      Decls.clear();
     }
     Actions.ActOnFinishOpenMPDeclareTargetDirective();
+
+    // If we have decls generate the group so that code can be generated for it later on.
+    if (!Decls.empty())
+      return Actions.BuildDeclaratorGroup(Decls, /*TypeMayContainAuto=*/false);
+
     return DeclGroupPtrTy();
   }
   case OMPD_unknown:
