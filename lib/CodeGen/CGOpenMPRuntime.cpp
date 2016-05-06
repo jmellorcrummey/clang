@@ -5010,6 +5010,42 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   }
 
   // Look for a simd directive in the given code block
+  bool findSimdPragma(const Stmt &S) {
+    // If the simd directive is a SIMD then return true as long as not in a sub-block.
+    bool valid = isa<OMPSimdDirective>(S);
+    //printf("In checkSimdPragma: is OpenMp = %d valid = %d\n", isa<OMPExecutableDirective>(S), valid);
+    if (isa<OMPExecutableDirective>(S) && !valid){
+        return false;
+    }
+
+    // Traverse all children of the for body.
+    // We allow any number of conforming pragmas.
+    bool found = false;
+
+    // Traverse all the top block statements.
+    for (Stmt::const_child_iterator ii = S.child_begin(), ie = S.child_end();
+         ii != ie; ++ii) {
+      if (*ii){
+        if (isSimdDirective(**ii)){
+           return true;
+        } else if (isParallelForDirective(**ii)) {
+           found |= simdExists(*dyn_cast_or_null<OMPExecutableDirective>(*ii));
+        }
+      }
+    }
+    return found;
+  }
+
+   bool simdExists(const OMPExecutableDirective &S){
+    // Search for parallel for or simd pragmas
+    const Stmt *Body = S.getAssociatedStmt();
+    if (const CapturedStmt *CS = dyn_cast_or_null<CapturedStmt>(Body))
+      Body = CS->getCapturedStmt();
+    const ForStmt *For = dyn_cast_or_null<ForStmt>(Body);
+    return findSimdPragma(*For->getBody());
+  }
+
+  // Look for a simd directive in the given code block
   bool checkSimdPragma(const Stmt &S) {
     // If the simd directive is a SIMD then return true as long as not in a sub-block.
     bool valid = isa<OMPSimdDirective>(S);
@@ -5036,8 +5072,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         }
       }
     }
-
-    // True if only ONE simd pragma exists.
     return valid_children;
   }
 
@@ -5154,7 +5188,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     CGF.onlyParallelOmpNodes = (OMPD_teams_distribute && onlyParForSimd(S)) ||
                                (OMPD_teams_distribute_parallel_for && onlySimd(S));
 
-    CGF.hasSimd = onlySimd(S);
+    CGF.hasSimd = simdExists(S);
 
     // Variable that controls which scheme to to use: with or without shared memory
     // in case we need to choose (currently on the nested loop nest with parallel for
