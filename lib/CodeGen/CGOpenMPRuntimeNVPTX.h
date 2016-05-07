@@ -152,8 +152,8 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // \brief Create the data sharing arguments and call the parallel outlined
   // function.
   llvm::Function *createDataSharingParallelWrapper(
-      llvm::Function &OutlinedParallelFn, const CapturedStmt &CS,
-      const Decl *CurrentContext, bool IsSimd = false);
+      const OMPExecutableDirective &D, llvm::Function &OutlinedParallelFn,
+      const CapturedStmt &CS, const Decl *CurrentContext, bool IsSimd = false);
 
   // \brief Map between an outlined function and its data-sharing-wrap version.
   llvm::DenseMap<llvm::Function *, llvm::Function *> WrapperFunctionsMap;

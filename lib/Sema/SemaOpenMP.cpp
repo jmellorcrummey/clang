@@ -1793,7 +1793,22 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
                              Params);
     break;
   }
-  case OMPD_distribute_parallel_for:
+  case OMPD_distribute_parallel_for: {
+    QualType KmpInt32Ty = Context.getIntTypeForBitwidth(32, 1);
+    QualType KmpInt32PtrTy =
+        Context.getPointerType(KmpInt32Ty).withConst().withRestrict();
+    // QualType KmpUIntTy = Context.getIntTypeForBitwidth(64, 0);
+    Sema::CapturedParamNameType Params[] = {
+        std::make_pair(".global_tid.", KmpInt32PtrTy),
+        std::make_pair(".bound_tid.", KmpInt32PtrTy),
+        std::make_pair(".dist.lb.", KmpInt32Ty),
+        std::make_pair(".dist.ub.", KmpInt32Ty),
+        std::make_pair(StringRef(), QualType()) // __context with shared vars
+    };
+    ActOnCapturedRegionStart(DSAStack->getConstructLoc(), CurScope, CR_OpenMP,
+                             Params);
+    break;
+  }
   case OMPD_teams_distribute_parallel_for:
   case OMPD_target_teams_distribute_parallel_for: {
     QualType KmpInt32Ty = Context.getIntTypeForBitwidth(32, 1);
@@ -7191,9 +7206,21 @@ StmtResult Sema::ActOnOpenMPDistributeParallelForDirective(
   assert((CurContext->isDependentContext() || B.builtAll()) &&
          "omp for loop exprs were not built");
 
+  // Create increment expression for distribute loop when combined in a same
+  // directive with for as IV = IV + ST
+  SourceLocation DistIncLoc;
+  ExprResult DistInc =
+      BuildBinOp(CurScope, DistIncLoc, BO_Add, B.IterationVarRef, B.ST);
+  assert(DistInc.isUsable() && "distribute inc expr was not built");
+  DistInc = BuildBinOp(CurScope, DistIncLoc, BO_Assign, B.IterationVarRef,
+                       DistInc.get());
+  DistInc = ActOnFinishFullExpr(DistInc.get());
+  assert(DistInc.isUsable() && "distribute inc expr was not built");
+
   getCurFunction()->setHasBranchProtectedScope();
-  return OMPDistributeParallelForDirective::Create(
-      Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
+  return OMPDistributeParallelForDirective::Create(Context, StartLoc, EndLoc,
+                                                   NestedLoopCount, Clauses,
+                                                   AStmt, B, DistInc.get());
 }
 
 StmtResult Sema::ActOnOpenMPTargetTeamsDirective(ArrayRef<OMPClause *> Clauses,

@@ -1026,7 +1026,7 @@ OMPDistributeDirective::CreateEmpty(const ASTContext &C, unsigned NumClauses,
 OMPDistributeParallelForDirective *OMPDistributeParallelForDirective::Create(
     const ASTContext &C, SourceLocation StartLoc, SourceLocation EndLoc,
     unsigned CollapsedNum, ArrayRef<OMPClause *> Clauses, Stmt *AssociatedStmt,
-    const HelperExprs &Exprs) {
+    const HelperExprs &Exprs, Expr *DistIncExpr) {
   unsigned Size = llvm::alignTo(sizeof(OMPDistributeParallelForDirective),
                                 llvm::alignOf<OMPClause *>());
   void *Mem = C.Allocate(
@@ -1044,6 +1044,7 @@ OMPDistributeParallelForDirective *OMPDistributeParallelForDirective::Create(
   Dir->setPreCond(Exprs.PreCond);
   Dir->setCond(Exprs.Cond);
   Dir->setInit(Exprs.Init);
+  Dir->setDistInc(DistIncExpr);
   Dir->setLaneInit(Exprs.LaneInit);
   Dir->setNumLanes(Exprs.NumLanes);
   Dir->setInc(Exprs.Inc);
