@@ -2522,7 +2522,7 @@ void CodeGenModule::EmitGlobalVarDefinition(const VarDecl *D,
         Linkage = llvm::GlobalValue::InternalLinkage;
     }
   }
-  if(OpenMPRuntime)
+  if (OpenMPRuntime)
     OpenMPRuntime->registerTargetVariableDefinition(D, GV);
   GV->setInitializer(Init);
 
@@ -2865,7 +2865,7 @@ void CodeGenModule::EmitGlobalFunctionDefinition(GlobalDecl GD,
   if (!GV->isDeclaration())
     return;
 
-  if(OpenMPRuntime)
+  if (OpenMPRuntime)
     OpenMPRuntime->registerTargetFunctionDefinition(GD);
 
   // We need to set linkage and visibility on the function before

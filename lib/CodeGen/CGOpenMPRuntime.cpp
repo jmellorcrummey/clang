@@ -11,11 +11,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "CGOpenMPRuntime.h"
 #include "CGCXXABI.h"
 #include "CGCleanup.h"
-#include "CGOpenMPRuntime.h"
 #include "CodeGenFunction.h"
 #include "clang/AST/Decl.h"
+#include "clang/AST/DeclTemplate.h"
 #include "clang/AST/StmtOpenMP.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/Bitcode/ReaderWriter.h"
@@ -2729,9 +2730,9 @@ enum KmpTaskTFields {
 
 bool CGOpenMPRuntime::OffloadEntriesInfoManagerTy::empty() const {
   // FIXME: Add other entries type when they become supported.
-  return OffloadEntriesTargetRegion.empty()
-      && OffloadEntriesDeviceGlobalVar.empty()
-      && OffloadEntriesDeviceFunction.empty();
+  return OffloadEntriesTargetRegion.empty() &&
+         OffloadEntriesDeviceGlobalVar.empty() &&
+         OffloadEntriesDeviceFunction.empty();
 }
 
 /// \brief Initialize target region entry.
@@ -2801,8 +2802,7 @@ void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::actOnTargetRegionEntriesInfo(
 
 /// \brief Initialize device global variable entry.
 void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::
-    initializeDeviceGlobalVarEntryInfo(StringRef MangledName,
-        unsigned Order) {
+    initializeDeviceGlobalVarEntryInfo(StringRef MangledName, unsigned Order) {
   assert(CGM.getLangOpts().OpenMPIsDevice && "Initialization of entries is "
                                              "only required for the device "
                                              "code generation.");
@@ -2813,21 +2813,19 @@ void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::
 
 void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::
     registerDeviceGlobalVarEntryInfo(StringRef MangledName,
-        llvm::Constant *Addr,
-        QualType Ty) {
+                                     llvm::Constant *Addr, QualType Ty) {
   // If we are emitting code for a target, the entry is already initialized,
   // only has to be registered.
   if (CGM.getLangOpts().OpenMPIsDevice) {
-    assert(hasDeviceGlobalVarEntryInfo(MangledName) &&
-           "Entry must exist.");
-    auto &Entry =
-        OffloadEntriesDeviceGlobalVar[MangledName];
+    assert(hasDeviceGlobalVarEntryInfo(MangledName) && "Entry must exist.");
+    auto &Entry = OffloadEntriesDeviceGlobalVar[MangledName];
     assert(Entry.isValid() && "Entry not initialized!");
     Entry.setAddress(Addr);
     Entry.setType(Ty);
     return;
   } else {
-    OffloadEntryInfoDeviceGlobalVar Entry(OffloadingOrderedEntriesNum++, Addr, Ty);
+    OffloadEntryInfoDeviceGlobalVar Entry(OffloadingOrderedEntriesNum++, Addr,
+                                          Ty);
     OffloadEntriesDeviceGlobalVar[MangledName] = Entry;
   }
 }
@@ -2843,8 +2841,9 @@ bool CGOpenMPRuntime::OffloadEntriesInfoManagerTy::hasDeviceGlobalVarEntryInfo(
   return true;
 }
 
-void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::actOnDeviceGlobalVarEntriesInfo(
-    const OffloadDeviceGlobalVarEntryInfoActTy &Action) {
+void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::
+    actOnDeviceGlobalVarEntriesInfo(
+        const OffloadDeviceGlobalVarEntryInfoActTy &Action) {
   // Scan all target region entries and perform the provided action.
   for (auto &E : OffloadEntriesDeviceGlobalVar)
     Action(E.first(), E.second);
@@ -2864,14 +2863,13 @@ void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::
   // If we are emitting code for a target, the entry is already initialized,
   // only has to be registered.
   if (CGM.getLangOpts().OpenMPIsDevice) {
-    assert(hasDeviceFunctionEntryInfo(MangledName) &&
-           "Entry must exist.");
-    auto &Entry =
-        OffloadEntriesDeviceFunction[MangledName];
+    assert(hasDeviceFunctionEntryInfo(MangledName) && "Entry must exist.");
+    auto &Entry = OffloadEntriesDeviceFunction[MangledName];
     Entry.setIsRegistered(/*Val=*/true);
     return;
   } else
-    OffloadEntriesDeviceFunction[MangledName] = OffloadEntryInfoDeviceFunction(/*IsRegistred=*/true);
+    OffloadEntriesDeviceFunction[MangledName] =
+        OffloadEntryInfoDeviceFunction(/*IsRegistred=*/true);
 }
 
 bool CGOpenMPRuntime::OffloadEntriesInfoManagerTy::hasDeviceFunctionEntryInfo(
@@ -2885,10 +2883,11 @@ bool CGOpenMPRuntime::OffloadEntriesInfoManagerTy::hasDeviceFunctionEntryInfo(
   return true;
 }
 
-void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::actOnDeviceFunctionEntriesInfo(
-    const OffloadDeviceFunctionEntryInfoActTy &Action){
+void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::
+    actOnDeviceFunctionEntriesInfo(
+        const OffloadDeviceFunctionEntryInfoActTy &Action) {
   // Scan all target region entries and perform the provided action.
-  for (auto &E : OffloadEntriesDeviceFunction )
+  for (auto &E : OffloadEntriesDeviceFunction)
     Action(E.first(), E.second);
 }
 
@@ -3120,46 +3119,46 @@ void CGOpenMPRuntime::createOffloadEntriesAndInfoMetadata() {
       TargetRegionMetadataEmitter);
 
   // Create function that emits metadata for each device global variable entry;
-  auto &&DeviceGlobalVarMetadataEmitter = [&](
-      StringRef MangledName,
-      OffloadEntriesInfoManagerTy::OffloadEntryInfoDeviceGlobalVar &E) {
-    llvm::SmallVector<llvm::Metadata *, 3> Ops;
-    // Generate metadata for global variables. Each entry of this metadata
-    // contains:
-    // - Entry 0 -> Kind of this type of metadata (1).
-    // - Entry 1 -> Mangled name of the variable.
-    // - Entry 2 -> Order the entry was created.
-    // The first element of the metadata node is the kind.
-    Ops.push_back(getMDInt(E.getKind()));
-    Ops.push_back(getMDString(MangledName));
-    Ops.push_back(getMDInt(E.getOrder()));
+  auto &&DeviceGlobalVarMetadataEmitter =
+      [&](StringRef MangledName,
+          OffloadEntriesInfoManagerTy::OffloadEntryInfoDeviceGlobalVar &E) {
+        llvm::SmallVector<llvm::Metadata *, 3> Ops;
+        // Generate metadata for global variables. Each entry of this metadata
+        // contains:
+        // - Entry 0 -> Kind of this type of metadata (1).
+        // - Entry 1 -> Mangled name of the variable.
+        // - Entry 2 -> Order the entry was created.
+        // The first element of the metadata node is the kind.
+        Ops.push_back(getMDInt(E.getKind()));
+        Ops.push_back(getMDString(MangledName));
+        Ops.push_back(getMDInt(E.getOrder()));
 
-    // Save this entry in the right position of the ordered entries array.
-    OrderedEntries[E.getOrder()] = &E;
+        // Save this entry in the right position of the ordered entries array.
+        OrderedEntries[E.getOrder()] = &E;
 
-    // Add metadata to the named metadata node.
-    MD->addOperand(llvm::MDNode::get(C, Ops));
-  };
+        // Add metadata to the named metadata node.
+        MD->addOperand(llvm::MDNode::get(C, Ops));
+      };
 
   OffloadEntriesInfoManager.actOnDeviceGlobalVarEntriesInfo(
       DeviceGlobalVarMetadataEmitter);
 
   // Create function that emits metadata for each device function entry;
-  auto &&DeviceFunctionMetadataEmitter = [&](
-      StringRef MangledName,
-      OffloadEntriesInfoManagerTy::OffloadEntryInfoDeviceFunction &E) {
-    llvm::SmallVector<llvm::Metadata *, 2> Ops;
-    // Generate metadata for global variables. Each entry of this metadata
-    // contains:
-    // - Entry 0 -> Kind of this type of metadata (2).
-    // - Entry 1 -> Mangled name of the variable.
-    // The first element of the metadata node is the kind.
-    Ops.push_back(getMDInt(E.getKind()));
-    Ops.push_back(getMDString(MangledName));
+  auto &&DeviceFunctionMetadataEmitter =
+      [&](StringRef MangledName,
+          OffloadEntriesInfoManagerTy::OffloadEntryInfoDeviceFunction &E) {
+        llvm::SmallVector<llvm::Metadata *, 2> Ops;
+        // Generate metadata for global variables. Each entry of this metadata
+        // contains:
+        // - Entry 0 -> Kind of this type of metadata (2).
+        // - Entry 1 -> Mangled name of the variable.
+        // The first element of the metadata node is the kind.
+        Ops.push_back(getMDInt(E.getKind()));
+        Ops.push_back(getMDString(MangledName));
 
-    // Add metadata to the named metadata node.
-    MD->addOperand(llvm::MDNode::get(C, Ops));
-  };
+        // Add metadata to the named metadata node.
+        MD->addOperand(llvm::MDNode::get(C, Ops));
+      };
 
   OffloadEntriesInfoManager.actOnDeviceFunctionEntriesInfo(
       DeviceFunctionMetadataEmitter);
@@ -3169,14 +3168,16 @@ void CGOpenMPRuntime::createOffloadEntriesAndInfoMetadata() {
     if (auto *CE =
             dyn_cast<OffloadEntriesInfoManagerTy::OffloadEntryInfoTargetRegion>(
                 E)) {
-      assert(CE->getID() && CE->getAddress() && "Entry ID and Addr are invalid!");
+      assert(CE->getID() && CE->getAddress() &&
+             "Entry ID and Addr are invalid!");
       createOffloadEntry(CE->getID(), CE->getAddress(), /*Size=*/0);
-    } else if (auto *CE =
-        dyn_cast<OffloadEntriesInfoManagerTy::OffloadEntryInfoDeviceGlobalVar>(
-            E)) {
+    } else if (auto *CE = dyn_cast<OffloadEntriesInfoManagerTy::
+                                       OffloadEntryInfoDeviceGlobalVar>(E)) {
       assert(CE->getAddress() && "Entry Addr is invalid!");
       // The global address can be used as ID.
-      createOffloadEntry(CE->getAddress(), CE->getAddress(), CGM.getContext().getTypeSizeInChars(CE->getType()).getQuantity());
+      createOffloadEntry(
+          CE->getAddress(), CE->getAddress(),
+          CGM.getContext().getTypeSizeInChars(CE->getType()).getQuantity());
     } else
       llvm_unreachable("Unsupported ordered entry kind.");
   }
@@ -5982,7 +5983,8 @@ bool CGOpenMPRuntime::emitTargetFunctions(GlobalDecl GD) {
     return false;
 
   // Emit this function normally if it is a device function.
-  if (OffloadEntriesInfoManager.hasDeviceFunctionEntryInfo(CGM.getMangledName(GD)))
+  if (OffloadEntriesInfoManager.hasDeviceFunctionEntryInfo(
+          CGM.getMangledName(GD)))
     return false;
 
   // Try to detect target regions in the function.
@@ -6016,8 +6018,10 @@ bool CGOpenMPRuntime::emitTargetGlobalVariable(GlobalDecl GD) {
     }
   }
 
-  // If we are in target mode we only emit global variables that we could find in the host metadata.
-  return !OffloadEntriesInfoManager.hasDeviceGlobalVarEntryInfo(CGM.getMangledName(GD));
+  // If we are in target mode we only emit global variables that we could find
+  // in the host metadata.
+  return !OffloadEntriesInfoManager.hasDeviceGlobalVarEntryInfo(
+      CGM.getMangledName(GD));
 }
 
 bool CGOpenMPRuntime::emitTargetGlobal(GlobalDecl GD) {
@@ -6028,25 +6032,38 @@ bool CGOpenMPRuntime::emitTargetGlobal(GlobalDecl GD) {
   return emitTargetGlobalVariable(GD);
 }
 
-void CGOpenMPRuntime::registerTargetFunctionDefinition(GlobalDecl GD) {
-  auto *FD = cast<FunctionDecl>(GD.getDecl());
-
-  // The host only registers declarations that appear in a declare target region.
-  if (!CGM.getLangOpts().OpenMPIsDevice && !FD->hasAttr<OMPDeclareTargetDeclAttr>())
-    return;
-
-  assert(FD->hasAttr<OMPDeclareTargetDeclAttr>() && "Device declaration not in declare target??");
-  OffloadEntriesInfoManager.registerDeviceFunctionEntryInfo(CGM.getMangledName(GD));
+/// \brief Return true if the declaration is marked as 'declare target', i.e.
+/// the declaration itself or its template declaration have the 'declare target'
+/// attribute.
+static bool IsDeclareTargetDeclaration(const ValueDecl *VD) {
+  if (VD->hasAttr<OMPDeclareTargetDeclAttr>())
+    return true;
+  if (auto *FD = dyn_cast<FunctionDecl>(VD)) {
+    auto *Tmpl = FD->getPrimaryTemplate();
+    if (Tmpl && Tmpl->hasAttr<OMPDeclareTargetDeclAttr>())
+      return true;
+  }
+  return false;
 }
 
-void CGOpenMPRuntime::registerTargetVariableDefinition(const VarDecl *D, llvm::Constant *Addr){
-  // The host only registers declarations that appear in a declare target region.
-  if (!CGM.getLangOpts().OpenMPIsDevice && !D->hasAttr<OMPDeclareTargetDeclAttr>())
+void CGOpenMPRuntime::registerTargetFunctionDefinition(GlobalDecl GD) {
+  auto *FD = cast<FunctionDecl>(GD.getDecl());
+  // Only declare target functions are registered.
+  if (!IsDeclareTargetDeclaration(FD))
     return;
+  OffloadEntriesInfoManager.registerDeviceFunctionEntryInfo(
+      CGM.getMangledName(GD));
+}
 
-  assert(D && Addr && "Invalid variable information!");
-  assert(D->hasAttr<OMPDeclareTargetDeclAttr>() && "Device declaration not in declare target??");
-  OffloadEntriesInfoManager.registerDeviceGlobalVarEntryInfo(CGM.getMangledName(GlobalDecl(D)), Addr, D->getType());
+void CGOpenMPRuntime::registerTargetVariableDefinition(const VarDecl *D,
+                                                       llvm::Constant *Addr) {
+  // Only declare target functions are registered.
+  if (!IsDeclareTargetDeclaration(D))
+    return
+
+        assert(D && Addr && "Invalid variable information!");
+  OffloadEntriesInfoManager.registerDeviceGlobalVarEntryInfo(
+      CGM.getMangledName(GlobalDecl(D)), Addr, D->getType());
 }
 
 llvm::Function *CGOpenMPRuntime::emitRegistrationFunction() {

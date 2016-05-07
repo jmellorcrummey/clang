@@ -298,9 +298,10 @@ private:
     bool empty() const;
 
     /// \brief Return number of ordered entries defined so far.
-    unsigned getOrderedEntriesNum() const { return OffloadingOrderedEntriesNum; }
-    OffloadEntriesInfoManagerTy(CodeGenModule &CGM)
-        : CGM(CGM) {}
+    unsigned getOrderedEntriesNum() const {
+      return OffloadingOrderedEntriesNum;
+    }
+    OffloadEntriesInfoManagerTy(CodeGenModule &CGM) : CGM(CGM) {}
 
     ///
     /// Target region entries related.
@@ -371,10 +372,10 @@ private:
           : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_GLOBAL_VAR, ~0u),
             Addr(nullptr) {}
       explicit OffloadEntryInfoDeviceGlobalVar(unsigned Order,
-                                            llvm::Constant *Addr,
-                                            QualType Ty)
+                                               llvm::Constant *Addr,
+                                               QualType Ty)
           : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_GLOBAL_VAR, Order),
-            Addr(Addr), Ty(Ty){}
+            Addr(Addr), Ty(Ty) {}
 
       llvm::Constant *getAddress() const { return Addr; }
       void setAddress(llvm::Constant *V) {
@@ -389,12 +390,10 @@ private:
     };
     /// \brief Initialize device global variable entry.
     void initializeDeviceGlobalVarEntryInfo(StringRef MangledName,
-                                         unsigned Order);
+                                            unsigned Order);
     /// \brief Register device global variable entry.
-    void registerDeviceGlobalVarEntryInfo(
-                                       StringRef MangledName,
-                                       llvm::Constant *Addr,
-                                       QualType Ty);
+    void registerDeviceGlobalVarEntryInfo(StringRef MangledName,
+                                          llvm::Constant *Addr, QualType Ty);
     /// \brief Return true if a device global variable entry with the provided
     /// information exists.
     bool hasDeviceGlobalVarEntryInfo(StringRef MangledName) const;
@@ -412,12 +411,13 @@ private:
     class OffloadEntryInfoDeviceFunction : public OffloadEntryInfo {
       // \brief Set to true if this entry was registered.
       bool IsRegistered = false;
+
     public:
       OffloadEntryInfoDeviceFunction()
           : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_FUNCTION, ~0u) {}
       explicit OffloadEntryInfoDeviceFunction(bool IsRegistered)
           : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_FUNCTION, ~0u),
-            IsRegistered(IsRegistered){}
+            IsRegistered(IsRegistered) {}
 
       bool isRegistered() const { return IsRegistered; }
       void setIsRegistered(bool Val) {
@@ -432,15 +432,14 @@ private:
     /// \brief Initialize device function entry.
     void initializeDeviceFunctionEntryInfo(StringRef MangledName);
     /// \brief Register device function entry.
-    void registerDeviceFunctionEntryInfo(
-                                       StringRef MangledName);
+    void registerDeviceFunctionEntryInfo(StringRef MangledName);
     /// \brief Return true if a device function entry with the provided
     /// information exists.
     bool hasDeviceFunctionEntryInfo(StringRef MangledName) const;
     /// brief Applies action \a Action on all registered entries.
     typedef llvm::function_ref<void(StringRef,
-        OffloadEntryInfoDeviceFunction &)>
-    OffloadDeviceFunctionEntryInfoActTy;
+                                    OffloadEntryInfoDeviceFunction &)>
+        OffloadDeviceFunctionEntryInfoActTy;
     void actOnDeviceFunctionEntriesInfo(
         const OffloadDeviceFunctionEntryInfoActTy &Action);
 
@@ -460,12 +459,14 @@ private:
 
     // Storage for device global variable entries kind. The storage is to be
     // indexed by mangled name.
-    typedef llvm::StringMap<OffloadEntryInfoDeviceGlobalVar> OffloadEntriesDeviceGlobalVarTy;
+    typedef llvm::StringMap<OffloadEntryInfoDeviceGlobalVar>
+        OffloadEntriesDeviceGlobalVarTy;
     OffloadEntriesDeviceGlobalVarTy OffloadEntriesDeviceGlobalVar;
 
     // Storage for device function entries kind. The storage is to be indexed by
     // mangled name.
-    typedef llvm::StringMap<OffloadEntryInfoDeviceFunction> OffloadEntriesDeviceFunctionTy;
+    typedef llvm::StringMap<OffloadEntryInfoDeviceFunction>
+        OffloadEntriesDeviceFunctionTy;
     OffloadEntriesDeviceFunctionTy OffloadEntriesDeviceFunction;
   };
   OffloadEntriesInfoManagerTy OffloadEntriesInfoManager;
@@ -1143,14 +1144,17 @@ public:
   /// \param GD Global to scan.
   virtual bool emitTargetGlobal(GlobalDecl GD);
 
-  /// \brief Register the function definition \a GD as meaningful for the target.
+  /// \brief Register the function definition \a GD as meaningful for the
+  /// target.
   /// \param GD Global declaration whose definition is being emitted.
   virtual void registerTargetFunctionDefinition(GlobalDecl GD);
 
-  /// \brief Register the global variable definition \a D as meaningful for the target.
+  /// \brief Register the global variable definition \a D as meaningful for the
+  /// target.
   /// \param D Global declaration whose definition is being emitted.
   /// \param Addr Address of the global.
-  virtual void registerTargetVariableDefinition(const VarDecl *D, llvm::Constant *Addr);
+  virtual void registerTargetVariableDefinition(const VarDecl *D,
+                                                llvm::Constant *Addr);
 
   /// \brief Creates the offloading descriptor in the event any target region
   /// was emitted in the current module and return the function that registers
