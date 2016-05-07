@@ -1345,7 +1345,7 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
       OutlinedFun = CGF.GenerateOpenMPCapturedStmtFunction(*CS);
     }
     auto *WrapperFun =
-        createDataSharingParallelWrapper(D, *OutlinedFun, *CS, CurrentContext);
+        createDataSharingParallelWrapper(*OutlinedFun, *CS, CurrentContext);
     WrapperFunctionsMap[OutlinedFun] = WrapperFun;
   }
   return OutlinedFun;
@@ -1381,7 +1381,7 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitSimdOutlinedFunction(
   }
 
   auto *WrapperFun = createDataSharingParallelWrapper(
-      D, *OutlinedFun, *CS, CurrentContext, /*IsSimd=*/true);
+      *OutlinedFun, *CS, CurrentContext, /*IsSimd=*/true);
   WrapperFunctionsMap[OutlinedFun] = WrapperFun;
   return OutlinedFun;
 }
@@ -1476,9 +1476,6 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
 
   llvm::SmallSet<const VarDecl *, 32> AlreadySharedDecls;
   for (auto *CS : CapturedStmts) {
-
-    // add lower and upper bounds to recorddecl (slot)
-
     const RecordDecl *RD = CS->getCapturedRecordDecl();
     auto CurField = RD->field_begin();
     auto CurCap = CS->capture_begin();
@@ -1861,8 +1858,8 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
 // \brief Create the data sharing arguments and call the parallel outlined
 // function.
 llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
-    const OMPExecutableDirective &D, llvm::Function &OutlinedParallelFn,
-    const CapturedStmt &CS, const Decl *CurrentContext, bool IsSimd) {
+    llvm::Function &OutlinedParallelFn, const CapturedStmt &CS,
+    const Decl *CurrentContext, bool IsSimd) {
   auto &Ctx = CGM.getContext();
 
   // Create a function that takes as argument the source lane.
@@ -1967,9 +1964,6 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
         CGF.EmitStoreOfScalar(Arg, ArgsAddresses[ArgsIdx], /*Volatile=*/false,
                               Ctx.getPointerType(FI->getType()));
     }
-
-    // Get the extra ub and lb.
-
   };
 
   auto &&L1ParallelGen = [this, &DSI, &Ctx, &CS, &RD, &ArgsAddresses,
@@ -2041,13 +2035,6 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
   } else {
     Args.push_back(llvm::Constant::getNullValue(CGM.Int32Ty->getPointerTo()));
     Args.push_back(llvm::Constant::getNullValue(CGM.Int32Ty->getPointerTo()));
-    if (D.getDirectiveKind() == OMPD_distribute_parallel_for) {
-      // combining distribute with for requires sharing each distribute chunk
-      // lower and upper bounds with the pragma for chunking mechanism
-      // TODO: add support for composite distribute parallel for
-      Args.push_back(llvm::Constant::getNullValue(CGM.Int32Ty));
-      Args.push_back(llvm::Constant::getNullValue(CGM.Int32Ty));
-    }
   }
 
   auto FI = DSI.MasterRecordType->getAs<RecordType>()->getDecl()->field_begin();

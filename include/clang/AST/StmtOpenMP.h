@@ -2770,7 +2770,7 @@ public:
   static OMPDistributeParallelForDirective *
   Create(const ASTContext &C, SourceLocation StartLoc, SourceLocation EndLoc,
          unsigned CollapsedNum, ArrayRef<OMPClause *> Clauses,
-         Stmt *AssociatedStmt, const HelperExprs &Exprs, Expr *DistInc);
+         Stmt *AssociatedStmt, const HelperExprs &Exprs);
 
   /// \brief Creates an empty directive with the place
   /// for \a NumClauses clauses.
@@ -2787,15 +2787,6 @@ public:
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == OMPDistributeParallelForDirectiveClass;
   }
-
-  /// \brief Loop iteration variable init for distribute loop only when combined
-  /// with for directive in same construct.
-  Expr *DistIncExpr;
-
-  Expr *getDistInc() const { return DistIncExpr; }
-
-protected:
-  void setDistInc(Expr *DistInc) { DistIncExpr = DistInc; }
 };
 
 /// \brief This represents '#pragma omp target teams' directive.
