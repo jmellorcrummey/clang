@@ -973,12 +973,12 @@ VarDecl *Sema::IsOpenMPCapturedDecl(ValueDecl *D) {
   // If we are attempting to capture a global variable in a directive with
   // 'target' we return true so that this global is also mapped to the device.
   //
-  // FIXME: If the declaration is enclosed in a 'declare target' directive,
-  // then it should not be captured. Therefore, an extra check has to be
-  // inserted here once support for 'declare target' is added.
+  // If the variable is enclosed ina declare target directive, that is not
+  // required.
   //
   auto *VD = dyn_cast<VarDecl>(D);
-  if (VD && !VD->hasLocalStorage()) {
+  if (VD && !VD->hasLocalStorage() &&
+      !VD->hasAttr<OMPDeclareTargetDeclAttr>()) {
     if (isOpenMPTargetExecutionDirective(DSAStack->getCurrentDirective()) &&
         !DSAStack->isClauseParsingMode())
       return VD;
@@ -11464,7 +11464,9 @@ static void checkDeclInTargetContext(SourceLocation SL, SourceRange SR,
   }
   if (!LD)
     LD = D;
-  if (LD && !LD->hasAttr<OMPDeclareTargetDeclAttr>() &&
+  // The parameters of a function are considered 'declare target' declarations
+  // if the function itself is 'declare target'.
+  if (LD && !LD->hasAttr<OMPDeclareTargetDeclAttr>() && !isa<ParmVarDecl>(LD) &&
       (isa<VarDecl>(LD) || isa<FunctionDecl>(LD))) {
     // Outlined declaration is not declared target.
     if (LD->isOutOfLine()) {
@@ -11528,6 +11530,14 @@ void Sema::checkDeclIsAllowedInOpenMPTarget(Expr *E, Decl *D) {
       }
       return;
     }
+  }
+  if (TemplateDecl *TD = dyn_cast<TemplateDecl>(D)) {
+    // Mark template declarations as declare target so that they can propagate
+    // that information to their instances.
+    TD->addAttr(OMPDeclareTargetDeclAttr::CreateImplicit(Context));
+    if (ASTMutationListener *ML = Context.getASTMutationListener())
+      ML->DeclarationMarkedOpenMPDeclareTarget(TD);
+    return;
   }
   if (!E) {
     // Checking declaration inside declare target region.

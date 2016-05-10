@@ -94,6 +94,8 @@ struct OMPTaskDataTy final {
   SmallVector<const Expr *, 4> FirstprivateVars;
   SmallVector<const Expr *, 4> FirstprivateCopies;
   SmallVector<const Expr *, 4> FirstprivateInits;
+  SmallVector<const Expr *, 4> LastprivateVars;
+  SmallVector<const Expr *, 4> LastprivateCopies;
   SmallVector<std::pair<OpenMPDependClauseKind, const Expr *>, 4> Dependences;
   llvm::PointerIntPair<llvm::Value *, 1, bool> Final;
   llvm::PointerIntPair<llvm::Value *, 1, bool> Schedule;
@@ -258,8 +260,8 @@ private:
   class OffloadEntriesInfoManagerTy {
     CodeGenModule &CGM;
 
-    /// \brief Number of entries registered so far.
-    unsigned OffloadingEntriesNum;
+    /// \brief Number of ordered entries registered so far.
+    unsigned OffloadingOrderedEntriesNum = 0u;
 
   public:
     /// \brief Base class of the entries info.
@@ -270,6 +272,10 @@ private:
       enum OffloadingEntryInfoKinds : unsigned {
         // Entry is a target region.
         OFFLOAD_ENTRY_INFO_TARGET_REGION = 0,
+        // Entry is a device global variable.
+        OFFLOAD_ENTRY_INFO_DEVICE_GLOBAL_VAR = 1,
+        // Entry is a device function.
+        OFFLOAD_ENTRY_INFO_DEVICE_FUNCTION = 2,
         // Invalid entry info.
         OFFLOAD_ENTRY_INFO_INVALID = ~0u
       };
@@ -292,10 +298,12 @@ private:
 
     /// \brief Return true if a there are no entries defined.
     bool empty() const;
-    /// \brief Return number of entries defined so far.
-    unsigned size() const { return OffloadingEntriesNum; }
-    OffloadEntriesInfoManagerTy(CodeGenModule &CGM)
-        : CGM(CGM), OffloadingEntriesNum(0) {}
+
+    /// \brief Return number of ordered entries defined so far.
+    unsigned getOrderedEntriesNum() const {
+      return OffloadingOrderedEntriesNum;
+    }
+    OffloadEntriesInfoManagerTy(CodeGenModule &CGM) : CGM(CGM) {}
 
     ///
     /// Target region entries related.
@@ -351,6 +359,92 @@ private:
     void actOnTargetRegionEntriesInfo(
         const OffloadTargetRegionEntryInfoActTy &Action);
 
+    ///
+    /// Device global variable entries related.
+    ///
+    /// \brief Device global variable entries info.
+    class OffloadEntryInfoDeviceGlobalVar : public OffloadEntryInfo {
+      // \brief Address of the entity that has to be mapped for offloading.
+      llvm::Constant *Addr;
+      // \brief Type of the global variable.
+      QualType Ty;
+
+    public:
+      OffloadEntryInfoDeviceGlobalVar()
+          : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_GLOBAL_VAR, ~0u),
+            Addr(nullptr) {}
+      explicit OffloadEntryInfoDeviceGlobalVar(unsigned Order,
+                                               llvm::Constant *Addr,
+                                               QualType Ty)
+          : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_GLOBAL_VAR, Order),
+            Addr(Addr), Ty(Ty) {}
+
+      llvm::Constant *getAddress() const { return Addr; }
+      void setAddress(llvm::Constant *V) {
+        assert(!Addr && "Address as been set before!");
+        Addr = V;
+      }
+      QualType getType() const { return Ty; }
+      void setType(QualType QTy) { Ty = QTy; }
+      static bool classof(const OffloadEntryInfo *Info) {
+        return Info->getKind() == OFFLOAD_ENTRY_INFO_DEVICE_GLOBAL_VAR;
+      }
+    };
+    /// \brief Initialize device global variable entry.
+    void initializeDeviceGlobalVarEntryInfo(StringRef MangledName,
+                                            unsigned Order);
+    /// \brief Register device global variable entry.
+    void registerDeviceGlobalVarEntryInfo(StringRef MangledName,
+                                          llvm::Constant *Addr, QualType Ty);
+    /// \brief Return true if a device global variable entry with the provided
+    /// information exists.
+    bool hasDeviceGlobalVarEntryInfo(StringRef MangledName) const;
+    /// brief Applies action \a Action on all registered entries.
+    typedef llvm::function_ref<void(StringRef,
+                                    OffloadEntryInfoDeviceGlobalVar &)>
+        OffloadDeviceGlobalVarEntryInfoActTy;
+    void actOnDeviceGlobalVarEntriesInfo(
+        const OffloadDeviceGlobalVarEntryInfoActTy &Action);
+
+    ///
+    /// Device function entries related.
+    ///
+    /// \brief Device global variable entries info.
+    class OffloadEntryInfoDeviceFunction : public OffloadEntryInfo {
+      // \brief Set to true if this entry was registered.
+      bool IsRegistered = false;
+
+    public:
+      OffloadEntryInfoDeviceFunction()
+          : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_FUNCTION, ~0u) {}
+      explicit OffloadEntryInfoDeviceFunction(bool IsRegistered)
+          : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_FUNCTION, ~0u),
+            IsRegistered(IsRegistered) {}
+
+      bool isRegistered() const { return IsRegistered; }
+      void setIsRegistered(bool Val) {
+        assert(!IsRegistered && "It was registered before!");
+        IsRegistered = Val;
+      }
+
+      static bool classof(const OffloadEntryInfo *Info) {
+        return Info->getKind() == OFFLOAD_ENTRY_INFO_DEVICE_FUNCTION;
+      }
+    };
+    /// \brief Initialize device function entry.
+    void initializeDeviceFunctionEntryInfo(StringRef MangledName);
+    /// \brief Register device function entry.
+    void registerDeviceFunctionEntryInfo(StringRef MangledName);
+    /// \brief Return true if a device function entry with the provided
+    /// information exists.
+    bool hasDeviceFunctionEntryInfo(StringRef MangledName) const;
+    /// brief Applies action \a Action on all registered entries.
+    typedef llvm::function_ref<void(StringRef,
+                                    OffloadEntryInfoDeviceFunction &)>
+        OffloadDeviceFunctionEntryInfoActTy;
+    void actOnDeviceFunctionEntriesInfo(
+        const OffloadDeviceFunctionEntryInfoActTy &Action);
+
   private:
     // Storage for target region entries kind. The storage is to be indexed by
     // file ID, device ID, parent function name and line number.
@@ -364,6 +458,18 @@ private:
         OffloadEntriesTargetRegionPerDevice;
     typedef OffloadEntriesTargetRegionPerDevice OffloadEntriesTargetRegionTy;
     OffloadEntriesTargetRegionTy OffloadEntriesTargetRegion;
+
+    // Storage for device global variable entries kind. The storage is to be
+    // indexed by mangled name.
+    typedef llvm::StringMap<OffloadEntryInfoDeviceGlobalVar>
+        OffloadEntriesDeviceGlobalVarTy;
+    OffloadEntriesDeviceGlobalVarTy OffloadEntriesDeviceGlobalVar;
+
+    // Storage for device function entries kind. The storage is to be indexed by
+    // mangled name.
+    typedef llvm::StringMap<OffloadEntryInfoDeviceFunction>
+        OffloadEntriesDeviceFunctionTy;
+    OffloadEntriesDeviceFunctionTy OffloadEntriesDeviceFunction;
   };
   OffloadEntriesInfoManagerTy OffloadEntriesInfoManager;
 
@@ -463,6 +569,7 @@ private:
     llvm::Value *NewTaskNewTaskTTy = nullptr;
     LValue TDBase;
     RecordDecl *KmpTaskTQTyRD = nullptr;
+    llvm::Value *TaskDupFn = nullptr;
   };
   /// Emit task region for the task directive. The task region is emitted in
   /// several steps:
@@ -1040,6 +1147,18 @@ public:
   /// \param GD Global to scan.
   virtual bool emitTargetGlobal(GlobalDecl GD);
 
+  /// \brief Register the function definition \a GD as meaningful for the
+  /// target.
+  /// \param GD Global declaration whose definition is being emitted.
+  virtual void registerTargetFunctionDefinition(GlobalDecl GD);
+
+  /// \brief Register the global variable definition \a D as meaningful for the
+  /// target.
+  /// \param D Global declaration whose definition is being emitted.
+  /// \param Addr Address of the global.
+  virtual void registerTargetVariableDefinition(const VarDecl *D,
+                                                llvm::Constant *Addr);
+
   /// \brief Creates the offloading descriptor in the event any target region
   /// was emitted in the current module and return the function that registers
   /// it.
@@ -1089,6 +1208,13 @@ public:
                                              const OMPExecutableDirective &D,
                                              const Expr *IfCond,
                                              const Expr *Device);
+
+  /// Marks function \a Fn with properly mangled versions of vector functions.
+  /// \param FD Function marked as 'declare simd'.
+  /// \param Fn LLVM function that must be marked with 'declare simd'
+  /// attributes.
+  virtual void emitDeclareSimdFunction(const FunctionDecl *FD,
+                                       llvm::Function *Fn);
 };
 
 } // namespace CodeGen
