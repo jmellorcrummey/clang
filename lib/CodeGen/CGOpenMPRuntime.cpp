@@ -4078,6 +4078,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     CGF.kparent = prev_k;
     switch(DKind){
+      case OMPD_teams_distribute_parallel_for:
+        CGF.kparent = prev_kparent;
+	CGF.k++;
+        break;
       case OMPD_parallel_for_simd:
         CGF.k += 2;
         break;
@@ -4622,8 +4626,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         GenerateSimplifiedLoop(S, CGF);
         break;
       case OMPD_teams_distribute_parallel_for:
-        CGF.k = 2;
-        GenerateSimplifiedLoop(S, CGF);
+        //CGF.k = 2;
+        //GenerateSimplifiedLoop(S, CGF);
+        CGF.k = 1;
+        ParallelOpenMPNode(CGF, SKind, S);
         break;
       case OMPD_teams_distribute_parallel_for_simd:
         CGF.k = 3;
