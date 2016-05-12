@@ -5123,7 +5123,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
       if (*ii){
         //printf("===> %d %d\n", isParallelForDirective(**ii), isParallelForSimdDirective(**ii) || isSimdDirective(**ii));
         if (isParallelForDirective(**ii)){
-           valid_children &= onlySimd(*dyn_cast_or_null<OMPExecutableDirective>(*ii));
+           valid_children &= (onlySimd(*dyn_cast_or_null<OMPExecutableDirective>(*ii)) | onlyParForSimd(*dyn_cast_or_null<OMPExecutableDirective>(*ii)));
         } else if (isParallelForSimdDirective(**ii) || isSimdDirective(**ii)){
            //printf("=====> Does not have any more OpenMP pragmas %d\n", !StmtHasOMPPragmas(*dyn_cast_or_null<OMPExecutableDirective>(*ii)));
            valid_children &= !StmtHasOMPPragmas(*dyn_cast_or_null<OMPExecutableDirective>(*ii));
