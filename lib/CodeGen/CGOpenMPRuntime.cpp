@@ -2423,6 +2423,11 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
           llvm::Intrinsic::nvvm_membar_gl);
   }
 
+  llvm::Function * Get_memfence_cta () {
+    return llvm::Intrinsic::getDeclaration(&CGM.getModule(),
+          llvm::Intrinsic::nvvm_membar_cta);
+  }
+
   llvm::Function * Get_shuffle (llvm::Type *VarTy) {
     assert((VarTy->isFloatingPointTy() || VarTy->isIntegerTy()) &&
            "Unsupported variable type in Get_shuffle()");
@@ -4080,13 +4085,16 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     switch(DKind){
       case OMPD_teams_distribute_parallel_for:
         CGF.kparent = prev_kparent;
-	CGF.k++;
+	      CGF.k++;
         break;
       case OMPD_parallel_for_simd:
         CGF.k += 2;
         break;
       case OMPD_parallel_for:
-        CGF.k++;
+        if (CGF.parallelFors > 1){
+          CGF.k++;
+        }
+        CGF.parallelFors++;
         break;
       default:
         assert(0 && "DKind is not a valid parallel pragma combination.\n");
@@ -4255,7 +4263,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // Tid[kparent]
     printf("     ===> LB: CGF.k = %d, CGF.kparent = %d\n", CGF.k, CGF.kparent);
     llvm::Value *LB = Builder.CreateLoad(CGF.Tid[CGF.kparent]);
-    if (isNonTerminalOpenMPNode){
+    if (CGF.parallelFors == 1) {
+      LB = Builder.getInt32(0);
+    } else if (isNonTerminalOpenMPNode){
       // Div(Tid[kparent], numberOfParallelUnits)
       LB = Builder.CreateUDiv(LB, createMult(CGF, CGF.k, CGF.p - 1));
     }
@@ -4326,7 +4336,9 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // FOR INC: tid += 1 if we are static no-chunk
     Builder.SetInsertPoint(IncCombinedFor);
     llvm::Value *step = createMult(CGF, CGF.kparent, CGF.k);
-    if (!isNonTerminalOpenMPNode){
+    if (CGF.parallelFors == 1) {
+      step = Builder.getInt32(1);
+    } else if (!isNonTerminalOpenMPNode){
       step = Builder.CreateMul(step, createMult(CGF, CGF.k, CGF.p - 1));
     }
     Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(Private), step),
