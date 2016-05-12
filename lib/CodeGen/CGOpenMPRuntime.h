@@ -147,6 +147,8 @@ protected:
   llvm::Type *getIdentTyPointerTy();
 
 public:
+  virtual StringRef RenameStandardFunction (StringRef name);
+
   /// \brief Gets lane id value for the current simd lane.
   ///
   virtual llvm::Value *getLaneID(CodeGenFunction &CGF, SourceLocation Loc);
