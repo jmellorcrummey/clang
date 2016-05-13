@@ -6680,3 +6680,7 @@ void CGOpenMPRuntime::emitDeclareSimdFunction(const FunctionDecl *FD,
       emitX86DeclareSimdFunction(FD, Fn, VLENVal, ParamAttrs, State);
   }
 }
+
+StringRef CGOpenMPRuntime::RenameStandardFunction (StringRef name) {
+  return name;
+}

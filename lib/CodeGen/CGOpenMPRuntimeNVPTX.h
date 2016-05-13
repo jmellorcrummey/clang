@@ -24,6 +24,9 @@ namespace clang {
 namespace CodeGen {
 
 class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
+  llvm::StringMap<StringRef> stdFuncs;
+  StringRef RenameStandardFunction (StringRef name) override;
+
   //
   // Data Sharing related calls.
   //

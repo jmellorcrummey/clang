@@ -1820,6 +1820,11 @@ CodeGenModule::GetOrCreateLLVMFunction(StringRef MangledName,
                                        bool IsForDefinition) {
   const Decl *D = GD.getDecl();
 
+  // Process function name as required by the OpenMP runtime
+  if (OpenMPRuntime) {
+    MangledName = OpenMPRuntime->RenameStandardFunction(MangledName);
+  }
+
   // Lookup the entry, lazily creating it if necessary.
   llvm::GlobalValue *Entry = GetGlobalValue(MangledName);
   if (Entry) {
