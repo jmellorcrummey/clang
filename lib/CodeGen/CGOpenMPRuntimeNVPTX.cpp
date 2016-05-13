@@ -1503,9 +1503,6 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
         const DeclRefExpr *DRE = cast<DeclRefExpr>(*I);
         CurVD = cast<VarDecl>(DRE->getDecl());
 
-        assert(CurVD->hasLocalStorage() &&
-               "Expecting to capture only variables with local storage.");
-
         // If we have an alloca for this variable, then we need to share the
         // storage too, not only the reference.
         auto *Val =
