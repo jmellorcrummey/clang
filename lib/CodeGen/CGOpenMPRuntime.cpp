@@ -6183,6 +6183,12 @@ static bool IsDeclareTargetDeclaration(const ValueDecl *VD) {
 }
 
 void CGOpenMPRuntime::registerTargetFunctionDefinition(GlobalDecl GD) {
+  // We don't have to register anything if compiling for the host with no target
+  // devices specified.
+  if (!CGM.getLangOpts().OpenMPIsDevice &&
+      CGM.getLangOpts().OMPTargetTriples.empty())
+    return;
+
   auto *FD = cast<FunctionDecl>(GD.getDecl());
   // Only declare target functions are registered.
   if (!IsDeclareTargetDeclaration(FD))
@@ -6193,6 +6199,12 @@ void CGOpenMPRuntime::registerTargetFunctionDefinition(GlobalDecl GD) {
 
 void CGOpenMPRuntime::registerTargetVariableDefinition(const VarDecl *D,
                                                        llvm::Constant *Addr) {
+  // We don't have to register anything if compiling for the host with no target
+  // devices specified.
+  if (!CGM.getLangOpts().OpenMPIsDevice &&
+      CGM.getLangOpts().OMPTargetTriples.empty())
+    return;
+
   // Only declare target functions are registered.
   if (!IsDeclareTargetDeclaration(D))
     return
