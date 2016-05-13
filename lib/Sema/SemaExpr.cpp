@@ -13284,7 +13284,7 @@ static bool captureInCapturedRegion(CapturedRegionScopeInfo *RSI,
                                     QualType &DeclRefType, 
                                     const bool RefersToCapturedVariable,
                                     Sema &S) {
-  
+
   // By default, capture variables by reference.
   bool ByRef = true;
   // Using an LValue reference type is consistent with Lambdas (see below).
