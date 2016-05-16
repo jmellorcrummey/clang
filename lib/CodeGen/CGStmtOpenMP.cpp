@@ -2023,8 +2023,11 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
           Chunk = Builder.getIntN(IVSize, 1);
         if (isOpenMPSimdDirective(S.getDirectiveKind()))
           EmitOMPSimdInit(S, /*IsMonotonic=*/true);
-        RT.emitForStaticInit(*this, S.getLocStart(), OMPC_SCHEDULE_static,
-                             IVSize, IVSigned, Ordered, IL.getAddress(),
+
+        OpenMPScheduleTy LoopSchedule;
+        LoopSchedule.Schedule = OMPC_SCHEDULE_static;
+        RT.emitForStaticInit(*this, S.getLocStart(), LoopSchedule, IVSize,
+                             IVSigned, Ordered, IL.getAddress(),
                              LB.getAddress(), UB.getAddress(), ST.getAddress(),
                              Chunk);
         auto LoopExit =

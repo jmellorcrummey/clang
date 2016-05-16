@@ -11635,9 +11635,11 @@ void Sema::checkDeclIsAllowedInOpenMPTarget(Expr *E, Decl *D) {
   if (TemplateDecl *TD = dyn_cast<TemplateDecl>(D)) {
     // Mark template declarations as declare target so that they can propagate
     // that information to their instances.
-    TD->addAttr(OMPDeclareTargetDeclAttr::CreateImplicit(Context));
+    Attr *A = OMPDeclareTargetDeclAttr::CreateImplicit(
+        Context, OMPDeclareTargetDeclAttr::MT_To);
+    TD->addAttr(A);
     if (ASTMutationListener *ML = Context.getASTMutationListener())
-      ML->DeclarationMarkedOpenMPDeclareTarget(TD);
+      ML->DeclarationMarkedOpenMPDeclareTarget(TD, A);
     return;
   }
   if (!E) {
