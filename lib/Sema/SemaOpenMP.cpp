@@ -1149,6 +1149,23 @@ public:
     return false;
   }
 };
+
+class VarOrFuncDeclFilterCCC : public CorrectionCandidateCallback {
+private:
+  Sema &SemaRef;
+
+public:
+  explicit VarOrFuncDeclFilterCCC(Sema &S) : SemaRef(S) {}
+  bool ValidateCandidate(const TypoCorrection &Candidate) override {
+    NamedDecl *ND = Candidate.getCorrectionDecl();
+    if (isa<VarDecl>(ND) || isa<FunctionDecl>(ND)) {
+      return SemaRef.isDeclInScope(ND, SemaRef.getCurLexicalContext(),
+                                   SemaRef.getCurScope());
+    }
+    return false;
+  }
+};
+
 } // namespace
 
 ExprResult Sema::ActOnOpenMPIdExpression(Scope *CurScope,
@@ -11458,6 +11475,52 @@ void Sema::ActOnFinishOpenMPDeclareTargetDirective() {
   IsInOpenMPDeclareTargetContext = false;
 }
 
+void
+Sema::ActOnOpenMPDeclareTargetName(Scope *CurScope, CXXScopeSpec &ScopeSpec,
+                                   const DeclarationNameInfo &Id,
+                                   OMPDeclareTargetDeclAttr::MapTypeTy MT,
+                                   NamedDeclSetType &SameDirectiveDecls) {
+  LookupResult Lookup(*this, Id, LookupOrdinaryName);
+  LookupParsedName(Lookup, CurScope, &ScopeSpec, true);
+
+  if (Lookup.isAmbiguous())
+    return;
+  Lookup.suppressDiagnostics();
+
+  if (!Lookup.isSingleResult()) {
+    if (TypoCorrection Corrected =
+            CorrectTypo(Id, LookupOrdinaryName, CurScope, nullptr,
+                        llvm::make_unique<VarOrFuncDeclFilterCCC>(*this),
+                        CTK_ErrorRecovery)) {
+      diagnoseTypo(Corrected, PDiag(diag::err_undeclared_var_use_suggest)
+                                  << Id.getName());
+      checkDeclIsAllowedInOpenMPTarget(nullptr, Corrected.getCorrectionDecl());
+      return;
+    }
+
+    Diag(Id.getLoc(), diag::err_undeclared_var_use) << Id.getName();
+    return;
+  }
+
+  NamedDecl *ND = Lookup.getAsSingle<NamedDecl>();
+  if (isa<VarDecl>(ND) || isa<FunctionDecl>(ND)) {
+    if (!SameDirectiveDecls.insert(cast<NamedDecl>(ND->getCanonicalDecl())))
+      Diag(Id.getLoc(), diag::err_omp_declare_target_multiple) << Id.getName();
+
+    if (!ND->hasAttr<OMPDeclareTargetDeclAttr>()) {
+      Attr *A = OMPDeclareTargetDeclAttr::CreateImplicit(Context, MT);
+      ND->addAttr(A);
+      if (ASTMutationListener *ML = Context.getASTMutationListener())
+        ML->DeclarationMarkedOpenMPDeclareTarget(ND, A);
+      checkDeclIsAllowedInOpenMPTarget(nullptr, ND);
+    } else if (ND->getAttr<OMPDeclareTargetDeclAttr>()->getMapType() != MT) {
+      Diag(Id.getLoc(), diag::err_omp_declare_target_to_and_link)
+          << Id.getName();
+    }
+  } else
+    Diag(Id.getLoc(), diag::err_omp_invalid_target_decl) << Id.getName();
+}
+
 static void checkDeclInTargetContext(SourceLocation SL, SourceRange SR,
                                      Sema &SemaRef, Decl *D) {
   if (!D)
@@ -11471,9 +11534,11 @@ static void checkDeclInTargetContext(SourceLocation SL, SourceRange SR,
     // If this is an implicit variable that is legal and we do not need to do
     // anything.
     if (cast<VarDecl>(D)->isImplicit()) {
-      D->addAttr(OMPDeclareTargetDeclAttr::CreateImplicit(SemaRef.Context));
+      Attr *A = OMPDeclareTargetDeclAttr::CreateImplicit(
+          SemaRef.Context, OMPDeclareTargetDeclAttr::MT_To);
+      D->addAttr(A);
       if (ASTMutationListener *ML = SemaRef.Context.getASTMutationListener())
-        ML->DeclarationMarkedOpenMPDeclareTarget(D);
+        ML->DeclarationMarkedOpenMPDeclareTarget(D, A);
       return;
     }
 
@@ -11486,9 +11551,11 @@ static void checkDeclInTargetContext(SourceLocation SL, SourceRange SR,
     // target region (it can be e.g. a lambda) that is legal and we do not need
     // to do anything else.
     if (LD == D) {
-      D->addAttr(OMPDeclareTargetDeclAttr::CreateImplicit(SemaRef.Context));
+      Attr *A = OMPDeclareTargetDeclAttr::CreateImplicit(
+          SemaRef.Context, OMPDeclareTargetDeclAttr::MT_To);
+      D->addAttr(A);
       if (ASTMutationListener *ML = SemaRef.Context.getASTMutationListener())
-        ML->DeclarationMarkedOpenMPDeclareTarget(D);
+        ML->DeclarationMarkedOpenMPDeclareTarget(D, A);
       return;
     }
   }
@@ -11518,9 +11585,11 @@ static void checkDeclInTargetContext(SourceLocation SL, SourceRange SR,
       SemaRef.Diag(SL, diag::note_used_here) << SR;
     }
     // Mark decl as declared target to prevent further diagnostic.
-    D->addAttr(OMPDeclareTargetDeclAttr::CreateImplicit(SemaRef.Context));
+    Attr *A = OMPDeclareTargetDeclAttr::CreateImplicit(
+        SemaRef.Context, OMPDeclareTargetDeclAttr::MT_To);
+    D->addAttr(A);
     if (ASTMutationListener *ML = SemaRef.Context.getASTMutationListener())
-      ML->DeclarationMarkedOpenMPDeclareTarget(D);
+      ML->DeclarationMarkedOpenMPDeclareTarget(D, A);
   }
 }
 
@@ -11554,9 +11623,11 @@ void Sema::checkDeclIsAllowedInOpenMPTarget(Expr *E, Decl *D) {
         !checkValueDeclInTarget(SL, SR, *this, DSAStack, VD)) {
       // Mark decl as declared target to prevent further diagnostic.
       if (isa<VarDecl>(VD) || isa<FunctionDecl>(VD)) {
-        VD->addAttr(OMPDeclareTargetDeclAttr::CreateImplicit(Context));
+        Attr *A = OMPDeclareTargetDeclAttr::CreateImplicit(
+            Context, OMPDeclareTargetDeclAttr::MT_To);
+        VD->addAttr(A);
         if (ASTMutationListener *ML = Context.getASTMutationListener())
-          ML->DeclarationMarkedOpenMPDeclareTarget(VD);
+          ML->DeclarationMarkedOpenMPDeclareTarget(VD, A);
       }
       return;
     }
@@ -11573,9 +11644,11 @@ void Sema::checkDeclIsAllowedInOpenMPTarget(Expr *E, Decl *D) {
     // Checking declaration inside declare target region.
     if (!D->hasAttr<OMPDeclareTargetDeclAttr>() &&
         (isa<VarDecl>(D) || isa<FunctionDecl>(D))) {
-      D->addAttr(OMPDeclareTargetDeclAttr::CreateImplicit(Context));
+      Attr *A = OMPDeclareTargetDeclAttr::CreateImplicit(
+          Context, OMPDeclareTargetDeclAttr::MT_To);
+      D->addAttr(A);
       if (ASTMutationListener *ML = Context.getASTMutationListener())
-        ML->DeclarationMarkedOpenMPDeclareTarget(D);
+        ML->DeclarationMarkedOpenMPDeclareTarget(D, A);
     }
     return;
   }

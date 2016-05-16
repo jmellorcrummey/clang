@@ -563,6 +563,11 @@ enum OpenMPSchedType {
   /// \brief dist_schedule types
   OMP_dist_sch_static_chunked = 91,
   OMP_dist_sch_static = 92,
+  /// Support for OpenMP 4.5 monotonic and nonmonotonic schedule modifiers.
+  /// Set if the monotonic schedule modifier was present.
+  OMP_sch_modifier_monotonic = (1 << 29),
+  /// Set if the nonmonotonic schedule modifier was present.
+  OMP_sch_modifier_nonmonotonic = (1 << 30),
 };
 
 enum OpenMPRTLFunction {
@@ -2475,16 +2480,42 @@ bool CGOpenMPRuntime::isDynamic(OpenMPScheduleClauseKind ScheduleKind) const {
   return Schedule != OMP_sch_static;
 }
 
+static int addMonoNonMonoModifier(OpenMPSchedType Schedule,
+                                  OpenMPScheduleClauseModifier M1,
+                                  OpenMPScheduleClauseModifier M2) {
+  switch (M1) {
+  case OMPC_SCHEDULE_MODIFIER_monotonic:
+    return Schedule | OMP_sch_modifier_monotonic;
+  case OMPC_SCHEDULE_MODIFIER_nonmonotonic:
+    return Schedule | OMP_sch_modifier_nonmonotonic;
+  case OMPC_SCHEDULE_MODIFIER_simd:
+  case OMPC_SCHEDULE_MODIFIER_last:
+  case OMPC_SCHEDULE_MODIFIER_unknown:
+    break;
+  }
+  switch (M2) {
+  case OMPC_SCHEDULE_MODIFIER_monotonic:
+    return Schedule | OMP_sch_modifier_monotonic;
+  case OMPC_SCHEDULE_MODIFIER_nonmonotonic:
+    return Schedule | OMP_sch_modifier_nonmonotonic;
+  case OMPC_SCHEDULE_MODIFIER_simd:
+  case OMPC_SCHEDULE_MODIFIER_last:
+  case OMPC_SCHEDULE_MODIFIER_unknown:
+    break;
+  }
+  return Schedule;
+}
+
 void CGOpenMPRuntime::emitForDispatchInit(CodeGenFunction &CGF,
                                           SourceLocation Loc,
-                                          OpenMPScheduleClauseKind ScheduleKind,
+                                          const OpenMPScheduleTy &ScheduleKind,
                                           unsigned IVSize, bool IVSigned,
                                           bool Ordered, llvm::Value *UB,
                                           llvm::Value *Chunk) {
   if (!CGF.HaveInsertPoint())
     return;
   OpenMPSchedType Schedule =
-      getRuntimeSchedule(ScheduleKind, Chunk != nullptr, Ordered);
+      getRuntimeSchedule(ScheduleKind.Schedule, Chunk != nullptr, Ordered);
   assert(Ordered ||
          (Schedule != OMP_sch_static && Schedule != OMP_sch_static_chunked &&
           Schedule != OMP_ord_static && Schedule != OMP_ord_static_chunked));
@@ -2497,26 +2528,23 @@ void CGOpenMPRuntime::emitForDispatchInit(CodeGenFunction &CGF,
   if (Chunk == nullptr)
     Chunk = CGF.Builder.getIntN(IVSize, 1);
   llvm::Value *Args[] = {
-      emitUpdateLocation(CGF, Loc),
-      getThreadID(CGF, Loc),
-      CGF.Builder.getInt32(Schedule), // Schedule type
-      CGF.Builder.getIntN(IVSize, 0), // Lower
-      UB,                             // Upper
-      CGF.Builder.getIntN(IVSize, 1), // Stride
-      Chunk                           // Chunk
+      emitUpdateLocation(CGF, Loc), getThreadID(CGF, Loc),
+      CGF.Builder.getInt32(addMonoNonMonoModifier(
+          Schedule, ScheduleKind.M1, ScheduleKind.M2)), // Schedule type
+      CGF.Builder.getIntN(IVSize, 0),                   // Lower
+      UB,                                               // Upper
+      CGF.Builder.getIntN(IVSize, 1),                   // Stride
+      Chunk                                             // Chunk
   };
   CGF.EmitRuntimeCall(createDispatchInitFunction(IVSize, IVSigned), Args);
 }
 
-static void emitForStaticInitCall(CodeGenFunction &CGF,
-                                  SourceLocation Loc,
-                                  llvm::Value * UpdateLocation,
-                                  llvm::Value * ThreadId,
-                                  llvm::Constant * ForStaticInitFunction,
-                                  OpenMPSchedType Schedule,
-                                  unsigned IVSize, bool IVSigned, bool Ordered,
-                                  Address IL, Address LB, Address UB,
-                                  Address ST, llvm::Value *Chunk) {
+static void emitForStaticInitCall(
+    CodeGenFunction &CGF, llvm::Value *UpdateLocation, llvm::Value *ThreadId,
+    llvm::Constant *ForStaticInitFunction, OpenMPSchedType Schedule,
+    OpenMPScheduleClauseModifier M1, OpenMPScheduleClauseModifier M2,
+    unsigned IVSize, bool Ordered, Address IL, Address LB, Address UB,
+    Address ST, llvm::Value *Chunk) {
   if (!CGF.HaveInsertPoint())
      return;
 
@@ -2544,47 +2572,48 @@ static void emitForStaticInitCall(CodeGenFunction &CGF,
             "expected static chunked schedule");
    }
    llvm::Value *Args[] = {
-     UpdateLocation,
-     ThreadId,
-     CGF.Builder.getInt32(Schedule), // Schedule type
-     IL.getPointer(),                // &isLastIter
-     LB.getPointer(),                // &LB
-     UB.getPointer(),                // &UB
-     ST.getPointer(),                // &Stride
-     CGF.Builder.getIntN(IVSize, 1), // Incr
-     Chunk                           // Chunk
+       UpdateLocation, ThreadId, CGF.Builder.getInt32(addMonoNonMonoModifier(
+                                     Schedule, M1, M2)), // Schedule type
+       IL.getPointer(),                                  // &isLastIter
+       LB.getPointer(),                                  // &LB
+       UB.getPointer(),                                  // &UB
+       ST.getPointer(),                                  // &Stride
+       CGF.Builder.getIntN(IVSize, 1),                   // Incr
+       Chunk                                             // Chunk
    };
    CGF.EmitRuntimeCall(ForStaticInitFunction, Args);
 }
 
 void CGOpenMPRuntime::emitForStaticInit(CodeGenFunction &CGF,
                                         SourceLocation Loc,
-                                        OpenMPScheduleClauseKind ScheduleKind,
+                                        const OpenMPScheduleTy &ScheduleKind,
                                         unsigned IVSize, bool IVSigned,
                                         bool Ordered, Address IL, Address LB,
                                         Address UB, Address ST,
                                         llvm::Value *Chunk) {
-  OpenMPSchedType ScheduleNum = getRuntimeSchedule(ScheduleKind, Chunk != nullptr,
-                                                   Ordered);
+  OpenMPSchedType ScheduleNum =
+      getRuntimeSchedule(ScheduleKind.Schedule, Chunk != nullptr, Ordered);
   auto *UpdatedLocation = emitUpdateLocation(CGF, Loc);
   auto *ThreadId = getThreadID(CGF, Loc);
   auto *StaticInitFunction = createForStaticInitFunction(IVSize, IVSigned);
-  emitForStaticInitCall(CGF, Loc, UpdatedLocation, ThreadId, StaticInitFunction,
-      ScheduleNum, IVSize, IVSigned, Ordered, IL, LB, UB, ST, Chunk);
+  emitForStaticInitCall(CGF, UpdatedLocation, ThreadId, StaticInitFunction,
+                        ScheduleNum, ScheduleKind.M1, ScheduleKind.M2, IVSize,
+                        Ordered, IL, LB, UB, ST, Chunk);
 }
 
-void CGOpenMPRuntime::emitDistributeStaticInit(CodeGenFunction &CGF,
-    SourceLocation Loc, OpenMPDistScheduleClauseKind SchedKind,
-    unsigned IVSize, bool IVSigned,
-    bool Ordered, Address IL, Address LB,
-    Address UB, Address ST,
+void CGOpenMPRuntime::emitDistributeStaticInit(
+    CodeGenFunction &CGF, SourceLocation Loc,
+    OpenMPDistScheduleClauseKind SchedKind, unsigned IVSize, bool IVSigned,
+    bool Ordered, Address IL, Address LB, Address UB, Address ST,
     llvm::Value *Chunk) {
   OpenMPSchedType ScheduleNum = getRuntimeSchedule(SchedKind, Chunk != nullptr);
   auto *UpdatedLocation = emitUpdateLocation(CGF, Loc);
   auto *ThreadId = getThreadID(CGF, Loc);
   auto *StaticInitFunction = createForStaticInitFunction(IVSize, IVSigned);
-  emitForStaticInitCall(CGF, Loc, UpdatedLocation, ThreadId, StaticInitFunction,
-      ScheduleNum, IVSize, IVSigned, Ordered, IL, LB, UB, ST, Chunk);
+  emitForStaticInitCall(CGF, UpdatedLocation, ThreadId, StaticInitFunction,
+                        ScheduleNum, OMPC_SCHEDULE_MODIFIER_unknown,
+                        OMPC_SCHEDULE_MODIFIER_unknown, IVSize, Ordered, IL, LB,
+                        UB, ST, Chunk);
 }
 
 void CGOpenMPRuntime::emitForStaticFinish(CodeGenFunction &CGF,
@@ -3687,8 +3716,7 @@ static int array_pod_sort_comparator(const PrivateDataTy *P1,
 }
 
 /// Emit initialization for private variables in task-based directives.
-/// \return true if cleanups are required, false otherwise.
-static bool emitPrivatesInit(CodeGenFunction &CGF,
+static void emitPrivatesInit(CodeGenFunction &CGF,
                              const OMPExecutableDirective &D,
                              Address KmpTaskSharedsPtr, LValue TDBase,
                              const RecordDecl *KmpTaskTWithPrivatesQTyRD,
@@ -3696,7 +3724,6 @@ static bool emitPrivatesInit(CodeGenFunction &CGF,
                              const OMPTaskDataTy &Data,
                              ArrayRef<PrivateDataTy> Privates, bool ForDup) {
   auto &C = CGF.getContext();
-  bool NeedsCleanup = false;
   auto FI = std::next(KmpTaskTWithPrivatesQTyRD->field_begin());
   LValue PrivatesBase = CGF.EmitLValueForField(TDBase, *FI);
   LValue SrcBase;
@@ -3712,9 +3739,9 @@ static bool emitPrivatesInit(CodeGenFunction &CGF,
   for (auto &&Pair : Privates) {
     auto *VD = Pair.second.PrivateCopy;
     auto *Init = VD->getAnyInitializer();
-    LValue PrivateLValue = CGF.EmitLValueForField(PrivatesBase, *FI);
     if (Init && (!ForDup || (isa<CXXConstructExpr>(Init) &&
                              !CGF.isTrivialInitializer(Init)))) {
+      LValue PrivateLValue = CGF.EmitLValueForField(PrivatesBase, *FI);
       if (auto *Elem = Pair.second.PrivateElemInit) {
         auto *OriginalVD = Pair.second.Original;
         auto *SharedField = CapturesInfo.lookup(OriginalVD);
@@ -3762,10 +3789,8 @@ static bool emitPrivatesInit(CodeGenFunction &CGF,
       } else
         CGF.EmitExprAsInit(Init, VD, PrivateLValue, /*capturedByInit=*/false);
     }
-    NeedsCleanup = NeedsCleanup || FI->getType().isDestructedType();
     ++FI;
   }
-  return NeedsCleanup;
 }
 
 /// Check if duplication function is required for taskloops.
@@ -3852,11 +3877,25 @@ emitTaskDupFunction(CodeGenModule &CGM, SourceLocation Loc,
                              Loc),
         CGF.getNaturalTypeAlignment(SharedsTy));
   }
-  (void)emitPrivatesInit(CGF, D, KmpTaskSharedsPtr, TDBase,
-                         KmpTaskTWithPrivatesQTyRD, SharedsTy, SharedsPtrTy,
-                         Data, Privates, /*ForDup=*/true);
+  emitPrivatesInit(CGF, D, KmpTaskSharedsPtr, TDBase, KmpTaskTWithPrivatesQTyRD,
+                   SharedsTy, SharedsPtrTy, Data, Privates, /*ForDup=*/true);
   CGF.FinishFunction();
   return TaskDup;
+}
+
+/// Checks if destructor function is required to be generated.
+/// \return true if cleanups are required, false otherwise.
+static bool
+checkDestructorsRequired(const RecordDecl *KmpTaskTWithPrivatesQTyRD) {
+  bool NeedsCleanup = false;
+  auto FI = std::next(KmpTaskTWithPrivatesQTyRD->field_begin());
+  auto *PrivateRD = cast<RecordDecl>(FI->getType()->getAsTagDecl());
+  for (auto *FD : PrivateRD->fields()) {
+    NeedsCleanup = NeedsCleanup || FD->getType().isDestructedType();
+    if (NeedsCleanup)
+      break;
+  }
+  return NeedsCleanup;
 }
 
 CGOpenMPRuntime::TaskResultTy
@@ -3949,9 +3988,21 @@ CGOpenMPRuntime::emitTaskInit(CodeGenFunction &CGF, SourceLocation Loc,
   // Task flags. Format is taken from
   // http://llvm.org/svn/llvm-project/openmp/trunk/runtime/src/kmp.h,
   // description of kmp_tasking_flags struct.
-  const unsigned TiedFlag = 0x1;
-  const unsigned FinalFlag = 0x2;
+  enum {
+    TiedFlag = 0x1,
+    FinalFlag = 0x2,
+    DestructorsFlag = 0x8,
+    PriorityFlag = 0x20
+  };
   unsigned Flags = Data.Tied ? TiedFlag : 0;
+  bool NeedsCleanup = false;
+  if (!Privates.empty()) {
+    NeedsCleanup = checkDestructorsRequired(KmpTaskTWithPrivatesQTyRD);
+    if (NeedsCleanup)
+      Flags = Flags | DestructorsFlag;
+  }
+  if (Data.Priority.getInt())
+    Flags = Flags | PriorityFlag;
   auto *TaskFlags =
       Data.Final.getPointer()
           ? CGF.Builder.CreateSelect(Data.Final.getPointer(),
@@ -3988,12 +4039,10 @@ CGOpenMPRuntime::emitTaskInit(CodeGenFunction &CGF, SourceLocation Loc,
   }
   // Emit initial values for private copies (if any).
   TaskResultTy Result;
-  bool NeedsCleanup = false;
   if (!Privates.empty()) {
-    NeedsCleanup = emitPrivatesInit(CGF, D, KmpTaskSharedsPtr, Base,
-                                    KmpTaskTWithPrivatesQTyRD, SharedsTy,
-                                    SharedsPtrTy, Data, Privates,
-                                    /*ForDup=*/false);
+    emitPrivatesInit(CGF, D, KmpTaskSharedsPtr, Base, KmpTaskTWithPrivatesQTyRD,
+                     SharedsTy, SharedsPtrTy, Data, Privates,
+                     /*ForDup=*/false);
     if (isOpenMPTaskLoopDirective(D.getDirectiveKind()) &&
         (!Data.LastprivateVars.empty() || checkInitIsRequired(CGF, Privates))) {
       Result.TaskDupFn = emitTaskDupFunction(

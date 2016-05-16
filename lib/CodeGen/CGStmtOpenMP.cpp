@@ -1785,16 +1785,18 @@ void CodeGenFunction::EmitOMPOuterLoop(bool DynamicOrOrdered, bool IsMonotonic,
 }
 
 void CodeGenFunction::EmitOMPForOuterLoop(
-    OpenMPScheduleClauseKind ScheduleKind, bool IsMonotonic,
+    const OpenMPScheduleTy &ScheduleKind, bool IsMonotonic,
     const OMPLoopDirective &S, OMPPrivateScope &LoopScope, bool Ordered,
     Address LB, Address UB, Address ST, Address IL, llvm::Value *Chunk) {
   auto &RT = CGM.getOpenMPRuntime();
 
   // Dynamic scheduling of the outer loop (dynamic, guided, auto, runtime).
-  const bool DynamicOrOrdered = Ordered || RT.isDynamic(ScheduleKind);
+  const bool DynamicOrOrdered =
+      Ordered || RT.isDynamic(ScheduleKind.Schedule);
 
   assert((Ordered ||
-          !RT.isStaticNonchunked(ScheduleKind, /*Chunked=*/Chunk != nullptr)) &&
+          !RT.isStaticNonchunked(ScheduleKind.Schedule,
+                                 /*Chunked=*/Chunk != nullptr)) &&
          "static non-chunked schedule does not need outer loop");
 
   // Emit outer loop.
@@ -1853,8 +1855,8 @@ void CodeGenFunction::EmitOMPForOuterLoop(
 
   if (DynamicOrOrdered) {
     llvm::Value *UBVal = EmitScalarExpr(S.getLastIteration());
-    RT.emitForDispatchInit(*this, S.getLocStart(), ScheduleKind,
-                           IVSize, IVSigned, Ordered, UBVal, Chunk);
+    RT.emitForDispatchInit(*this, S.getLocStart(), ScheduleKind, IVSize,
+                           IVSigned, Ordered, UBVal, Chunk);
   } else {
     RT.emitForStaticInit(*this, S.getLocStart(), ScheduleKind, IVSize, IVSigned,
                          Ordered, IL, LB, UB, ST, Chunk);
@@ -1980,13 +1982,11 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
       // Detect the loop schedule kind and chunk.
       llvm::Value *Chunk = nullptr;
       bool ChunkSizeOne = false;
-      OpenMPScheduleClauseKind ScheduleKind = OMPC_SCHEDULE_unknown;
-      OpenMPScheduleClauseModifier M1 = OMPC_SCHEDULE_MODIFIER_unknown;
-      OpenMPScheduleClauseModifier M2 = OMPC_SCHEDULE_MODIFIER_unknown;
+      OpenMPScheduleTy ScheduleKind;
       if (auto *C = S.getSingleClause<OMPScheduleClause>()) {
-        ScheduleKind = C->getScheduleKind();
-        M1 = C->getFirstScheduleModifier();
-        M2 = C->getSecondScheduleModifier();
+        ScheduleKind.Schedule = C->getScheduleKind();
+        ScheduleKind.M1 = C->getFirstScheduleModifier();
+        ScheduleKind.M2 = C->getSecondScheduleModifier();
         if (const auto *Ch = C->getChunkSize()) {
           llvm::APSInt Result;
           if (ConstantFoldsToSimpleInteger(Ch, Result)) {
@@ -2001,7 +2001,7 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
       const unsigned IVSize = getContext().getTypeSize(IVExpr->getType());
       const bool IVSigned = IVExpr->getType()->hasSignedIntegerRepresentation();
       const bool Ordered = S.getSingleClause<OMPOrderedClause>() != nullptr;
-      if (RT.generateCoalescedSchedule(ScheduleKind, ChunkSizeOne, Ordered)) {
+      if (RT.generateCoalescedSchedule(ScheduleKind.Schedule, ChunkSizeOne, Ordered)) {
         // For NVPTX and other GPU targets high performance is often achieved
         // if adjacent threads access memory in a coalesced manner.  This is
         // true for loops that access memory with stride one if a static
@@ -2057,7 +2057,7 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
         EmitBlock(LoopExit.getBlock());
         // Tell the runtime we are done.
         RT.emitForStaticFinish(*this, S.getLocStart());
-      } else if (RT.isStaticNonchunked(ScheduleKind,
+      } else if (RT.isStaticNonchunked(ScheduleKind.Schedule,
                                        /* Chunked */ Chunk != nullptr) &&
                  !Ordered) {
         // OpenMP 4.5, 2.7.1 Loop Construct, Description.
@@ -2093,11 +2093,11 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
         // Tell the runtime we are done.
         RT.emitForStaticFinish(*this, S.getLocStart());
       } else {
-        const bool IsMonotonic = Ordered ||
-                                 ScheduleKind == OMPC_SCHEDULE_static ||
-                                 ScheduleKind == OMPC_SCHEDULE_unknown ||
-                                 M1 == OMPC_SCHEDULE_MODIFIER_monotonic ||
-                                 M2 == OMPC_SCHEDULE_MODIFIER_monotonic;
+        const bool IsMonotonic =
+            Ordered || ScheduleKind.Schedule == OMPC_SCHEDULE_static ||
+            ScheduleKind.Schedule == OMPC_SCHEDULE_unknown ||
+            ScheduleKind.M1 == OMPC_SCHEDULE_MODIFIER_monotonic ||
+            ScheduleKind.M2 == OMPC_SCHEDULE_MODIFIER_monotonic;
         // Emit the outer loop, which requests its work chunk [LB..UB] from
         // runtime and runs the inner loop to process it.
         EmitOMPForOuterLoop(ScheduleKind, IsMonotonic, S, LoopScope, Ordered,
@@ -2265,8 +2265,10 @@ void CodeGenFunction::EmitSections(const OMPExecutableDirective &S) {
     (void)LoopScope.Privatize();
 
     // Emit static non-chunked loop.
+    OpenMPScheduleTy ScheduleKind;
+    ScheduleKind.Schedule = OMPC_SCHEDULE_static;
     CGF.CGM.getOpenMPRuntime().emitForStaticInit(
-        CGF, S.getLocStart(), OMPC_SCHEDULE_static, /*IVSize=*/32,
+        CGF, S.getLocStart(), ScheduleKind, /*IVSize=*/32,
         /*IVSigned=*/true, /*Ordered=*/false, IL.getAddress(), LB.getAddress(),
         UB.getAddress(), ST.getAddress());
     // UB = min(UB, GlobalUB);
@@ -2452,6 +2454,13 @@ void CodeGenFunction::EmitOMPTaskBasedDirective(const OMPExecutableDirective &S,
   } else {
     // By default the task is not final.
     Data.Final.setInt(/*IntVal=*/false);
+  }
+  // Check if the task has 'priority' clause.
+  if (const auto *Clause = S.getSingleClause<OMPPriorityClause>()) {
+    // Runtime currently does not support codegen for priority clause argument.
+    // TODO: Add codegen for priority clause arg when runtime lib support it.
+    auto *Prio = Clause->getPriority();
+    Data.Priority.setInt(Prio);
   }
   // The first function argument for tasks is a thread id, the second one is a
   // part id (0 for tied tasks, >=0 for untied task).

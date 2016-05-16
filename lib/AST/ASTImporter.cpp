@@ -2115,6 +2115,8 @@ bool ASTNodeImporter::ImportDefinition(RecordDecl *From, RecordDecl *To,
     ToData.HasUninitializedReferenceMember
       = FromData.HasUninitializedReferenceMember;
     ToData.HasUninitializedFields = FromData.HasUninitializedFields;
+    ToData.HasInheritedConstructor = FromData.HasInheritedConstructor;
+    ToData.HasInheritedAssignment = FromData.HasInheritedAssignment;
     ToData.NeedOverloadResolutionForMoveConstructor
       = FromData.NeedOverloadResolutionForMoveConstructor;
     ToData.NeedOverloadResolutionForMoveAssignment
@@ -2818,8 +2820,17 @@ Decl *ASTNodeImporter::VisitRecordDecl(RecordDecl *D) {
         Decl *CDecl = Importer.Import(DCXX->getLambdaContextDecl());
         if (DCXX->getLambdaContextDecl() && !CDecl)
           return nullptr;
-        D2CXX->setLambdaMangling(DCXX->getLambdaManglingNumber(),
-                                 CDecl);
+        D2CXX->setLambdaMangling(DCXX->getLambdaManglingNumber(), CDecl);
+      } else if (DCXX->isInjectedClassName()) {                                                 
+        // We have to be careful to do a similar dance to the one in                            
+        // Sema::ActOnStartCXXMemberDeclarations                                                
+        CXXRecordDecl *const PrevDecl = nullptr;                                                
+        const bool DelayTypeCreation = true;                                                    
+        D2CXX = CXXRecordDecl::Create(                                                          
+            Importer.getToContext(), D->getTagKind(), DC, StartLoc, Loc,                        
+            Name.getAsIdentifierInfo(), PrevDecl, DelayTypeCreation);                           
+        Importer.getToContext().getTypeDeclType(                                                
+            D2CXX, llvm::dyn_cast<CXXRecordDecl>(DC));                                          
       } else {
         D2CXX = CXXRecordDecl::Create(Importer.getToContext(),
                                       D->getTagKind(),
@@ -5767,9 +5778,14 @@ Expr *ASTNodeImporter::VisitCXXConstructExpr(CXXConstructExpr *E) {
   if (T.isNull())
     return nullptr;
 
+  NamedDecl *ToFound =
+    dyn_cast<NamedDecl>(Importer.Import(E->getFoundDecl()));
+  if (!ToFound)
+    return nullptr;
+
   CXXConstructorDecl *ToCCD =
     dyn_cast<CXXConstructorDecl>(Importer.Import(E->getConstructor()));
-  if (!ToCCD && E->getConstructor())
+  if (!ToCCD)
     return nullptr;
 
   SmallVector<Expr *, 6> ToArgs(E->getNumArgs());
@@ -5779,7 +5795,7 @@ Expr *ASTNodeImporter::VisitCXXConstructExpr(CXXConstructExpr *E) {
 
   return CXXConstructExpr::Create(Importer.getToContext(), T,
                                   Importer.Import(E->getLocation()),
-                                  ToCCD, E->isElidable(),
+                                  ToFound, ToCCD, E->isElidable(),
                                   ToArgs, E->hadMultipleCandidates(),
                                   E->isListInitialization(),
                                   E->isStdInitListInitialization(),
@@ -6448,7 +6464,12 @@ IdentifierInfo *ASTImporter::Import(const IdentifierInfo *FromId) {
   if (!FromId)
     return nullptr;
 
-  return &ToContext.Idents.get(FromId->getName());
+  IdentifierInfo *ToId = &ToContext.Idents.get(FromId->getName());
+
+  if (!ToId->getBuiltinID() && FromId->getBuiltinID())
+    ToId->setBuiltinID(FromId->getBuiltinID());
+
+  return ToId;
 }
 
 Selector ASTImporter::Import(Selector FromSel) {
