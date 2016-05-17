@@ -2634,8 +2634,9 @@ void CGOpenMPRuntime::emitDistributeForStaticInit(
   auto *ThreadId = getThreadID(CGF, Loc);
   auto *StaticInitFunction = createForStaticInitFunction(IVSize, IVSigned);
   emitForStaticInitCall(CGF, UpdatedLocation, ThreadId, StaticInitFunction,
-                        ScheduleNum, IVSize, IVSigned, false, IL, LB, UB, ST,
-                        Chunk);
+                        ScheduleNum, OMPC_SCHEDULE_MODIFIER_unknown,
+                        OMPC_SCHEDULE_MODIFIER_unknown, IVSize, false, IL, LB,
+                        UB, ST, Chunk);
 }
 
 void CGOpenMPRuntime::emitForStaticFinish(CodeGenFunction &CGF,
