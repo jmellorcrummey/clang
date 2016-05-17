@@ -2633,7 +2633,7 @@ void CGOpenMPRuntime::emitDistributeForStaticInit(
   auto *UpdatedLocation = emitUpdateLocation(CGF, Loc);
   auto *ThreadId = getThreadID(CGF, Loc);
   auto *StaticInitFunction = createForStaticInitFunction(IVSize, IVSigned);
-  emitForStaticInitCall(CGF, Loc, UpdatedLocation, ThreadId, StaticInitFunction,
+  emitForStaticInitCall(CGF, UpdatedLocation, ThreadId, StaticInitFunction,
                         ScheduleNum, IVSize, IVSigned, false, IL, LB, UB, ST,
                         Chunk);
 }
