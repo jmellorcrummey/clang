@@ -257,8 +257,10 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   class EntryFunctionState {
   public:
     llvm::BasicBlock *ExitBB;
+    bool RequiresOpenMP;
 
-    EntryFunctionState() : ExitBB(nullptr){};
+    EntryFunctionState(bool RequiresOpenMP = false)
+        : ExitBB(nullptr), RequiresOpenMP(RequiresOpenMP){};
   };
 
   class WorkerFunctionState {
@@ -283,13 +285,19 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   /// \brief Helper for worker function. Emit body of worker loop.
   void emitWorkerLoop(CodeGenFunction &CGF, WorkerFunctionState &WST);
 
-  /// \brief Helper for target entry function. Guide the master and worker
+  /// \brief Helper for SMT target entry function. Guide the master and worker
   /// threads to their respective locations.
-  void emitEntryHeader(CodeGenFunction &CGF, EntryFunctionState &EST,
-                       WorkerFunctionState &WST);
+  void emitSMTEntryHeader(CodeGenFunction &CGF, EntryFunctionState &EST,
+                          WorkerFunctionState &WST);
 
-  /// \brief Signal termination of OMP execution.
-  void emitEntryFooter(CodeGenFunction &CGF, EntryFunctionState &EST);
+  /// \brief Signal termination of SMT OMP execution.
+  void emitSMTEntryFooter(CodeGenFunction &CGF, EntryFunctionState &EST);
+
+  /// \brief Helper for SPMD target entry function.
+  void emitSPMDEntryHeader(CodeGenFunction &CGF, EntryFunctionState &EST);
+
+  /// \brief Signal termination of SPMD OMP execution.
+  void emitSPMDEntryFooter(CodeGenFunction &CGF, EntryFunctionState &EST);
 
   /// \brief Returns specified OpenMP runtime function for the current OpenMP
   /// implementation.  Specialized for the NVPTX device.
@@ -321,7 +329,36 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   void createOffloadEntry(llvm::Constant *ID, llvm::Constant *Addr,
                           uint64_t Size) override;
 
-  /// \brief Emit outlined function for 'target' directive on the NVPTX
+  /// \brief Emit outlined function specialized for the Simultaneous
+  /// MultiThreading programming model for applicable target directives on the
+  /// NVPTX device.
+  /// \param D Directive to emit.
+  /// \param ParentName Name of the function that encloses the target region.
+  /// \param OutlinedFn Outlined function value to be defined by this call.
+  /// \param OutlinedFnID Outlined function ID value to be defined by this call.
+  /// \param IsOffloadEntry True if the outlined function is an offload entry.
+  /// An outlined function may not be an entry if, e.g. the if clause always
+  /// evaluates to false.
+  void emitSMTKernel(const OMPExecutableDirective &D, StringRef ParentName,
+                     llvm::Function *&OutlinedFn, llvm::Constant *&OutlinedFnID,
+                     bool IsOffloadEntry, const RegionCodeGenTy &CodeGen);
+
+  /// \brief Emit outlined function specialized for the Single Program
+  /// Multiple Data programming model for applicable target directives on the
+  /// NVPTX device.
+  /// \param D Directive to emit.
+  /// \param ParentName Name of the function that encloses the target region.
+  /// \param OutlinedFn Outlined function value to be defined by this call.
+  /// \param OutlinedFnID Outlined function ID value to be defined by this call.
+  /// \param IsOffloadEntry True if the outlined function is an offload entry.
+  /// An outlined function may not be an entry if, e.g. the if clause always
+  /// evaluates to false.
+  void emitSPMDKernel(const OMPExecutableDirective &D, StringRef ParentName,
+                      llvm::Function *&OutlinedFn,
+                      llvm::Constant *&OutlinedFnID, bool IsOffloadEntry,
+                      const RegionCodeGenTy &CodeGen);
+
+  /// \brief Emit outlined function for target directives on the NVPTX
   /// device.
   /// \param D Directive to emit.
   /// \param ParentName Name of the function that encloses the target region.
@@ -409,6 +446,20 @@ public:
   bool generateCoalescedSchedule(OpenMPScheduleClauseKind ScheduleKind,
                                  bool ChunkSizeOne,
                                  bool ordered) const override;
+
+  /// \brief Check if we should generate code as if \a DistScheduleKind is
+  /// static non-chunked and \a ScheduleKind is static with a chunk size of 1.
+  /// \param DistScheduleKind Schedule Kind specified in the 'dist_schedule'
+  /// clause.
+  /// \param ScheduleKind Schedule Kind specified in the 'schedule' clause.
+  /// \param Chunked True if distribute chunk is specified in the clause.
+  /// \param ChunkSizeOne True if schedule chunk is one.
+  /// \param Ordered true if loop is ordered, false otherwise.
+  ///
+  bool generateCoalescedSchedule(OpenMPDistScheduleClauseKind DistScheduleKind,
+                                 OpenMPScheduleClauseKind ScheduleKind,
+                                 bool DistChunked, bool ChunkSizeOne,
+                                 bool Ordered) const override;
 
   /// \brief Check if we must always generate a barrier at the end of a
   /// particular construct regardless of the presence of a nowait clause.

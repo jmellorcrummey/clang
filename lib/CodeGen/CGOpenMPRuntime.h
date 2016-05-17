@@ -789,10 +789,26 @@ public:
   /// \brief Check if we should generate code as if \a ScheduleKind is static
   /// with a chunk size of 1.
   /// \param ScheduleKind Schedule Kind specified in the 'schedule' clause.
-  /// \param Chunk size.
+  /// \param ChunkSizeOne True if schedule chunk is one.
+  /// \param Ordered true if loop is ordered, false otherwise.
   ///
   virtual bool generateCoalescedSchedule(OpenMPScheduleClauseKind ScheduleKind,
-                                         bool ChunkSizeOne, bool ordered) const;
+                                         bool ChunkSizeOne, bool Ordered) const;
+
+  /// \brief Check if we should generate code as if \a DistScheduleKind is
+  /// static non-chunked and \a ScheduleKind is static with a chunk size of 1.
+  /// \param DistScheduleKind Schedule Kind specified in the 'dist_schedule'
+  /// clause.
+  /// \param ScheduleKind Schedule Kind specified in the 'schedule' clause.
+  /// \param Chunked True if distribute chunk is specified in the clause.
+  /// \param ChunkSizeOne True if schedule chunk is one.
+  /// \param Ordered true if loop is ordered, false otherwise.
+  ///
+  virtual bool
+  generateCoalescedSchedule(OpenMPDistScheduleClauseKind DistScheduleKind,
+                            OpenMPScheduleClauseKind ScheduleKind,
+                            bool DistChunked, bool ChunkSizeOne,
+                            bool Ordered) const;
 
   /// \brief Check if the specified \a ScheduleKind is dynamic.
   /// This kind of worksharing directive is emitted without outer loop.
@@ -860,6 +876,28 @@ public:
                                         bool Ordered, Address IL, Address LB,
                                         Address UB, Address ST,
                                         llvm::Value *Chunk = nullptr);
+
+  ///
+  /// \param CGF Reference to current CodeGenFunction.
+  /// \param Loc Clang source location.
+  /// \param IVSize Size of the iteration variable in bits.
+  /// \param IVSigned Sign of the interation variable.
+  /// \param IL Address of the output variable in which the flag of the
+  /// last iteration is returned.
+  /// \param LB Address of the output variable in which the lower iteration
+  /// number is returned.
+  /// \param UB Address of the output variable in which the upper iteration
+  /// number is returned.
+  /// \param ST Address of the output variable in which the stride value is
+  /// returned nesessary to generated the static_chunked scheduled loop.
+  /// \param Chunk Value of the chunk for the static_chunked scheduled loop.
+  /// For the default (nullptr) value, the chunk 1 will be used.
+  ///
+  virtual void emitDistributeForStaticInit(CodeGenFunction &CGF,
+                                           SourceLocation Loc, unsigned IVSize,
+                                           bool IVSigned, Address IL,
+                                           Address LB, Address UB, Address ST,
+                                           llvm::Value *Chunk = nullptr);
 
   /// \brief Call the appropriate runtime routine to notify that we finished
   /// iteration of the ordered loop with the dynamic scheduling.
