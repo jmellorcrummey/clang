@@ -3643,7 +3643,9 @@ void CodeGenFunction::EmitOMPTargetParallelForDirective(
   emitCommonOMPTargetDirective(*this, S, OMPD_target_parallel_for, CodeGen);
 }
 
-void CodeGenFunction::EmitOMPLeagueWorksharingLoop(const OMPLoopDirective &S) {
+void CodeGenFunction::EmitOMPLeagueWorksharingLoop(
+    const OMPLoopDirective &S, const OpenMPDirectiveKind InnermostKind,
+    const llvm::function_ref<void(CodeGenFunction &, JumpDest &)> &CodeGen) {
   // Emit the loop iteration variable.
   auto IVExpr = cast<DeclRefExpr>(S.getIterationVariable());
   auto IVDecl = cast<VarDecl>(IVExpr->getDecl());
@@ -3779,9 +3781,8 @@ void CodeGenFunction::EmitOMPLeagueWorksharingLoop(const OMPLoopDirective &S) {
         EmitOMPInnerLoop(S, LoopScope.requiresCleanups(),
                          S.getCond() /* IV < GlobalUB */,
                          S.getInc() /* Unused */,
-                         [&S, LoopExit](CodeGenFunction &CGF) {
-                           CGF.EmitOMPLoopBody(S, LoopExit);
-                           CGF.EmitStopPoint(&S);
+                         [&S, &LoopExit, &CodeGen](CodeGenFunction &CGF) {
+                           CodeGen(CGF, LoopExit);
                          },
                          [&S](CodeGenFunction &CGF) {
                            // LB = LB + Stride
@@ -3815,9 +3816,8 @@ void CodeGenFunction::EmitOMPLeagueWorksharingLoop(const OMPLoopDirective &S) {
         // while (idx <= UB) { BODY; ++idx; }
         EmitOMPInnerLoop(S, LoopScope.requiresCleanups(), S.getCond(),
                          S.getInc(),
-                         [&S, LoopExit](CodeGenFunction &CGF) {
-                           CGF.EmitOMPLoopBody(S, LoopExit);
-                           CGF.EmitStopPoint(&S);
+                         [&S, &LoopExit, &CodeGen](CodeGenFunction &CGF) {
+                           CodeGen(CGF, LoopExit);
                          },
                          [](CodeGenFunction &) {});
         EmitBlock(LoopExit.getBlock());
@@ -3847,7 +3847,11 @@ void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForDeviceFunction(
   // region.
   auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
     Action.Enter(CGF);
-    CGF.EmitOMPLeagueWorksharingLoop(S);
+    auto &&CodeGen = [&S](CodeGenFunction &CGF, JumpDest &LoopExit) {
+      CGF.EmitOMPLoopBody(S, LoopExit);
+      CGF.EmitStopPoint(&S);
+    };
+    CGF.EmitOMPLeagueWorksharingLoop(S, OMPD_distribute_parallel_for, CodeGen);
   };
   llvm::Function *Fn;
   llvm::Constant *Addr;
@@ -3867,13 +3871,23 @@ void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForDirective(
       CGF.EmitOMPPrivateClause(S, PrivateScope);
       (void)PrivateScope.Privatize();
       auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-        CGF.EmitOMPLeagueWorksharingLoop(S);
+        auto &&CodeGen = [&S](CodeGenFunction &CGF, JumpDest &LoopExit) {
+//          auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+//            CGF.EmitOMPWorksharingLoop(S);
+//          };
+//          emitCommonOMPParallelDirective(*this, S, OMPD_for, CodeGen);
+          CGF.EmitOMPLoopBody(S, LoopExit);
+          CGF.EmitStopPoint(&S);
+        };
+        CGF.EmitOMPLeagueWorksharingLoop(S, OMPD_distribute_parallel_for,
+                                         CodeGen);
       };
       OMPLexicalScope Scope(CGF, S, /*AsInlined=*/true);
-      CGF.CGM.getOpenMPRuntime().emitInlinedDirective(CGF, OMPD_distribute,
-                                                      CodeGen, false);
+      CGF.CGM.getOpenMPRuntime().emitInlinedDirective(
+          CGF, OMPD_distribute_parallel_for, CodeGen, false);
     };
-    emitCommonOMPTeamsDirective(CGF, S, OMPD_teams, CodeGen);
+    emitCommonOMPTeamsDirective(CGF, S, OMPD_teams_distribute_parallel_for,
+                                CodeGen);
   };
   emitCommonOMPTargetDirective(
       *this, S, OMPD_target_teams_distribute_parallel_for, CodeGen);

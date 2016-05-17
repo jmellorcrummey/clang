@@ -2391,7 +2391,6 @@ public:
   void EmitOMPTaskLoopSimdDirective(const OMPTaskLoopSimdDirective &S);
   void EmitOMPDistributeDirective(const OMPDistributeDirective &S);
   void EmitOMPDistributeLoop(const OMPDistributeDirective &S);
-  void EmitOMPLeagueWorksharingLoop(const OMPLoopDirective &S);
   void EmitOMPDistributeParallelForDirective(
       const OMPDistributeParallelForDirective &S);
   void EmitOMPTargetTeamsDirective(const OMPTargetTeamsDirective &S);
@@ -2471,6 +2470,9 @@ private:
                                   OMPPrivateScope &LoopScope, Address LB,
                                   Address UB, Address ST, Address IL,
                                   llvm::Value *Chunk);
+  void EmitOMPLeagueWorksharingLoop(const OMPLoopDirective &S,
+    const OpenMPDirectiveKind InnermostKind,
+    const llvm::function_ref<void(CodeGenFunction &, JumpDest &)> &CodeGen);
   /// \brief Emit code for sections directive.
   void EmitSections(const OMPExecutableDirective &S);
 
