@@ -1315,7 +1315,7 @@ static bool SemaBuiltinCpuSupports(Sema &S, CallExpr *TheCall) {
 }
 
 bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
-  unsigned i = 0, l = 0, u = 0;
+  int i = 0, l = 0, u = 0;
   switch (BuiltinID) {
   default:
     return false;
@@ -1442,10 +1442,12 @@ bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
     i = 2; l = 0; u = 31;
     break;
   case X86::BI__builtin_ia32_xabort:
-    i = 0; l = 0; u = 255;
+    i = 0; l = -128; u = 255;
     break;
   case X86::BI__builtin_ia32_pshufw:
   case X86::BI__builtin_ia32_aeskeygenassist128:
+    i = 1; l = -128; u = 255;
+    break;
   case X86::BI__builtin_ia32_vcvtps2ph:
   case X86::BI__builtin_ia32_vcvtps2ph256:
   case X86::BI__builtin_ia32_vcvtps2ph512:
@@ -1524,11 +1526,6 @@ bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
     i = 1; l = 0; u = 255;
     break;
   case X86::BI__builtin_ia32_palignr:
-  case X86::BI__builtin_ia32_palignr128:
-  case X86::BI__builtin_ia32_palignr256:
-  case X86::BI__builtin_ia32_palignr128_mask:
-  case X86::BI__builtin_ia32_palignr256_mask:
-  case X86::BI__builtin_ia32_palignr512_mask:
   case X86::BI__builtin_ia32_insertps128:
   case X86::BI__builtin_ia32_dpps:
   case X86::BI__builtin_ia32_dppd:
@@ -1547,6 +1544,13 @@ bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
   case X86::BI__builtin_ia32_vperm2f128_ps256:
   case X86::BI__builtin_ia32_vperm2f128_si256:
   case X86::BI__builtin_ia32_permti256:
+    i = 2; l = -128; u = 255;
+    break;
+  case X86::BI__builtin_ia32_palignr128:
+  case X86::BI__builtin_ia32_palignr256:
+  case X86::BI__builtin_ia32_palignr128_mask:
+  case X86::BI__builtin_ia32_palignr256_mask:
+  case X86::BI__builtin_ia32_palignr512_mask:
   case X86::BI__builtin_ia32_alignq512_mask:
   case X86::BI__builtin_ia32_alignd512_mask:
   case X86::BI__builtin_ia32_alignd128_mask:
@@ -1605,6 +1609,8 @@ bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
   case X86::BI__builtin_ia32_pcmpestrio128:
   case X86::BI__builtin_ia32_pcmpestris128:
   case X86::BI__builtin_ia32_pcmpestriz128:
+    i = 4; l = -128; u = 255;
+    break;
   case X86::BI__builtin_ia32_rndscalesd_round_mask:
   case X86::BI__builtin_ia32_rndscaless_round_mask:
     i = 4; l = 0; u = 255;
@@ -3130,8 +3136,7 @@ ExprResult Sema::SemaBuiltinShuffleVector(CallExpr *TheCall) {
 
   // Determine which of the following types of shufflevector we're checking:
   // 1) unary, vector mask: (lhs, mask)
-  // 2) binary, vector mask: (lhs, rhs, mask)
-  // 3) binary, scalar mask: (lhs, rhs, index, ..., index)
+  // 2) binary, scalar mask: (lhs, rhs, index, ..., index)
   QualType resType = TheCall->getArg(0)->getType();
   unsigned numElements = 0;
 

@@ -45,46 +45,26 @@ enum DefaultDataSharingAttributes {
   DSA_shared = 1 << 1  /// \brief Default data sharing attribute 'shared'.
 };
 
-template <class T> struct MatchesAny {
-  explicit MatchesAny(ArrayRef<T> Arr) : Arr(std::move(Arr)) {}
-  bool operator()(T Kind) {
-    for (auto KindEl : Arr)
-      if (KindEl == Kind)
-        return true;
-    return false;
-  }
-
-private:
-  ArrayRef<T> Arr;
-};
-struct MatchesAlways {
-  MatchesAlways() {}
-  template <class T> bool operator()(T) { return true; }
-};
-
-typedef MatchesAny<OpenMPClauseKind> MatchesAnyClause;
-typedef MatchesAny<OpenMPDirectiveKind> MatchesAnyDirective;
-
 /// \brief Stack for tracking declarations used in OpenMP directives and
 /// clauses and their data-sharing attributes.
-class DSAStackTy {
+class DSAStackTy final {
 public:
-  struct DSAVarData {
-    OpenMPDirectiveKind DKind;
-    OpenMPClauseKind CKind;
-    Expr *RefExpr;
-    DeclRefExpr *PrivateCopy;
+  struct DSAVarData final {
+    OpenMPDirectiveKind DKind = OMPD_unknown;
+    OpenMPClauseKind CKind = OMPC_unknown;
+    Expr *RefExpr = nullptr;
+    DeclRefExpr *PrivateCopy = nullptr;
     SourceLocation ImplicitDSALoc;
-    DSAVarData()
-        : DKind(OMPD_unknown), CKind(OMPC_unknown), RefExpr(nullptr),
-          PrivateCopy(nullptr), ImplicitDSALoc() {}
+    DSAVarData() {}
   };
 
 private:
-  struct DSAInfo {
-    OpenMPClauseKind Attributes;
-    Expr *RefExpr;
-    DeclRefExpr *PrivateCopy;
+  struct DSAInfo final {
+    OpenMPClauseKind Attributes = OMPC_unknown;
+    /// Pointer to a reference expression and a flag which shows that the
+    /// variable is marked as lastprivate(true) or not (false).
+    llvm::PointerIntPair<Expr *, 1, bool> RefExpr;
+    DeclRefExpr *PrivateCopy = nullptr;
   };
   typedef llvm::DenseMap<ValueDecl *, DSAInfo> DeclSAMapTy;
   typedef llvm::DenseMap<ValueDecl *, Expr *> AlignedMapTy;
@@ -96,40 +76,30 @@ private:
   typedef llvm::StringMap<std::pair<OMPCriticalDirective *, llvm::APSInt>>
       CriticalsWithHintsTy;
 
-  struct SharingMapTy {
+  struct SharingMapTy final {
     DeclSAMapTy SharingMap;
     AlignedMapTy AlignedMap;
     MappedExprComponentsTy MappedExprComponents;
     LoopControlVariablesMapTy LCVMap;
-    DefaultDataSharingAttributes DefaultAttr;
+    DefaultDataSharingAttributes DefaultAttr = DSA_unspecified;
     SourceLocation DefaultAttrLoc;
-    OpenMPDirectiveKind Directive;
+    OpenMPDirectiveKind Directive = OMPD_unknown;
     DeclarationNameInfo DirectiveName;
-    Scope *CurScope;
+    Scope *CurScope = nullptr;
     SourceLocation ConstructLoc;
     /// \brief first argument (Expr *) contains optional argument of the
     /// 'ordered' clause, the second one is true if the regions has 'ordered'
     /// clause, false otherwise.
     llvm::PointerIntPair<Expr *, 1, bool> OrderedRegion;
-    bool NowaitRegion;
-    bool CancelRegion;
-    unsigned AssociatedLoops;
+    bool NowaitRegion = false;
+    bool CancelRegion = false;
+    unsigned AssociatedLoops = 1;
     SourceLocation InnerTeamsRegionLoc;
-    const DeclContext *ParentDeclContext;
     SharingMapTy(OpenMPDirectiveKind DKind, DeclarationNameInfo Name,
-                 Scope *CurScope, SourceLocation Loc,
-                 const DeclContext *ParentDeclContext)
-        : SharingMap(), AlignedMap(), LCVMap(), DefaultAttr(DSA_unspecified),
-          Directive(DKind), DirectiveName(std::move(Name)), CurScope(CurScope),
-          ConstructLoc(Loc), OrderedRegion(), NowaitRegion(false),
-          CancelRegion(false), AssociatedLoops(1), InnerTeamsRegionLoc(),
-          ParentDeclContext(ParentDeclContext) {}
-    SharingMapTy()
-        : SharingMap(), AlignedMap(), LCVMap(), DefaultAttr(DSA_unspecified),
-          Directive(OMPD_unknown), DirectiveName(), CurScope(nullptr),
-          ConstructLoc(), OrderedRegion(), NowaitRegion(false),
-          CancelRegion(false), AssociatedLoops(1), InnerTeamsRegionLoc(),
-          ParentDeclContext(nullptr) {}
+                 Scope *CurScope, SourceLocation Loc)
+        : Directive(DKind), DirectiveName(Name), CurScope(CurScope),
+          ConstructLoc(Loc) {}
+    SharingMapTy() {}
   };
 
   typedef SmallVector<SharingMapTy, 4> StackTy;
@@ -138,9 +108,9 @@ private:
   StackTy Stack;
   /// \brief true, if check for DSA must be from parent directive, false, if
   /// from current directive.
-  OpenMPClauseKind ClauseKindMode;
+  OpenMPClauseKind ClauseKindMode = OMPC_unknown;
   Sema &SemaRef;
-  bool ForceCapturing;
+  bool ForceCapturing = false;
   CriticalsWithHintsTy Criticals;
 
   typedef SmallVector<SharingMapTy, 8>::reverse_iterator reverse_iterator;
@@ -151,9 +121,7 @@ private:
   bool isOpenMPLocal(VarDecl *D, StackTy::reverse_iterator Iter);
 
 public:
-  explicit DSAStackTy(Sema &S)
-      : Stack(1), ClauseKindMode(OMPC_unknown), SemaRef(S),
-        ForceCapturing(false) {}
+  explicit DSAStackTy(Sema &S) : Stack(1), SemaRef(S) {}
 
   bool isClauseParsingMode() const { return ClauseKindMode != OMPC_unknown; }
   void setClauseParsingMode(OpenMPClauseKind K) { ClauseKindMode = K; }
@@ -162,10 +130,8 @@ public:
   void setForceVarCapturing(bool V) { ForceCapturing = V; }
 
   void push(OpenMPDirectiveKind DKind, const DeclarationNameInfo &DirName,
-            Scope *CurScope, SourceLocation Loc,
-            const DeclContext *ParentDeclContext) {
-    Stack.push_back(
-        SharingMapTy(DKind, DirName, CurScope, Loc, ParentDeclContext));
+            Scope *CurScope, SourceLocation Loc) {
+    Stack.push_back(SharingMapTy(DKind, DirName, CurScope, Loc));
     Stack.back().DefaultAttrLoc = Loc;
   }
 
@@ -217,21 +183,24 @@ public:
   /// \brief Checks if the specified variables has data-sharing attributes which
   /// match specified \a CPred predicate in any directive which matches \a DPred
   /// predicate.
-  template <class ClausesPredicate, class DirectivesPredicate>
-  DSAVarData hasDSA(ValueDecl *D, ClausesPredicate CPred,
-                    DirectivesPredicate DPred, bool FromParent);
+  DSAVarData hasDSA(ValueDecl *D,
+                    const llvm::function_ref<bool(OpenMPClauseKind)> &CPred,
+                    const llvm::function_ref<bool(OpenMPDirectiveKind)> &DPred,
+                    bool FromParent);
   /// \brief Checks if the specified variables has data-sharing attributes which
   /// match specified \a CPred predicate in any innermost directive which
   /// matches \a DPred predicate.
-  template <class ClausesPredicate, class DirectivesPredicate>
-  DSAVarData hasInnermostDSA(ValueDecl *D, ClausesPredicate CPred,
-                             DirectivesPredicate DPred, bool FromParent);
+  DSAVarData
+  hasInnermostDSA(ValueDecl *D,
+                  const llvm::function_ref<bool(OpenMPClauseKind)> &CPred,
+                  const llvm::function_ref<bool(OpenMPDirectiveKind)> &DPred,
+                  bool FromParent);
   /// \brief Checks if the specified variables has explicit data-sharing
   /// attributes which match specified \a CPred predicate at the specified
   /// OpenMP region.
   bool hasExplicitDSA(ValueDecl *D,
                       const llvm::function_ref<bool(OpenMPClauseKind)> &CPred,
-                      unsigned Level);
+                      unsigned Level, bool NotLastprivate = false);
 
   /// \brief Returns true if the directive at level \Level matches in the
   /// specified \a DPred predicate.
@@ -240,8 +209,10 @@ public:
       unsigned Level);
 
   /// \brief Finds a directive which matches specified \a DPred predicate.
-  template <class NamedDirectivesPredicate>
-  bool hasDirective(NamedDirectivesPredicate DPred, bool FromParent);
+  bool hasDirective(const llvm::function_ref<bool(OpenMPDirectiveKind,
+                                                  const DeclarationNameInfo &,
+                                                  SourceLocation)> &DPred,
+                    bool FromParent);
 
   /// \brief Returns currently analyzed directive.
   OpenMPDirectiveKind getCurrentDirective() const {
@@ -253,9 +224,6 @@ public:
       return Stack[Stack.size() - 2].Directive;
     return OMPD_unknown;
   }
-  /// \brief Return the directive associated with the provided region scope.
-  OpenMPDirectiveKind
-  getDirectiveForRegionScope(const CapturedRegionScopeInfo *RSI) const;
 
   /// \brief Set default data sharing attribute to none.
   void setDefaultDSANone(SourceLocation Loc) {
@@ -418,6 +386,11 @@ public:
     MEC.resize(MEC.size() + 1);
     MEC.back().append(Components.begin(), Components.end());
   }
+
+  unsigned getNestingLevel() const {
+    assert(Stack.size() > 1);
+    return Stack.size() - 2;
+  }
 };
 bool isParallelOrTaskRegion(OpenMPDirectiveKind DKind) {
   return isOpenMPParallelDirective(DKind) || isOpenMPTaskingDirective(DKind) ||
@@ -482,7 +455,7 @@ DSAStackTy::DSAVarData DSAStackTy::getDSA(StackTy::reverse_iterator& Iter,
   // Explicitly specified attributes and local variables with predetermined
   // attributes.
   if (Iter->SharingMap.count(D)) {
-    DVar.RefExpr = Iter->SharingMap[D].RefExpr;
+    DVar.RefExpr = Iter->SharingMap[D].RefExpr.getPointer();
     DVar.PrivateCopy = Iter->SharingMap[D].PrivateCopy;
     DVar.CKind = Iter->SharingMap[D].Attributes;
     DVar.ImplicitDSALoc = Iter->DefaultAttrLoc;
@@ -600,16 +573,32 @@ void DSAStackTy::addDSA(ValueDecl *D, Expr *E, OpenMPClauseKind A,
                         DeclRefExpr *PrivateCopy) {
   D = getCanonicalDecl(D);
   if (A == OMPC_threadprivate) {
-    Stack[0].SharingMap[D].Attributes = A;
-    Stack[0].SharingMap[D].RefExpr = E;
-    Stack[0].SharingMap[D].PrivateCopy = nullptr;
+    auto &Data = Stack[0].SharingMap[D];
+    Data.Attributes = A;
+    Data.RefExpr.setPointer(E);
+    Data.PrivateCopy = nullptr;
   } else {
     assert(Stack.size() > 1 && "Data-sharing attributes stack is empty");
-    Stack.back().SharingMap[D].Attributes = A;
-    Stack.back().SharingMap[D].RefExpr = E;
-    Stack.back().SharingMap[D].PrivateCopy = PrivateCopy;
-    if (PrivateCopy)
-      addDSA(PrivateCopy->getDecl(), PrivateCopy, A);
+    auto &Data = Stack.back().SharingMap[D];
+    assert(Data.Attributes == OMPC_unknown || (A == Data.Attributes) ||
+           (A == OMPC_firstprivate && Data.Attributes == OMPC_lastprivate) ||
+           (A == OMPC_lastprivate && Data.Attributes == OMPC_firstprivate) ||
+           (isLoopControlVariable(D).first && A == OMPC_private));
+    if (A == OMPC_lastprivate && Data.Attributes == OMPC_firstprivate) {
+      Data.RefExpr.setInt(/*IntVal=*/true);
+      return;
+    }
+    const bool IsLastprivate =
+        A == OMPC_lastprivate || Data.Attributes == OMPC_lastprivate;
+    Data.Attributes = A;
+    Data.RefExpr.setPointerAndInt(E, IsLastprivate);
+    Data.PrivateCopy = PrivateCopy;
+    if (PrivateCopy) {
+      auto &Data = Stack.back().SharingMap[PrivateCopy->getDecl()];
+      Data.Attributes = A;
+      Data.RefExpr.setPointerAndInt(PrivateCopy, IsLastprivate);
+      Data.PrivateCopy = nullptr;
+    }
   }
 }
 
@@ -679,7 +668,7 @@ DSAStackTy::DSAVarData DSAStackTy::getTopDSA(ValueDecl *D, bool FromParent) {
            OMPC_threadprivate);
   }
   if (Stack[0].SharingMap.count(D)) {
-    DVar.RefExpr = Stack[0].SharingMap[D].RefExpr;
+    DVar.RefExpr = Stack[0].SharingMap[D].RefExpr.getPointer();
     DVar.CKind = OMPC_threadprivate;
     return DVar;
   }
@@ -696,9 +685,9 @@ DSAStackTy::DSAVarData DSAStackTy::getTopDSA(ValueDecl *D, bool FromParent) {
   // in a Construct, C/C++, predetermined, p.7]
   //  Variables with static storage duration that are declared in a scope
   //  inside the construct are shared.
+  auto &&MatchesAlways = [](OpenMPDirectiveKind) -> bool { return true; };
   if (VD && VD->isStaticDataMember()) {
-    DSAVarData DVarTemp =
-        hasDSA(D, isOpenMPPrivate, MatchesAlways(), FromParent);
+    DSAVarData DVarTemp = hasDSA(D, isOpenMPPrivate, MatchesAlways, FromParent);
     if (DVarTemp.CKind != OMPC_unknown && DVarTemp.RefExpr)
       return DVar;
 
@@ -723,8 +712,9 @@ DSAStackTy::DSAVarData DSAStackTy::getTopDSA(ValueDecl *D, bool FromParent) {
         RD->hasMutableFields())) {
     // Variables with const-qualified type having no mutable member may be
     // listed in a firstprivate clause, even if they are static data members.
-    DSAVarData DVarTemp = hasDSA(D, MatchesAnyClause(OMPC_firstprivate),
-                                 MatchesAlways(), FromParent);
+    DSAVarData DVarTemp = hasDSA(
+        D, [](OpenMPClauseKind C) -> bool { return C == OMPC_firstprivate; },
+        MatchesAlways, FromParent);
     if (DVarTemp.CKind == OMPC_firstprivate && DVarTemp.RefExpr)
       return DVar;
 
@@ -741,7 +731,7 @@ DSAStackTy::DSAVarData DSAStackTy::getTopDSA(ValueDecl *D, bool FromParent) {
   }
   auto I = std::prev(StartI);
   if (I->SharingMap.count(D)) {
-    DVar.RefExpr = I->SharingMap[D].RefExpr;
+    DVar.RefExpr = I->SharingMap[D].RefExpr.getPointer();
     DVar.PrivateCopy = I->SharingMap[D].PrivateCopy;
     DVar.CKind = I->SharingMap[D].Attributes;
     DVar.ImplicitDSALoc = I->DefaultAttrLoc;
@@ -761,10 +751,11 @@ DSAStackTy::DSAVarData DSAStackTy::getImplicitDSA(ValueDecl *D,
   return getDSA(StartI, D);
 }
 
-template <class ClausesPredicate, class DirectivesPredicate>
-DSAStackTy::DSAVarData DSAStackTy::hasDSA(ValueDecl *D, ClausesPredicate CPred,
-                                          DirectivesPredicate DPred,
-                                          bool FromParent) {
+DSAStackTy::DSAVarData
+DSAStackTy::hasDSA(ValueDecl *D,
+                   const llvm::function_ref<bool(OpenMPClauseKind)> &CPred,
+                   const llvm::function_ref<bool(OpenMPDirectiveKind)> &DPred,
+                   bool FromParent) {
   D = getCanonicalDecl(D);
   auto StartI = std::next(Stack.rbegin());
   auto EndI = Stack.rend();
@@ -781,10 +772,10 @@ DSAStackTy::DSAVarData DSAStackTy::hasDSA(ValueDecl *D, ClausesPredicate CPred,
   return DSAVarData();
 }
 
-template <class ClausesPredicate, class DirectivesPredicate>
-DSAStackTy::DSAVarData
-DSAStackTy::hasInnermostDSA(ValueDecl *D, ClausesPredicate CPred,
-                            DirectivesPredicate DPred, bool FromParent) {
+DSAStackTy::DSAVarData DSAStackTy::hasInnermostDSA(
+    ValueDecl *D, const llvm::function_ref<bool(OpenMPClauseKind)> &CPred,
+    const llvm::function_ref<bool(OpenMPDirectiveKind)> &DPred,
+    bool FromParent) {
   D = getCanonicalDecl(D);
   auto StartI = std::next(Stack.rbegin());
   auto EndI = Stack.rend();
@@ -804,36 +795,37 @@ DSAStackTy::hasInnermostDSA(ValueDecl *D, ClausesPredicate CPred,
 
 bool DSAStackTy::hasExplicitDSA(
     ValueDecl *D, const llvm::function_ref<bool(OpenMPClauseKind)> &CPred,
-    unsigned Level) {
+    unsigned Level, bool NotLastprivate) {
   if (CPred(ClauseKindMode))
     return true;
-  if (isClauseParsingMode())
-    ++Level;
   D = getCanonicalDecl(D);
-  auto StartI = Stack.rbegin();
-  auto EndI = std::prev(Stack.rend());
+  auto StartI = std::next(Stack.begin());
+  auto EndI = Stack.end();
   if (std::distance(StartI, EndI) <= (int)Level)
     return false;
   std::advance(StartI, Level);
-  return (StartI->SharingMap.count(D) > 0) && StartI->SharingMap[D].RefExpr &&
-         CPred(StartI->SharingMap[D].Attributes);
+  return (StartI->SharingMap.count(D) > 0) &&
+         StartI->SharingMap[D].RefExpr.getPointer() &&
+         CPred(StartI->SharingMap[D].Attributes) &&
+         (!NotLastprivate || !StartI->SharingMap[D].RefExpr.getInt());
 }
 
 bool DSAStackTy::hasExplicitDirective(
     const llvm::function_ref<bool(OpenMPDirectiveKind)> &DPred,
     unsigned Level) {
-  if (isClauseParsingMode())
-    ++Level;
-  auto StartI = Stack.rbegin();
-  auto EndI = std::prev(Stack.rend());
+  auto StartI = std::next(Stack.begin());
+  auto EndI = Stack.end();
   if (std::distance(StartI, EndI) <= (int)Level)
     return false;
   std::advance(StartI, Level);
   return DPred(StartI->Directive);
 }
 
-template <class NamedDirectivesPredicate>
-bool DSAStackTy::hasDirective(NamedDirectivesPredicate DPred, bool FromParent) {
+bool DSAStackTy::hasDirective(
+    const llvm::function_ref<bool(OpenMPDirectiveKind,
+                                  const DeclarationNameInfo &, SourceLocation)>
+        &DPred,
+    bool FromParent) {
   // We look only in the enclosing region.
   if (Stack.size() < 2)
     return false;
@@ -849,38 +841,22 @@ bool DSAStackTy::hasDirective(NamedDirectivesPredicate DPred, bool FromParent) {
   return false;
 }
 
-OpenMPDirectiveKind DSAStackTy::getDirectiveForRegionScope(
-    const CapturedRegionScopeInfo *RSI) const {
-  // Directives are expected to have a context associated.
-  if (!(RSI && RSI->TheCapturedDecl))
-    return OMPD_unknown;
-
-  // A DSA refers to this captured region if the parent contexts match.
-  auto *ParentContext = RSI->TheCapturedDecl->getParent();
-  for (auto I = Stack.rbegin(), EE = Stack.rend(); I != EE; ++I)
-    if (I->ParentDeclContext == ParentContext)
-      return I->Directive;
-  return OMPD_unknown;
-}
-
 void Sema::InitDataSharingAttributesStack() {
   VarDataSharingAttributesStack = new DSAStackTy(*this);
 }
 
 #define DSAStack static_cast<DSAStackTy *>(VarDataSharingAttributesStack)
 
-bool Sema::IsOpenMPCapturedByRef(ValueDecl *D,
-                                 const CapturedRegionScopeInfo *RSI) {
+bool Sema::IsOpenMPCapturedByRef(ValueDecl *D, unsigned Level) {
   assert(LangOpts.OpenMP && "OpenMP is not allowed");
 
   auto &Ctx = getASTContext();
   bool IsByRef = true;
 
   // Find the directive that is associated with the provided scope.
-  auto DKind = DSAStack->getDirectiveForRegionScope(RSI);
   auto Ty = D->getType();
 
-  if (isOpenMPTargetExecutionDirective(DKind)) {
+  if (DSAStack->hasExplicitDirective(isOpenMPTargetExecutionDirective, Level)) {
     // This table summarizes how a given variable should be passed to the device
     // given its type and the clauses where it appears. This table is based on
     // the description in OpenMP 4.5 [2.10.4, target Construct] and
@@ -946,8 +922,9 @@ bool Sema::IsOpenMPCapturedByRef(ValueDecl *D,
     bool IsVariableAssociatedWithSection = false;
 
     DSAStack->checkMappableExprComponentListsForDecl(
-        D, RSI, [&](OMPClauseMappableExprCommon::MappableExprComponentListRef
-                        MapExprComponents) {
+        D, /*CurrentRegionOnly=*/true,
+        [&](OMPClauseMappableExprCommon::MappableExprComponentListRef
+                MapExprComponents) {
 
           auto EI = MapExprComponents.rbegin();
           auto EE = MapExprComponents.rend();
@@ -983,6 +960,12 @@ bool Sema::IsOpenMPCapturedByRef(ValueDecl *D,
     }
   }
 
+  if (IsByRef && Ty.getNonReferenceType()->isScalarType()) {
+    IsByRef = !DSAStack->hasExplicitDSA(
+        D, [](OpenMPClauseKind K) -> bool { return K == OMPC_firstprivate; },
+        Level, /*NotLastprivate=*/true);
+  }
+
   // When passing data by copy, we need to make sure it fits the uintptr size
   // and alignment, because the runtime library only deals with uintptr types.
   // If it does not fit the uintptr size, we need to pass the data by reference
@@ -990,10 +973,16 @@ bool Sema::IsOpenMPCapturedByRef(ValueDecl *D,
   if (!IsByRef &&
       (Ctx.getTypeSizeInChars(Ty) >
            Ctx.getTypeSizeInChars(Ctx.getUIntPtrType()) ||
-       Ctx.getDeclAlign(D) > Ctx.getTypeAlignInChars(Ctx.getUIntPtrType())))
+       Ctx.getDeclAlign(D) > Ctx.getTypeAlignInChars(Ctx.getUIntPtrType()))) {
     IsByRef = true;
+  }
 
   return IsByRef;
+}
+
+unsigned Sema::getOpenMPNestingLevel() const {
+  assert(getLangOpts().OpenMP);
+  return DSAStack->getNestingLevel();
 }
 
 VarDecl *Sema::IsOpenMPCapturedDecl(ValueDecl *D) {
@@ -1014,7 +1003,7 @@ VarDecl *Sema::IsOpenMPCapturedDecl(ValueDecl *D) {
       return VD;
     if (DSAStack->hasDirective(
             [](OpenMPDirectiveKind K, const DeclarationNameInfo &DNI,
-               SourceLocation Loc) -> bool {
+               SourceLocation) -> bool {
               return isOpenMPTargetExecutionDirective(K);
             },
             false))
@@ -1033,8 +1022,9 @@ VarDecl *Sema::IsOpenMPCapturedDecl(ValueDecl *D) {
     auto DVarPrivate = DSAStack->getTopDSA(D, DSAStack->isClauseParsingMode());
     if (DVarPrivate.CKind != OMPC_unknown && isOpenMPPrivate(DVarPrivate.CKind))
       return VD ? VD : cast<VarDecl>(DVarPrivate.PrivateCopy->getDecl());
-    DVarPrivate = DSAStack->hasDSA(D, isOpenMPPrivate, MatchesAlways(),
-                                   DSAStack->isClauseParsingMode());
+    DVarPrivate = DSAStack->hasDSA(
+        D, isOpenMPPrivate, [](OpenMPDirectiveKind) -> bool { return true; },
+        DSAStack->isClauseParsingMode());
     if (DVarPrivate.CKind != OMPC_unknown)
       return VD ? VD : cast<VarDecl>(DVarPrivate.PrivateCopy->getDecl());
   }
@@ -1062,9 +1052,7 @@ void Sema::DestroyDataSharingAttributesStack() { delete DSAStack; }
 void Sema::StartOpenMPDSABlock(OpenMPDirectiveKind DKind,
                                const DeclarationNameInfo &DirName,
                                Scope *CurScope, SourceLocation Loc) {
-  // The current Sema declarative context is the parent of the captured region
-  // that refers to this DSA block.
-  DSAStack->push(DKind, DirName, CurScope, Loc, CurContext);
+  DSAStack->push(DKind, DirName, CurScope, Loc);
   PushExpressionEvaluationContext(PotentiallyEvaluated);
 }
 
@@ -1510,13 +1498,13 @@ public:
       //  A list item that appears in a reduction clause of the innermost
       //  enclosing worksharing or parallel construct may not be accessed in an
       //  explicit task.
-      DVar = Stack->hasInnermostDSA(VD, MatchesAnyClause(OMPC_reduction),
-                                    [](OpenMPDirectiveKind K) -> bool {
-                                      return isOpenMPParallelDirective(K) ||
-                                             isOpenMPWorksharingDirective(K) ||
-                                             isOpenMPTeamsDirective(K);
-                                    },
-                                    false);
+      DVar = Stack->hasInnermostDSA(
+          VD, [](OpenMPClauseKind C) -> bool { return C == OMPC_reduction; },
+          [](OpenMPDirectiveKind K) -> bool {
+            return isOpenMPParallelDirective(K) ||
+                   isOpenMPWorksharingDirective(K) || isOpenMPTeamsDirective(K);
+          },
+          false);
       if (isOpenMPTaskingDirective(DKind) && DVar.CKind == OMPC_reduction) {
         ErrorFound = true;
         SemaRef.Diag(ELoc, diag::err_omp_reduction_in_task);
@@ -1549,14 +1537,14 @@ public:
         //  A list item that appears in a reduction clause of the innermost
         //  enclosing worksharing or parallel construct may not be accessed in
         //  an  explicit task.
-        DVar =
-            Stack->hasInnermostDSA(FD, MatchesAnyClause(OMPC_reduction),
-                                   [](OpenMPDirectiveKind K) -> bool {
-                                     return isOpenMPParallelDirective(K) ||
-                                            isOpenMPWorksharingDirective(K) ||
-                                            isOpenMPTeamsDirective(K);
-                                   },
-                                   false);
+        DVar = Stack->hasInnermostDSA(
+            FD, [](OpenMPClauseKind C) -> bool { return C == OMPC_reduction; },
+            [](OpenMPDirectiveKind K) -> bool {
+              return isOpenMPParallelDirective(K) ||
+                     isOpenMPWorksharingDirective(K) ||
+                     isOpenMPTeamsDirective(K);
+            },
+            false);
         if (isOpenMPTaskingDirective(DKind) && DVar.CKind == OMPC_reduction) {
           ErrorFound = true;
           SemaRef.Diag(ELoc, diag::err_omp_reduction_in_task);
@@ -3496,9 +3484,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
       // target exit data construct is encountered during execution of a
       // target region, the behavior is unspecified.
       NestingProhibited = Stack->hasDirective(
-          [&OffendingRegion](OpenMPDirectiveKind K,
-                             const DeclarationNameInfo &DNI,
-                             SourceLocation Loc) -> bool {
+          [&OffendingRegion](OpenMPDirectiveKind K, const DeclarationNameInfo &,
+                             SourceLocation) -> bool {
             if (isOpenMPTargetExecutionDirective(K)) {
               OffendingRegion = K;
               return true;
@@ -4922,7 +4909,8 @@ static bool CheckOpenMPIterationSpace(
       // lastprivate (for simd directives with several collapsed or ordered
       // loops).
       if (DVar.CKind == OMPC_unknown)
-        DVar = DSA.hasDSA(LCDecl, isOpenMPPrivate, MatchesAlways(),
+        DVar = DSA.hasDSA(LCDecl, isOpenMPPrivate,
+                          [](OpenMPDirectiveKind) -> bool { return true; },
                           /*FromParent=*/false);
       DSA.addDSA(LCDecl, LoopDeclRefExpr, PredeterminedCKind);
     }
@@ -8578,13 +8566,13 @@ OMPClause *Sema::ActOnOpenMPFirstprivateClause(ArrayRef<Expr *> VarList,
       //  encountered during execution of any of the worksharing regions arising
       //  from the worksharing construct.
       if (isOpenMPTaskingDirective(CurrDir)) {
-        DVar =
-            DSAStack->hasInnermostDSA(D, MatchesAnyClause(OMPC_reduction),
-                                      [](OpenMPDirectiveKind K) -> bool {
-                                        return isOpenMPParallelDirective(K) ||
-                                               isOpenMPWorksharingDirective(K);
-                                      },
-                                      false);
+        DVar = DSAStack->hasInnermostDSA(
+            D, [](OpenMPClauseKind C) -> bool { return C == OMPC_reduction; },
+            [](OpenMPDirectiveKind K) -> bool {
+              return isOpenMPParallelDirective(K) ||
+                     isOpenMPWorksharingDirective(K);
+            },
+            false);
         if (DVar.CKind == OMPC_reduction &&
             (isOpenMPParallelDirective(DVar.DKind) ||
              isOpenMPWorksharingDirective(DVar.DKind))) {
@@ -8609,21 +8597,23 @@ OMPClause *Sema::ActOnOpenMPFirstprivateClause(ArrayRef<Expr *> VarList,
       // A list item may appear in a firstprivate or lastprivate clause but not
       // both.
       if (CurrDir == OMPD_distribute) {
-        DVar = DSAStack->hasInnermostDSA(D, MatchesAnyClause(OMPC_private),
-                                         [](OpenMPDirectiveKind K) -> bool {
-                                           return isOpenMPTeamsDirective(K);
-                                         },
-                                         false);
+        DVar = DSAStack->hasInnermostDSA(
+            D, [](OpenMPClauseKind C) -> bool { return C == OMPC_private; },
+            [](OpenMPDirectiveKind K) -> bool {
+              return isOpenMPTeamsDirective(K);
+            },
+            false);
         if (DVar.CKind == OMPC_private && isOpenMPTeamsDirective(DVar.DKind)) {
           Diag(ELoc, diag::err_omp_firstprivate_distribute_private_teams);
           ReportOriginalDSA(*this, DSAStack, D, DVar);
           continue;
         }
-        DVar = DSAStack->hasInnermostDSA(D, MatchesAnyClause(OMPC_reduction),
-                                         [](OpenMPDirectiveKind K) -> bool {
-                                           return isOpenMPTeamsDirective(K);
-                                         },
-                                         false);
+        DVar = DSAStack->hasInnermostDSA(
+            D, [](OpenMPClauseKind C) -> bool { return C == OMPC_reduction; },
+            [](OpenMPDirectiveKind K) -> bool {
+              return isOpenMPTeamsDirective(K);
+            },
+            false);
         if (DVar.CKind == OMPC_reduction &&
             isOpenMPTeamsDirective(DVar.DKind)) {
           Diag(ELoc, diag::err_omp_firstprivate_distribute_in_teams_reduction);
@@ -8883,8 +8873,7 @@ OMPClause *Sema::ActOnOpenMPLastprivateClause(ArrayRef<Expr *> VarList,
             IgnoredValueConversions(PostUpdateRes.get()).get());
       }
     }
-    if (TopDVar.CKind != OMPC_firstprivate)
-      DSAStack->addDSA(D, RefExpr->IgnoreParens(), OMPC_lastprivate, Ref);
+    DSAStack->addDSA(D, RefExpr->IgnoreParens(), OMPC_lastprivate, Ref);
     Vars.push_back(VD ? RefExpr->IgnoreParens() : Ref);
     SrcExprs.push_back(PseudoSrcExpr);
     DstExprs.push_back(PseudoDstExpr);
@@ -8961,8 +8950,9 @@ public:
         return false;
       if (DVar.CKind != OMPC_unknown)
         return true;
-      DSAStackTy::DSAVarData DVarPrivate =
-          Stack->hasDSA(VD, isOpenMPPrivate, MatchesAlways(), false);
+      DSAStackTy::DSAVarData DVarPrivate = Stack->hasDSA(
+          VD, isOpenMPPrivate, [](OpenMPDirectiveKind) -> bool { return true; },
+          false);
       if (DVarPrivate.CKind != OMPC_unknown)
         return true;
       return false;

@@ -328,14 +328,14 @@ int main (int argc, char **argv) {
 // CK5-64:  call void (%ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_teams(%ident_t* [[DEF_LOC_0]], i32 1, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, i32*)* @.omp_outlined. to void (i32*, i32*, ...)*), i32* [[CONV]])
 // CK5-32:  call void (%ident_t*, i32, void (i32*, i32*, ...)*, ...) @__kmpc_fork_teams(%ident_t* [[DEF_LOC_0]], i32 1, void (i32*, i32*, ...)* bitcast (void (i32*, i32*, i32*)* @.omp_outlined. to void (i32*, i32*, ...)*), i32* [[ARGCADDR]])
 
-// CK5:  define {{.*}}void @{{[^,]+}}(i{{.+}} [[AP:%.+]], i{{.+}} [[BP:%.+]], i8** [[ARGC:%.+]])
+// CK5:  define {{.*}}void @{{[^,]+}}(i{{.+}} [[AP:%.+]], i{{.+}} [[BP:%.+]], i{{.+}}** [[ARGC:%.+]])
 // CK5:  [[AADDR:%.+]] = alloca i{{.+}}
 // CK5:  [[BADDR:%.+]] = alloca i{{.+}}
-// CK5:  [[ARGCADDR:%.+]] = alloca i8**
+// CK5:  [[ARGCADDR:%.+]] = alloca i{{.+}}**
 // CK5:  [[GBL_TH_NUM:%.+]] = call i32 @__kmpc_global_thread_num(%ident_t* [[DEF_LOC_0]])
 // CK5:  store i{{.+}} [[AP]], i{{.+}}* [[AADDR]]
 // CK5:  store i{{.+}} [[BP]], i{{.+}}* [[BADDR]]
-// CK5:  store i8** [[ARGC]], i8*** [[ARGCADDR]]
+// CK5:  store i{{.+}}** [[ARGC]], i{{.+}}*** [[ARGCADDR]]
 // CK5-64:  [[ACONV:%.+]] = bitcast i64* [[AADDR]] to i32*
 // CK5-64:  [[BCONV:%.+]] = bitcast i64* [[BADDR]] to i32*
 // CK5-64:  [[ACONVVAL:%.+]] = load i32, i32* [[ACONV]]
