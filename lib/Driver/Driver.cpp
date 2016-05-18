@@ -760,9 +760,11 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
                     .Default(SaveTempsCwd);
   }
 
+  setLTOMode(Args);
+
   // Ignore -fembed-bitcode options with LTO
   // since the output will be bitcode anyway.
-  if (!Args.hasFlag(options::OPT_flto, options::OPT_fno_lto, false)) {
+  if (getLTOMode() == LTOK_None) {
     if (Arg *A = Args.getLastArg(options::OPT_fembed_bitcode_EQ)) {
       StringRef Name = A->getValue();
       unsigned Model = llvm::StringSwitch<unsigned>(Name)
@@ -781,8 +783,6 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
     // claim the bitcode option under LTO so no warning is issued.
     Args.ClaimAllArgs(options::OPT_fembed_bitcode_EQ);
   }
-
-  setLTOMode(Args);
 
   std::unique_ptr<llvm::opt::InputArgList> UArgs =
       llvm::make_unique<InputArgList>(std::move(Args));
