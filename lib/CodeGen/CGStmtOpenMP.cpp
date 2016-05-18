@@ -3895,7 +3895,6 @@ void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForDirective(
 //            CGF.EmitOMPWorksharingLoop(S);
 //          };
 //          emitCommonOMPParallelDirective(*this, S, OMPD_for, CodeGen);
-
           CGF.EmitOMPLoopBody(S, LoopExit);
           CGF.EmitStopPoint(&S);
         };
