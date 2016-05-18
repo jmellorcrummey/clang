@@ -2310,6 +2310,11 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   // executing a simd region or if pre-conditions for it are false
   llvm::GlobalVariable *ExecuteSimd;
 
+  llvm::GlobalVariable *value0;
+  llvm::GlobalVariable *value1;
+  llvm::GlobalVariable *value2;
+  llvm::GlobalVariable *value3;
+
   // initial value for SimdNumLanes
   int WARP_SIZE = 32; // should obtain from parameters of target function
   int MAX_THREADS_IN_BLOCK = 1024;
@@ -4066,12 +4071,16 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     CGBuilderTy &Builder = CGF.Builder;
 
-    //Push parallel region on stack
-    OMPRegionTypesStack.push_back(OMP_Parallel);
-    Builder.CreateStore(
+    // TODO:Remove this
+    CGF.parallelFors = 10;
+    if (CGF.parallelFors > 0){
+      //Push parallel region on stack
+      OMPRegionTypesStack.push_back(OMP_Parallel);
+      Builder.CreateStore(
           Builder.CreateAdd(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
           ParallelNesting);
-    PushNewParallelRegion(true);
+      PushNewParallelRegion(true);
+    }
 
     int prev_k = CGF.k;
     int prev_kparent = CGF.kparent;
@@ -4085,14 +4094,16 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     switch(DKind){
       case OMPD_teams_distribute_parallel_for:
         CGF.kparent = prev_kparent;
-	      CGF.k++;
+        CGF.k++;
         break;
       case OMPD_parallel_for_simd:
         CGF.k += 2;
         break;
       case OMPD_parallel_for:
-        if (CGF.parallelFors > 1){
+        if (CGF.parallelFors > 0){
           CGF.k++;
+        } else {
+          CGF.kparent = prev_kparent;
         }
         CGF.parallelFors++;
         break;
@@ -4102,20 +4113,30 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     GenerateSimplifiedLoop(S, CGF);
 
+    switch(DKind){
+      case OMPD_parallel_for:
+        CGF.parallelFors--;
+        break;
+      default:
+        break;
+    }
+
     CGF.k = prev_k;
     CGF.kparent = prev_kparent;
 
-    assert((OMPRegionTypesStack.back() == OMP_Parallel) &&
+    if (CGF.parallelFors > 0){
+      assert((OMPRegionTypesStack.back() == OMP_Parallel) &&
             "Exiting a parallel region does not match stack state");
-    OMPRegionTypesStack.pop_back();
+      OMPRegionTypesStack.pop_back();
 
-    Builder.CreateStore(
+      Builder.CreateStore(
           Builder.CreateSub(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
           ParallelNesting);
 
-    // we need to inspect the previous layer to understand what type
-    // of end we need
-    PopParallelRegion();
+      // we need to inspect the previous layer to understand what type
+      // of end we need
+      PopParallelRegion();
+    }
   }
 
   // Main function which generates the code
@@ -4143,6 +4164,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // Connect previous region with the current OpenMP parallel loop.
     Builder.SetInsertPoint(CGF.EndOpenMPRegion);
     Builder.CreateCall(Get_syncthreads(), {});
+    //Builder.CreateCall(Get_memfence_cta(), {});
     printf("   =====> End OpenMP Region %d\n", CGF.regionID);
     // Start populating the basic blocks which perform the init, cond and inc
     // of the combined construct for loop.
@@ -4261,7 +4283,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // Setup LB
     // Tid[kparent]
-    printf("     ===> LB: CGF.k = %d, CGF.kparent = %d\n", CGF.k, CGF.kparent);
+    printf("     ===> LB: CGF.k = %d, CGF.kparent = %d, CGF.parallelFors = %d\n", CGF.k, CGF.kparent, CGF.parallelFors);
     llvm::Value *LB = Builder.CreateLoad(CGF.Tid[CGF.kparent]);
     if (CGF.parallelFors == 1) {
       LB = Builder.getInt32(0);
@@ -4406,6 +4428,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
           // Sync all threads
           Builder.SetInsertPoint(CGF.EndOpenMPRegion);
           Builder.CreateCall(Get_syncthreads(), {});
+          //Builder.CreateCall(Get_memfence_cta(), {});
           printf("   =====> End OpenMP Region %d\n", CGF.regionID);
         }
       }
@@ -4498,23 +4521,30 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     printf("Start GPU specific code gen\n");
     // Number of parallel levels for an NVIDIA GPU
     CGF.p = 4;
+    bool requires_init = !value0 || !value1 || !value2 || !value3;
 
-    llvm::GlobalVariable *value0 = new llvm::GlobalVariable(
+    printf("Requires init %d\n", requires_init);
+
+    if (!value0)
+        value0 = new llvm::GlobalVariable(
               CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
               llvm::Constant::getNullValue(VarTy), "uZero", 0,
               llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
 
-    llvm::GlobalVariable *value1 = new llvm::GlobalVariable(
+    if (!value1)
+        value1 = new llvm::GlobalVariable(
               CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
               llvm::Constant::getNullValue(VarTy), "uOne", 0,
               llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
 
-    llvm::GlobalVariable *value2 = new llvm::GlobalVariable(
+    if (!value2)
+        value2 = new llvm::GlobalVariable(
               CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
               llvm::Constant::getNullValue(VarTy), "uTwo", 0,
               llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
 
-    llvm::GlobalVariable *value3 = new llvm::GlobalVariable(
+    if (!value3)
+        value3 = new llvm::GlobalVariable(
               CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
               llvm::Constant::getNullValue(VarTy), "uThree", 0,
               llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
@@ -4534,14 +4564,18 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     Bld.CreateCondBr(IsTeamMaster1, MasterInit, NonMasterInit);
     Bld.SetInsertPoint(MasterInit);
 
-    // Up[0] = number of grids (always 1)
-    //llvm::AllocaInst *value0 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uZero");
-    Bld.CreateStore(Bld.getInt32(1), value0);
+    if (requires_init){
+        // Up[0] = number of grids (always 1)
+        //llvm::AllocaInst *value0 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uZero");
+        Bld.CreateStore(Bld.getInt32(1), value0);
+    }
     CGF.U.push_back(value0);
 
-    // Up[1] = number of blocks per grid
-    //llvm::AllocaInst *value1 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uOne");
-    Bld.CreateStore(Bld.CreateCall(Get_num_teams(), {}), value1);
+    if (requires_init){
+        // Up[1] = number of blocks per grid
+        //llvm::AllocaInst *value1 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uOne");
+        Bld.CreateStore(Bld.CreateCall(Get_num_teams(), {}), value1);
+    }
     CGF.U.push_back(value1);
 
     // Up[2] = number of warps per block
@@ -4549,12 +4583,17 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     llvm::Value *const32 = Bld.getInt32(5); // 2^5
     llvm::Value *NumWarps = Bld.CreateCall(Get_num_threads(), {});
     NumWarps = Bld.CreateAShr(NumWarps, const32);
-    Bld.CreateStore(NumWarps, value2);
+
+    if (requires_init){
+        Bld.CreateStore(NumWarps, value2);
+    }
     CGF.U.push_back(value2);
 
-    // Up[3] = number of threads per warp
-    //llvm::AllocaInst *value3 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uThree");
-    Bld.CreateStore(Bld.getInt32(WARP_SIZE), value3);
+    if (requires_init){
+        // Up[3] = number of threads per warp
+        //llvm::AllocaInst *value3 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uThree");
+        Bld.CreateStore(Bld.getInt32(WARP_SIZE), value3);
+    }
     CGF.U.push_back(value3);
 
     // Carry on with the rest of threads (the non-team-master ones)
@@ -5223,6 +5262,11 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
                                 CGF.combinedSimd ||
                                 CGF.distributedParallel ||
                                 CGF.onlyParallelOmpNodes;
+
+    CGF.isSimplifiedConstruct = false;
+    CGF.onlyParallelOmpNodes = false;
+    CGF.combined = false;
+    CGF.combinedSimd = false;
 
     //applyNestedSimd = false;
     printf("Considering if combined construct is applicable:\n");
@@ -6962,7 +7006,7 @@ public:
          ControlStateIndex(0), CudaThreadsInParallel(0), SimdNumLanes(0), OmpNumThreads(0),
          SimdLaneNum(0), OmpThreadNum(0), ControlSwitch(0), SimdHasReduction(false),
          ThreadLimitGlobal(0), CudaGlobalThreadId(0), SimdLocalLaneId(0), OuterLB(0), OuterUB(0),
-         WarpId(0), NumWarpsInBlock(0) {
+         WarpId(0), NumWarpsInBlock(0), value0(0), value1(0), value2(0), value3(0) {
 
      SimdAndWorksharingNesting.resize(EXPECTED_WS_NESTS);
 
