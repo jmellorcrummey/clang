@@ -4523,8 +4523,6 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     CGF.p = 4;
     //bool requires_init = !value0 || !value1 || !value2 || !value3;
 
-    printf("Requires init %d\n", requires_init);
-
     //if (!value0)
     llvm::GlobalVariable* value0 = new llvm::GlobalVariable(
               CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
