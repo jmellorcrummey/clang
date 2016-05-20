@@ -4510,7 +4510,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // Create variable to trace the parallel nesting one is currently in
     ParallelNesting =
-        Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "ParallelNesting");
+        Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), CGF.TgtFunName + "ParallelNesting");
     Bld.CreateStore(Bld.getInt32(0), ParallelNesting);
 
     // Populate Up using the details of the current architecture.
