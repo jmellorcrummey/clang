@@ -4526,25 +4526,25 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     printf("Requires init %d\n", requires_init);
 
     //if (!value0)
-    llvm::GlobalVariable value0 = new llvm::GlobalVariable(
+    llvm::GlobalVariable* value0 = new llvm::GlobalVariable(
               CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
               llvm::Constant::getNullValue(VarTy), CGF.TgtFunName + "_uZero", 0,
               llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
 
     //if (!value1)
-    llvm::GlobalVariable value1 = new llvm::GlobalVariable(
+    llvm::GlobalVariable* value1 = new llvm::GlobalVariable(
               CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
               llvm::Constant::getNullValue(VarTy), CGF.TgtFunName + "_uOne", 0,
               llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
 
     //if (!value2)
-    llvm::GlobalVariable value2 = new llvm::GlobalVariable(
+    llvm::GlobalVariable* value2 = new llvm::GlobalVariable(
               CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
               llvm::Constant::getNullValue(VarTy), CGF.TgtFunName + "_uTwo", 0,
               llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
 
     //if (!value3)
-    llvm::GlobalVariable value3 = new llvm::GlobalVariable(
+    llvm::GlobalVariable* value3 = new llvm::GlobalVariable(
               CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
               llvm::Constant::getNullValue(VarTy), CGF.TgtFunName + "_uThree", 0,
               llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
