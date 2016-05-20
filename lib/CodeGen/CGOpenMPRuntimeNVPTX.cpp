@@ -1057,6 +1057,8 @@ void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
 
   EntryFunctionState EST;
   WorkerFunctionState WST(CGM);
+  Work.clear();
+  WrapperFunctionsMap.clear();
 
   // Emit target region as a standalone region.
   class NVPTXPrePostActionTy : public PrePostActionTy {
