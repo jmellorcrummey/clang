@@ -5263,11 +5263,13 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
                                 CGF.distributedParallel ||
                                 CGF.onlyParallelOmpNodes;
 
+  /* 
     CGF.isSimplifiedConstruct = false;
+    CGF.distributedParallel = false;
     CGF.onlyParallelOmpNodes = false;
     CGF.combined = false;
     CGF.combinedSimd = false;
-
+  */
     //applyNestedSimd = false;
     printf("Considering if combined construct is applicable:\n");
     //printf("    => SKIND is (OMPD_teams_distribute_parallel_for %d): %d\n", OMPD_teams_distribute_parallel_for, SKind);
