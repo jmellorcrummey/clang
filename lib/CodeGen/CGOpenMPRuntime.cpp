@@ -2309,12 +2309,12 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
   // dynamically track control-flow of threads to decide if they need
   // executing a simd region or if pre-conditions for it are false
   llvm::GlobalVariable *ExecuteSimd;
-
+/*
   llvm::GlobalVariable *value0;
   llvm::GlobalVariable *value1;
   llvm::GlobalVariable *value2;
   llvm::GlobalVariable *value3;
-
+*/
   // initial value for SimdNumLanes
   int WARP_SIZE = 32; // should obtain from parameters of target function
   int MAX_THREADS_IN_BLOCK = 1024;
@@ -4521,32 +4521,32 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     printf("Start GPU specific code gen\n");
     // Number of parallel levels for an NVIDIA GPU
     CGF.p = 4;
-    bool requires_init = !value0 || !value1 || !value2 || !value3;
+    //bool requires_init = !value0 || !value1 || !value2 || !value3;
 
     printf("Requires init %d\n", requires_init);
 
-    if (!value0)
-        value0 = new llvm::GlobalVariable(
+    //if (!value0)
+    llvm::GlobalVariable value0 = new llvm::GlobalVariable(
               CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
-              llvm::Constant::getNullValue(VarTy), "uZero", 0,
+              llvm::Constant::getNullValue(VarTy), CGF.TgtFunName + "_uZero", 0,
               llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
 
-    if (!value1)
-        value1 = new llvm::GlobalVariable(
+    //if (!value1)
+    llvm::GlobalVariable value1 = new llvm::GlobalVariable(
               CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
-              llvm::Constant::getNullValue(VarTy), "uOne", 0,
+              llvm::Constant::getNullValue(VarTy), CGF.TgtFunName + "_uOne", 0,
               llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
 
-    if (!value2)
-        value2 = new llvm::GlobalVariable(
+    //if (!value2)
+    llvm::GlobalVariable value2 = new llvm::GlobalVariable(
               CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
-              llvm::Constant::getNullValue(VarTy), "uTwo", 0,
+              llvm::Constant::getNullValue(VarTy), CGF.TgtFunName + "_uTwo", 0,
               llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
 
-    if (!value3)
-        value3 = new llvm::GlobalVariable(
+    //if (!value3)
+    llvm::GlobalVariable value3 = new llvm::GlobalVariable(
               CGF.CGM.getModule(), VarTy, false, llvm::GlobalValue::CommonLinkage,
-              llvm::Constant::getNullValue(VarTy), "uThree", 0,
+              llvm::Constant::getNullValue(VarTy), CGF.TgtFunName + "_uThree", 0,
               llvm::GlobalVariable::NotThreadLocal, SHARED_ADDRESS_SPACE, false);
 
     //team-master sets the initial value for the data structures declared as AllcaInst
@@ -4564,18 +4564,18 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     Bld.CreateCondBr(IsTeamMaster1, MasterInit, NonMasterInit);
     Bld.SetInsertPoint(MasterInit);
 
-    if (requires_init){
+    //if (requires_init){
         // Up[0] = number of grids (always 1)
         //llvm::AllocaInst *value0 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uZero");
         Bld.CreateStore(Bld.getInt32(1), value0);
-    }
+    //}
     CGF.U.push_back(value0);
 
-    if (requires_init){
+    //if (requires_init){
         // Up[1] = number of blocks per grid
         //llvm::AllocaInst *value1 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uOne");
         Bld.CreateStore(Bld.CreateCall(Get_num_teams(), {}), value1);
-    }
+    //}
     CGF.U.push_back(value1);
 
     // Up[2] = number of warps per block
@@ -4584,16 +4584,16 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     llvm::Value *NumWarps = Bld.CreateCall(Get_num_threads(), {});
     NumWarps = Bld.CreateAShr(NumWarps, const32);
 
-    if (requires_init){
+    //if (requires_init){
         Bld.CreateStore(NumWarps, value2);
-    }
+    //}
     CGF.U.push_back(value2);
 
-    if (requires_init){
+    //if (requires_init){
         // Up[3] = number of threads per warp
         //llvm::AllocaInst *value3 = Bld.CreateAlloca(Bld.getInt32Ty(), Bld.getInt32(1), "uThree");
         Bld.CreateStore(Bld.getInt32(WARP_SIZE), value3);
-    }
+    //}
     CGF.U.push_back(value3);
 
     // Carry on with the rest of threads (the non-team-master ones)
@@ -5294,6 +5294,7 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
             llvm::GlobalValue::ExternalLinkage, Bld.getInt32(0),
             TgtFunName + Twine("_thread_limit"));
 
+      CGF.TgtFunName = TgtFunName;
       EnterParalleLoopNest(DKind, SKind, S, CGF);
     } else if (CGF.combined){
       // If the directives contain a reduction clause then we insert appropriate
@@ -7008,7 +7009,7 @@ public:
          ControlStateIndex(0), CudaThreadsInParallel(0), SimdNumLanes(0), OmpNumThreads(0),
          SimdLaneNum(0), OmpThreadNum(0), ControlSwitch(0), SimdHasReduction(false),
          ThreadLimitGlobal(0), CudaGlobalThreadId(0), SimdLocalLaneId(0), OuterLB(0), OuterUB(0),
-         WarpId(0), NumWarpsInBlock(0), value0(0), value1(0), value2(0), value3(0) {
+         WarpId(0), NumWarpsInBlock(0)/*, value0(0), value1(0), value2(0), value3(0)*/ {
 
      SimdAndWorksharingNesting.resize(EXPECTED_WS_NESTS);
 

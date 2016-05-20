@@ -137,6 +137,7 @@ public:
   bool useSubWarps = false;
   bool onlyParallelOmpNodes = false;
   bool hasSimd = false;
+  StringRef TgtFunName = "";
   unsigned int p = 0;
   int k = 0;
   int kparent = 0;
