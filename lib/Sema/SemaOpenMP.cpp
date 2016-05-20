@@ -343,35 +343,25 @@ public:
     return false;
   }
 
-//  // Do the check specified in \a Check to all component lists in a specific
-//  // region and return true if any issue is found.
-//  bool checkMappableExprComponentListsForDecl(
-//      ValueDecl *VD, const CapturedRegionScopeInfo *RSI,
-//      const llvm::function_ref<bool(
-//          OMPClauseMappableExprCommon::MappableExprComponentListRef)> &Check) {
-//
-//    assert(RSI && RSI->TheCapturedDecl && RSI->TheCapturedDecl->getParent() &&
-//           "Invalid region to look for mappable expressions!");
-//
-//    auto SI = Stack.rbegin();
-//    auto SE = Stack.rend();
-//
-//    for (; SI != SE; ++SI) {
-//
-//      if (SI->ParentDeclContext != RSI->TheCapturedDecl->getParent())
-//        continue;
-//
-//      auto MI = SI->MappedExprComponents.find(VD);
-//      if (MI != SI->MappedExprComponents.end())
-//        for (auto &L : MI->second)
-//          if (Check(L))
-//            return true;
-//
-//      break;
-//    }
-//
-//    return false;
-//  }
+  // Do the check specified in \a Check to all component lists at a given level
+  // and return true if any issue is found.
+  bool checkMappableExprComponentListsForDeclAtLevel(
+      ValueDecl *VD, unsigned Level,
+      const llvm::function_ref<bool(
+          OMPClauseMappableExprCommon::MappableExprComponentListRef)> &Check) {
+    auto StartI = std::next(Stack.begin());
+    auto EndI = Stack.end();
+    if (std::distance(StartI, EndI) <= (int)Level)
+      return false;
+    std::advance(StartI, Level);
+
+    auto MI = StartI->MappedExprComponents.find(VD);
+    if (MI != StartI->MappedExprComponents.end())
+      for (auto &L : MI->second)
+        if (Check(L))
+          return true;
+    return false;
+  }
 
   // Create a new mappable expression component list associated with a given
   // declaration and initialize it with the provided list of components.
@@ -920,8 +910,8 @@ bool Sema::IsOpenMPCapturedByRef(ValueDecl *D, unsigned Level) {
     bool IsVariableUsedInMapClause = false;
     bool IsVariableAssociatedWithSection = false;
 
-    DSAStack->checkMappableExprComponentListsForDecl(
-        D, /*CurrentRegionOnly=*/true,
+    DSAStack->checkMappableExprComponentListsForDeclAtLevel(
+        D, Level,
         [&](OMPClauseMappableExprCommon::MappableExprComponentListRef
                 MapExprComponents) {
 

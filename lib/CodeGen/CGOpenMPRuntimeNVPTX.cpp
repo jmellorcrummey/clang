@@ -1480,24 +1480,20 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
          I != E; ++I, ++CurField, ++CurCap) {
 
       const VarDecl *CurVD = nullptr;
+      QualType ElemTy = (*I)->getType();
 
       // Track the data sharing type.
       DataSharingInfo::DataSharingType DST = DataSharingInfo::DST_Val;
 
       if (CurField->hasCapturedVLAType()) {
-        assert("VLAs are not yet supported in NVPTX target data sharing!");
+        llvm_unreachable("VLAs are not yet supported in NVPTX target data sharing!");
         continue;
       } else if (CurCap->capturesThis()) {
         // We use null to indicate 'this'.
         CurVD = nullptr;
-      } else if (CurCap->capturesVariableByCopy()) {
-        assert("Not expecting to capture variables by copy in NVPTX target "
-               "data sharing!");
-        continue;
       } else {
-        // Get the reference to the variable that is initializing the capture.
-        const DeclRefExpr *DRE = cast<DeclRefExpr>(*I);
-        CurVD = cast<VarDecl>(DRE->getDecl());
+        // Get the variable that is initializing the capture.
+        CurVD = CurCap->getCapturedVar();
 
         // If we have an alloca for this variable, then we need to share the
         // storage too, not only the reference.
@@ -1516,7 +1512,6 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
       AlreadySharedDecls.insert(CurVD);
       Info.add(CurVD, DST);
 
-      QualType ElemTy = (*I)->getType();
       if (DST == DataSharingInfo::DST_Ref)
         ElemTy = C.getPointerType(ElemTy);
 
@@ -1837,9 +1832,6 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
     assert(OriginalVal && "Can't obtain value to replace with??");
 
     EnclosingFuncInfo.ValuesToBeReplaced.push_back(OriginalVal);
-
-    //    llvm::errs() << "Inserting instruction to be replaced:\n";
-    //    OriginalVal->dump();
   }
 
   CGF.EmitBlock(ExitBB);
@@ -1898,8 +1890,6 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
                                             CE = CS.capture_end();
        CI != CE; ++CI, ++CurField) {
     assert(!CI->capturesVariableArrayType() && "Not expecting to capture VLA!");
-    assert(!CI->capturesVariableByCopy() &&
-           "Not expecting to capture by copy values!");
 
     StringRef Name;
     if (CI->capturesThis())
@@ -1907,8 +1897,14 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
     else
       Name = CI->getCapturedVar()->getName();
 
+    QualType ElemTy = CurField->getType();
+
+    // If this is a capture by copy the element type has to be the pointer to the data.
+    if (CI->capturesVariableByCopy())
+      ElemTy = Ctx.getPointerType(ElemTy);
+
     ArgsAddresses.push_back(
-        CGF.CreateMemTemp(CurField->getType(), Name + ".addr"));
+        CGF.CreateMemTemp(ElemTy, Name + ".addr"));
   }
 
   // Get the data sharing information for the context that encloses the current
@@ -2031,10 +2027,18 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
   }
 
   auto FI = DSI.MasterRecordType->getAs<RecordType>()->getDecl()->field_begin();
-  for (unsigned i = 0; i < ArgsAddresses.size(); ++i, ++FI) {
+  auto CI = CS.capture_begin();
+  for (unsigned i = 0; i < ArgsAddresses.size(); ++i, ++FI, ++CI) {
     auto *Arg = CGF.EmitLoadOfScalar(ArgsAddresses[i], /*Volatile=*/false,
                                      Ctx.getPointerType(FI->getType()),
                                      SourceLocation());
+
+    // If this is a capture by value, we need to load the data.
+    if (CI->capturesVariableByCopy()) {
+      auto LV = CGF.MakeNaturalAlignAddrLValue(Arg, FI->getType());
+      Arg = CGF.EmitLoadOfScalar(LV, SourceLocation());
+    }
+
     Args.push_back(Arg);
   }
 
