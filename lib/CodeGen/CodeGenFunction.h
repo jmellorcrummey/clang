@@ -142,7 +142,7 @@ public:
   int k = 0;
   int kparent = 0;
   int regionID = 0;
-  int parallelFors = 0;
+  // int parallelFors = 0;
   llvm::AllocaInst *CombinedOuterLoopIndex;
   llvm::BasicBlock *SyncAfterCombinedBlock;
   llvm::BasicBlock *SyncAfterSimdBlock;

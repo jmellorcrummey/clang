@@ -4072,15 +4072,15 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     CGBuilderTy &Builder = CGF.Builder;
 
     // TODO:Remove this
-    CGF.parallelFors = 10;
-    if (CGF.parallelFors > 0){
-      //Push parallel region on stack
-      OMPRegionTypesStack.push_back(OMP_Parallel);
-      Builder.CreateStore(
-          Builder.CreateAdd(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
-          ParallelNesting);
-      PushNewParallelRegion(true);
-    }
+    //CGF.parallelFors = 10;
+    //if (CGF.parallelFors > 0){
+    //Push parallel region on stack
+    OMPRegionTypesStack.push_back(OMP_Parallel);
+    Builder.CreateStore(
+        Builder.CreateAdd(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
+        ParallelNesting);
+    PushNewParallelRegion(true);
+    //}
 
     int prev_k = CGF.k;
     int prev_kparent = CGF.kparent;
@@ -4100,12 +4100,12 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
         CGF.k += 2;
         break;
       case OMPD_parallel_for:
-        if (CGF.parallelFors > 0){
+        // if (CGF.parallelFors > 0){
           CGF.k++;
-        } else {
-          CGF.kparent = prev_kparent;
-        }
-        CGF.parallelFors++;
+        // } else {
+        //   CGF.kparent = prev_kparent;
+        // }
+        // CGF.parallelFors++;
         break;
       default:
         assert(0 && "DKind is not a valid parallel pragma combination.\n");
@@ -4113,30 +4113,30 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     GenerateSimplifiedLoop(S, CGF);
 
-    switch(DKind){
-      case OMPD_parallel_for:
-        CGF.parallelFors--;
-        break;
-      default:
-        break;
-    }
+    // switch(DKind){
+    //   case OMPD_parallel_for:
+    //     CGF.parallelFors--;
+    //     break;
+    //   default:
+    //     break;
+    // }
 
     CGF.k = prev_k;
     CGF.kparent = prev_kparent;
 
-    if (CGF.parallelFors > 0){
-      assert((OMPRegionTypesStack.back() == OMP_Parallel) &&
-            "Exiting a parallel region does not match stack state");
-      OMPRegionTypesStack.pop_back();
+    // if (CGF.parallelFors > 0){
+    assert((OMPRegionTypesStack.back() == OMP_Parallel) &&
+          "Exiting a parallel region does not match stack state");
+    OMPRegionTypesStack.pop_back();
 
-      Builder.CreateStore(
-          Builder.CreateSub(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
-          ParallelNesting);
+    Builder.CreateStore(
+        Builder.CreateSub(Builder.CreateLoad(ParallelNesting), Builder.getInt32(1)),
+        ParallelNesting);
 
-      // we need to inspect the previous layer to understand what type
-      // of end we need
-      PopParallelRegion();
-    }
+    // we need to inspect the previous layer to understand what type
+    // of end we need
+    PopParallelRegion();
+    // }
   }
 
   // Main function which generates the code
@@ -4283,11 +4283,12 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
 
     // Setup LB
     // Tid[kparent]
-    printf("     ===> LB: CGF.k = %d, CGF.kparent = %d, CGF.parallelFors = %d\n", CGF.k, CGF.kparent, CGF.parallelFors);
+    printf("     ===> LB: CGF.k = %d, CGF.kparent = %d\n", CGF.k, CGF.kparent);
     llvm::Value *LB = Builder.CreateLoad(CGF.Tid[CGF.kparent]);
-    if (CGF.parallelFors == 1) {
-      LB = Builder.getInt32(0);
-    } else if (isNonTerminalOpenMPNode){
+    // if (CGF.parallelFors == 1) {
+    //   LB = Builder.getInt32(0);
+    // } else 
+    if (isNonTerminalOpenMPNode){
       // Div(Tid[kparent], numberOfParallelUnits)
       LB = Builder.CreateUDiv(LB, createMult(CGF, CGF.k, CGF.p - 1));
     }
@@ -4358,9 +4359,10 @@ class CGOpenMPRuntime_NVPTX: public CGOpenMPRuntime {
     // FOR INC: tid += 1 if we are static no-chunk
     Builder.SetInsertPoint(IncCombinedFor);
     llvm::Value *step = createMult(CGF, CGF.kparent, CGF.k);
-    if (CGF.parallelFors == 1) {
-      step = Builder.getInt32(1);
-    } else if (!isNonTerminalOpenMPNode){
+    // if (CGF.parallelFors == 1) {
+    //   step = Builder.getInt32(1);
+    // } else
+    if (!isNonTerminalOpenMPNode){
       step = Builder.CreateMul(step, createMult(CGF, CGF.k, CGF.p - 1));
     }
     Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(Private), step),
