@@ -5317,7 +5317,7 @@ enum CXVisitorResult {
   CXVisit_Continue
 };
 
-typedef struct {
+typedef struct CXCursorAndRangeVisitor {
   void *context;
   enum CXVisitorResult (*visit)(void *context, CXCursor, CXSourceRange);
 } CXCursorAndRangeVisitor;

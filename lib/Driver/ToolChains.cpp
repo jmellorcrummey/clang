@@ -4546,9 +4546,14 @@ CudaToolChain::addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
   } else {
     CC1Args.push_back("-fcuda-is-device");
 
-  	if (DriverArgs.hasFlag(options::OPT_fcuda_flush_denormals_to_zero,
-                         options::OPT_fno_cuda_flush_denormals_to_zero, false))
-    	CC1Args.push_back("-fcuda-flush-denormals-to-zero");
+    if (DriverArgs.hasFlag(options::OPT_fcuda_flush_denormals_to_zero,
+                           options::OPT_fno_cuda_flush_denormals_to_zero,
+                           false))
+      CC1Args.push_back("-fcuda-flush-denormals-to-zero");
+
+    if (DriverArgs.hasFlag(options::OPT_fcuda_approx_transcendentals,
+                           options::OPT_fno_cuda_approx_transcendentals, false))
+      CC1Args.push_back("-fcuda-approx-transcendentals");
 
     if (DriverArgs.hasArg(options::OPT_nocudalib))
       return;
@@ -4605,11 +4610,14 @@ CudaToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
   if (getOffloadingKind() == OK_OpenMP_Device) {
     for (Arg *A : Args)
       DAL->append(A);
-    // FIXME: get the right arch from the offloading arguments.
+// FIXME: get the right arch from the offloading arguments.
 #ifdef OPENMP_NVPTX_COMPUTE_CAPABILITY
 #define OPENMP_NVPTX_COMPUTE_CAPABILITY_STR2(X) #X
-#define OPENMP_NVPTX_COMPUTE_CAPABILITY_STR(X) OPENMP_NVPTX_COMPUTE_CAPABILITY_STR2(X)
-    DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_march_EQ), "sm_" OPENMP_NVPTX_COMPUTE_CAPABILITY_STR(OPENMP_NVPTX_COMPUTE_CAPABILITY));
+#define OPENMP_NVPTX_COMPUTE_CAPABILITY_STR(X)                                 \
+  OPENMP_NVPTX_COMPUTE_CAPABILITY_STR2(X)
+    DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_march_EQ),
+                      "sm_" OPENMP_NVPTX_COMPUTE_CAPABILITY_STR(
+                          OPENMP_NVPTX_COMPUTE_CAPABILITY));
 #else
     DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_march_EQ), "sm_35");
 #endif
