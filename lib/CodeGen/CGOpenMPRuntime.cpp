@@ -6794,6 +6794,10 @@ void CGOpenMPRuntime::emitDeclareSimdFunction(const FunctionDecl *FD,
   }
 }
 
+StringRef CGOpenMPRuntime::RenameStandardFunction (StringRef name) {
+  return name;
+}
+
 namespace {
 /// Cleanup action for doacross support.
 class DoacrossCleanupTy final : public EHScopeStack::Cleanup {

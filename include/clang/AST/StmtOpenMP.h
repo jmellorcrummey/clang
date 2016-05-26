@@ -320,17 +320,17 @@ class OMPLoopDirective : public OMPExecutableDirective {
     // updates/finals arrays).
     DefaultEnd = 11,
     // The following 7 exprs are used by worksharing loops only.
-    IsLastIterVariableOffset = 12,
-    LowerBoundVariableOffset = 13,
-    UpperBoundVariableOffset = 14,
-    StrideVariableOffset = 15,
-    EnsureUpperBoundOffset = 16,
-    NextLowerBoundOffset = 17,
-    NextUpperBoundOffset = 18,
-    NumIterationsOffset = 19,
+    IsLastIterVariableOffset = 11,
+    LowerBoundVariableOffset = 12,
+    UpperBoundVariableOffset = 13,
+    StrideVariableOffset = 14,
+    EnsureUpperBoundOffset = 15,
+    NextLowerBoundOffset = 16,
+    NextUpperBoundOffset = 17,
+    NumIterationsOffset = 18,
     // Offset to the end (and start of the following counters/updates/finals
     // arrays) for worksharing loop directives.
-    WorksharingEnd = 20,
+    WorksharingEnd = 19,
   };
 
   /// \brief Get the counters storage.
