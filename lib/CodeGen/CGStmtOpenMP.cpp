@@ -2030,7 +2030,8 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
       const unsigned IVSize = getContext().getTypeSize(IVExpr->getType());
       const bool IVSigned = IVExpr->getType()->hasSignedIntegerRepresentation();
       const bool Ordered = S.getSingleClause<OMPOrderedClause>() != nullptr;
-      if (RT.generateCoalescedSchedule(ScheduleKind.Schedule, ChunkSizeOne, Ordered)) {
+      if (RT.generateCoalescedSchedule(ScheduleKind.Schedule, ChunkSizeOne,
+                                       Ordered)) {
         // For NVPTX and other GPU targets high performance is often achieved
         // if adjacent threads access memory in a coalesced manner.  This is
         // true for loops that access memory with stride one if a static
@@ -2727,7 +2728,7 @@ void CodeGenFunction::EmitOMPDistributeLoop(const OMPDistributeDirective &S) {
           EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getIsLastIterVariable()));
 
       OMPPrivateScope LoopScope(*this);
-	    if (EmitOMPFirstprivateClause(S, LoopScope)) {
+      if (EmitOMPFirstprivateClause(S, LoopScope)) {
         // Emit implicit barrier to synchronize threads and avoid data races on
         // initialization of firstprivate variables and post-update of
         // lastprivate variables.
