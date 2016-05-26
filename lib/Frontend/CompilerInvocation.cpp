@@ -441,8 +441,12 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
                                  : CodeGenOptions::OnlyAlwaysInlining);
   // -fno-inline-functions overrides OptimizationLevel > 1.
   Opts.NoInline = Args.hasArg(OPT_fno_inline);
-  Opts.setInlining(Args.hasArg(OPT_fno_inline_functions) ?
-                     CodeGenOptions::OnlyAlwaysInlining : Opts.getInlining());
+  if (Arg* InlineArg = Args.getLastArg(options::OPT_finline_functions,
+                                       options::OPT_fno_inline_functions)) {
+    Opts.setInlining(
+      InlineArg->getOption().matches(options::OPT_finline_functions) ?
+        CodeGenOptions::NormalInlining : CodeGenOptions::OnlyAlwaysInlining);
+  }
 
   if (Arg *A = Args.getLastArg(OPT_fveclib)) {
     StringRef Name = A->getValue();
@@ -1956,18 +1960,23 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   Opts.OpenMPIsDevice =
       Opts.OpenMP && Args.hasArg(options::OPT_fopenmp_is_device);
 
-  // Provide diagnostic when a given target is not expected to be an OpenMP
-  // device or host.
-  if (Opts.OpenMP && !Opts.OpenMPIsDevice) {
-    switch (T.getArch()) {
-    default:
-      break;
-    // Add unsupported host targets here:
-    case llvm::Triple::nvptx:
-    case llvm::Triple::nvptx64:
-      Diags.Report(clang::diag::err_drv_omp_host_target_not_supported)
-          << TargetOpts.Triple;
-      break;
+  if (Opts.OpenMP) {
+    if (int Version = getLastArgIntValue(Args, OPT_fopenmp_version_EQ,
+                                         Opts.OpenMP, Diags))
+      Opts.OpenMP = Version;
+    // Provide diagnostic when a given target is not expected to be an OpenMP
+    // device or host.
+    if (!Opts.OpenMPIsDevice) {
+      switch (T.getArch()) {
+      default:
+        break;
+      // Add unsupported host targets here:
+      case llvm::Triple::nvptx:
+      case llvm::Triple::nvptx64:
+        Diags.Report(clang::diag::err_drv_omp_host_target_not_supported)
+            << TargetOpts.Triple;
+        break;
+      }
     }
   }
 

@@ -2503,7 +2503,6 @@ public:
   void EmitAtomicInit(Expr *E, LValue lvalue);
 
   bool LValueIsSuitableForInlineAtomic(LValue Src);
-  bool typeIsSuitableForInlineAtomic(QualType Ty, bool IsVolatile) const;
 
   RValue EmitAtomicLoad(LValue LV, SourceLocation SL,
                         AggValueSlot Slot = AggValueSlot::ignored());
