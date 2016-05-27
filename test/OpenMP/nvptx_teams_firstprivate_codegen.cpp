@@ -87,11 +87,13 @@ int foo(int n, double* ptr) {
 
   // TCHECK:  define void @__omp_offloading_{{.+}}(i{{[0-9]+}} [[A_IN:%.+]])
   // TCHECK:  [[A_ADDR:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  store i{{[0-9]+}} [[A_IN]], i{{[0-9]+}}* [[A_ADDR]],
   // TCHECK-64:  [[CONV:%.+]] = bitcast i{{[0-9]+}}* [[A_ADDR]] to i{{[0-9]+}}*
   // TCHECK-64:  [[A_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[CONV]],
   // TCHECK-32:  [[A_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
-  // TCHECK-64:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[CONV]],
+  // TCHECK-64:  store i{{[0-9]+}} [[A_IN_VAL]], i{{[0-9]+}}* [[ATE]],
+  // TCHECK-64:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[ATE]],
   // TCHECK-32:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A_ADDR]],
   // TCHECK:  ret void
 
