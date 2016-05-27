@@ -1954,15 +1954,16 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   }
 
   // Check if -fopenmp is specified.
-  Opts.OpenMP = Args.hasArg(options::OPT_fopenmp);
+  Opts.OpenMP = Args.hasArg(options::OPT_fopenmp) ? 1 : 0;
   Opts.OpenMPUseTLS =
       Opts.OpenMP && !Args.hasArg(options::OPT_fnoopenmp_use_tls);
   Opts.OpenMPIsDevice =
       Opts.OpenMP && Args.hasArg(options::OPT_fopenmp_is_device);
 
   if (Opts.OpenMP) {
-    if (int Version = getLastArgIntValue(Args, OPT_fopenmp_version_EQ,
-                                         Opts.OpenMP, Diags))
+    int Version =
+        getLastArgIntValue(Args, OPT_fopenmp_version_EQ, Opts.OpenMP, Diags);
+    if (Version != 0)
       Opts.OpenMP = Version;
     // Provide diagnostic when a given target is not expected to be an OpenMP
     // device or host.
@@ -2415,7 +2416,7 @@ std::string CompilerInvocation::getModuleHash() const {
 
   // Extend the signature with the module file extensions.
   const FrontendOptions &frontendOpts = getFrontendOpts();
-  for (auto ext : frontendOpts.ModuleFileExtensions) {
+  for (const auto &ext : frontendOpts.ModuleFileExtensions) {
     code = ext->hashExtension(code);
   }
 
