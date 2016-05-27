@@ -3446,7 +3446,7 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
       // parallel loop region) with an ordered clause.
       // OpenMP [2.8.1,simd Construct, Restrictions]
       // An ordered construct with the simd clause is the only OpenMP construct
-      // that can appear in the simd region./
+      // that can appear in the simd region.
       NestingProhibited = ParentRegion == OMPD_critical ||
                           isOpenMPTaskingDirective(ParentRegion) ||
                           !(isOpenMPSimdDirective(ParentRegion) ||
