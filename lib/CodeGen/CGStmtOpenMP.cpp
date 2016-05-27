@@ -2029,7 +2029,8 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
       }
       const unsigned IVSize = getContext().getTypeSize(IVExpr->getType());
       const bool IVSigned = IVExpr->getType()->hasSignedIntegerRepresentation();
-      if (RT.generateCoalescedSchedule(ScheduleKind.Schedule, ChunkSizeOne, Ordered)) {
+      if (RT.generateCoalescedSchedule(ScheduleKind.Schedule, ChunkSizeOne,
+                                       Ordered)) {
         // For NVPTX and other GPU targets high performance is often achieved
         // if adjacent threads access memory in a coalesced manner.  This is
         // true for loops that access memory with stride one if a static
@@ -3284,6 +3285,8 @@ static void EmitOMPAtomicExpr(CodeGenFunction &CGF, OpenMPClauseKind Kind,
   case OMPC_dist_schedule:
   case OMPC_defaultmap:
   case OMPC_uniform:
+  case OMPC_to:
+  case OMPC_from:
     llvm_unreachable("Clause is not allowed in 'omp atomic'.");
   }
 }
@@ -3514,8 +3517,7 @@ void CodeGenFunction::EmitOMPTargetEnterDataDirective(
   if (auto *C = S.getSingleClause<OMPDeviceClause>())
     Device = C->getDevice();
 
-  CGM.getOpenMPRuntime().emitTargetEnterOrExitDataCall(*this, S, IfCond,
-                                                       Device);
+  CGM.getOpenMPRuntime().emitTargetDataStandAloneCall(*this, S, IfCond, Device);
 }
 
 void CodeGenFunction::EmitOMPTargetExitDataDirective(
@@ -3535,8 +3537,7 @@ void CodeGenFunction::EmitOMPTargetExitDataDirective(
   if (auto *C = S.getSingleClause<OMPDeviceClause>())
     Device = C->getDevice();
 
-  CGM.getOpenMPRuntime().emitTargetEnterOrExitDataCall(*this, S, IfCond,
-                                                       Device);
+  CGM.getOpenMPRuntime().emitTargetDataStandAloneCall(*this, S, IfCond, Device);
 }
 
 void CodeGenFunction::EmitOMPTargetParallelDirective(
@@ -3693,4 +3694,25 @@ void CodeGenFunction::EmitOMPTaskLoopDirective(const OMPTaskLoopDirective &S) {
 void CodeGenFunction::EmitOMPTaskLoopSimdDirective(
     const OMPTaskLoopSimdDirective &S) {
   EmitOMPTaskLoopBasedDirective(S);
+}
+
+// Generate the instructions for '#pragma omp target update' directive.
+void CodeGenFunction::EmitOMPTargetUpdateDirective(
+    const OMPTargetUpdateDirective &S) {
+  // If we don't have target devices, don't bother emitting the data mapping
+  // code.
+  if (CGM.getLangOpts().OMPTargetTriples.empty())
+    return;
+
+  // Check if we have any if clause associated with the directive.
+  const Expr *IfCond = nullptr;
+  if (auto *C = S.getSingleClause<OMPIfClause>())
+    IfCond = C->getCondition();
+
+  // Check if we have any device clause associated with the directive.
+  const Expr *Device = nullptr;
+  if (auto *C = S.getSingleClause<OMPDeviceClause>())
+    Device = C->getDevice();
+
+  CGM.getOpenMPRuntime().emitTargetDataStandAloneCall(*this, S, IfCond, Device);
 }

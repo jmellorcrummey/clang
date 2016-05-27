@@ -14,8 +14,8 @@
 #ifndef LLVM_CLANG_LIB_CODEGEN_CGOPENMPRUNTIME_H
 #define LLVM_CLANG_LIB_CODEGEN_CGOPENMPRUNTIME_H
 
-#include "CodeGenFunction.h"
 #include "CGValue.h"
+#include "CodeGenFunction.h"
 #include "clang/AST/Type.h"
 #include "clang/Basic/OpenMPKinds.h"
 #include "clang/Basic/SourceLocation.h"
@@ -149,7 +149,7 @@ protected:
   llvm::Type *getIdentTyPointerTy();
 
 public:
-  virtual StringRef RenameStandardFunction (StringRef name);
+  virtual StringRef RenameStandardFunction(StringRef name);
 
   /// \brief Gets lane id value for the current simd lane.
   ///
@@ -1206,17 +1206,17 @@ public:
                                    const Expr *IfCond, const Expr *Device,
                                    const RegionCodeGenTy &CodeGen);
 
-  /// \brief Emit the target enter or exit data mapping code associated with
-  /// directive \a D.
+  /// \brief Emit the data mapping/movement code associated with the directive
+  /// \a D that should be of the form 'target [{enter|exit} data | update]'.
   /// \param D Directive to emit.
   /// \param IfCond Expression evaluated in if clause associated with the target
   /// directive, or null if no if clause is used.
   /// \param Device Expression evaluated in device clause associated with the
   /// target directive, or null if no device clause is used.
-  virtual void emitTargetEnterOrExitDataCall(CodeGenFunction &CGF,
-                                             const OMPExecutableDirective &D,
-                                             const Expr *IfCond,
-                                             const Expr *Device);
+  virtual void emitTargetDataStandAloneCall(CodeGenFunction &CGF,
+                                            const OMPExecutableDirective &D,
+                                            const Expr *IfCond,
+                                            const Expr *Device);
 
   /// Marks function \a Fn with properly mangled versions of vector functions.
   /// \param FD Function marked as 'declare simd'.

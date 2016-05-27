@@ -1445,9 +1445,10 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
           isOpenMPSimdDirective(Dir->getDirectiveKind()))
         CapturedStmts.push_back(cast<CapturedStmt>(Dir->getAssociatedStmt()));
       else {
-        if(Dir->hasAssociatedStmt()) {
+        if (Dir->hasAssociatedStmt()) {
           // Look into the associated statement of OpenMP directives.
-          const CapturedStmt &CS = *cast<CapturedStmt>(Dir->getAssociatedStmt());
+          const CapturedStmt &CS =
+              *cast<CapturedStmt>(Dir->getAssociatedStmt());
           CurStmt = CS.getCapturedStmt();
 
           WorkList.push_back(CurStmt);
@@ -1488,7 +1489,8 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
       DataSharingInfo::DataSharingType DST = DataSharingInfo::DST_Val;
 
       if (CurField->hasCapturedVLAType()) {
-        llvm_unreachable("VLAs are not yet supported in NVPTX target data sharing!");
+        llvm_unreachable(
+            "VLAs are not yet supported in NVPTX target data sharing!");
         continue;
       } else if (CurCap->capturesThis()) {
         // We use null to indicate 'this'.
@@ -1901,12 +1903,12 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
 
     QualType ElemTy = CurField->getType();
 
-    // If this is a capture by copy the element type has to be the pointer to the data.
+    // If this is a capture by copy the element type has to be the pointer to
+    // the data.
     if (CI->capturesVariableByCopy())
       ElemTy = Ctx.getPointerType(ElemTy);
 
-    ArgsAddresses.push_back(
-        CGF.CreateMemTemp(ElemTy, Name + ".addr"));
+    ArgsAddresses.push_back(CGF.CreateMemTemp(ElemTy, Name + ".addr"));
   }
 
   // Get the data sharing information for the context that encloses the current
@@ -2641,164 +2643,163 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
   return CGOpenMPRuntime::emitRegistrationFunction();
 }
 
-StringRef CGOpenMPRuntimeNVPTX::RenameStandardFunction (StringRef name) {
- // Fill up hashmap entries lazily
- if (stdFuncs.empty()) {
+StringRef CGOpenMPRuntimeNVPTX::RenameStandardFunction(StringRef name) {
+  // Fill up hashmap entries lazily
+  if (stdFuncs.empty()) {
 
-   // Trigonometric functions
-   stdFuncs.insert(std::make_pair("cos", "__nv_cos"));
-   stdFuncs.insert(std::make_pair("sin", "__nv_sin"));
-   stdFuncs.insert(std::make_pair("tan", "__nv_tan"));
-   stdFuncs.insert(std::make_pair("acos", "__nv_acos"));
-   stdFuncs.insert(std::make_pair("asin", "__nv_asin"));
-   stdFuncs.insert(std::make_pair("atan", "__nv_atan"));
-   stdFuncs.insert(std::make_pair("atan2", "__nv_atan2"));
+    // Trigonometric functions
+    stdFuncs.insert(std::make_pair("cos", "__nv_cos"));
+    stdFuncs.insert(std::make_pair("sin", "__nv_sin"));
+    stdFuncs.insert(std::make_pair("tan", "__nv_tan"));
+    stdFuncs.insert(std::make_pair("acos", "__nv_acos"));
+    stdFuncs.insert(std::make_pair("asin", "__nv_asin"));
+    stdFuncs.insert(std::make_pair("atan", "__nv_atan"));
+    stdFuncs.insert(std::make_pair("atan2", "__nv_atan2"));
 
-   stdFuncs.insert(std::make_pair("cosf", "__nv_cosf"));
-   stdFuncs.insert(std::make_pair("sinf", "__nv_sinf"));
-   stdFuncs.insert(std::make_pair("tanf", "__nv_tanf"));
-   stdFuncs.insert(std::make_pair("acosf", "__nv_acosf"));
-   stdFuncs.insert(std::make_pair("asinf", "__nv_asinf"));
-   stdFuncs.insert(std::make_pair("atanf", "__nv_atanf"));
-   stdFuncs.insert(std::make_pair("atan2f", "__nv_atan2f"));
+    stdFuncs.insert(std::make_pair("cosf", "__nv_cosf"));
+    stdFuncs.insert(std::make_pair("sinf", "__nv_sinf"));
+    stdFuncs.insert(std::make_pair("tanf", "__nv_tanf"));
+    stdFuncs.insert(std::make_pair("acosf", "__nv_acosf"));
+    stdFuncs.insert(std::make_pair("asinf", "__nv_asinf"));
+    stdFuncs.insert(std::make_pair("atanf", "__nv_atanf"));
+    stdFuncs.insert(std::make_pair("atan2f", "__nv_atan2f"));
 
-   // Hyperbolic functions
-   stdFuncs.insert(std::make_pair("cosh", "__nv_cosh"));
-   stdFuncs.insert(std::make_pair("sinh", "__nv_sinh"));
-   stdFuncs.insert(std::make_pair("tanh", "__nv_tanh"));
-   stdFuncs.insert(std::make_pair("acosh", "__nv_acosh"));
-   stdFuncs.insert(std::make_pair("asinh", "__nv_asinh"));
-   stdFuncs.insert(std::make_pair("atanh", "__nv_atanh"));
+    // Hyperbolic functions
+    stdFuncs.insert(std::make_pair("cosh", "__nv_cosh"));
+    stdFuncs.insert(std::make_pair("sinh", "__nv_sinh"));
+    stdFuncs.insert(std::make_pair("tanh", "__nv_tanh"));
+    stdFuncs.insert(std::make_pair("acosh", "__nv_acosh"));
+    stdFuncs.insert(std::make_pair("asinh", "__nv_asinh"));
+    stdFuncs.insert(std::make_pair("atanh", "__nv_atanh"));
 
-   stdFuncs.insert(std::make_pair("coshf", "__nv_coshf"));
-   stdFuncs.insert(std::make_pair("sinhf", "__nv_sinhf"));
-   stdFuncs.insert(std::make_pair("tanhf", "__nv_tanhf"));
-   stdFuncs.insert(std::make_pair("acoshf", "__nv_acoshf"));
-   stdFuncs.insert(std::make_pair("asinhf", "__nv_asinhf"));
-   stdFuncs.insert(std::make_pair("atanhf", "__nv_atanhf"));
+    stdFuncs.insert(std::make_pair("coshf", "__nv_coshf"));
+    stdFuncs.insert(std::make_pair("sinhf", "__nv_sinhf"));
+    stdFuncs.insert(std::make_pair("tanhf", "__nv_tanhf"));
+    stdFuncs.insert(std::make_pair("acoshf", "__nv_acoshf"));
+    stdFuncs.insert(std::make_pair("asinhf", "__nv_asinhf"));
+    stdFuncs.insert(std::make_pair("atanhf", "__nv_atanhf"));
 
-   // Exponential and logarithm functions
-   stdFuncs.insert(std::make_pair("exp", "__nv_exp"));
-   stdFuncs.insert(std::make_pair("frexp", "__nv_frexp"));
-   stdFuncs.insert(std::make_pair("ldexp", "__nv_ldexp"));
-   stdFuncs.insert(std::make_pair("log", "__nv_log"));
-   stdFuncs.insert(std::make_pair("log10", "__nv_log10"));
-   stdFuncs.insert(std::make_pair("modf", "__nv_modf"));
-   stdFuncs.insert(std::make_pair("exp2", "__nv_exp2"));
-   stdFuncs.insert(std::make_pair("expm1", "__nv_expm1"));
-   stdFuncs.insert(std::make_pair("ilogb", "__nv_ilogb"));
-   stdFuncs.insert(std::make_pair("log1p", "__nv_log1p"));
-   stdFuncs.insert(std::make_pair("log2", "__nv_log2"));
-   stdFuncs.insert(std::make_pair("logb", "__nv_logb"));
-   stdFuncs.insert(std::make_pair("scalbn", "__nv_scalbn"));
-//     map.insert(std::make_pair((scalbln", ""));
+    // Exponential and logarithm functions
+    stdFuncs.insert(std::make_pair("exp", "__nv_exp"));
+    stdFuncs.insert(std::make_pair("frexp", "__nv_frexp"));
+    stdFuncs.insert(std::make_pair("ldexp", "__nv_ldexp"));
+    stdFuncs.insert(std::make_pair("log", "__nv_log"));
+    stdFuncs.insert(std::make_pair("log10", "__nv_log10"));
+    stdFuncs.insert(std::make_pair("modf", "__nv_modf"));
+    stdFuncs.insert(std::make_pair("exp2", "__nv_exp2"));
+    stdFuncs.insert(std::make_pair("expm1", "__nv_expm1"));
+    stdFuncs.insert(std::make_pair("ilogb", "__nv_ilogb"));
+    stdFuncs.insert(std::make_pair("log1p", "__nv_log1p"));
+    stdFuncs.insert(std::make_pair("log2", "__nv_log2"));
+    stdFuncs.insert(std::make_pair("logb", "__nv_logb"));
+    stdFuncs.insert(std::make_pair("scalbn", "__nv_scalbn"));
+    //     map.insert(std::make_pair((scalbln", ""));
 
-   stdFuncs.insert(std::make_pair("expf", "__nv_exp"));
-   stdFuncs.insert(std::make_pair("frexpf", "__nv_frexpf"));
-   stdFuncs.insert(std::make_pair("ldexpf", "__nv_ldexpf"));
-   stdFuncs.insert(std::make_pair("logf", "__nv_logf"));
-   stdFuncs.insert(std::make_pair("log10f", "__nv_log10f"));
-   stdFuncs.insert(std::make_pair("modff", "__nv_modff"));
-   stdFuncs.insert(std::make_pair("exp2f", "__nv_exp2f"));
-   stdFuncs.insert(std::make_pair("expm1f", "__nv_expm1f"));
-   stdFuncs.insert(std::make_pair("ilogbf", "__nv_ilogbf"));
-   stdFuncs.insert(std::make_pair("log1pf", "__nv_log1pf"));
-   stdFuncs.insert(std::make_pair("log2f", "__nv_log2f"));
-   stdFuncs.insert(std::make_pair("logbf", "__nv_logbf"));
-   stdFuncs.insert(std::make_pair("scalbnf", "__nv_scalbnf"));
-//     map.insert(std::make_pair("scalblnf", ""));
+    stdFuncs.insert(std::make_pair("expf", "__nv_exp"));
+    stdFuncs.insert(std::make_pair("frexpf", "__nv_frexpf"));
+    stdFuncs.insert(std::make_pair("ldexpf", "__nv_ldexpf"));
+    stdFuncs.insert(std::make_pair("logf", "__nv_logf"));
+    stdFuncs.insert(std::make_pair("log10f", "__nv_log10f"));
+    stdFuncs.insert(std::make_pair("modff", "__nv_modff"));
+    stdFuncs.insert(std::make_pair("exp2f", "__nv_exp2f"));
+    stdFuncs.insert(std::make_pair("expm1f", "__nv_expm1f"));
+    stdFuncs.insert(std::make_pair("ilogbf", "__nv_ilogbf"));
+    stdFuncs.insert(std::make_pair("log1pf", "__nv_log1pf"));
+    stdFuncs.insert(std::make_pair("log2f", "__nv_log2f"));
+    stdFuncs.insert(std::make_pair("logbf", "__nv_logbf"));
+    stdFuncs.insert(std::make_pair("scalbnf", "__nv_scalbnf"));
+    //     map.insert(std::make_pair("scalblnf", ""));
 
-   // Power functions
-   stdFuncs.insert(std::make_pair("pow", "__nv_pow"));
-   stdFuncs.insert(std::make_pair("sqrt", "__nv_sqrt"));
-   stdFuncs.insert(std::make_pair("cbrt", "__nv_cbrt"));
-   stdFuncs.insert(std::make_pair("hypot", "__nv_hypot"));
+    // Power functions
+    stdFuncs.insert(std::make_pair("pow", "__nv_pow"));
+    stdFuncs.insert(std::make_pair("sqrt", "__nv_sqrt"));
+    stdFuncs.insert(std::make_pair("cbrt", "__nv_cbrt"));
+    stdFuncs.insert(std::make_pair("hypot", "__nv_hypot"));
 
-   stdFuncs.insert(std::make_pair("powf", "__nv_powf"));
-   stdFuncs.insert(std::make_pair("sqrtf", "__nv_sqrtf"));
-   stdFuncs.insert(std::make_pair("cbrtf", "__nv_cbrtf"));
-   stdFuncs.insert(std::make_pair("hypotf", "__nv_hypotf"));
+    stdFuncs.insert(std::make_pair("powf", "__nv_powf"));
+    stdFuncs.insert(std::make_pair("sqrtf", "__nv_sqrtf"));
+    stdFuncs.insert(std::make_pair("cbrtf", "__nv_cbrtf"));
+    stdFuncs.insert(std::make_pair("hypotf", "__nv_hypotf"));
 
-   // Error and gamma functions
-   stdFuncs.insert(std::make_pair("erf", "__nv_erf"));
-   stdFuncs.insert(std::make_pair("erfc", "__nv_erfc"));
-   stdFuncs.insert(std::make_pair("tgamma", "__nv_tgamma"));
-   stdFuncs.insert(std::make_pair("lgamma", "__nv_lgamma"));
+    // Error and gamma functions
+    stdFuncs.insert(std::make_pair("erf", "__nv_erf"));
+    stdFuncs.insert(std::make_pair("erfc", "__nv_erfc"));
+    stdFuncs.insert(std::make_pair("tgamma", "__nv_tgamma"));
+    stdFuncs.insert(std::make_pair("lgamma", "__nv_lgamma"));
 
-   stdFuncs.insert(std::make_pair("erff", "__nv_erff"));
-   stdFuncs.insert(std::make_pair("erfcf", "__nv_erfcf"));
-   stdFuncs.insert(std::make_pair("tgammaf", "__nv_tgammaf"));
-   stdFuncs.insert(std::make_pair("lgammaf", "__nv_lgammaf"));
+    stdFuncs.insert(std::make_pair("erff", "__nv_erff"));
+    stdFuncs.insert(std::make_pair("erfcf", "__nv_erfcf"));
+    stdFuncs.insert(std::make_pair("tgammaf", "__nv_tgammaf"));
+    stdFuncs.insert(std::make_pair("lgammaf", "__nv_lgammaf"));
 
-   // Rounding and remainder functions
-   stdFuncs.insert(std::make_pair("ceil", "__nv_ceil"));
-   stdFuncs.insert(std::make_pair("floor", "__nv_floor"));
-   stdFuncs.insert(std::make_pair("fmod", "__nv_fmod"));
-   stdFuncs.insert(std::make_pair("trunc", "__nv_trunc"));
-   stdFuncs.insert(std::make_pair("round", "__nv_round"));
-   stdFuncs.insert(std::make_pair("lround", "__nv_lround"));
-   stdFuncs.insert(std::make_pair("llround", "__nv_llround"));
-   stdFuncs.insert(std::make_pair("rint", "__nv_rint"));
-   stdFuncs.insert(std::make_pair("lrint", "__nv_lrint"));
-   stdFuncs.insert(std::make_pair("llrint", "__nv_llrint"));
-   stdFuncs.insert(std::make_pair("nearbyint", "__nv_nearbyint"));
-   stdFuncs.insert(std::make_pair("remainder", "__nv_remainder"));
-   stdFuncs.insert(std::make_pair("remquo", "__nv_remquo"));
+    // Rounding and remainder functions
+    stdFuncs.insert(std::make_pair("ceil", "__nv_ceil"));
+    stdFuncs.insert(std::make_pair("floor", "__nv_floor"));
+    stdFuncs.insert(std::make_pair("fmod", "__nv_fmod"));
+    stdFuncs.insert(std::make_pair("trunc", "__nv_trunc"));
+    stdFuncs.insert(std::make_pair("round", "__nv_round"));
+    stdFuncs.insert(std::make_pair("lround", "__nv_lround"));
+    stdFuncs.insert(std::make_pair("llround", "__nv_llround"));
+    stdFuncs.insert(std::make_pair("rint", "__nv_rint"));
+    stdFuncs.insert(std::make_pair("lrint", "__nv_lrint"));
+    stdFuncs.insert(std::make_pair("llrint", "__nv_llrint"));
+    stdFuncs.insert(std::make_pair("nearbyint", "__nv_nearbyint"));
+    stdFuncs.insert(std::make_pair("remainder", "__nv_remainder"));
+    stdFuncs.insert(std::make_pair("remquo", "__nv_remquo"));
 
-   stdFuncs.insert(std::make_pair("ceilf", "__nv_ceilf"));
-   stdFuncs.insert(std::make_pair("floorf", "__nv_floorf"));
-   stdFuncs.insert(std::make_pair("fmodf", "__nv_fmodf"));
-   stdFuncs.insert(std::make_pair("truncf", "__nv_truncf"));
-   stdFuncs.insert(std::make_pair("roundf", "__nv_roundf"));
-   stdFuncs.insert(std::make_pair("lroundf", "__nv_lroundf"));
-   stdFuncs.insert(std::make_pair("llroundf", "__nv_llroundf"));
-   stdFuncs.insert(std::make_pair("rintf", "__nv_rintf"));
-   stdFuncs.insert(std::make_pair("lrintf", "__nv_lrintf"));
-   stdFuncs.insert(std::make_pair("llrintf", "__nv_llrintf"));
-   stdFuncs.insert(std::make_pair("nearbyintf", "__nv_nearbyintf"));
-   stdFuncs.insert(std::make_pair("remainderf", "__nv_remainderf"));
-   stdFuncs.insert(std::make_pair("remquof", "__nv_remquof"));
+    stdFuncs.insert(std::make_pair("ceilf", "__nv_ceilf"));
+    stdFuncs.insert(std::make_pair("floorf", "__nv_floorf"));
+    stdFuncs.insert(std::make_pair("fmodf", "__nv_fmodf"));
+    stdFuncs.insert(std::make_pair("truncf", "__nv_truncf"));
+    stdFuncs.insert(std::make_pair("roundf", "__nv_roundf"));
+    stdFuncs.insert(std::make_pair("lroundf", "__nv_lroundf"));
+    stdFuncs.insert(std::make_pair("llroundf", "__nv_llroundf"));
+    stdFuncs.insert(std::make_pair("rintf", "__nv_rintf"));
+    stdFuncs.insert(std::make_pair("lrintf", "__nv_lrintf"));
+    stdFuncs.insert(std::make_pair("llrintf", "__nv_llrintf"));
+    stdFuncs.insert(std::make_pair("nearbyintf", "__nv_nearbyintf"));
+    stdFuncs.insert(std::make_pair("remainderf", "__nv_remainderf"));
+    stdFuncs.insert(std::make_pair("remquof", "__nv_remquof"));
 
-   // Floating-point manipulation functions
-   stdFuncs.insert(std::make_pair("copysign", "__nv_copysign"));
-   stdFuncs.insert(std::make_pair("nan", "__nv_nan"));
-   stdFuncs.insert(std::make_pair("nextafter", "__nv_nextafter"));
-//     map.insert(std::make_pair("nexttoward", ""));
+    // Floating-point manipulation functions
+    stdFuncs.insert(std::make_pair("copysign", "__nv_copysign"));
+    stdFuncs.insert(std::make_pair("nan", "__nv_nan"));
+    stdFuncs.insert(std::make_pair("nextafter", "__nv_nextafter"));
+    //     map.insert(std::make_pair("nexttoward", ""));
 
-   stdFuncs.insert(std::make_pair("copysignf", "__nv_copysignf"));
-   stdFuncs.insert(std::make_pair("nanf", "__nv_nanf"));
-   stdFuncs.insert(std::make_pair("nextafterf", "__nv_nextafterf"));
-//     map.insert(std::make_pair("nexttowardf", ""));
+    stdFuncs.insert(std::make_pair("copysignf", "__nv_copysignf"));
+    stdFuncs.insert(std::make_pair("nanf", "__nv_nanf"));
+    stdFuncs.insert(std::make_pair("nextafterf", "__nv_nextafterf"));
+    //     map.insert(std::make_pair("nexttowardf", ""));
 
-   // Minimum, maximu,, difference functions
-   stdFuncs.insert(std::make_pair("fdim", "__nv_fdim"));
-   stdFuncs.insert(std::make_pair("fmax", "__nv_fmax"));
-   stdFuncs.insert(std::make_pair("fmin", "__nv_fmin"));
+    // Minimum, maximu,, difference functions
+    stdFuncs.insert(std::make_pair("fdim", "__nv_fdim"));
+    stdFuncs.insert(std::make_pair("fmax", "__nv_fmax"));
+    stdFuncs.insert(std::make_pair("fmin", "__nv_fmin"));
 
-   stdFuncs.insert(std::make_pair("fdimf", "__nv_fdimf"));
-   stdFuncs.insert(std::make_pair("fmaxf", "__nv_fmaxf"));
-   stdFuncs.insert(std::make_pair("fminf", "__nv_fminf"));
+    stdFuncs.insert(std::make_pair("fdimf", "__nv_fdimf"));
+    stdFuncs.insert(std::make_pair("fmaxf", "__nv_fmaxf"));
+    stdFuncs.insert(std::make_pair("fminf", "__nv_fminf"));
 
-   // Other functions
-   stdFuncs.insert(std::make_pair("fabs", "__nv_fabs"));
-   stdFuncs.insert(std::make_pair("abs", "__nv_abs"));
-   stdFuncs.insert(std::make_pair("fma", "__nv_fma"));
+    // Other functions
+    stdFuncs.insert(std::make_pair("fabs", "__nv_fabs"));
+    stdFuncs.insert(std::make_pair("abs", "__nv_abs"));
+    stdFuncs.insert(std::make_pair("fma", "__nv_fma"));
 
-   stdFuncs.insert(std::make_pair("fabsf", "__nv_fabsf"));
-   stdFuncs.insert(std::make_pair("absf", "__nv_absf"));
-   stdFuncs.insert(std::make_pair("fmaf", "__nv_fmaf"));
+    stdFuncs.insert(std::make_pair("fabsf", "__nv_fabsf"));
+    stdFuncs.insert(std::make_pair("absf", "__nv_absf"));
+    stdFuncs.insert(std::make_pair("fmaf", "__nv_fmaf"));
 
-   // temporary solution for Znam: this is how the cuda toolkit defines
-   // _Znam but the header file is not properly picked up
-   stdFuncs.insert(std::make_pair("_Znam", "malloc"));
- }
+    // temporary solution for Znam: this is how the cuda toolkit defines
+    // _Znam but the header file is not properly picked up
+    stdFuncs.insert(std::make_pair("_Znam", "malloc"));
+  }
 
- // If callee is standard function, change its name
- StringRef match =  stdFuncs.lookup(name);
- if (!match.empty()) {
-   return match;
- }
+  // If callee is standard function, change its name
+  StringRef match = stdFuncs.lookup(name);
+  if (!match.empty()) {
+    return match;
+  }
 
- return name;
+  return name;
 }
-
