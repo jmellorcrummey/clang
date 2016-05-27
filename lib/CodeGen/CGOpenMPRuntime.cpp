@@ -11,9 +11,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "CGOpenMPRuntime.h"
 #include "CGCXXABI.h"
 #include "CGCleanup.h"
-#include "CGOpenMPRuntime.h"
 #include "CodeGenFunction.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclTemplate.h"
@@ -6836,7 +6836,7 @@ void CGOpenMPRuntime::emitDeclareSimdFunction(const FunctionDecl *FD,
   }
 }
 
-StringRef CGOpenMPRuntime::RenameStandardFunction (StringRef name) {
+StringRef CGOpenMPRuntime::RenameStandardFunction(StringRef name) {
   return name;
 }
 

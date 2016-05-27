@@ -934,9 +934,8 @@ bool Sema::IsOpenMPCapturedByRef(ValueDecl *D, unsigned Level) {
     bool IsVariableAssociatedWithSection = false;
 
     DSAStack->checkMappableExprComponentListsForDeclAtLevel(
-        D, Level,
-        [&](OMPClauseMappableExprCommon::MappableExprComponentListRef
-                MapExprComponents) {
+        D, Level, [&](OMPClauseMappableExprCommon::MappableExprComponentListRef
+                          MapExprComponents) {
 
           auto EI = MapExprComponents.rbegin();
           auto EE = MapExprComponents.rend();

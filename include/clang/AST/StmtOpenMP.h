@@ -3016,7 +3016,8 @@ class OMPTargetTeamsDistributeParallelForDirective : public OMPLoopDirective {
                                                SourceLocation EndLoc,
                                                unsigned CollapsedNum,
                                                unsigned NumClauses)
-      : OMPLoopDirective(this, OMPTargetTeamsDistributeParallelForDirectiveClass,
+      : OMPLoopDirective(this,
+                         OMPTargetTeamsDistributeParallelForDirectiveClass,
                          OMPD_target_teams_distribute_parallel_for, StartLoc,
                          EndLoc, CollapsedNum, NumClauses) {}
 
@@ -3027,10 +3028,10 @@ class OMPTargetTeamsDistributeParallelForDirective : public OMPLoopDirective {
   ///
   explicit OMPTargetTeamsDistributeParallelForDirective(unsigned CollapsedNum,
                                                         unsigned NumClauses)
-      : OMPLoopDirective(this, OMPTargetTeamsDistributeParallelForDirectiveClass,
-                         OMPD_target_teams_distribute_parallel_for,
-                         SourceLocation(), SourceLocation(), CollapsedNum,
-                         NumClauses) {}
+      : OMPLoopDirective(
+            this, OMPTargetTeamsDistributeParallelForDirectiveClass,
+            OMPD_target_teams_distribute_parallel_for, SourceLocation(),
+            SourceLocation(), CollapsedNum, NumClauses) {}
 
 public:
   /// \brief Creates directive with a list of \a Clauses.

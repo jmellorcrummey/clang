@@ -5993,7 +5993,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       TargetInfo += T.getTriple();
     }
     CmdArgs.push_back(Args.MakeArgString(TargetInfo.str()));
-  }  
+  }
 
   bool WholeProgramVTables =
       Args.hasFlag(options::OPT_fwhole_program_vtables,

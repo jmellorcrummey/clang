@@ -14,8 +14,8 @@
 #ifndef LLVM_CLANG_LIB_CODEGEN_CGOPENMPRUNTIME_H
 #define LLVM_CLANG_LIB_CODEGEN_CGOPENMPRUNTIME_H
 
-#include "CodeGenFunction.h"
 #include "CGValue.h"
+#include "CodeGenFunction.h"
 #include "clang/AST/Type.h"
 #include "clang/Basic/OpenMPKinds.h"
 #include "clang/Basic/SourceLocation.h"
@@ -149,7 +149,7 @@ protected:
   llvm::Type *getIdentTyPointerTy();
 
 public:
-  virtual StringRef RenameStandardFunction (StringRef name);
+  virtual StringRef RenameStandardFunction(StringRef name);
 
   /// \brief Gets lane id value for the current simd lane.
   ///

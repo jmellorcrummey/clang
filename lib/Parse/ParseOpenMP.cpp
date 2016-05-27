@@ -40,7 +40,7 @@ enum OpenMPDirectiveKindEx {
   OMPD_target_enter,
   OMPD_target_exit,
   OMPD_update,
-	OMPD_distribute_parallel,
+  OMPD_distribute_parallel,
   OMPD_teams_distribute,
   OMPD_teams_distribute_parallel,
   OMPD_target_teams_distribute,
@@ -795,9 +795,9 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
 ///         'for simd' | 'parallel for simd' | 'target' | 'target data' |
 ///         'taskgroup' | 'teams' | 'taskloop' | 'taskloop simd' |
 ///         'distribute' | 'target enter data' | 'target exit data' |
-///         'target parallel' | 'target parallel for' | 'target update' | 
+///         'target parallel' | 'target parallel for' | 'target update' |
 ///         'distribute parallel for' | 'target teams' |
-///         'teams distribute parallel for' | 
+///         'teams distribute parallel for' |
 ///         'target teams distribute parallel for' {clause}
 ///         annot_pragma_openmp_end
 ///

@@ -8185,9 +8185,10 @@ public:
       llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA);
   /// \brief Called on well-formed '\#pragma omp target teams' after parsing of
   /// the associated statement.
-  StmtResult ActOnOpenMPTargetTeamsDirective(
-      ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
-      SourceLocation EndLoc);
+  StmtResult ActOnOpenMPTargetTeamsDirective(ArrayRef<OMPClause *> Clauses,
+                                             Stmt *AStmt,
+                                             SourceLocation StartLoc,
+                                             SourceLocation EndLoc);
   /// \brief Called on well-formed '\#pragma omp teams distribute parallel for'
   /// after parsing of the associated statement.
   StmtResult ActOnOpenMPTeamsDistributeParallelForDirective(

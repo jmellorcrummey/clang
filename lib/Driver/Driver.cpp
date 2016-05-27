@@ -803,7 +803,7 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   // Owned by the host.
   const ToolChain &TC = getToolChain(
       *UArgs, computeTargetTriple(*this, DefaultTargetTriple, *UArgs),
-                   HostOffloadingKind);
+      HostOffloadingKind);
 
   // Get the toolchains for the offloading targets if any. We need to read the
   // offloading toolchains only if we have a compatible runtime library, and
