@@ -39,6 +39,7 @@ enum : SanitizerMask {
   TrappingSupported =
       (Undefined & ~Vptr) | UnsignedIntegerOverflow | LocalBounds | CFI,
   TrappingDefault = CFI,
+  CFIClasses = CFIVCall | CFINVCall | CFIDerivedCast | CFIUnrelatedCast,
 };
 
 enum CoverageFeature {
@@ -339,11 +340,13 @@ SanitizerArgs::SanitizerArgs(const ToolChain &TC,
   for (const auto *Arg : Args) {
     const char *DeprecatedReplacement = nullptr;
     if (Arg->getOption().matches(options::OPT_fsanitize_recover)) {
-      DeprecatedReplacement = "-fsanitize-recover=undefined,integer";
+      DeprecatedReplacement =
+          "-fsanitize-recover=undefined,integer' or '-fsanitize-recover=all";
       RecoverableKinds |= expandSanitizerGroups(LegacyFsanitizeRecoverMask);
       Arg->claim();
     } else if (Arg->getOption().matches(options::OPT_fno_sanitize_recover)) {
-      DeprecatedReplacement = "-fno-sanitize-recover=undefined,integer";
+      DeprecatedReplacement = "-fno-sanitize-recover=undefined,integer' or "
+                              "'-fno-sanitize-recover=all";
       RecoverableKinds &= ~expandSanitizerGroups(LegacyFsanitizeRecoverMask);
       Arg->claim();
     } else if (Arg->getOption().matches(options::OPT_fsanitize_recover_EQ)) {
@@ -680,6 +683,16 @@ void SanitizerArgs::addArgs(const ToolChain &TC, const llvm::opt::ArgList &Args,
     CmdArgs.push_back(Args.MakeArgString("--dependent-lib=" +
                                          TC.getCompilerRT(Args, "stats")));
     addIncludeLinkerOption(TC, Args, CmdArgs, "__sanitizer_stats_register");
+  }
+
+  // Require -fvisibility= flag on non-Windows when compiling if vptr CFI is
+  // enabled.
+  if (Sanitizers.hasOneOf(CFIClasses) && !TC.getTriple().isOSWindows() &&
+      !Args.hasArg(options::OPT_fvisibility_EQ)) {
+    TC.getDriver().Diag(clang::diag::err_drv_argument_only_allowed_with)
+        << lastArgumentForMask(TC.getDriver(), Args,
+                               Sanitizers.Mask & CFIClasses)
+        << "-fvisibility=";
   }
 }
 

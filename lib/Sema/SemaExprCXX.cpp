@@ -934,6 +934,8 @@ Sema::CXXThisScopeRAII::CXXThisScopeRAII(Sema &S,
   else
     Record = cast<CXXRecordDecl>(ContextDecl);
     
+  // We care only for CVR qualifiers here, so cut everything else.
+  CXXThisTypeQuals &= Qualifiers::FastMask;
   S.CXXThisTypeOverride
     = S.Context.getPointerType(
         S.Context.getRecordType(Record).withCVRQualifiers(CXXThisTypeQuals));
@@ -3077,7 +3079,7 @@ static ExprResult BuildCXXCastArgument(Sema &S,
       return ExprError();
 
     ExprResult Result = S.BuildCXXConstructExpr(
-        CastLoc, Ty, cast<CXXConstructorDecl>(Method),
+        CastLoc, Ty, FoundDecl, cast<CXXConstructorDecl>(Method),
         ConstructorArgs, HadMultipleCandidates,
         /*ListInit*/ false, /*StdInitListInit*/ false, /*ZeroInit*/ false,
         CXXConstructExpr::CK_Complete, SourceRange());
@@ -3228,13 +3230,15 @@ Sema::PerformImplicitConversion(Expr *From, QualType ToType,
                                   ConstructorArgs))
         return ExprError();
       return BuildCXXConstructExpr(
-          /*FIXME:ConstructLoc*/ SourceLocation(), ToType, SCS.CopyConstructor,
+          /*FIXME:ConstructLoc*/ SourceLocation(), ToType,
+          SCS.FoundCopyConstructor, SCS.CopyConstructor,
           ConstructorArgs, /*HadMultipleCandidates*/ false,
           /*ListInit*/ false, /*StdInitListInit*/ false, /*ZeroInit*/ false,
           CXXConstructExpr::CK_Complete, SourceRange());
     }
     return BuildCXXConstructExpr(
-        /*FIXME:ConstructLoc*/ SourceLocation(), ToType, SCS.CopyConstructor,
+        /*FIXME:ConstructLoc*/ SourceLocation(), ToType,
+        SCS.FoundCopyConstructor, SCS.CopyConstructor,
         From, /*HadMultipleCandidates*/ false,
         /*ListInit*/ false, /*StdInitListInit*/ false, /*ZeroInit*/ false,
         CXXConstructExpr::CK_Complete, SourceRange());
@@ -4457,6 +4461,7 @@ static bool EvaluateBinaryTypeTrait(Sema &Self, TypeTrait BTT, QualType LhsT,
     return !Result.isInvalid() && !SFINAE.hasErrorOccurred();
   }
 
+  case BTT_IsAssignable:
   case BTT_IsNothrowAssignable:
   case BTT_IsTriviallyAssignable: {
     // C++11 [meta.unary.prop]p3:
@@ -4503,6 +4508,9 @@ static bool EvaluateBinaryTypeTrait(Sema &Self, TypeTrait BTT, QualType LhsT,
                                         &Rhs);
     if (Result.isInvalid() || SFINAE.hasErrorOccurred())
       return false;
+
+    if (BTT == BTT_IsAssignable)
+      return true;
 
     if (BTT == BTT_IsNothrowAssignable)
       return Self.canThrow(Result.get()) == CT_Cannot;
@@ -4795,7 +4803,7 @@ QualType Sema::CheckPointerToMemberOperands(ExprResult &LHS, ExprResult &RHS,
   return Result;
 }
 
-/// \brief Try to convert a type to another according to C++0x 5.16p3.
+/// \brief Try to convert a type to another according to C++11 5.16p3.
 ///
 /// This is part of the parameter validation for the ? operator. If either
 /// value operand is a class type, the two operands are attempted to be
@@ -4811,17 +4819,21 @@ static bool TryClassUnification(Sema &Self, Expr *From, Expr *To,
 
   InitializationKind Kind = InitializationKind::CreateCopy(To->getLocStart(),
                                                            SourceLocation());
-  // C++0x 5.16p3
+  // C++11 5.16p3
   //   The process for determining whether an operand expression E1 of type T1
   //   can be converted to match an operand expression E2 of type T2 is defined
   //   as follows:
-  //   -- If E2 is an lvalue:
-  bool ToIsLvalue = To->isLValue();
-  if (ToIsLvalue) {
-    //   E1 can be converted to match E2 if E1 can be implicitly converted to
-    //   type "lvalue reference to T2", subject to the constraint that in the
-    //   conversion the reference must bind directly to E1.
-    QualType T = Self.Context.getLValueReferenceType(ToType);
+  //   -- If E2 is an lvalue: E1 can be converted to match E2 if E1 can be
+  //      implicitly converted to type "lvalue reference to T2", subject to the
+  //      constraint that in the conversion the reference must bind directly to
+  //      an lvalue.
+  //   -- If E2 is an xvalue: E1 can be converted to match E2 if E1 can be
+  //      implicitly conveted to the type "rvalue reference to R2", subject to
+  //      the constraint that the reference must bind directly.
+  if (To->isLValue() || To->isXValue()) {
+    QualType T = To->isLValue() ? Self.Context.getLValueReferenceType(ToType)
+                                : Self.Context.getRValueReferenceType(ToType);
+
     InitializedEntity Entity = InitializedEntity::InitializeTemporary(T);
 
     InitializationSequence InitSeq(Self, Entity, Kind, From);
@@ -5172,6 +5184,12 @@ QualType Sema::CXXCheckConditionalOperands(ExprResult &Cond, ExprResult &LHS,
     QualType ResTy = UsualArithmeticConversions(LHS, RHS);
     if (LHS.isInvalid() || RHS.isInvalid())
       return QualType();
+    if (ResTy.isNull()) {
+      Diag(QuestionLoc,
+           diag::err_typecheck_cond_incompatible_operands) << LTy << RTy
+        << LHS.get()->getSourceRange() << RHS.get()->getSourceRange();
+      return QualType();
+    }
 
     LHS = ImpCastExprToType(LHS.get(), ResTy, PrepareScalarCast(LHS, ResTy));
     RHS = ImpCastExprToType(RHS.get(), ResTy, PrepareScalarCast(RHS, ResTy));
@@ -6225,9 +6243,12 @@ ExprResult Sema::BuildCXXMemberCallExpr(Expr *E, NamedDecl *FoundDecl,
       // follows the normal lifetime rules for block literals instead of being
       // autoreleased.
       DiagnosticErrorTrap Trap(Diags);
+      PushExpressionEvaluationContext(PotentiallyEvaluated);
       ExprResult Exp = BuildBlockForLambdaConversion(E->getExprLoc(),
                                                      E->getExprLoc(),
                                                      Method, E);
+      PopExpressionEvaluationContext();
+
       if (Exp.isInvalid())
         Diag(E->getExprLoc(), diag::note_lambda_to_block_conv);
       return Exp;

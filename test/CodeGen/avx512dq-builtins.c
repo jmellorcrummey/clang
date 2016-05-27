@@ -946,6 +946,24 @@ __m128i test_mm512_maskz_extracti64x2_epi64(__mmask8 __U, __m512i __A) {
   return _mm512_maskz_extracti64x2_epi64(__U, __A, 3); 
 }
 
+__m512 test_mm512_insertf32x8(__m512 __A, __m256 __B) {
+  // CHECK-LABEL: @test_mm512_insertf32x8
+  // CHECK: @llvm.x86.avx512.mask.insertf32x8
+  return _mm512_insertf32x8(__A, __B, 1); 
+}
+
+__m512 test_mm512_mask_insertf32x8(__m512 __W, __mmask16 __U, __m512 __A, __m256 __B) {
+  // CHECK-LABEL: @test_mm512_mask_insertf32x8
+  // CHECK: @llvm.x86.avx512.mask.insertf32x8
+  return _mm512_mask_insertf32x8(__W, __U, __A, __B, 1); 
+}
+
+__m512 test_mm512_maskz_insertf32x8(__mmask16 __U, __m512 __A, __m256 __B) {
+  // CHECK-LABEL: @test_mm512_maskz_insertf32x8
+  // CHECK: @llvm.x86.avx512.mask.insertf32x8
+  return _mm512_maskz_insertf32x8(__U, __A, __B, 1); 
+}
+
 __m512d test_mm512_insertf64x2(__m512d __A, __m128d __B) {
   // CHECK-LABEL: @test_mm512_insertf64x2
   // CHECK: @llvm.x86.avx512.mask.insertf64x2
@@ -999,3 +1017,51 @@ __m512i test_mm512_maskz_inserti64x2(__mmask8 __U, __m512i __A, __m128i __B) {
   // CHECK: @llvm.x86.avx512.mask.inserti64x2
   return _mm512_maskz_inserti64x2(__U, __A, __B, 1); 
 }
+__mmask8 test_mm512_mask_fpclass_pd_mask(__mmask8 __U, __m512d __A) {
+  // CHECK-LABEL: @test_mm512_mask_fpclass_pd_mask
+  // CHECK: @llvm.x86.avx512.mask.fpclass.pd.512
+  return _mm512_mask_fpclass_pd_mask(__U, __A, 4); 
+}
+
+__mmask8 test_mm512_fpclass_pd_mask(__m512d __A) {
+  // CHECK-LABEL: @test_mm512_fpclass_pd_mask
+  // CHECK: @llvm.x86.avx512.mask.fpclass.pd.512
+  return _mm512_fpclass_pd_mask(__A, 4); 
+}
+
+__mmask16 test_mm512_mask_fpclass_ps_mask(__mmask16 __U, __m512 __A) {
+  // CHECK-LABEL: @test_mm512_mask_fpclass_ps_mask
+  // CHECK: @llvm.x86.avx512.mask.fpclass.ps.512
+  return _mm512_mask_fpclass_ps_mask(__U, __A, 4); 
+}
+
+__mmask16 test_mm512_fpclass_ps_mask(__m512 __A) {
+  // CHECK-LABEL: @test_mm512_fpclass_ps_mask
+  // CHECK: @llvm.x86.avx512.mask.fpclass.ps.512
+  return _mm512_fpclass_ps_mask(__A, 4); 
+}
+
+__mmask8 test_mm_fpclass_sd_mask(__m128 __A)  { 
+  // CHECK-LABEL: @test_mm_fpclass_sd_mask
+  // CHECK: @llvm.x86.avx512.mask.fpclass.sd
+ return _mm_fpclass_sd_mask (__A, 2);
+}
+
+__mmask8 test_mm_mask_fpclass_sd_mask(__mmask8 __U, __m128 __A)  {
+ // CHECK-LABEL: @test_mm_mask_fpclass_sd_mask
+ // CHECK: @llvm.x86.avx512.mask.fpclass.sd
+ return _mm_mask_fpclass_sd_mask (__U,  __A, 2);
+}
+
+__mmask8 test_mm_fpclass_ss_mask(__m128 __A)  { 
+ // CHECK-LABEL: @test_mm_fpclass_ss_mask
+ // CHECK: @llvm.x86.avx512.mask.fpclass.ss
+ return _mm_fpclass_ss_mask ( __A, 2);
+}
+
+__mmask8 test_mm_mask_fpclass_ss_mask(__mmask8 __U, __m128 __A)  {
+ // CHECK-LABEL: @test_mm_mask_fpclass_ss_mask
+ // CHECK: @llvm.x86.avx512.mask.fpclass.ss
+ return _mm_mask_fpclass_ss_mask (__U, __A, 2);
+}
+

@@ -85,7 +85,9 @@ class BlockByrefHelpers;
 class BlockByrefInfo;
 class BlockFlags;
 class BlockFieldFlags;
+class RegionCodeGenTy;
 class TargetCodeGenInfo;
+struct OMPTaskDataTy;
 
 /// The kind of evaluation to perform on values of a particular
 /// type.  Basically, is the code in CGExprScalar, CGExprComplex, or
@@ -188,6 +190,8 @@ public:
         if (I->capturesThis())
           CXXThisFieldDecl = *Field;
         else if (I->capturesVariable())
+          CaptureFields[I->getCapturedVar()] = *Field;
+        else if (I->capturesVariableByCopy())
           CaptureFields[I->getCapturedVar()] = *Field;
       }
     }
@@ -638,6 +642,11 @@ public:
     ~OMPPrivateScope() {
       if (PerformCleanup)
         ForceCleanup();
+    }
+
+    /// Checks if the global variable is captured in current function. 
+    bool isGlobalVarCaptured(const VarDecl *VD) const {
+      return !VD->isLocalVarDeclOrParm() && CGF.LocalDeclMap.count(VD) > 0;
     }
 
   private:
@@ -1872,7 +1881,7 @@ public:
                                       const CXXConstructExpr *E);
 
   void EmitCXXAggrConstructorCall(const CXXConstructorDecl *D,
-                                  const ConstantArrayType *ArrayTy,
+                                  const ArrayType *ArrayTy,
                                   Address ArrayPtr,
                                   const CXXConstructExpr *E,
                                   bool ZeroInitialization = false);
@@ -2222,8 +2231,7 @@ public:
   llvm::Function *GenerateCapturedStmtFunction(const CapturedStmt &S);
   Address GenerateCapturedStmtArgument(const CapturedStmt &S);
   llvm::Function *GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S,
-                                                     QualType ReturnQTy);
-  llvm::Function *GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S);
+                                                     bool CastValToPtr = false);
   void GenerateOpenMPCapturedVars(const CapturedStmt &S,
                                   SmallVectorImpl<llvm::Value *> &CapturedVars);
   void emitOMPSimpleStore(LValue LVal, RValue RVal, QualType RValTy,
@@ -2340,6 +2348,14 @@ public:
   /// \param D Directive (possibly) with the 'linear' clause.
   void EmitOMPLinearClauseInit(const OMPLoopDirective &D);
 
+  typedef const llvm::function_ref<void(CodeGenFunction & /*CGF*/,
+                                        llvm::Value * /*OutlinedFn*/,
+                                        const OMPTaskDataTy & /*Data*/)>
+      TaskGenTy;
+  void EmitOMPTaskBasedDirective(const OMPExecutableDirective &S,
+                                 const RegionCodeGenTy &BodyGen,
+                                 const TaskGenTy &TaskGen, OMPTaskDataTy &Data);
+
   void EmitOMPParallelDirective(const OMPParallelDirective &S);
   void EmitOMPSimdDirective(const OMPSimdDirective &S);
   void EmitOMPForDirective(const OMPForDirective &S);
@@ -2364,6 +2380,7 @@ public:
   void EmitOMPTargetDataDirective(const OMPTargetDataDirective &S);
   void EmitOMPTargetEnterDataDirective(const OMPTargetEnterDataDirective &S);
   void EmitOMPTargetExitDataDirective(const OMPTargetExitDataDirective &S);
+  void EmitOMPTargetUpdateDirective(const OMPTargetUpdateDirective &S);
   void EmitOMPTargetParallelDirective(const OMPTargetParallelDirective &S);
   void
   EmitOMPTargetParallelForDirective(const OMPTargetParallelForDirective &S);
@@ -2371,6 +2388,7 @@ public:
   void
   EmitOMPCancellationPointDirective(const OMPCancellationPointDirective &S);
   void EmitOMPCancelDirective(const OMPCancelDirective &S);
+  void EmitOMPTaskLoopBasedDirective(const OMPLoopDirective &S);
   void EmitOMPTaskLoopDirective(const OMPTaskLoopDirective &S);
   void EmitOMPTaskLoopSimdDirective(const OMPTaskLoopSimdDirective &S);
   void EmitOMPDistributeDirective(const OMPDistributeDirective &S);
@@ -2418,7 +2436,7 @@ private:
   void EmitOMPOuterLoop(bool IsMonotonic, bool DynamicOrOrdered,
       const OMPLoopDirective &S, OMPPrivateScope &LoopScope, bool Ordered,
       Address LB, Address UB, Address ST, Address IL, llvm::Value *Chunk);
-  void EmitOMPForOuterLoop(OpenMPScheduleClauseKind ScheduleKind,
+  void EmitOMPForOuterLoop(const OpenMPScheduleTy &ScheduleKind,
                            bool IsMonotonic, const OMPLoopDirective &S,
                            OMPPrivateScope &LoopScope, bool Ordered, Address LB,
                            Address UB, Address ST, Address IL,
@@ -2479,7 +2497,6 @@ public:
   void EmitAtomicInit(Expr *E, LValue lvalue);
 
   bool LValueIsSuitableForInlineAtomic(LValue Src);
-  bool typeIsSuitableForInlineAtomic(QualType Ty, bool IsVolatile) const;
 
   RValue EmitAtomicLoad(LValue LV, SourceLocation SL,
                         AggValueSlot Slot = AggValueSlot::ignored());

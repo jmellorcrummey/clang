@@ -48,6 +48,7 @@
 #include <sys/stat.h>
 #include <system_error>
 #include <time.h>
+#include <utility>
 
 using namespace clang;
 
@@ -55,7 +56,8 @@ CompilerInstance::CompilerInstance(
     std::shared_ptr<PCHContainerOperations> PCHContainerOps,
     bool BuildingModule)
     : ModuleLoader(BuildingModule), Invocation(new CompilerInvocation()),
-      ModuleManager(nullptr), ThePCHContainerOperations(PCHContainerOps),
+      ModuleManager(nullptr),
+      ThePCHContainerOperations(std::move(PCHContainerOps)),
       BuildGlobalModuleIndex(false), HaveFullGlobalModuleIndex(false),
       ModuleBuildFailed(false) {}
 
@@ -836,8 +838,9 @@ bool CompilerInstance::ExecuteAction(FrontendAction &Act) {
 
   // Create TargetInfo for the other side of CUDA compilation.
   if (getLangOpts().CUDA && !getFrontendOpts().AuxTriple.empty()) {
-    std::shared_ptr<TargetOptions> TO(new TargetOptions);
+    auto TO = std::make_shared<TargetOptions>();
     TO->Triple = getFrontendOpts().AuxTriple;
+    TO->HostTriple = getTarget().getTriple().str();
     setAuxTarget(TargetInfo::CreateTargetInfo(getDiagnostics(), TO));
   }
 

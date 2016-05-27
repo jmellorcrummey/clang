@@ -745,6 +745,12 @@ def Destructor : InheritableAttr {
   let Documentation = [Undocumented];
 }
 
+def EmptyBases : InheritableAttr, TargetSpecificAttr<TargetMicrosoftCXXABI> {
+  let Spellings = [Declspec<"empty_bases">];
+  let Subjects = SubjectList<[CXXRecord]>;
+  let Documentation = [EmptyBasesDocs];
+}
+
 def EnableIf : InheritableAttr {
   let Spellings = [GNU<"enable_if">];
   let Subjects = SubjectList<[Function]>;
@@ -868,6 +874,13 @@ def Restrict : InheritableAttr {
   let Documentation = [Undocumented];
 }
 
+def LayoutVersion : InheritableAttr, TargetSpecificAttr<TargetMicrosoftCXXABI> {
+  let Spellings = [Declspec<"layout_version">];
+  let Args = [UnsignedArgument<"Version">];
+  let Subjects = SubjectList<[CXXRecord]>;
+  let Documentation = [LayoutVersionDocs];
+}
+
 def MaxFieldAlignment : InheritableAttr {
   // This attribute has no spellings as it is only ever created implicitly.
   let Spellings = [];
@@ -973,7 +986,9 @@ def NoCommon : InheritableAttr {
 
 def NoDebug : InheritableAttr {
   let Spellings = [GCC<"nodebug">];
-  let Documentation = [Undocumented];
+  let Subjects = SubjectList<[FunctionLike, ObjCMethod, GlobalVar], WarnDiag,
+                              "ExpectedFunctionGlobalVarMethodOrProperty">;
+  let Documentation = [NoDebugDocs];
 }
 
 def NoDuplicate : InheritableAttr {
@@ -1611,6 +1626,12 @@ def WeakRef : InheritableAttr {
   let Documentation = [Undocumented];
 }
 
+def LTOVisibilityPublic : InheritableAttr {
+  let Spellings = [CXX11<"clang", "lto_visibility_public">];
+  let Subjects = SubjectList<[Record]>;
+  let Documentation = [LTOVisibilityDocs];
+}
+
 def AnyX86Interrupt : InheritableAttr, TargetSpecificAttr<TargetAnyX86> {
   // NOTE: If you add any additional spellings, ARMInterrupt's,
   // MSP430Interrupt's and MipsInterrupt's spellings must match.
@@ -2149,10 +2170,6 @@ def InitSeg : Attr {
   }];
 }
 
-def Unaligned : IgnoredAttr {
-  let Spellings = [Keyword<"__unaligned">];
-}
-
 def LoopHint : Attr {
   /// #pragma clang loop <option> directive
   /// vectorize: vectorizes loop operations if State == Enable.
@@ -2337,8 +2354,17 @@ def OMPDeclareTargetDecl : Attr {
   let Spellings = [Pragma<"omp", "declare target">];
   let SemaHandler = 0;
   let Documentation = [OMPDeclareTargetDocs];
+  let Args = [
+    EnumArgument<"MapType", "MapTypeTy",
+                 [ "to", "link" ],
+                 [ "MT_To", "MT_Link" ]>
+  ];
   let AdditionalMembers = [{
-    void printPrettyPragma(raw_ostream &OS, const PrintingPolicy &Policy) const {}
+    void printPrettyPragma(raw_ostream &OS, const PrintingPolicy &Policy) const {
+      // Use fake syntax because it is for testing and debugging purpose only.
+      if (getMapType() != MT_To)
+        OS << ConvertMapTypeTyToStr(getMapType()) << " ";
+    }
   }];
 }
 

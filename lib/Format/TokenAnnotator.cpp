@@ -538,6 +538,9 @@ private:
       }
       break;
     case tok::kw_for:
+      if (Style.Language == FormatStyle::LK_JavaScript && Tok->Previous &&
+          Tok->Previous->is(tok::period))
+        break;
       Contexts.back().ColonIsForRangeExpr = true;
       next();
       if (!parseParens())
@@ -920,6 +923,10 @@ private:
       Contexts.back().IsExpression = false;
     } else if (Current.is(TT_LambdaArrow) || Current.is(Keywords.kw_assert)) {
       Contexts.back().IsExpression = Style.Language == FormatStyle::LK_Java;
+    } else if (Current.Previous &&
+               Current.Previous->is(TT_CtorInitializerColon)) {
+      Contexts.back().IsExpression = true;
+      Contexts.back().InCtorInitializer = true;
     } else if (Current.isOneOf(tok::r_paren, tok::greater, tok::comma)) {
       for (FormatToken *Previous = Current.Previous;
            Previous && Previous->isOneOf(tok::star, tok::amp);
@@ -927,10 +934,6 @@ private:
         Previous->Type = TT_PointerOrReference;
       if (Line.MustBeDeclaration && !Contexts.front().InCtorInitializer)
         Contexts.back().IsExpression = false;
-    } else if (Current.Previous &&
-               Current.Previous->is(TT_CtorInitializerColon)) {
-      Contexts.back().IsExpression = true;
-      Contexts.back().InCtorInitializer = true;
     } else if (Current.is(tok::kw_new)) {
       Contexts.back().CanBeExpression = false;
     } else if (Current.isOneOf(tok::semi, tok::exclaim)) {
@@ -1823,6 +1826,8 @@ unsigned TokenAnnotator::splitPenalty(const AnnotatedLine &Line,
     return 500;
   if (Left.isOneOf(tok::kw_class, tok::kw_struct))
     return 5000;
+  if (Left.is(tok::comment))
+    return 1000;
 
   if (Left.isOneOf(TT_RangeBasedForLoopColon, TT_InheritanceColon))
     return 2;
@@ -1965,7 +1970,8 @@ bool TokenAnnotator::spaceRequiredBetween(const AnnotatedLine &Line,
   if (Left.is(tok::less) || Right.isOneOf(tok::greater, tok::less))
     return false;
   if (Right.is(tok::ellipsis))
-    return Left.Tok.isLiteral();
+    return Left.Tok.isLiteral() || (Left.is(tok::identifier) && Left.Previous &&
+                                    Left.Previous->is(tok::kw_case));
   if (Left.is(tok::l_square) && Right.is(tok::amp))
     return false;
   if (Right.is(TT_PointerOrReference))
@@ -2078,8 +2084,11 @@ bool TokenAnnotator::spaceRequiredBefore(const AnnotatedLine &Line,
   } else if (Style.Language == FormatStyle::LK_JavaScript) {
     if (Left.is(TT_JsFatArrow))
       return true;
+    if (Right.is(tok::star) &&
+        Left.isOneOf(Keywords.kw_function, Keywords.kw_yield))
+      return false;
     if (Left.isOneOf(Keywords.kw_let, Keywords.kw_var, Keywords.kw_in,
-                     Keywords.kw_of) &&
+                     Keywords.kw_of, tok::kw_const) &&
         (!Left.Previous || !Left.Previous->is(tok::period)))
       return true;
     if (Left.is(tok::kw_default) && Left.Previous &&
@@ -2171,7 +2180,7 @@ bool TokenAnnotator::spaceRequiredBefore(const AnnotatedLine &Line,
   if (!Style.SpaceBeforeAssignmentOperators &&
       Right.getPrecedence() == prec::Assignment)
     return false;
-  if (Right.is(tok::coloncolon) && Left.isNot(tok::l_brace))
+  if (Right.is(tok::coloncolon) && !Left.isOneOf(tok::l_brace, tok::comment))
     return (Left.is(TT_TemplateOpener) &&
             Style.Standard == FormatStyle::LS_Cpp03) ||
            !(Left.isOneOf(tok::identifier, tok::l_paren, tok::r_paren,
@@ -2457,7 +2466,7 @@ bool TokenAnnotator::canBreakBefore(const AnnotatedLine &Line,
        Left.getPrecedence() == prec::Assignment))
     return true;
   return Left.isOneOf(tok::comma, tok::coloncolon, tok::semi, tok::l_brace,
-                      tok::kw_class, tok::kw_struct) ||
+                      tok::kw_class, tok::kw_struct, tok::comment) ||
          Right.isMemberAccess() ||
          Right.isOneOf(TT_TrailingReturnArrow, TT_LambdaArrow, tok::lessless,
                        tok::colon, tok::l_square, tok::at) ||

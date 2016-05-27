@@ -755,6 +755,7 @@ TEST_F(FormatTest, CaseRanges) {
   verifyFormat("switch (x) {\n"
                "case 'A' ... 'Z':\n"
                "case 1 ... 5:\n"
+               "case a ... b:\n"
                "  break;\n"
                "}");
 }
@@ -1122,7 +1123,7 @@ TEST_F(FormatTest, RemovesTrailingWhitespaceOfComments) {
 
 TEST_F(FormatTest, UnderstandsBlockComments) {
   verifyFormat("f(/*noSpaceAfterParameterNamingComment=*/true);");
-  verifyFormat("void f() { g(/*aaa=*/x, /*bbb=*/!y); }");
+  verifyFormat("void f() { g(/*aaa=*/x, /*bbb=*/!y, /*c=*/::c); }");
   EXPECT_EQ("f(aaaaaaaaaaaaaaaaaaaaaaaaa, /* Trailing comment for aa... */\n"
             "  bbbbbbbbbbbbbbbbbbbbbbbbb);",
             format("f(aaaaaaaaaaaaaaaaaaaaaaaaa ,   \\\n"
@@ -1142,6 +1143,8 @@ TEST_F(FormatTest, UnderstandsBlockComments) {
              "                      aaaaaaaaaaaaaaaaaa  ,\n"
              "    aaaaaaaaaaaaaaaaaa) {   /*aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa*/\n"
              "}"));
+  verifyFormat("f(/* aaaaaaaaaaaaaaaaaa = */\n"
+               "  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa);");
 
   FormatStyle NoBinPacking = getLLVMStyle();
   NoBinPacking.BinPackParameters = false;
@@ -2766,6 +2769,12 @@ TEST_F(FormatTest, MacroDefinitionsWithIncompleteCode) {
                "  case 1:          \\\n"
                "  case 2\n",
                getLLVMStyleWithColumns(20));
+  verifyFormat("#define MACRO(a) \\\n"
+               "  if (a)         \\\n"
+               "    f();         \\\n"
+               "  else           \\\n"
+               "    g()",
+               getLLVMStyleWithColumns(18));
   verifyFormat("#define A template <typename T>");
   verifyIncompleteFormat("#define STR(x) #x\n"
                          "f(STR(this_is_a_string_literal{));");
@@ -5381,6 +5390,10 @@ TEST_F(FormatTest, WrapsTemplateDeclarations) {
   verifyFormat("template <typename T> // T can be A, B or C.\n"
                "struct C {};",
                AlwaysBreak);
+  verifyFormat("template <enum E> class A {\n"
+               "public:\n"
+               "  E *f();\n"
+               "};");
 }
 
 TEST_F(FormatTest, WrapsAtNestedNameSpecifiers) {
@@ -11524,6 +11537,31 @@ TEST_F(ReplacementTest, FormatCodeAfterReplacements) {
   Style.ColumnLimit = 20; // Set column limit to 20 to increase readibility.
   EXPECT_EQ(Expected, applyAllReplacements(
                           Code, formatReplacements(Code, Replaces, Style)));
+}
+
+TEST_F(ReplacementTest, SortIncludesAfterReplacement) {
+  std::string Code = "#include \"a.h\"\n"
+                     "#include \"c.h\"\n"
+                     "\n"
+                     "int main() {\n"
+                     "  return 0;\n"
+                     "}";
+  std::string Expected = "#include \"a.h\"\n"
+                         "#include \"b.h\"\n"
+                         "#include \"c.h\"\n"
+                         "\n"
+                         "int main() {\n"
+                         "  return 0;\n"
+                         "}";
+  FileID ID = Context.createInMemoryFile("fix.cpp", Code);
+  tooling::Replacements Replaces;
+  Replaces.insert(tooling::Replacement(
+      Context.Sources, Context.getLocation(ID, 1, 1), 0, "#include \"b.h\"\n"));
+
+  format::FormatStyle Style = format::getLLVMStyle();
+  Style.SortIncludes = true;
+  auto FinalReplaces = formatReplacements(Code, Replaces, Style);
+  EXPECT_EQ(Expected, applyAllReplacements(Code, FinalReplaces));
 }
 
 } // end namespace

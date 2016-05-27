@@ -1751,6 +1751,29 @@ public:
         Kind, ChunkSize, StartLoc, LParenLoc, KindLoc, CommaLoc, EndLoc);
   }
 
+  /// \brief Build a new OpenMP 'to' clause.
+  ///
+  /// By default, performs semantic analysis to build the new statement.
+  /// Subclasses may override this routine to provide different behavior.
+  OMPClause *RebuildOMPToClause(ArrayRef<Expr *> VarList,
+                                SourceLocation StartLoc,
+                                SourceLocation LParenLoc,
+                                SourceLocation EndLoc) {
+    return getSema().ActOnOpenMPToClause(VarList, StartLoc, LParenLoc, EndLoc);
+  }
+
+  /// \brief Build a new OpenMP 'from' clause.
+  ///
+  /// By default, performs semantic analysis to build the new statement.
+  /// Subclasses may override this routine to provide different behavior.
+  OMPClause *RebuildOMPFromClause(ArrayRef<Expr *> VarList,
+                                  SourceLocation StartLoc,
+                                  SourceLocation LParenLoc,
+                                  SourceLocation EndLoc) {
+    return getSema().ActOnOpenMPFromClause(VarList, StartLoc, LParenLoc,
+                                           EndLoc);
+  }
+
   /// \brief Rebuild the operand to an Objective-C \@synchronized statement.
   ///
   /// By default, performs semantic analysis to build the new statement.
@@ -2637,6 +2660,7 @@ public:
   /// Subclasses may override this routine to provide different behavior.
   ExprResult RebuildCXXConstructExpr(QualType T,
                                      SourceLocation Loc,
+                                     NamedDecl *Found,
                                      CXXConstructorDecl *Constructor,
                                      bool IsElidable,
                                      MultiExprArg Args,
@@ -2651,7 +2675,8 @@ public:
                                           ConvertedArgs))
       return ExprError();
 
-    return getSema().BuildCXXConstructExpr(Loc, T, Constructor, IsElidable,
+    return getSema().BuildCXXConstructExpr(Loc, T, Found, Constructor,
+                                           IsElidable,
                                            ConvertedArgs,
                                            HadMultipleCandidates,
                                            ListInitialization,
@@ -7475,6 +7500,17 @@ StmtResult TreeTransform<Derived>::TransformOMPTargetParallelForDirective(
 }
 
 template <typename Derived>
+StmtResult TreeTransform<Derived>::TransformOMPTargetUpdateDirective(
+    OMPTargetUpdateDirective *D) {
+  DeclarationNameInfo DirName;
+  getDerived().getSema().StartOpenMPDSABlock(OMPD_target_update, DirName,
+                                             nullptr, D->getLocStart());
+  StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
+  getDerived().getSema().EndOpenMPDSABlock(Res.get());
+  return Res;
+}
+
+template <typename Derived>
 StmtResult
 TreeTransform<Derived>::TransformOMPTeamsDirective(OMPTeamsDirective *D) {
   DeclarationNameInfo DirName;
@@ -8023,6 +8059,34 @@ template <typename Derived>
 OMPClause *
 TreeTransform<Derived>::TransformOMPDefaultmapClause(OMPDefaultmapClause *C) {
   return C;
+}
+
+template <typename Derived>
+OMPClause *TreeTransform<Derived>::TransformOMPToClause(OMPToClause *C) {
+  llvm::SmallVector<Expr *, 16> Vars;
+  Vars.reserve(C->varlist_size());
+  for (auto *VE : C->varlists()) {
+    ExprResult EVar = getDerived().TransformExpr(cast<Expr>(VE));
+    if (EVar.isInvalid())
+      return 0;
+    Vars.push_back(EVar.get());
+  }
+  return getDerived().RebuildOMPToClause(Vars, C->getLocStart(),
+                                         C->getLParenLoc(), C->getLocEnd());
+}
+
+template <typename Derived>
+OMPClause *TreeTransform<Derived>::TransformOMPFromClause(OMPFromClause *C) {
+  llvm::SmallVector<Expr *, 16> Vars;
+  Vars.reserve(C->varlist_size());
+  for (auto *VE : C->varlists()) {
+    ExprResult EVar = getDerived().TransformExpr(cast<Expr>(VE));
+    if (EVar.isInvalid())
+      return 0;
+    Vars.push_back(EVar.get());
+  }
+  return getDerived().RebuildOMPFromClause(Vars, C->getLocStart(),
+                                           C->getLParenLoc(), C->getLocEnd());
 }
 
 //===----------------------------------------------------------------------===//
@@ -9880,6 +9944,11 @@ TreeTransform<Derived>::TransformCXXConstructExpr(CXXConstructExpr *E) {
   if (T.isNull())
     return ExprError();
 
+  NamedDecl *FoundDecl = cast_or_null<NamedDecl>(
+      getDerived().TransformDecl(E->getLocStart(), E->getFoundDecl()));
+  if (!FoundDecl)
+    return ExprError();
+
   CXXConstructorDecl *Constructor
     = cast_or_null<CXXConstructorDecl>(
                                 getDerived().TransformDecl(E->getLocStart(),
@@ -9895,6 +9964,7 @@ TreeTransform<Derived>::TransformCXXConstructExpr(CXXConstructExpr *E) {
 
   if (!getDerived().AlwaysRebuild() &&
       T == E->getType() &&
+      FoundDecl == E->getFoundDecl() &&
       Constructor == E->getConstructor() &&
       !ArgumentChanged) {
     // Mark the constructor as referenced.
@@ -9904,8 +9974,8 @@ TreeTransform<Derived>::TransformCXXConstructExpr(CXXConstructExpr *E) {
   }
 
   return getDerived().RebuildCXXConstructExpr(T, /*FIXME:*/E->getLocStart(),
-                                              Constructor, E->isElidable(),
-                                              Args,
+                                              FoundDecl, Constructor,
+                                              E->isElidable(), Args,
                                               E->hadMultipleCandidates(),
                                               E->isListInitialization(),
                                               E->isStdInitListInitialization(),
