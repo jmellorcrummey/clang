@@ -1912,6 +1912,11 @@ CodeGenModule::GetOrCreateLLVMFunction(StringRef MangledName,
   }
 
   assert(F->getName() == MangledName && "name was uniqued!");
+  if (F->getName() == "_ZN3MPI4InfoD2Ev") {
+
+    llvm::errs() << "aiaiai....\n";
+
+  }
   if (D)
     SetFunctionAttributes(GD, F, IsIncompleteFunction, IsThunk);
   if (ExtraAttrs.hasAttributes(llvm::AttributeSet::FunctionIndex)) {

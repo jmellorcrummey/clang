@@ -14,6 +14,7 @@
 #include "CodeGenFunction.h"
 #include "CGCXXABI.h"
 #include "CodeGenModule.h"
+#include "CGOpenMPRuntime.h"
 #include "clang/AST/CXXInheritance.h"
 #include "clang/AST/RecordLayout.h"
 #include "clang/CodeGen/CGFunctionInfo.h"
@@ -596,6 +597,12 @@ llvm::Constant *CodeGenVTables::CreateVTableInitializer(
           break;
         }
         // Method is acceptable, continue processing as usual.
+      }
+
+      // If this is OpenMP device, check if it is legal to emit these methods.
+      if (CGM.getLangOpts().OpenMP && CGM.getOpenMPRuntime().emitTargetGlobal(GD)) {
+        Init = llvm::ConstantExpr::getNullValue(Int8PtrTy);
+        break;
       }
 
       if (cast<CXXMethodDecl>(GD.getDecl())->isPure()) {
