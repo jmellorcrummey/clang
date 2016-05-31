@@ -1499,10 +1499,17 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
         // Get the variable that is initializing the capture.
         CurVD = CurCap->getCapturedVar();
 
+        // If this is an OpenMP capture declaration, we need to look at the
+        // original declaration.
+        const VarDecl *OrigVD = CurVD;
+        if (auto *OD = dyn_cast<OMPCapturedExprDecl>(OrigVD))
+          OrigVD = cast<VarDecl>(
+              cast<DeclRefExpr>(OD->getInit()->IgnoreImpCasts())->getDecl());
+
         // If we have an alloca for this variable, then we need to share the
         // storage too, not only the reference.
         auto *Val =
-            cast<llvm::Instruction>(CGF.GetAddrOfLocalVar(CurVD).getPointer());
+            cast<llvm::Instruction>(CGF.GetAddrOfLocalVar(OrigVD).getPointer());
         if (isa<llvm::LoadInst>(Val))
           DST = DataSharingInfo::DST_Ref;
         else if (isa<llvm::BitCastInst>(Val))
