@@ -690,10 +690,24 @@ private:
   }
 
   LineType parsePreprocessorDirective() {
+    bool IsFirstToken = CurrentToken->IsFirst;
     LineType Type = LT_PreprocessorDirective;
     next();
     if (!CurrentToken)
       return Type;
+
+    if (Style.Language == FormatStyle::LK_JavaScript && IsFirstToken) {
+      // JavaScript files can contain shebang lines of the form:
+      // #!/usr/bin/env node
+      // Treat these like C++ #include directives.
+      while (CurrentToken) {
+        // Tokens cannot be comments here.
+        CurrentToken->Type = TT_ImplicitStringLiteral;
+        next();
+      }
+      return LT_ImportStatement;
+    }
+
     if (CurrentToken->Tok.is(tok::numeric_constant)) {
       CurrentToken->SpacesRequiredBefore = 1;
       return Type;
@@ -1826,6 +1840,8 @@ unsigned TokenAnnotator::splitPenalty(const AnnotatedLine &Line,
     return 500;
   if (Left.isOneOf(tok::kw_class, tok::kw_struct))
     return 5000;
+  if (Left.is(tok::comment))
+    return 1000;
 
   if (Left.isOneOf(TT_RangeBasedForLoopColon, TT_InheritanceColon))
     return 2;
@@ -2464,7 +2480,7 @@ bool TokenAnnotator::canBreakBefore(const AnnotatedLine &Line,
        Left.getPrecedence() == prec::Assignment))
     return true;
   return Left.isOneOf(tok::comma, tok::coloncolon, tok::semi, tok::l_brace,
-                      tok::kw_class, tok::kw_struct) ||
+                      tok::kw_class, tok::kw_struct, tok::comment) ||
          Right.isMemberAccess() ||
          Right.isOneOf(TT_TrailingReturnArrow, TT_LambdaArrow, tok::lessless,
                        tok::colon, tok::l_square, tok::at) ||

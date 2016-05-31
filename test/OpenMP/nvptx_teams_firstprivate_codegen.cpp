@@ -87,12 +87,16 @@ int foo(int n, double* ptr) {
 
   // TCHECK:  define void @__omp_offloading_{{.+}}(i{{[0-9]+}} [[A_IN:%.+]])
   // TCHECK:  [[A_ADDR:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  store i{{[0-9]+}} [[A_IN]], i{{[0-9]+}}* [[A_ADDR]],
   // TCHECK-64:  [[CONV:%.+]] = bitcast i{{[0-9]+}}* [[A_ADDR]] to i{{[0-9]+}}*
+  // TCHECK-64:  {{.}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[CONV]],
   // TCHECK-64:  [[A_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[CONV]],
+  // TCHECK-32:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
   // TCHECK-32:  [[A_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
-  // TCHECK-64:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[CONV]],
-  // TCHECK-32:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A_ADDR]],
+  // TCHECK-64:  store i{{[0-9]+}} [[A_IN_VAL]], i{{[0-9]+}}* [[ATE]],
+  // TCHECK-64:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[ATE]],
+  // TCHECK-32:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[ATE]],
   // TCHECK:  ret void
 
   #pragma omp target firstprivate(a)
@@ -103,11 +107,15 @@ int foo(int n, double* ptr) {
 
   // TCHECK:  define void @__omp_offloading_{{.+}}(i{{[0-9]+}} [[A_IN:%.+]])
   // TCHECK:  [[A_ADDR:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  store i{{[0-9]+}} [[A_IN]], i{{[0-9]+}}* [[A_ADDR]],
   // TCHECK-64:  [[CONV:%.+]] = bitcast i{{[0-9]+}}* [[A_ADDR]] to i{{[0-9]+}}*
-  // TCHECK-32:  [[A_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
-  // TCHECK-64:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[CONV]],
-  // TCHECK-32:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A_ADDR]],
+  // TCHECK-64:  {{.}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[CONV]],
+  // TCHECK-64:  [[A_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[CONV]],  
+  // TCHECK-32:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
+  // TCHECK-32:  [[A_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],  
+  // TCHECK:  store i{{[0-9]+}} [[A_IN_VAL]], i{{[0-9]+}}* [[ATE]],
+  // TCHECK:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[ATE]],
   // TCHECK:  ret void  
 
 
@@ -141,16 +149,22 @@ int foo(int n, double* ptr) {
   // TCHECK:  define void @__omp_offloading_{{.+}}(i{{[0-9]+}} [[A_IN:%.+]], i{{[0-9]+}} [[A2_IN:%.+]])
   // TCHECK:  [[A_ADDR:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[A2_ADDR:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK:  [[A2TE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  store i{{[0-9]+}} [[A_IN]], i{{[0-9]+}}* [[A_ADDR]],
   // TCHECK:  store i{{[0-9]+}} [[A2_IN]], i{{[0-9]+}}* [[A2_ADDR]],
   // TCHECK-64:  [[CONV:%.+]] = bitcast i{{[0-9]+}}* [[A_ADDR]] to i{{[0-9]+}}*
   // TCHECK:  [[CONV2:%.+]] = bitcast i{{[0-9]+}}* [[A2_ADDR]] to i{{[0-9]+}}*
+  // TCHECK-64:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[CONV]],
+  // TCHECK-32:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
+  // TCHECK:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[CONV2]],
   // TCHECK-64:  [[A_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[CONV]],
   // TCHECK-32:  [[A_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
+  // TCHECK:  store i{{[0-9]+}} [[A_IN_VAL]], i{{[0-9]+}}* [[ATE]],
   // TCHECK:  [[A2_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[CONV2]],
-  // TCHECK-64:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[CONV]],
-  // TCHECK-32:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A_ADDR]],
-  // TCHECK:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[CONV2]],
+  // TCHECK:  store i{{[0-9]+}} [[A2_IN_VAL]], i{{[0-9]+}}* [[A2TE]],
+  // TCHECK:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[ATE]],
+  // TCHECK:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A2TE]],
   // TCHECK:  ret void
   
   #pragma omp target firstprivate(a, aa)
@@ -166,25 +180,29 @@ int foo(int n, double* ptr) {
   // TCHECK:  define void @__omp_offloading_{{.+}}(i{{[0-9]+}} [[A_IN:%.+]], i{{[0-9]+}} [[A2_IN:%.+]])
   // TCHECK:  [[A_ADDR:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[A2_ADDR:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK:  [[A2TE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  store i{{[0-9]+}} [[A_IN]], i{{[0-9]+}}* [[A_ADDR]],
   // TCHECK:  store i{{[0-9]+}} [[A2_IN]], i{{[0-9]+}}* [[A2_ADDR]],
   // TCHECK-64:  [[CONV:%.+]] = bitcast i{{[0-9]+}}* [[A_ADDR]] to i{{[0-9]+}}*
   // TCHECK:  [[CONV2:%.+]] = bitcast i{{[0-9]+}}* [[A2_ADDR]] to i{{[0-9]+}}*
-  // TCHECK-64:  [[A_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[CONV]],
-  // TCHECK-32:  [[A_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
+  // TCHECK-64:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[CONV]],
+  // TCHECK-32:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
+  // TCHECK:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[CONV2]],
+  // TCHECK-64:  [[A_IN_VAL]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[CONV]],
+  // TCHECK-32:  [[A_IN_VAL]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
+  // TCHECK:  store i{{[0-9]+}} [[A_IN_VAL]], i{{[0-9]+}}* [[ATE]],
   // TCHECK:  [[A2_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[CONV2]],
-
+  // TCHECK: store i{{[0-9]+}} [[A2_IN_VAL]], i{{[0-9]+}}* [[A2TE]],
   // a = 1, aa = 1
-  // TCHECK-64: store i{{[0-9]+}} 1, i{{[0-9]+}}* [[CONV]],
-  // TCHECK-32: store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A_ADDR]],
-  // TCHECK: store i{{[0-9]+}} 1, i{{[0-9]+}}* [[CONV2]],
+  // TCHECK: store i{{[0-9]+}} 1, i{{[0-9]+}}* [[ATE]],
+  // TCHECK: store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A2TE]],
 
   // aa = a+1
-  // TCHECK-64:  [[ATE_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[CONV]],
-  // TCHECK-32:  [[ATE_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
+  // TCHECK:  [[ATE_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[ATE]],
   // TCHECK:  [[ATE_INC:%.+]] = add{{.+}} i{{[0-9]+}} [[ATE_VAL]], 1
   // TCHECK:  [[ATE_CONV:%.+]] = trunc {{.+}} to
-  // TCHECK:  store i{{[0-9]+}} [[ATE_CONV]], i{{[0-9]+}}* [[CONV2]],
+  // TCHECK:  store i{{[0-9]+}} [[ATE_CONV]], i{{[0-9]+}}* [[A2TE]],
   // TCHECK:  ret void
 
   #pragma omp target private(a, b, c, d)
@@ -244,6 +262,7 @@ int foo(int n, double* ptr) {
   // TCHECK:  [[B_ADDR:%.+]] = alloca [10 x float]*,
   // TCHECK:  [[C_ADDR:%.+]] = alloca [5 x [10 x double]]*,
   // TCHECK:  [[D_ADDR:%.+]] = alloca [[TT]]*,
+  // TCHECK:  [[A:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[B:%.+]] = alloca [10 x float],
   // TCHECK:  [[C:%.+]] = alloca [5 x [10 x double]],
   // TCHECK:  [[D:%.+]] = alloca [[TT]],
@@ -256,7 +275,9 @@ int foo(int n, double* ptr) {
   // TCHECK:  [[C_ADDR_REF:%.+]] = load [5 x [10 x double]]*, [5 x [10 x double]]** [[C_ADDR]],
   // TCHECK:  [[D_ADDR_REF:%.+]] = load %struct.TT*, %struct.TT** [[D_ADDR]],
   
+  // TCHECK-64:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[CONV]],
   // TCHECK-64:  [[A_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[CONV]],
+  // TCHECK-64:  store i{{[0-9]+}} [[A_IN_VAL]], i{{[0-9]+}}* [[A]],
   // TCHECK-32:  [[A_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
   // TCHECK:  [[B_CPY:%.+]] = bitcast [10 x float]* [[B]] to i8*
   // TCHECK:  [[B_IN_CPY:%.+]] = bitcast [10 x float]* [[B_ADDR_REF]] to i8*
@@ -268,8 +289,7 @@ int foo(int n, double* ptr) {
   // TCHECK:  [[D_IN_CPY:%.+]] = bitcast [[TT]]* [[D_ADDR_REF]] to i8*
   // TCHECK:  call void @llvm.memcpy.{{.+}}(i8* [[D_CPY]], i8* [[D_IN_CPY]],{{.+}})
   
-  // TCHECK-64:  store {{.+}} [[CONV]],
-  // TCHECK-32:  store {{.+}} [[A_ADDR]],
+  // TCHECK:  store {{.+}} [[A]],
   // TCHECK:  [[B_IDX:%.+]] = getelementptr{{.+}} [[B]], {{.+}},
   // TCHECK:  store {{.+}} [[B_IDX]],
   // TCHECK:  [[C_IDX1:%.+]] = getelementptr {{.+}} [[C]], {{.+}}
@@ -298,6 +318,7 @@ int foo(int n, double* ptr) {
   // TCHECK:  [[BTA:%.+]] = alloca [10 x float],
   // TCHECK:  [[CTA:%.+]] = alloca [5 x [10 x double]],
   // TCHECK:  [[DTA:%.+]] = alloca [[TT]],
+  // TCHECK:  [[A:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[BTE:%.+]] = alloca [10 x float],
   // TCHECK:  [[CTE:%.+]] = alloca [5 x [10 x double]],
   // TCHECK:  [[DTE:%.+]] = alloca [[TT]],
@@ -310,7 +331,6 @@ int foo(int n, double* ptr) {
   // TCHECK:  [[B_ADDR_REF:%.+]] = load [10 x float]*, [10 x float]** [[B_ADDR]],
   // TCHECK:  [[C_ADDR_REF:%.+]] = load [5 x [10 x double]]*, [5 x [10 x double]]** [[C_ADDR]],
   // TCHECK:  [[D_ADDR_REF:%.+]] = load %struct.TT*, %struct.TT** [[D_ADDR]],
-  
   // TCHECK:  [[B_CPY:%.+]] = bitcast [10 x float]* [[BTA]] to i8*
   // TCHECK:  [[B_IN_CPY:%.+]] = bitcast [10 x float]* [[B_ADDR_REF]] to i8*
   // TCHECK:  call void @llvm.memcpy.{{.+}}(i8* [[B_CPY]], i8* [[B_IN_CPY]],{{.+}})
@@ -320,9 +340,11 @@ int foo(int n, double* ptr) {
   // TCHECK:  [[D_CPY:%.+]] = bitcast [[TT]]* [[DTA]] to i8*
   // TCHECK:  [[D_IN_CPY:%.+]] = bitcast [[TT]]* [[D_ADDR_REF]] to i8*
   // TCHECK:  call void @llvm.memcpy.{{.+}}(i8* [[D_CPY]], i8* [[D_IN_CPY]],{{.+}})
-
+  // TCHECK-64:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[CONV]],
   // TCHECK-64:  [[ATA_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[CONV]],
-  // TCHECK-32:  [[ATA_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
+  // TCHECK-32:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
+  // TCHECK-32:  [[ATA_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],  
+  // TCHECK:  store i{{[0-9]+}} [[ATA_VAL]], i{{[0-9]+}}* [[A]],
   // TCHECK:  [[BTE_CPY:%.+]] = bitcast [10 x float]* [[BTE]] to i8*
   // TCHECK:  [[BTA_CPY:%.+]] = bitcast [10 x float]* [[BTA]] to i8*
   // TCHECK:  call void @llvm.memcpy.{{.+}}(i8* [[BTE_CPY]], i8* [[BTA_CPY]],{{.+}})
@@ -333,8 +355,7 @@ int foo(int n, double* ptr) {
   // TCHECK:  [[DTA_CPY:%.+]] = bitcast [[TT]]* [[DTA]] to i8*
   // TCHECK:  call void @llvm.memcpy.{{.+}}(i8* [[DTE_CPY]], i8* [[DTA_CPY]],{{.+}})
   
-  // TCHECK-64:  store {{.+}} [[CONV]],
-  // TCHECK-32:  store {{.+}} [[A_ADDR]],
+  // TCHECK:  store {{.+}} [[A]],
   // TCHECK:  [[B_IDX:%.+]] = getelementptr{{.+}} [[BTE]], {{.+}},
   // TCHECK:  store {{.+}} [[B_IDX]],
   // TCHECK:  [[C_IDX1:%.+]] = getelementptr {{.+}} [[CTE]], {{.+}}
@@ -353,9 +374,16 @@ int foo(int n, double* ptr) {
 
   // TCHECK:  define void @__omp_offloading_{{.+}}(double* [[PTR_IN:%.+]])
   // TCHECK:  [[PTR_ADDR:%.+]] = alloca double*,
+  // TCHECK:  [[PTR:%.+]] = alloca double*,
   // TCHECK:  store double* [[PTR_IN]], double** [[PTR_ADDR]],
-  // TCHECK-DAG:  getelementptr inbounds double, double* [[PTR_ADDR_REF:%.+]], i{{.+}} 0
-  // TCHECK-DAG:  [[PTR_ADDR_REF]] = load double*, double** [[PTR_ADDR]],
+  // TCHECK:  {{.+}} = load double*, double** [[PTR_ADDR]],
+  // TCHECK:  [[PTR_ADDR_REF:%.+]] = load double*, double** [[PTR_ADDR]],
+  // TCHECK:  store double* [[PTR_ADDR_REF]], double** [[PTR]],
+  // TCHECK:  [[PTR_VAL:%.+]] = load double*, double** [[PTR]],
+  // TCHECK:  [[PTR_VAL_0:%.+]] = getelementptr inbounds double, double* [[PTR_VAL]], i{{.+}} 0
+  // TCHECK:  [[PTR_VAL_0_VAL:%.+]] = load double, double* [[PTR_VAL_0]],
+  // TCHECK:  add double [[PTR_VAL_0_VAL]], 1.{{.+}}
+  // TCHECK:  store double {{.+}}, double* [[PTR_VAL_0]],
 
   #pragma omp target firstprivate(ptr)
   #pragma omp teams firstprivate(ptr)
@@ -365,10 +393,14 @@ int foo(int n, double* ptr) {
 
   // TCHECK:  define void @__omp_offloading_{{.+}}(double* [[PTR_IN:%.+]])
   // TCHECK:  [[PTR_ADDR:%.+]] = alloca double*,
+  // TCHECK:  [[PTR:%.+]] = alloca double*,
   // TCHECK:  store double* [[PTR_IN]], double** [[PTR_ADDR]],
-  // TCHECK-DAG:  getelementptr inbounds double, double* [[PTR_ADDR_REF:%.+]], i{{.+}} 0
-  // TCHECK-DAG:  [[PTR_ADDR_REF]] = load double*, double** [[PTR_ADDR]],
-
+  // TCHECK:  {{.+}} = load double*, double** [[PTR_ADDR]],
+  // TCHECK:  [[PTR_ADDR_REF:%.+]] = load double*, double** [[PTR_ADDR]],
+  // TCHECK:  store double* [[PTR_ADDR_REF]], double** [[PTR]],
+  // TCHECK:  [[PTR_VAL:%.+]] = load double*, double** [[PTR]],
+  // TCHECK:  getelementptr inbounds double, double* [[PTR_VAL:%.+]], i{{.+}} 0
+  // TCHECK-NOT: store double {{.}}, double* [[PTR_ADDR]],
   return a;
 }
 
@@ -464,6 +496,9 @@ int fstatic(int n) {
 // TCHECK:  [[A2_ADDR:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[A3_ADDR:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[B_ADDR:%.+]] = alloca [10 x i{{[0-9]+}}]*,
+// TCHECK:  [[A:%.+]] = alloca i{{[0-9]+}},
+// TCHECK:  [[A2:%.+]] = alloca i{{[0-9]+}},
+// TCHECK:  [[A3:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[B:%.+]] = alloca [10 x i{{[0-9]+}}],
 // TCHECK:  store i{{[0-9]+}} [[A_IN]], i{{[0-9]+}}* [[A_ADDR]],
 // TCHECK:  store i{{[0-9]+}} [[A2_IN]], i{{[0-9]+}}* [[A2_ADDR]],
@@ -473,18 +508,23 @@ int fstatic(int n) {
 // TCHECK:  [[A2_CONV:%.+]] = bitcast i{{[0-9]+}}* [[A2_ADDR]] to i{{[0-9]+}}*
 // TCHECK:  [[A3_CONV:%.+]] = bitcast i{{[0-9]+}}* [[A3_ADDR]] to i{{[0-9]+}}*
 // TCHECK:  [[B_ADDR_REF:%.+]] = load [10 x i{{[0-9]+}}]*, [10 x i{{[0-9]+}}]** [[B_ADDR]],
+// TCHECK-64:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_CONV]],
+// TCHECK-32:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
+// TCHECK:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[A2_CONV]],
+// TCHECK:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[A3_CONV]],
 // TCHECK-64:  [[A_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_CONV]],
-// TCHECK-32:  [[A_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
+// TCHECK-64:  store i{{[0-9]+}} [[A_IN_VAL]], i{{[0-9]+}}* [[A]],
 // TCHECK:  [[A2_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A2_CONV]],
+// TCHECK:  store i{{[0-9]+}} [[A2_IN_VAL]], i{{[0-9]+}}* [[A2]],
 // TCHECK:  [[A3_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A3_CONV]],
+// TCHECK:  store i{{[0-9]+}} [[A3_IN_VAL]], i{{[0-9]+}}* [[A3]],
 // TCHECK:  [[B_CPY:%.+]] = bitcast [10 x i{{[0-9]+}}]* [[B]] to i8*
 // TCHECK:  [[B_IN_CPY:%.+]] = bitcast [10 x i{{[0-9]+}}]* [[B_ADDR_REF]] to i8*
 // TCHECK:  call void @llvm.memcpy.{{.+}}(i8* [[B_CPY]], i8* [[B_IN_CPY]],{{.+}})
 
-// TCHECK-64:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A_CONV]],
-// TCHECK-32:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A_ADDR]],
-// TCHECK:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A2_CONV]],
-// TCHECK:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A3_CONV]],
+// TCHECK:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A]],
+// TCHECK:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A2]],
+// TCHECK:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A3]],
 // TCHECK:  [[B_GEP:%.+]] = getelementptr inbounds [10 x i{{[0-9]+}}], [10 x i{{[0-9]+}}]* [[B]], i{{[0-9]+}} 0, i{{[0-9]+}} 2
 // TCHECK:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[B_GEP]],
 // TCHECK:  ret void
@@ -504,6 +544,9 @@ int fstatic(int n) {
 // TCHECK:  [[A3_ADDR:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[B_ADDR:%.+]] = alloca [10 x i{{[0-9]+}}]*,
 // TCHECK:  [[BTA:%.+]] = alloca [10 x i{{[0-9]+}}],
+// TCHECK:  [[A:%.+]] = alloca i{{[0-9]+}},
+// TCHECK:  [[A2:%.+]] = alloca i{{[0-9]+}},
+// TCHECK:  [[A3:%.+]] = alloca i{{[0-9]+}},  
 // TCHECK:  [[BTE:%.+]] = alloca [10 x i{{[0-9]+}}],
 // TCHECK:  store i{{[0-9]+}} [[A_IN]], i{{[0-9]+}}* [[A_ADDR]],
 // TCHECK:  store i{{[0-9]+}} [[A2_IN]], i{{[0-9]+}}* [[A2_ADDR]],
@@ -518,18 +561,24 @@ int fstatic(int n) {
 // TCHECK:  [[B_IN_CPY:%.+]] = bitcast [10 x i{{[0-9]+}}]* [[B_ADDR_REF]] to i8*
 // TCHECK:  call void @llvm.memcpy.{{.+}}(i8* [[B_CPY]], i8* [[B_IN_CPY]],{{.+}})
 
+// TCHECK-64:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_CONV]],
+// TCHECK-32:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
+// TCHECK:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[A2_CONV]],
+// TCHECK:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[A3_CONV]],
 // TCHECK-64:  [[ATA_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_CONV]],
 // TCHECK-32:  [[ATA_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
+// TCHECK:  store i{{[0-9]+}} [[ATA_VAL]], i{{[0-9]+}}* [[A]],
 // TCHECK:  [[A2TA_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A2_CONV]],
+// TCHECK:  store i{{[0-9]+}} [[A2TA_VAL]], i{{[0-9]+}}* [[A2]],
 // TCHECK:  [[A3TA_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A3_CONV]],
+// TCHECK:  store i{{[0-9]+}} [[A3TA_VAL]], i{{[0-9]+}}* [[A3]],
 // TCHECK:  [[BTE_CPY:%.+]] = bitcast [10 x i{{[0-9]+}}]* [[BTE]] to i8*
 // TCHECK:  [[BTA_IN_CPY:%.+]] = bitcast [10 x i{{[0-9]+}}]* [[BTA]] to i8*
 // TCHECK:  call void @llvm.memcpy.{{.+}}(i8* [[BTE_CPY]], i8* [[BTA_IN_CPY]],{{.+}})
 
-// TCHECK-64:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A_CONV]],
-// TCHECK-32:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A_ADDR]],
-// TCHECK:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A2_CONV]],
-// TCHECK:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A3_CONV]],
+// TCHECK:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A]],
+// TCHECK:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A2]],
+// TCHECK:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A3]],
 // TCHECK:  [[B_GEP:%.+]] = getelementptr inbounds [10 x i{{[0-9]+}}], [10 x i{{[0-9]+}}]* [[BTE]], i{{[0-9]+}} 0, i{{[0-9]+}} 2
 // TCHECK:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[B_GEP]],
 // TCHECK:  ret void
@@ -595,22 +644,27 @@ struct S1 {
   // TCHECK:  [[B_ADDR:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[C_ADDR:%.+]] = alloca [2 x [5 x i{{[0-9]+}}]]*,
   // TCHECK:  [[TH_ADDR:%.+]] = alloca [[S1]]*,
+  // TCHECK:  [[B:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[C:%.+]] = alloca [2 x [5 x i{{[0-9]+}}]],
+
   // TCHECK:  store i{{[0-9]+}} [[B_IN]], i{{[0-9]+}}* [[B_ADDR]],
   // TCHECK:  store [2 x [5 x i{{[0-9]+}}]]* [[C_IN]], [2 x [5 x i{{[0-9]+}}]]** [[C_ADDR]],
   // TCHECK:  store [[S1]]* [[TH]], [[S1]]** [[TH_ADDR]],
+
   // TCHECK-64:  [[B_CONV:%.+]] = bitcast i{{[0-9]+}}* [[B_ADDR]] to i{{[0-9]+}}*
   // TCHECK:  [[C_ADDR_REF:%.+]] = load [2 x [5 x i{{[0-9]+}}]]*, [2 x [5 x i{{[0-9]+}}]]** [[C_ADDR]],
   // TCHECK:  [[TH_ADDR_REF:%.+]] = load [[S1]]*, [[S1]]** [[TH_ADDR]],
+  // TCHECK-64:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[B_CONV]],
   // TCHECK-64:  [[B_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[B_CONV]],
+  // TCHECK-32:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[B_ADDR]],
   // TCHECK-32:  [[B_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[B_ADDR]],
+  // TCHECK:  store i{{[0-9]+}} [[B_IN_VAL]], i{{[0-9]+}}* [[B]],
   // TCHECK:  [[C_CPY:%.+]] = bitcast [2 x [5 x i{{[0-9]+}}]]* [[C]] to i8*
   // TCHECK:  [[C_IN_CPY:%.+]] = bitcast [2 x [5 x i{{[0-9]+}}]]* [[C_ADDR_REF]] to i8*
   // TCHECK:  call void @llvm.memcpy.{{.+}}(i8* [[C_CPY]], i8* [[C_IN_CPY]],{{.+}})
 
   // this->a = (double)b + 1.5;
-  // TCHECK-64: [[B_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[B_CONV]],
-  // TCHECK-32: [[B_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[B_ADDR]],
+  // TCHECK: [[B_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[B]],
   // TCHECK: [[B_CONV:%.+]] = sitofp i{{[0-9]+}} [[B_VAL]] to double
   // TCHECK: [[NEW_A_VAL:%.+]] = fadd double [[B_CONV]], 1.5{{.+}}+00
   // TCHECK: [[A_FIELD:%.+]] = getelementptr inbounds [[S1]], [[S1]]* [[TH_ADDR_REF]], i{{[0-9]+}} 0, i{{[0-9]+}} 0
@@ -642,6 +696,7 @@ struct S1 {
   // TCHECK: [[C_ADDR:%.+]] = alloca [2 x [5 x i{{[0-9]+}}]]*,
   // TCHECK: [[TH_ADDR:%.+]] = alloca [[S1]]*,
   // TCHECK:  [[CTA:%.+]] = alloca [2 x [5 x i{{[0-9]+}}]],
+  // TCHECK: [[B:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[CTE:%.+]] = alloca [2 x [5 x i{{[0-9]+}}]],
 
   // TCHECK:  store i{{[0-9]+}} [[B_IN]], i{{[0-9]+}}* [[B_ADDR]],
@@ -654,15 +709,17 @@ struct S1 {
   // TCHECK:  [[C_IN_CPY:%.+]] = bitcast [2 x [5 x i{{[0-9]+}}]]* [[C_ADDR_REF]] to i8*
   // TCHECK:  call void @llvm.memcpy.{{.+}}(i8* [[C_CPY]], i8* [[C_IN_CPY]],{{.+}})
 
+  // TCHECK-64:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[B_CONV]],
   // TCHECK-64:  [[B_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[B_CONV]],
+  // TCHECK-32:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[B_ADDR]],
   // TCHECK-32:  [[B_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[B_ADDR]],
+  // TCHECK:  store i{{[0-9]+}} [[B_IN_VAL]], i{{[0-9]+}}* [[B]],
   // TCHECK:  [[C_CPY:%.+]] = bitcast [2 x [5 x i{{[0-9]+}}]]* [[CTE]] to i8*
   // TCHECK:  [[C_IN_CPY:%.+]] = bitcast [2 x [5 x i{{[0-9]+}}]]* [[CTA]] to i8*
   // TCHECK:  call void @llvm.memcpy.{{.+}}(i8* [[C_CPY]], i8* [[C_IN_CPY]],{{.+}})
 
   // this->a = (double)b + 1.5;
-  // TCHECK-64: [[B_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[B_CONV]],
-  // TCHECK-32: [[B_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[B_ADDR]],
+  // TCHECK: [[B_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[B]],
   // TCHECK: [[B_CONV:%.+]] = sitofp i{{[0-9]+}} [[B_VAL]] to double
   // TCHECK: [[NEW_A_VAL:%.+]] = fadd double [[B_CONV]], 1.5{{.+}}+00
   // TCHECK: [[A_FIELD:%.+]] = getelementptr inbounds [[S1]], [[S1]]* [[TH_ADDR_REF]], i{{[0-9]+}} 0, i{{[0-9]+}} 0
@@ -722,23 +779,30 @@ int bar(int n, double* ptr){
 // TCHECK:  [[A_ADDR:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[A2_ADDR:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[B_ADDR:%.+]] = alloca [10 x i{{[0-9]+}}]*,
+// TCHECK:  [[A:%.+]] = alloca i{{[0-9]+}},
+// TCHECK:  [[A2:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[B:%.+]] = alloca [10 x i{{[0-9]+}}],
+
 // TCHECK:  store i{{[0-9]+}} [[A_IN]], i{{[0-9]+}}* [[A_ADDR]],
 // TCHECK:  store i{{[0-9]+}} [[A2_IN]], i{{[0-9]+}}* [[A2_ADDR]],
 // TCHECK:  store [10 x i{{[0-9]+}}]* [[B_IN]], [10 x i{{[0-9]+}}]** [[B_ADDR]],
 // TCHECK-64:  [[A_CONV:%.+]] = bitcast i{{[0-9]+}}* [[A_ADDR]] to i{{[0-9]+}}*
 // TCHECK:  [[A2_CONV:%.+]] = bitcast i{{[0-9]+}}* [[A2_ADDR]] to i{{[0-9]+}}*
 // TCHECK:  [[B_ADDR_REF:%.+]] = load [10 x i{{[0-9]+}}]*, [10 x i{{[0-9]+}}]** [[B_ADDR]],
+// TCHECK-64:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_CONV]],
+// TCHECK-32:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
+// TCHECK:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[A2_CONV]],
 // TCHECK-64:  [[A_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_CONV]],
 // TCHECK-32:  [[A_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
+// TCHECK:  store i{{[0-9]+}} [[A_IN_VAL]], i{{[0-9]+}}* [[A]],
 // TCHECK:  [[A2_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A2_CONV]],
+// TCHECK:  store i{{[0-9]+}} [[A2_IN_VAL]], i{{[0-9]+}}* [[A2]],
 // TCHECK:  [[B_CPY:%.+]] = bitcast [10 x i{{[0-9]+}}]* [[B]] to i8*
 // TCHECK:  [[B_IN_CPY:%.+]] = bitcast [10 x i{{[0-9]+}}]* [[B_ADDR_REF]] to i8*
 // TCHECK:  call void @llvm.memcpy.{{.+}}(i8* [[B_CPY]], i8* [[B_IN_CPY]],{{.+}})
 
-// TCHECK-64: store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A_CONV]],
-// TCHECK-32: store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A_ADDR]],
-// TCHECK: store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A2_CONV]],
+// TCHECK: store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A]],
+// TCHECK: store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A2]],
 // TCHECK: [[B_GEP:%.+]] = getelementptr inbounds [10 x i{{[0-9]+}}], [10 x i{{[0-9]+}}]* [[B]], i{{[0-9]+}} 0, i{{[0-9]+}} 2
 // TCHECK: store i{{[0-9]+}} 1, i{{[0-9]+}}* [[B_GEP]],
 // TCHECK: ret void
@@ -748,7 +812,10 @@ int bar(int n, double* ptr){
 // TCHECK:  [[A2_ADDR:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[B_ADDR:%.+]] = alloca [10 x i{{[0-9]+}}]*,
 // TCHECK:  [[BTA:%.+]] = alloca [10 x i{{[0-9]+}}],
+// TCHECK:  [[A:%.+]] = alloca i{{[0-9]+}},
+// TCHECK:  [[A2:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[BTE:%.+]] = alloca [10 x i{{[0-9]+}}],
+
 // TCHECK:  store i{{[0-9]+}} [[A_IN]], i{{[0-9]+}}* [[A_ADDR]],
 // TCHECK:  store i{{[0-9]+}} [[A2_IN]], i{{[0-9]+}}* [[A2_ADDR]],
 // TCHECK:  store [10 x i{{[0-9]+}}]* [[B_IN]], [10 x i{{[0-9]+}}]** [[B_ADDR]],
@@ -759,16 +826,20 @@ int bar(int n, double* ptr){
 // TCHECK:  [[B_IN_CPY:%.+]] = bitcast [10 x i{{[0-9]+}}]* [[B_ADDR_REF]] to i8*
 // TCHECK:  call void @llvm.memcpy.{{.+}}(i8* [[B_CPY]], i8* [[B_IN_CPY]],{{.+}})
 
+// TCHECK-64:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_CONV]],
+// TCHECK-32:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
+// TCHECK:  {{.+}} = load i{{[0-9]+}}, i{{[0-9]+}}* [[A2_CONV]],
 // TCHECK-64:  [[A_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_CONV]],
 // TCHECK-32:  [[A_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A_ADDR]],
+// TCHECK:  store i{{[0-9]+}} [[A_IN_VAL]], i{{[0-9]+}}* [[A]],
 // TCHECK:  [[A2_IN_VAL:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[A2_CONV]],
+// TCHECK:  store i{{[0-9]+}} [[A2_IN_VAL]], i{{[0-9]+}}* [[A2]],
 // TCHECK:  [[B_CPY:%.+]] = bitcast [10 x i{{[0-9]+}}]* [[BTE]] to i8*
 // TCHECK:  [[B_IN_CPY:%.+]] = bitcast [10 x i{{[0-9]+}}]* [[BTA]] to i8*
 // TCHECK:  call void @llvm.memcpy.{{.+}}(i8* [[B_CPY]], i8* [[B_IN_CPY]],{{.+}})
 
-// TCHECK-64: store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A_CONV]],
-// TCHECK-32: store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A_ADDR]],
-// TCHECK: store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A2_CONV]],
+// TCHECK: store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A]],
+// TCHECK: store i{{[0-9]+}} 1, i{{[0-9]+}}* [[A2]],
 // TCHECK: [[B_GEP:%.+]] = getelementptr inbounds [10 x i{{[0-9]+}}], [10 x i{{[0-9]+}}]* [[BTE]], i{{[0-9]+}} 0, i{{[0-9]+}} 2
 // TCHECK: store i{{[0-9]+}} 1, i{{[0-9]+}}* [[B_GEP]],
 // TCHECK: ret void

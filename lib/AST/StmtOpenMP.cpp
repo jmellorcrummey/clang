@@ -1031,6 +1031,28 @@ OMPDistributeDirective::CreateEmpty(const ASTContext &C, unsigned NumClauses,
   return new (Mem) OMPDistributeDirective(CollapsedNum, NumClauses);
 }
 
+OMPTargetUpdateDirective *
+OMPTargetUpdateDirective::Create(const ASTContext &C, SourceLocation StartLoc,
+                                 SourceLocation EndLoc,
+                                 ArrayRef<OMPClause *> Clauses) {
+  unsigned Size = llvm::alignTo(sizeof(OMPTargetUpdateDirective),
+                                llvm::alignOf<OMPClause *>());
+  void *Mem = C.Allocate(Size + sizeof(OMPClause *) * Clauses.size());
+  OMPTargetUpdateDirective *Dir =
+      new (Mem) OMPTargetUpdateDirective(StartLoc, EndLoc, Clauses.size());
+  Dir->setClauses(Clauses);
+  return Dir;
+}
+
+OMPTargetUpdateDirective *
+OMPTargetUpdateDirective::CreateEmpty(const ASTContext &C, unsigned NumClauses,
+                                      EmptyShell) {
+  unsigned Size = llvm::alignTo(sizeof(OMPTargetUpdateDirective),
+                                llvm::alignOf<OMPClause *>());
+  void *Mem = C.Allocate(Size + sizeof(OMPClause *) * NumClauses);
+  return new (Mem) OMPTargetUpdateDirective(NumClauses);
+}
+
 OMPDistributeParallelForDirective *OMPDistributeParallelForDirective::Create(
     const ASTContext &C, SourceLocation StartLoc, SourceLocation EndLoc,
     unsigned CollapsedNum, ArrayRef<OMPClause *> Clauses, Stmt *AssociatedStmt,
@@ -1062,6 +1084,7 @@ OMPDistributeParallelForDirective *OMPDistributeParallelForDirective::Create(
   Dir->setEnsureUpperBound(Exprs.EUB);
   Dir->setNextLowerBound(Exprs.NLB);
   Dir->setNextUpperBound(Exprs.NUB);
+  Dir->setNumIterations(Exprs.NumIterations);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -1141,6 +1164,7 @@ OMPTeamsDistributeParallelForDirective::Create(
   Dir->setEnsureUpperBound(Exprs.EUB);
   Dir->setNextLowerBound(Exprs.NLB);
   Dir->setNextUpperBound(Exprs.NUB);
+  Dir->setNumIterations(Exprs.NumIterations);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -1199,6 +1223,7 @@ OMPTargetTeamsDistributeParallelForDirective::Create(
   Dir->setEnsureUpperBound(Exprs.EUB);
   Dir->setNextLowerBound(Exprs.NLB);
   Dir->setNextUpperBound(Exprs.NUB);
+  Dir->setNumIterations(Exprs.NumIterations);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);

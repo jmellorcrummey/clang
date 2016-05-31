@@ -11,9 +11,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "CGOpenMPRuntime.h"
 #include "CGCXXABI.h"
 #include "CGCleanup.h"
-#include "CGOpenMPRuntime.h"
 #include "CodeGenFunction.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclTemplate.h"
@@ -551,6 +551,8 @@ enum OpenMPSchedType {
   OMP_sch_guided_chunked = 36,
   OMP_sch_runtime = 37,
   OMP_sch_auto = 38,
+  /// static with chunk adjustment (e.g., simd)
+  OMP_sch_static_balanced_chunked   = 45,
   /// \brief Lower bound for 'ordered' versions.
   OMP_ord_lower = 64,
   OMP_ord_static_chunked = 65,
@@ -726,6 +728,9 @@ enum OpenMPRTLFunction {
   // Call to void __tgt_target_data_end(int32_t device_id, int32_t arg_num,
   // void** args_base, void **args, size_t *arg_sizes, int32_t *arg_types);
   OMPRTL__tgt_target_data_end,
+  // Call to void __tgt_target_data_update(int32_t device_id, int32_t arg_num,
+  // void** args_base, void **args, size_t *arg_sizes, int32_t *arg_types);
+  OMPRTL__tgt_target_data_update,
 };
 
 /// A basic class for pre|post-action for advanced codegen sequence for OpenMP
@@ -1742,6 +1747,20 @@ CGOpenMPRuntime::createRuntimeFunction(unsigned Function) {
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_target_data_end");
     break;
   }
+  case OMPRTL__tgt_target_data_update: {
+    // Build void __tgt_target_data_update(int32_t device_id, int32_t arg_num,
+    // void** args_base, void **args, size_t *arg_sizes, int32_t *arg_types);
+    llvm::Type *TypeParams[] = {CGM.Int32Ty,
+                                CGM.Int32Ty,
+                                CGM.VoidPtrPtrTy,
+                                CGM.VoidPtrPtrTy,
+                                CGM.SizeTy->getPointerTo(),
+                                CGM.Int32Ty->getPointerTo()};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__tgt_target_data_update");
+    break;
+  }
   }
   assert(RTLFn && "Unable to find OpenMP runtime function");
   return RTLFn;
@@ -2534,27 +2553,38 @@ bool CGOpenMPRuntime::isDynamic(OpenMPScheduleClauseKind ScheduleKind) const {
 static int addMonoNonMonoModifier(OpenMPSchedType Schedule,
                                   OpenMPScheduleClauseModifier M1,
                                   OpenMPScheduleClauseModifier M2) {
+  int Modifier = 0;
   switch (M1) {
   case OMPC_SCHEDULE_MODIFIER_monotonic:
-    return Schedule | OMP_sch_modifier_monotonic;
+    Modifier = OMP_sch_modifier_monotonic;
+    break;
   case OMPC_SCHEDULE_MODIFIER_nonmonotonic:
-    return Schedule | OMP_sch_modifier_nonmonotonic;
+    Modifier = OMP_sch_modifier_nonmonotonic;
+    break;
   case OMPC_SCHEDULE_MODIFIER_simd:
+    if (Schedule == OMP_sch_static_chunked)
+      Schedule = OMP_sch_static_balanced_chunked;
+    break;
   case OMPC_SCHEDULE_MODIFIER_last:
   case OMPC_SCHEDULE_MODIFIER_unknown:
     break;
   }
   switch (M2) {
   case OMPC_SCHEDULE_MODIFIER_monotonic:
-    return Schedule | OMP_sch_modifier_monotonic;
+    Modifier = OMP_sch_modifier_monotonic;
+    break;
   case OMPC_SCHEDULE_MODIFIER_nonmonotonic:
-    return Schedule | OMP_sch_modifier_nonmonotonic;
+    Modifier = OMP_sch_modifier_nonmonotonic;
+    break;
   case OMPC_SCHEDULE_MODIFIER_simd:
+    if (Schedule == OMP_sch_static_chunked)
+      Schedule = OMP_sch_static_balanced_chunked;
+    break;
   case OMPC_SCHEDULE_MODIFIER_last:
   case OMPC_SCHEDULE_MODIFIER_unknown:
     break;
   }
-  return Schedule;
+  return Schedule | Modifier;
 }
 
 void CGOpenMPRuntime::emitForDispatchInit(CodeGenFunction &CGF,
@@ -2569,7 +2599,8 @@ void CGOpenMPRuntime::emitForDispatchInit(CodeGenFunction &CGF,
       getRuntimeSchedule(ScheduleKind.Schedule, Chunk != nullptr, Ordered);
   assert(Ordered ||
          (Schedule != OMP_sch_static && Schedule != OMP_sch_static_chunked &&
-          Schedule != OMP_ord_static && Schedule != OMP_ord_static_chunked));
+          Schedule != OMP_ord_static && Schedule != OMP_ord_static_chunked &&
+          Schedule != OMP_sch_static_balanced_chunked));
   // Call __kmpc_dispatch_init(
   //          ident_t *loc, kmp_int32 tid, kmp_int32 schedule,
   //          kmp_int[32|64] lower, kmp_int[32|64] upper,
@@ -2601,6 +2632,7 @@ static void emitForStaticInitCall(
 
    assert(!Ordered);
    assert(Schedule == OMP_sch_static || Schedule == OMP_sch_static_chunked ||
+          Schedule == OMP_sch_static_balanced_chunked ||
           Schedule == OMP_ord_static || Schedule == OMP_ord_static_chunked ||
           Schedule == OMP_dist_sch_static ||
           Schedule == OMP_dist_sch_static_chunked);
@@ -2618,6 +2650,7 @@ static void emitForStaticInitCall(
        Chunk = CGF.Builder.getIntN(IVSize, 1);
    } else {
      assert((Schedule == OMP_sch_static_chunked ||
+             Schedule == OMP_sch_static_balanced_chunked ||
              Schedule == OMP_ord_static_chunked ||
              Schedule == OMP_dist_sch_static_chunked) &&
             "expected static chunked schedule");
@@ -2795,8 +2828,10 @@ enum KmpTaskTFields {
   KmpTaskTRoutine,
   /// \brief Partition id for the untied tasks.
   KmpTaskTPartId,
-  /// \brief Function with call of destructors for private variables.
-  KmpTaskTDestructors,
+  /// Function with call of destructors for private variables.
+  Data1,
+  /// Task priority.
+  Data2,
   /// (Taskloops only) Lower bound.
   KmpTaskTLowerBound,
   /// (Taskloops only) Upper bound.
@@ -3475,19 +3510,27 @@ createKmpTaskTRecordDecl(CodeGenModule &CGM, OpenMPDirectiveKind Kind,
   //         void *              shareds;
   //         kmp_routine_entry_t routine;
   //         kmp_int32           part_id;
-  //         kmp_routine_entry_t destructors;
+  //         kmp_cmplrdata_t data1;
+  //         kmp_cmplrdata_t data2;
   // For taskloops additional fields:
   //         kmp_uint64          lb;
   //         kmp_uint64          ub;
   //         kmp_int64           st;
   //         kmp_int32           liter;
   //       };
+  auto *UD = C.buildImplicitRecord("kmp_cmplrdata_t", TTK_Union);
+  UD->startDefinition();
+  addFieldToRecordDecl(C, UD, KmpInt32Ty);
+  addFieldToRecordDecl(C, UD, KmpRoutineEntryPointerQTy);
+  UD->completeDefinition();
+  QualType KmpCmplrdataTy = C.getRecordType(UD);
   auto *RD = C.buildImplicitRecord("kmp_task_t");
   RD->startDefinition();
   addFieldToRecordDecl(C, RD, C.VoidPtrTy);
   addFieldToRecordDecl(C, RD, KmpRoutineEntryPointerQTy);
   addFieldToRecordDecl(C, RD, KmpInt32Ty);
-  addFieldToRecordDecl(C, RD, KmpRoutineEntryPointerQTy);
+  addFieldToRecordDecl(C, RD, KmpCmplrdataTy);
+  addFieldToRecordDecl(C, RD, KmpCmplrdataTy);
   if (isOpenMPTaskLoopDirective(Kind)) {
     QualType KmpUInt64Ty =
         CGM.getContext().getIntTypeForBitwidth(/*DestWidth=*/64, /*Signed=*/0);
@@ -4102,18 +4145,30 @@ CGOpenMPRuntime::emitTaskInit(CodeGenFunction &CGF, SourceLocation Loc,
           /*WithLastIter=*/!Data.LastprivateVars.empty());
     }
   }
+  // Fields of union "kmp_cmplrdata_t" for destructors and priority.
+  enum { Priority = 0, Destructors = 1 };
   // Provide pointer to function with destructors for privates.
-  llvm::Value *DestructorFn =
-      NeedsCleanup ? emitDestructorsFunction(CGM, Loc, KmpInt32Ty,
-                                             KmpTaskTWithPrivatesPtrQTy,
-                                             KmpTaskTWithPrivatesQTy)
-                   : llvm::ConstantPointerNull::get(
-                         cast<llvm::PointerType>(KmpRoutineEntryPtrTy));
-  LValue Destructor = CGF.EmitLValueForField(
-      TDBase, *std::next(KmpTaskTQTyRD->field_begin(), KmpTaskTDestructors));
-  CGF.EmitStoreOfScalar(CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
-                            DestructorFn, KmpRoutineEntryPtrTy),
-                        Destructor);
+  auto FI = std::next(KmpTaskTQTyRD->field_begin(), Data1);
+  auto *KmpCmplrdataUD = (*FI)->getType()->getAsUnionType()->getDecl();
+  if (NeedsCleanup) {
+    llvm::Value *DestructorFn = emitDestructorsFunction(
+        CGM, Loc, KmpInt32Ty, KmpTaskTWithPrivatesPtrQTy,
+        KmpTaskTWithPrivatesQTy);
+    LValue Data1LV = CGF.EmitLValueForField(TDBase, *FI);
+    LValue DestructorsLV = CGF.EmitLValueForField(
+        Data1LV, *std::next(KmpCmplrdataUD->field_begin(), Destructors));
+    CGF.EmitStoreOfScalar(CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
+                              DestructorFn, KmpRoutineEntryPtrTy),
+                          DestructorsLV);
+  }
+  // Set priority.
+  if (Data.Priority.getInt()) {
+    LValue Data2LV = CGF.EmitLValueForField(
+        TDBase, *std::next(KmpTaskTQTyRD->field_begin(), Data2));
+    LValue PriorityLV = CGF.EmitLValueForField(
+        Data2LV, *std::next(KmpCmplrdataUD->field_begin(), Priority));
+    CGF.EmitStoreOfScalar(Data.Priority.getPointer(), PriorityLV);
+  }
   Result.NewTask = NewTask;
   Result.TaskEntry = TaskEntry;
   Result.NewTaskNewTaskTTy = NewTaskNewTaskTTy;
@@ -5259,6 +5314,9 @@ private:
   /// \brief Function the directive is being generated for.
   CodeGenFunction &CGF;
 
+  /// \brief Set of all first private variables in the current directive.
+  llvm::SmallPtrSet<const VarDecl *, 8> FirstPrivateDecls;
+
   llvm::Value *getExprTypeSize(const Expr *E) const {
     auto ExprTy = E->getType().getCanonicalType();
 
@@ -5312,8 +5370,10 @@ private:
     switch (MapType) {
     case OMPC_MAP_alloc:
     case OMPC_MAP_release:
-      // alloc and release require a default behavior by the runtime library,
-      // therefore they do not need to be signaled.
+      // alloc and release is the default behavior in the runtime library,  i.e.
+      // if we don't pass any bits alloc/release that is what the runtime is
+      // going to do. Therefore, we don't need to signal anything for these two
+      // type modifiers.
       break;
     case OMPC_MAP_to:
       Bits = OMP_MAP_TO;
@@ -5609,9 +5669,33 @@ private:
     }
   }
 
+  /// \brief Return the adjusted map modifiers if the declaration a capture
+  /// refers to appears in a first-private clause. This is expected to be used
+  /// only with directives that start with 'target'.
+  unsigned adjustMapModifiersForPrivateClauses(const CapturedStmt::Capture &Cap,
+                                               unsigned CurrentModifiers) {
+    assert(Cap.capturesVariable() && "Expected capture by reference only!");
+
+    // A first private variable captured by reference will use only the
+    // 'private ptr' and 'map to' flag. Return the right flags if the captured
+    // declaration is known as first-private in this handler.
+    if (FirstPrivateDecls.count(Cap.getCapturedVar()))
+      return MappableExprsHandler::OMP_MAP_PRIVATE_PTR |
+             MappableExprsHandler::OMP_MAP_TO;
+
+    // We didn't modify anything.
+    return CurrentModifiers;
+  }
+
 public:
   MappableExprsHandler(const OMPExecutableDirective &Dir, CodeGenFunction &CGF)
-      : Directive(Dir), CGF(CGF) {}
+      : Directive(Dir), CGF(CGF) {
+    // Extract firstprivate clause information.
+    for (const auto *C : Dir.getClausesOfKind<OMPFirstprivateClause>())
+      for (const auto *D : C->varlists())
+        FirstPrivateDecls.insert(
+            cast<VarDecl>(cast<DeclRefExpr>(D)->getDecl())->getCanonicalDecl());
+  }
 
   /// \brief Generate all the base pointers, section pointers, sizes and map
   /// types for the extracted mappable expressions.
@@ -5633,13 +5717,27 @@ public:
     // declaration in a single chunk so that we can generate the map flags
     // correctly. Therefore, we organize all lists in a map.
     llvm::DenseMap<const ValueDecl *, SmallVector<MapInfo, 8>> Info;
+
+    // Helper function to fill the information map for the different supported
+    // clauses.
+    auto &&InfoGen =
+        [&Info](const ValueDecl *D,
+                OMPClauseMappableExprCommon::MappableExprComponentListRef L,
+                OpenMPMapClauseKind MapType, OpenMPMapClauseKind MapModifier) {
+          const ValueDecl *VD =
+              D ? cast<ValueDecl>(D->getCanonicalDecl()) : nullptr;
+          Info[VD].push_back({L, MapType, MapModifier});
+        };
+
     for (auto *C : Directive.getClausesOfKind<OMPMapClause>())
-      for (auto L : C->component_lists()) {
-        const ValueDecl *VD =
-            L.first ? cast<ValueDecl>(L.first->getCanonicalDecl()) : nullptr;
-        Info[VD].push_back(
-            {L.second, C->getMapType(), C->getMapTypeModifier()});
-      }
+      for (auto L : C->component_lists())
+        InfoGen(L.first, L.second, C->getMapType(), C->getMapTypeModifier());
+    for (auto *C : Directive.getClausesOfKind<OMPToClause>())
+      for (auto L : C->component_lists())
+        InfoGen(L.first, L.second, OMPC_MAP_to, OMPC_MAP_unknown);
+    for (auto *C : Directive.getClausesOfKind<OMPFromClause>())
+      for (auto L : C->component_lists())
+        InfoGen(L.first, L.second, OMPC_MAP_from, OMPC_MAP_unknown);
 
     for (auto &M : Info) {
       // We need to know when we generate information for the first component
@@ -5692,6 +5790,86 @@ public:
       }
 
     return;
+  }
+
+  /// \brief Generate the default map information for a given capture \a CI,
+  /// record field declaration \a RI and captured value \a CV.
+  void generateDefaultMapInfo(
+      const CapturedStmt::Capture &CI, const FieldDecl &RI, llvm::Value *CV,
+      MappableExprsHandler::MapValuesArrayTy &CurBasePointers,
+      MappableExprsHandler::MapValuesArrayTy &CurPointers,
+      MappableExprsHandler::MapValuesArrayTy &CurSizes,
+      MappableExprsHandler::MapFlagsArrayTy &CurMapTypes) {
+    auto &Ctx = CGF.getContext();
+
+    // Do the default mapping.
+    if (CI.capturesThis()) {
+      CurBasePointers.push_back(CV);
+      CurPointers.push_back(CV);
+      const PointerType *PtrTy = cast<PointerType>(RI.getType().getTypePtr());
+      CurSizes.push_back(CGF.getTypeSize(PtrTy->getPointeeType()));
+      // Default map type.
+      CurMapTypes.push_back(MappableExprsHandler::OMP_MAP_TO |
+                            MappableExprsHandler::OMP_MAP_FROM);
+    } else if (CI.capturesVariableByCopy()) {
+      if (!RI.getType()->isAnyPointerType()) {
+        // If the field is not a pointer, we need to save the actual value
+        // and load it as a void pointer.
+        CurMapTypes.push_back(MappableExprsHandler::OMP_MAP_PRIVATE_VAL);
+        auto DstAddr = CGF.CreateMemTemp(Ctx.getUIntPtrType(),
+                                         Twine(CI.getCapturedVar()->getName()) +
+                                             ".casted");
+        LValue DstLV = CGF.MakeAddrLValue(DstAddr, Ctx.getUIntPtrType());
+
+        auto *SrcAddrVal = CGF.EmitScalarConversion(
+            DstAddr.getPointer(), Ctx.getPointerType(Ctx.getUIntPtrType()),
+            Ctx.getPointerType(RI.getType()), SourceLocation());
+        LValue SrcLV = CGF.MakeNaturalAlignAddrLValue(SrcAddrVal, RI.getType());
+
+        // Store the value using the source type pointer.
+        CGF.EmitStoreThroughLValue(RValue::get(CV), SrcLV);
+
+        // Load the value using the destination type pointer.
+        CurBasePointers.push_back(
+            CGF.EmitLoadOfLValue(DstLV, SourceLocation()).getScalarVal());
+        CurPointers.push_back(CurBasePointers.back());
+
+        // Get the size of the type to be used in the map.
+        CurSizes.push_back(CGF.getTypeSize(RI.getType()));
+      } else {
+        // Pointers are implicitly mapped with a zero size and no flags
+        // (other than first map that is added for all implicit maps).
+        CurMapTypes.push_back(0u);
+        CurBasePointers.push_back(CV);
+        CurPointers.push_back(CV);
+        CurSizes.push_back(llvm::Constant::getNullValue(CGF.SizeTy));
+      }
+    } else {
+      assert(CI.capturesVariable() && "Expected captured reference.");
+      CurBasePointers.push_back(CV);
+      CurPointers.push_back(CV);
+
+      const ReferenceType *PtrTy =
+          cast<ReferenceType>(RI.getType().getTypePtr());
+      QualType ElementType = PtrTy->getPointeeType();
+      CurSizes.push_back(CGF.getTypeSize(ElementType));
+      // The default map type for a scalar/complex type is 'to' because by
+      // default the value doesn't have to be retrieved. For an aggregate
+      // type, the default is 'tofrom'.
+      CurMapTypes.push_back(ElementType->isAggregateType()
+                                ? (MappableExprsHandler::OMP_MAP_TO |
+                                   MappableExprsHandler::OMP_MAP_FROM)
+                                : MappableExprsHandler::OMP_MAP_TO);
+
+      // If we have a capture by reference we may need to add the private
+      // pointer flag if the base declaration shows in some first-private
+      // clause.
+      CurMapTypes.back() =
+          adjustMapModifiersForPrivateClauses(CI, CurMapTypes.back());
+    }
+    // Every default map produces a single argument, so, it is always the
+    // first one.
+    CurMapTypes.back() |= MappableExprsHandler::OMP_MAP_FIRST_REF;
   }
 };
 
@@ -5850,48 +6028,6 @@ static void emitOffloadingArraysArgument(
   }
 }
 
-/// \brief Return the adjusted map modifiers if the declaration a capture refers
-/// to appears in a private or first-private clause.
-static unsigned
-adjustMapModifiersForPrivateClauses(const OMPExecutableDirective &D,
-                                    const CapturedStmt::Capture *Cap,
-                                    unsigned CurrentModifiers) {
-  assert(Cap->capturesVariable() && "Expected capture by reference only!");
-
-  // The declaration that is being captured.
-  const VarDecl *VD = Cap->getCapturedVar();
-
-  // Check all the private clauses and see if this variable is referred to in
-  // there.
-  for (const auto *C : D.getClausesOfKind<OMPPrivateClause>()) {
-    for (const auto *D : C->varlists()) {
-      const auto *CurVD =
-          cast<VarDecl>(cast<DeclRefExpr>(D)->getDecl())->getCanonicalDecl();
-      // A private variable captured by reference will use only the 'private
-      // ptr' flag.
-      if (CurVD == VD)
-        return MappableExprsHandler::OMP_MAP_PRIVATE_PTR;
-    }
-  }
-
-  // Check all the first private clauses and see if this variable is referred to
-  // in there.
-  for (const auto *C : D.getClausesOfKind<OMPFirstprivateClause>()) {
-    for (const auto *D : C->varlists()) {
-      const auto *CurVD =
-          cast<VarDecl>(cast<DeclRefExpr>(D)->getDecl())->getCanonicalDecl();
-      // A first private variable captured by reference will use only the
-      // 'private ptr' and 'map to' flag.
-      if (CurVD == VD)
-        return MappableExprsHandler::OMP_MAP_PRIVATE_PTR |
-               MappableExprsHandler::OMP_MAP_TO;
-    }
-  }
-
-  // We didn't modify anything.
-  return CurrentModifiers;
-}
-
 void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
                                      const OMPExecutableDirective &D,
                                      llvm::Value *OutlinedFn,
@@ -5917,8 +6053,8 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
   MappableExprsHandler::MapValuesArrayTy CurSizes;
   MappableExprsHandler::MapFlagsArrayTy CurMapTypes;
 
-  // Get map clause information.
-  MappableExprsHandler MCHandler(D, CGF);
+  // Get mappable expression information.
+  MappableExprsHandler MEHandler(D, CGF);
 
   const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
   auto RI = CS.getCapturedRecordDecl()->field_begin();
@@ -5946,82 +6082,11 @@ void CGOpenMPRuntime::emitTargetCall(CodeGenFunction &CGF,
     } else {
       // If we have any information in the map clause, we use it, otherwise we
       // just do a default mapping.
-      MCHandler.generateInfoForCapture(CI, CurBasePointers, CurPointers,
+      MEHandler.generateInfoForCapture(CI, CurBasePointers, CurPointers,
                                        CurSizes, CurMapTypes);
-
-      if (CurBasePointers.empty()) {
-        // Do the default mapping.
-        if (CI->capturesThis()) {
-          CurBasePointers.push_back(*CV);
-          CurPointers.push_back(*CV);
-          const PointerType *PtrTy =
-              cast<PointerType>(RI->getType().getTypePtr());
-          CurSizes.push_back(CGF.getTypeSize(PtrTy->getPointeeType()));
-          // Default map type.
-          CurMapTypes.push_back(MappableExprsHandler::OMP_MAP_TO |
-                                MappableExprsHandler::OMP_MAP_FROM);
-        } else if (CI->capturesVariableByCopy()) {
-          if (!RI->getType()->isAnyPointerType()) {
-            // If the field is not a pointer, we need to save the actual value
-            // and load it as a void pointer.
-            CurMapTypes.push_back(MappableExprsHandler::OMP_MAP_PRIVATE_VAL);
-            auto DstAddr = CGF.CreateMemTemp(
-                Ctx.getUIntPtrType(),
-                Twine(CI->getCapturedVar()->getName()) + ".casted");
-            LValue DstLV = CGF.MakeAddrLValue(DstAddr, Ctx.getUIntPtrType());
-
-            auto *SrcAddrVal = CGF.EmitScalarConversion(
-                DstAddr.getPointer(), Ctx.getPointerType(Ctx.getUIntPtrType()),
-                Ctx.getPointerType(RI->getType()), SourceLocation());
-            LValue SrcLV =
-                CGF.MakeNaturalAlignAddrLValue(SrcAddrVal, RI->getType());
-
-            // Store the value using the source type pointer.
-            CGF.EmitStoreThroughLValue(RValue::get(*CV), SrcLV);
-
-            // Load the value using the destination type pointer.
-            CurBasePointers.push_back(
-                CGF.EmitLoadOfLValue(DstLV, SourceLocation()).getScalarVal());
-            CurPointers.push_back(CurBasePointers.back());
-
-            // Get the size of the type to be used in the map.
-            CurSizes.push_back(CGF.getTypeSize(RI->getType()));
-          } else {
-            // Pointers are implicitly mapped with a zero size and no flags
-            // (other than first map that is added for all implicit maps).
-            CurMapTypes.push_back(0u);
-            CurBasePointers.push_back(*CV);
-            CurPointers.push_back(*CV);
-            CurSizes.push_back(llvm::Constant::getNullValue(CGM.SizeTy));
-          }
-        } else {
-          assert(CI->capturesVariable() && "Expected captured reference.");
-          CurBasePointers.push_back(*CV);
-          CurPointers.push_back(*CV);
-
-          const ReferenceType *PtrTy =
-              cast<ReferenceType>(RI->getType().getTypePtr());
-          QualType ElementType = PtrTy->getPointeeType();
-          CurSizes.push_back(CGF.getTypeSize(ElementType));
-          // The default map type for a scalar/complex type is 'to' because by
-          // default the value doesn't have to be retrieved. For an aggregate
-          // type, the default is 'tofrom'.
-          CurMapTypes.push_back(ElementType->isAggregateType()
-                                    ? (MappableExprsHandler::OMP_MAP_TO |
-                                       MappableExprsHandler::OMP_MAP_FROM)
-                                    : MappableExprsHandler::OMP_MAP_TO);
-
-          // If we have a capture by reference we may need to add the private
-          // pointer flag if the base declaration shows in some first-private or
-          // private clauses.
-          CurMapTypes.back() =
-              adjustMapModifiersForPrivateClauses(D, CI, CurMapTypes.back());
-        
-				}
-        // Every default map produces a single argument, so, it is always the
-        // first one.
-        CurMapTypes.back() |= MappableExprsHandler::OMP_MAP_FIRST_REF;
-      }
+      if (CurBasePointers.empty())
+        MEHandler.generateDefaultMapInfo(*CI, **RI, *CV, CurBasePointers,
+                                         CurPointers, CurSizes, CurMapTypes);
     }
     // We expect to have at least an element of information for this capture.
     assert(!CurBasePointers.empty() && "Non-existing map pointer for capture!");
@@ -6507,15 +6572,16 @@ void CGOpenMPRuntime::emitTargetDataCalls(CodeGenFunction &CGF,
   }
 }
 
-void CGOpenMPRuntime::emitTargetEnterOrExitDataCall(
+void CGOpenMPRuntime::emitTargetDataStandAloneCall(
     CodeGenFunction &CGF, const OMPExecutableDirective &D, const Expr *IfCond,
     const Expr *Device) {
   if (!CGF.HaveInsertPoint())
     return;
 
   assert((isa<OMPTargetEnterDataDirective>(D) ||
-          isa<OMPTargetExitDataDirective>(D)) &&
-         "Expecting either target enter or exit data directives.");
+          isa<OMPTargetExitDataDirective>(D) ||
+          isa<OMPTargetUpdateDirective>(D)) &&
+         "Expecting either target enter, exit data, or update directives.");
 
   // Generate the code for the opening of the data environment.
   auto &&ThenGen = [&D, &CGF, Device](CodeGenFunction &CGF, PrePostActionTy &) {
@@ -6526,8 +6592,8 @@ void CGOpenMPRuntime::emitTargetEnterOrExitDataCall(
     MappableExprsHandler::MapFlagsArrayTy MapTypes;
 
     // Get map clause information.
-    MappableExprsHandler MCHandler(D, CGF);
-    MCHandler.generateAllInfo(BasePointers, Pointers, Sizes, MapTypes);
+    MappableExprsHandler MEHandler(D, CGF);
+    MEHandler.generateAllInfo(BasePointers, Pointers, Sizes, MapTypes);
 
     llvm::Value *BasePointersArrayArg = nullptr;
     llvm::Value *PointersArrayArg = nullptr;
@@ -6557,12 +6623,26 @@ void CGOpenMPRuntime::emitTargetEnterOrExitDataCall(
     llvm::Value *OffloadingArgs[] = {
         DeviceID,         PointerNum,    BasePointersArrayArg,
         PointersArrayArg, SizesArrayArg, MapTypesArrayArg};
+
     auto &RT = CGF.CGM.getOpenMPRuntime();
-    CGF.EmitRuntimeCall(
-        RT.createRuntimeFunction(isa<OMPTargetEnterDataDirective>(D)
-                                     ? OMPRTL__tgt_target_data_begin
-                                     : OMPRTL__tgt_target_data_end),
-        OffloadingArgs);
+    // Select the right runtime function call for each expected standalone
+    // directive.
+    OpenMPRTLFunction RTLFn;
+    switch (D.getDirectiveKind()) {
+    default:
+      llvm_unreachable("Unexpected standalone target data directive.");
+      break;
+    case OMPD_target_enter_data:
+      RTLFn = OMPRTL__tgt_target_data_begin;
+      break;
+    case OMPD_target_exit_data:
+      RTLFn = OMPRTL__tgt_target_data_end;
+      break;
+    case OMPD_target_update:
+      RTLFn = OMPRTL__tgt_target_data_update;
+      break;
+    }
+    CGF.EmitRuntimeCall(RT.createRuntimeFunction(RTLFn), OffloadingArgs);
   };
 
   // In the event we get an if clause, we don't have to take any action on the
@@ -6802,7 +6882,7 @@ void CGOpenMPRuntime::emitDeclareSimdFunction(const FunctionDecl *FD,
   }
 }
 
-StringRef CGOpenMPRuntime::RenameStandardFunction (StringRef name) {
+StringRef CGOpenMPRuntime::RenameStandardFunction(StringRef name) {
   return name;
 }
 

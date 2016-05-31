@@ -2714,7 +2714,7 @@ public:
   /// \param Clauses List of clauses.
   /// \param AssociatedStmt Statement, associated with the directive.
   /// \param Exprs Helper expressions for CodeGen.
-    ///
+  ///
   static OMPDistributeDirective *
   Create(const ASTContext &C, SourceLocation StartLoc, SourceLocation EndLoc,
          unsigned CollapsedNum, ArrayRef<OMPClause *> Clauses,
@@ -2733,6 +2733,65 @@ public:
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == OMPDistributeDirectiveClass;
+  }
+};
+
+/// \brief This represents '#pragma omp target update' directive.
+///
+/// \code
+/// #pragma omp target update to(a) from(b) device(1)
+/// \endcode
+/// In this example directive '#pragma omp target update' has clause 'to' with
+/// argument 'a', clause 'from' with argument 'b' and clause 'device' with
+/// argument '1'.
+///
+class OMPTargetUpdateDirective : public OMPExecutableDirective {
+  friend class ASTStmtReader;
+  /// \brief Build directive with the given start and end location.
+  ///
+  /// \param StartLoc Starting location of the directive kind.
+  /// \param EndLoc Ending Location of the directive.
+  /// \param NumClauses The number of clauses.
+  ///
+  OMPTargetUpdateDirective(SourceLocation StartLoc, SourceLocation EndLoc,
+                           unsigned NumClauses)
+      : OMPExecutableDirective(this, OMPTargetUpdateDirectiveClass,
+                               OMPD_target_update, StartLoc, EndLoc, NumClauses,
+                               0) {}
+
+  /// \brief Build an empty directive.
+  ///
+  /// \param NumClauses Number of clauses.
+  ///
+  explicit OMPTargetUpdateDirective(unsigned NumClauses)
+      : OMPExecutableDirective(this, OMPTargetUpdateDirectiveClass,
+                               OMPD_target_update, SourceLocation(),
+                               SourceLocation(), NumClauses, 0) {}
+
+public:
+  /// \brief Creates directive with a list of \a Clauses.
+  ///
+  /// \param C AST context.
+  /// \param StartLoc Starting location of the directive kind.
+  /// \param EndLoc Ending Location of the directive.
+  /// \param Clauses List of clauses.
+  ///
+  static OMPTargetUpdateDirective *Create(const ASTContext &C,
+                                          SourceLocation StartLoc,
+                                          SourceLocation EndLoc,
+                                          ArrayRef<OMPClause *> Clauses);
+
+  /// \brief Creates an empty directive with the place for \a NumClauses
+  /// clauses.
+  ///
+  /// \param C AST context.
+  /// \param NumClauses The number of clauses.
+  ///
+  static OMPTargetUpdateDirective *CreateEmpty(const ASTContext &C,
+                                               unsigned NumClauses, EmptyShell);
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == OMPTargetUpdateDirectiveClass;
   }
 };
 
@@ -2957,7 +3016,8 @@ class OMPTargetTeamsDistributeParallelForDirective : public OMPLoopDirective {
                                                SourceLocation EndLoc,
                                                unsigned CollapsedNum,
                                                unsigned NumClauses)
-      : OMPLoopDirective(this, OMPTargetTeamsDistributeParallelForDirectiveClass,
+      : OMPLoopDirective(this,
+                         OMPTargetTeamsDistributeParallelForDirectiveClass,
                          OMPD_target_teams_distribute_parallel_for, StartLoc,
                          EndLoc, CollapsedNum, NumClauses) {}
 
@@ -2968,10 +3028,10 @@ class OMPTargetTeamsDistributeParallelForDirective : public OMPLoopDirective {
   ///
   explicit OMPTargetTeamsDistributeParallelForDirective(unsigned CollapsedNum,
                                                         unsigned NumClauses)
-      : OMPLoopDirective(this, OMPTargetTeamsDistributeParallelForDirectiveClass,
-                         OMPD_target_teams_distribute_parallel_for,
-                         SourceLocation(), SourceLocation(), CollapsedNum,
-                         NumClauses) {}
+      : OMPLoopDirective(
+            this, OMPTargetTeamsDistributeParallelForDirectiveClass,
+            OMPD_target_teams_distribute_parallel_for, SourceLocation(),
+            SourceLocation(), CollapsedNum, NumClauses) {}
 
 public:
   /// \brief Creates directive with a list of \a Clauses.
