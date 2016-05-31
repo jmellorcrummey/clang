@@ -316,21 +316,6 @@ private:
   };
   std::vector<DeferredGlobal> DeferredDeclsToEmit;
   void addDeferredDeclToEmit(llvm::GlobalValue *GV, GlobalDecl GD) {
-
-    if (GD.getDecl()) {
-
-      StringRef Name = getMangledName(GD);
-
-      if (Name == "_ZN3MPI4InfoD2Ev") {
-
-        llvm::errs() << "deferring....\n";
-
-      }
-
-      llvm::errs() << "Deferred to emit " << getMangledName(GD);
-
-    }
-
     DeferredDeclsToEmit.emplace_back(GV, GD);
   }
 

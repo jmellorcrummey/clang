@@ -1234,6 +1234,10 @@ public:
   /// \param C 'depend' clause with 'sink|source' dependency kind.
   virtual void emitDoacrossOrdered(CodeGenFunction &CGF,
                                    const OMPDependClause *C);
+
+  /// Return true if the current openMP implementation supports RTTI. The return
+  /// default value is 'true'.
+  virtual bool requiresRTTIDescriptor() { return true; }
 };
 
 } // namespace CodeGen

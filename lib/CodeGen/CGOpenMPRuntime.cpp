@@ -6327,19 +6327,11 @@ bool CGOpenMPRuntime::emitTargetGlobalVariable(GlobalDecl GD) {
 }
 
 bool CGOpenMPRuntime::emitTargetGlobal(GlobalDecl GD) {
-
-  llvm::errs() << "Quering: " << CGM.getMangledName(GD) << "\n";
-
   auto *VD = GD.getDecl();
-  bool Res = false;
   if (isa<FunctionDecl>(VD))
-    Res = emitTargetFunctions(GD);
-  else
-    Res = emitTargetGlobalVariable(GD);
+    return emitTargetFunctions(GD);
 
-  llvm::errs() << "Result: " << (Res?"True":"False") << "\n";
-
-  return Res;
+  return emitTargetGlobalVariable(GD);
 }
 
 /// \brief Return true if the declaration is marked as 'declare target', i.e.

@@ -469,6 +469,10 @@ public:
   /// was emitted in the current module and return the function that registers
   /// it. We take advantage of this hook to do data sharing replacements.
   llvm::Function *emitRegistrationFunction() override;
+
+  /// Return false for the current NVPTX OpenMP implementation as it does NOT
+  /// supports RTTI.
+  bool requiresRTTIDescriptor() override { return false; }
 };
 
 } // CodeGen namespace.
