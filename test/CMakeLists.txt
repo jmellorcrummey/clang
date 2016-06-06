@@ -68,14 +68,16 @@ if( NOT CLANG_BUILT_STANDALONE )
     FileCheck count not
     llc
     llvm-bcanalyzer
-    llvm-lto
     llvm-objdump
     llvm-profdata
     llvm-readobj
     llvm-symbolizer
-    LTO
     opt
     )
+
+  if(TARGET llvm-lto)
+    list(APPEND CLANG_TEST_DEPS llvm-lto)
+  endif()
 endif()
 
 add_custom_target(clang-test-depends DEPENDS ${CLANG_TEST_DEPS})

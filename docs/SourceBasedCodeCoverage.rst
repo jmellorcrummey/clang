@@ -165,9 +165,9 @@ A few final notes:
   indexed profiles. To combine profiling data from multiple runs of a program,
   try e.g:
 
-.. code-block:: console
+  .. code-block:: console
 
-    % llvm-profdata merge -sparse foo1.profraw foo2.profdata -o foo3.profdata
+      % llvm-profdata merge -sparse foo1.profraw foo2.profdata -o foo3.profdata
 
 Format compatibility guarantees
 ===============================
@@ -184,3 +184,21 @@ Format compatibility guarantees
 * There is a third format in play: the format of the coverage mappings emitted
   into instrumented binaries. Tools must retain **backwards** compatibility
   with these formats. These formats are not forwards-compatible.
+
+Drawbacks and limitations
+=========================
+
+* Code coverage does not handle unpredictable changes in control flow or stack
+  unwinding in the presence of exceptions precisely. Consider the following
+  function:
+
+  .. code-block:: cpp
+
+      int f() {
+        may_throw();
+        return 0;
+      }
+
+  If the call to ``may_throw()`` propagates an exception into ``f``, the code
+  coverage tool may mark the ``return`` statement as executed even though it is
+  not. A call to ``longjmp()`` can have similar effects.

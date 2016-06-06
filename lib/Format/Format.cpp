@@ -1436,6 +1436,49 @@ inline bool isHeaderInsertion(const tooling::Replacement &Replace) {
          llvm::Regex(IncludeRegexPattern).match(Replace.getReplacementText());
 }
 
+void skipComments(Lexer &Lex, Token &Tok) {
+  while (Tok.is(tok::comment))
+    if (Lex.LexFromRawLexer(Tok))
+      return;
+}
+
+// Check if a sequence of tokens is like "#<Name> <raw_identifier>". If it is,
+// \p Tok will be the token after this directive; otherwise, it can be any token
+// after the given \p Tok (including \p Tok).
+bool checkAndConsumeDirectiveWithName(Lexer &Lex, StringRef Name, Token &Tok) {
+  bool Matched = Tok.is(tok::hash) && !Lex.LexFromRawLexer(Tok) &&
+                 Tok.is(tok::raw_identifier) &&
+                 Tok.getRawIdentifier() == Name && !Lex.LexFromRawLexer(Tok) &&
+                 Tok.is(tok::raw_identifier);
+  if (Matched)
+    Lex.LexFromRawLexer(Tok);
+  return Matched;
+}
+
+unsigned getOffsetAfterHeaderGuardsAndComments(StringRef FileName,
+                                               StringRef Code,
+                                               FormatStyle Style) {
+  std::unique_ptr<Environment> Env =
+      Environment::CreateVirtualEnvironment(Code, FileName, /*Ranges=*/{});
+  const SourceManager &SourceMgr = Env->getSourceManager();
+  Lexer Lex(Env->getFileID(), SourceMgr.getBuffer(Env->getFileID()), SourceMgr,
+            getFormattingLangOpts(Style));
+  Token Tok;
+  // Get the first token.
+  Lex.LexFromRawLexer(Tok);
+  skipComments(Lex, Tok);
+  unsigned AfterComments = SourceMgr.getFileOffset(Tok.getLocation());
+  if (checkAndConsumeDirectiveWithName(Lex, "ifndef", Tok)) {
+    skipComments(Lex, Tok);
+    if (checkAndConsumeDirectiveWithName(Lex, "define", Tok))
+      return SourceMgr.getFileOffset(Tok.getLocation());
+  }
+  return AfterComments;
+}
+
+// FIXME: we also need to insert a '\n' at the end of the code if we have an
+// insertion with offset Code.size(), and there is no '\n' at the end of the
+// code.
 // FIXME: do not insert headers into conditional #include blocks, e.g. #includes
 // surrounded by compile condition "#if...".
 // FIXME: do not insert existing headers.
@@ -1477,37 +1520,37 @@ fixCppIncludeInsertions(StringRef Code, const tooling::Replacements &Replaces,
   for (const auto &Category : Style.IncludeCategories)
     Priorities.insert(Category.Priority);
   int FirstIncludeOffset = -1;
-  int Offset = 0;
-  int AfterHeaderGuard = 0;
+  // All new headers should be inserted after this offset.
+  unsigned MinInsertOffset =
+      getOffsetAfterHeaderGuardsAndComments(FileName, Code, Style);
+  StringRef TrimmedCode = Code.drop_front(MinInsertOffset);
   SmallVector<StringRef, 32> Lines;
-  Code.split(Lines, '\n');
+  TrimmedCode.split(Lines, '\n');
+  unsigned Offset = MinInsertOffset;
+  unsigned NextLineOffset;
   for (auto Line : Lines) {
+    NextLineOffset = std::min(Code.size(), Offset + Line.size() + 1);
     if (IncludeRegex.match(Line, &Matches)) {
       StringRef IncludeName = Matches[2];
       int Category = Categories.getIncludePriority(
           IncludeName, /*CheckMainHeader=*/FirstIncludeOffset < 0);
-      CategoryEndOffsets[Category] = Offset + Line.size() + 1;
+      CategoryEndOffsets[Category] = NextLineOffset;
       if (FirstIncludeOffset < 0)
         FirstIncludeOffset = Offset;
     }
-    Offset += Line.size() + 1;
-    // FIXME: make header guard matching stricter, e.g. consider #ifndef.
-    if (AfterHeaderGuard == 0 && DefineRegex.match(Line))
-      AfterHeaderGuard = Offset;
+    Offset = NextLineOffset;
   }
 
   // Populate CategoryEndOfssets:
   // - Ensure that CategoryEndOffset[Highest] is always populated.
   // - If CategoryEndOffset[Priority] isn't set, use the next higher value that
   //   is set, up to CategoryEndOffset[Highest].
-  // FIXME: skip comment section in the beginning of the code if there is no
-  // existing #include and #define.
   auto Highest = Priorities.begin();
   if (CategoryEndOffsets.find(*Highest) == CategoryEndOffsets.end()) {
     if (FirstIncludeOffset >= 0)
       CategoryEndOffsets[*Highest] = FirstIncludeOffset;
     else
-      CategoryEndOffsets[*Highest] = AfterHeaderGuard;
+      CategoryEndOffsets[*Highest] = MinInsertOffset;
   }
   // By this point, CategoryEndOffset[Highest] is always set appropriately:
   //  - to an appropriate location before/after existing #includes, or
