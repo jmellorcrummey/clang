@@ -1019,9 +1019,8 @@ void CGOpenMPRuntimeNVPTX::registerParallelContext(
   CurrentParallelContext = CGF.CurCodeDecl;
 
   if (isOpenMPParallelDirective(S.getDirectiveKind()) ||
-      isOpenMPSimdDirective(S.getDirectiveKind())) {
+      isOpenMPSimdDirective(S.getDirectiveKind()))
     createDataSharingInfo(CGF);
-  }
 }
 
 void CGOpenMPRuntimeNVPTX::createOffloadEntry(llvm::Constant *ID,
@@ -1268,6 +1267,27 @@ LValue CGOpenMPRegionInfo::getNumLanesVariableLValue(CodeGenFunction &CGF) {
       getNumLanesVariable()->getType()->castAs<PointerType>());
 }
 
+/// Run the provided function with the shared loop bounds of a loop directive.
+static void DoOnSharedLoopBounds(
+    const OMPExecutableDirective &D,
+    const llvm::function_ref<void(const VarDecl *, const VarDecl *)> &Exec) {
+  // Is this a loop directive?
+  //if (auto *LDir = dyn_cast<OMPLoopDirective>(&D)) {
+  if (isOpenMPLoopBoundSharingDirective(D.getDirectiveKind())) {
+    auto *LDir =  dyn_cast<OMPLoopDirective>(&D);
+    // Do the bounds of the associated loop need to be shared? This check is the
+    // same as checking the existence of an expression that refers to a previous
+    // (enclosing) loop.
+    if (LDir->getPrevLowerBoundVariable()) {
+      const VarDecl *LB = cast<VarDecl>(
+          cast<DeclRefExpr>(LDir->getLowerBoundVariable())->getDecl());
+      const VarDecl *UB = cast<VarDecl>(
+          cast<DeclRefExpr>(LDir->getUpperBoundVariable())->getDecl());
+      Exec(LB, UB);
+    }
+  }
+}
+
 void CGOpenMPRegionInfo::EmitBody(CodeGenFunction &CGF, const Stmt * /*S*/) {
   if (!CGF.HaveInsertPoint())
     return;
@@ -1343,7 +1363,7 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
       OutlinedFun = CGF.GenerateOpenMPCapturedStmtFunction(*CS);
     }
     auto *WrapperFun =
-        createDataSharingParallelWrapper(*OutlinedFun, *CS, CurrentContext);
+        createDataSharingParallelWrapper(*OutlinedFun, D, CurrentContext);
     WrapperFunctionsMap[OutlinedFun] = WrapperFun;
   }
   return OutlinedFun;
@@ -1379,7 +1399,7 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitSimdOutlinedFunction(
   }
 
   auto *WrapperFun = createDataSharingParallelWrapper(
-      *OutlinedFun, *CS, CurrentContext, /*IsSimd=*/true);
+      *OutlinedFun, D, CurrentContext, /*IsSimd=*/true);
   WrapperFunctionsMap[OutlinedFun] = WrapperFun;
   return OutlinedFun;
 }
@@ -1429,9 +1449,11 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
   else
     Body = cast<FunctionDecl>(D)->getBody();
 
+  // Track if in this region one has to share
+
   // Find all the captures in all enclosed regions and obtain their captured
   // statements.
-  SmallVector<const CapturedStmt *, 8> CapturedStmts;
+  SmallVector<const OMPExecutableDirective *, 8> CapturedDirs;
   SmallVector<const Stmt *, 64> WorkList;
   WorkList.push_back(Body);
   while (!WorkList.empty()) {
@@ -1442,9 +1464,9 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
     // Is this a parallel region.
     if (auto *Dir = dyn_cast<OMPExecutableDirective>(CurStmt)) {
       if (isOpenMPParallelDirective(Dir->getDirectiveKind()) ||
-          isOpenMPSimdDirective(Dir->getDirectiveKind()))
-        CapturedStmts.push_back(cast<CapturedStmt>(Dir->getAssociatedStmt()));
-      else {
+          isOpenMPSimdDirective(Dir->getDirectiveKind())) {
+        CapturedDirs.push_back(Dir);
+      } else {
         if (Dir->hasAssociatedStmt()) {
           // Look into the associated statement of OpenMP directives.
           const CapturedStmt &CS =
@@ -1462,7 +1484,7 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
     WorkList.append(CurStmt->child_begin(), CurStmt->child_end());
   }
 
-  assert(!CapturedStmts.empty() && "Expecting at least one parallel region!");
+  assert(!CapturedDirs.empty() && "Expecting at least one parallel region!");
 
   // Scan the captured statements and generate a record to contain all the data
   // to be shared. Make sure we do not share the same thing twice.
@@ -1474,7 +1496,8 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
   SharedWarpRD->startDefinition();
 
   llvm::SmallSet<const VarDecl *, 32> AlreadySharedDecls;
-  for (auto *CS : CapturedStmts) {
+  for (auto *Dir : CapturedDirs) {
+    const CapturedStmt *CS = cast<CapturedStmt>(Dir->getAssociatedStmt());
     const RecordDecl *RD = CS->getCapturedRecordDecl();
     auto CurField = RD->field_begin();
     auto CurCap = CS->capture_begin();
@@ -1533,6 +1556,35 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
                                         /*IndexTypeQuals=*/0);
       addFieldToRecordDecl(C, SharedWarpRD, QTy);
     }
+
+    // Add loop bounds if required.
+    DoOnSharedLoopBounds(
+        *Dir, [&AlreadySharedDecls, &C, &Info, &SharedMasterRD,
+               &SharedWarpRD](const VarDecl *LB, const VarDecl *UB) {
+          // Do not insert the same declaration twice.
+          if (AlreadySharedDecls.count(LB))
+            return;
+
+          // We assume that if the lower bound is not to be shared, the upper
+          // bound is not shared as well.
+          assert(!AlreadySharedDecls.count(UB) &&
+                 "Not expecting shared upper bound.");
+
+          QualType ElemTy = LB->getType();
+
+          // Bounds are shared by value.
+          Info.add(LB, DataSharingInfo::DST_Val);
+          Info.add(UB, DataSharingInfo::DST_Val);
+          addFieldToRecordDecl(C, SharedMasterRD, ElemTy);
+          addFieldToRecordDecl(C, SharedMasterRD, ElemTy);
+
+          llvm::APInt NumElems(C.getTypeSize(C.getUIntPtrType()),
+                               DS_Max_Worker_Warp_Size);
+          auto QTy = C.getConstantArrayType(ElemTy, NumElems, ArrayType::Normal,
+                                            /*IndexTypeQuals=*/0);
+          addFieldToRecordDecl(C, SharedWarpRD, QTy);
+          addFieldToRecordDecl(C, SharedWarpRD, QTy);
+        });
   }
 
   SharedMasterRD->completeDefinition();
@@ -1882,12 +1934,47 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
   EnclosingFuncInfo.InitializationFunction = CGF.CurFn;
 }
 
+// Store the data sharing address of the provided variable (null for 'this').
+static void CreateAddressStoreForVariable(
+    CodeGenFunction &CGF, const VarDecl *VD, QualType Ty,
+    const CGOpenMPRuntimeNVPTX::DataSharingInfo &DSI, llvm::Value *SlotAddr,
+    Address StoreAddr, llvm::Value *LaneID = nullptr) {
+  auto &Ctx = CGF.getContext();
+  auto &Bld = CGF.Builder;
+
+  unsigned Idx = 0;
+  for (; Idx < DSI.CapturesValues.size(); ++Idx)
+    if (DSI.CapturesValues[Idx].first == VD)
+      break;
+  assert(Idx != DSI.CapturesValues.size() && "Capture must exist!");
+
+  llvm::Value *Arg;
+  if (LaneID) {
+    llvm::Value *Idxs[] = {Bld.getInt32(0), Bld.getInt32(Idx), LaneID};
+    Arg = Bld.CreateInBoundsGEP(SlotAddr, Idxs);
+  } else {
+    llvm::Value *Idxs[] = {Bld.getInt32(0), Bld.getInt32(Idx)};
+    Arg = Bld.CreateInBoundsGEP(SlotAddr, Idxs);
+  }
+
+  // If what is being shared is the reference, we should load it.
+  if (DSI.CapturesValues[Idx].second ==
+      CGOpenMPRuntimeNVPTX::DataSharingInfo::DST_Ref) {
+    auto Addr = CGF.MakeNaturalAlignAddrLValue(Arg, Ty);
+    Arg = CGF.EmitLoadOfScalar(Addr, SourceLocation());
+    CGF.EmitStoreOfScalar(Arg, StoreAddr, /*Volatile=*/false, Ty);
+  } else
+    CGF.EmitStoreOfScalar(Arg, StoreAddr, /*Volatile=*/false,
+                          Ctx.getPointerType(Ty));
+}
+
 // \brief Create the data sharing arguments and call the parallel outlined
 // function.
 llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
-    llvm::Function &OutlinedParallelFn, const CapturedStmt &CS,
+    llvm::Function &OutlinedParallelFn, const OMPExecutableDirective &D,
     const Decl *CurrentContext, bool IsSimd) {
   auto &Ctx = CGM.getContext();
+  const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
 
   // Create a function that takes as argument the source lane.
   FunctionArgList WrapperArgs;
@@ -1953,7 +2040,17 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
   // one.
   auto &DSI = getDataSharingInfo(CurrentContext);
 
-  auto &&L0ParallelGen = [this, &DSI, &Ctx, &CS, &RD, &ArgsAddresses,
+  // If this region is sharing loop bounds we need to create the local variables
+  // to store the right addresses.
+  DoOnSharedLoopBounds(D, [&CGF, &Ctx, &ArgsAddresses](const VarDecl *LB,
+                                                       const VarDecl *UB) {
+    ArgsAddresses.push_back(
+        CGF.CreateMemTemp(Ctx.getPointerType(LB->getType()), "prev.lb.addr"));
+    ArgsAddresses.push_back(
+        CGF.CreateMemTemp(Ctx.getPointerType(UB->getType()), "prev.ub.addr"));
+  });
+
+  auto &&L0ParallelGen = [this, &D, &DSI, &Ctx, &CS, &RD, &ArgsAddresses,
                           SourceLaneID](CodeGenFunction &CGF,
                                         PrePostActionTy &) {
     auto &Bld = CGF.Builder;
@@ -1976,28 +2073,21 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
                                               CE = CS.capture_end();
          CI != CE; ++CI, ++ArgsIdx, ++FI) {
       const VarDecl *VD = CI->capturesThis() ? nullptr : CI->getCapturedVar();
-      unsigned Idx = 0;
-      for (; Idx < DSI.CapturesValues.size(); ++Idx)
-        if (DSI.CapturesValues[Idx].first == VD)
-          break;
-      assert(Idx != DSI.CapturesValues.size() && "Capture must exist!");
-
-      llvm::Value *Idxs[] = {Bld.getInt32(0), Bld.getInt32(Idx)};
-      auto *Arg = Bld.CreateInBoundsGEP(CastedDataAddr, Idxs);
-
-      // If what is being shared is the reference, we should load it.
-      if (DSI.CapturesValues[Idx].second == DataSharingInfo::DST_Ref) {
-        auto Addr = CGF.MakeNaturalAlignAddrLValue(Arg, FI->getType());
-        Arg = CGF.EmitLoadOfScalar(Addr, SourceLocation());
-        CGF.EmitStoreOfScalar(Arg, ArgsAddresses[ArgsIdx], /*Volatile=*/false,
-                              FI->getType());
-      } else
-        CGF.EmitStoreOfScalar(Arg, ArgsAddresses[ArgsIdx], /*Volatile=*/false,
-                              Ctx.getPointerType(FI->getType()));
+      CreateAddressStoreForVariable(CGF, VD, FI->getType(), DSI, CastedDataAddr,
+                                    ArgsAddresses[ArgsIdx]);
     }
+
+    // Get the addresses of the loop bounds if required.
+    DoOnSharedLoopBounds(D, [&CGF, &DSI, &CastedDataAddr, &ArgsAddresses,
+                             &ArgsIdx](const VarDecl *LB, const VarDecl *UB) {
+      CreateAddressStoreForVariable(CGF, LB, LB->getType(), DSI, CastedDataAddr,
+                                    ArgsAddresses[ArgsIdx++]);
+      CreateAddressStoreForVariable(CGF, UB, UB->getType(), DSI, CastedDataAddr,
+                                    ArgsAddresses[ArgsIdx++]);
+    });
   };
 
-  auto &&L1ParallelGen = [this, &DSI, &Ctx, &CS, &RD, &ArgsAddresses,
+  auto &&L1ParallelGen = [this, &D, &DSI, &Ctx, &CS, &RD, &ArgsAddresses,
                           SourceLaneID](CodeGenFunction &CGF,
                                         PrePostActionTy &) {
     auto &Bld = CGF.Builder;
@@ -2021,25 +2111,19 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
                                               CE = CS.capture_end();
          CI != CE; ++CI, ++ArgsIdx, ++FI) {
       const VarDecl *VD = CI->capturesThis() ? nullptr : CI->getCapturedVar();
-      unsigned Idx = 0;
-      for (; Idx < DSI.CapturesValues.size(); ++Idx)
-        if (DSI.CapturesValues[Idx].first == VD)
-          break;
-      assert(Idx != DSI.CapturesValues.size() && "Capture must exist!");
-
-      llvm::Value *Idxs[] = {Bld.getInt32(0), Bld.getInt32(Idx), SourceLaneID};
-      auto *Arg = Bld.CreateInBoundsGEP(CastedDataAddr, Idxs);
-
-      // If the what is being shared is the reference, we should load it.
-      if (DSI.CapturesValues[Idx].second == DataSharingInfo::DST_Ref) {
-        auto Addr = CGF.MakeNaturalAlignAddrLValue(Arg, FI->getType());
-        Arg = CGF.EmitLoadOfScalar(Addr, SourceLocation());
-        CGF.EmitStoreOfScalar(Arg, ArgsAddresses[ArgsIdx], /*Volatile=*/false,
-                              FI->getType());
-      } else
-        CGF.EmitStoreOfScalar(Arg, ArgsAddresses[ArgsIdx], /*Volatile=*/false,
-                              Ctx.getPointerType(FI->getType()));
+      CreateAddressStoreForVariable(CGF, VD, FI->getType(), DSI, CastedDataAddr,
+                                    ArgsAddresses[ArgsIdx], SourceLaneID);
     }
+
+    // Get the addresses of the loop bounds if required.
+    DoOnSharedLoopBounds(D, [&CGF, &DSI, &CastedDataAddr, &ArgsAddresses,
+                             &ArgsIdx, SourceLaneID](const VarDecl *LB,
+                                                     const VarDecl *UB) {
+      CreateAddressStoreForVariable(CGF, LB, LB->getType(), DSI, CastedDataAddr,
+                                    ArgsAddresses[ArgsIdx++], SourceLaneID);
+      CreateAddressStoreForVariable(CGF, UB, UB->getType(), DSI, CastedDataAddr,
+                                    ArgsAddresses[ArgsIdx++], SourceLaneID);
+    });
   };
   auto &&Sequential = [](CodeGenFunction &CGF, PrePostActionTy &) {
     // A sequential region does not use the wrapper.
@@ -2068,9 +2152,26 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
     Args.push_back(llvm::Constant::getNullValue(CGM.Int32Ty->getPointerTo()));
   }
 
+  // Get the addresses of the loop bounds if required.
+  DoOnSharedLoopBounds(D, [&CGF, &Ctx, &CS, &ArgsAddresses,
+                           &Args](const VarDecl *LB, const VarDecl *UB) {
+    QualType Ty = Ctx.getPointerType(Ctx.getUIntPtrType());
+    unsigned Idx = 0;
+    for (const VarDecl *L : {LB, UB}) {
+      auto *Arg =
+          CGF.EmitLoadOfScalar(ArgsAddresses[CS.capture_size() + Idx],
+                               /*Volatile=*/false, Ty, SourceLocation());
+      // Bounds are passed by value, so we need to load the data.
+      auto LV = CGF.MakeNaturalAlignAddrLValue(Arg, L->getType());
+      Arg = CGF.EmitLoadOfScalar(LV, SourceLocation());
+      Args.push_back(Arg);
+      ++Idx;
+    }
+  });
+
   auto FI = DSI.MasterRecordType->getAs<RecordType>()->getDecl()->field_begin();
   auto CI = CS.capture_begin();
-  for (unsigned i = 0; i < ArgsAddresses.size(); ++i, ++FI, ++CI) {
+  for (unsigned i = 0; i < CS.capture_size(); ++i, ++FI, ++CI) {
     auto *Arg = CGF.EmitLoadOfScalar(ArgsAddresses[i], /*Volatile=*/false,
                                      Ctx.getPointerType(FI->getType()),
                                      SourceLocation());
@@ -2623,12 +2724,6 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
       auto *From = R.first;
       auto *To = new llvm::LoadInst(R.second, "", /*isVolatile=*/false,
                                     PointerAlign, InsertPtr);
-
-      //      auto *Arg = llvm::CastInst::CreateBitOrPointerCast(To,
-      //      CGM.Int64Ty, "", InsertPtr);
-      //      llvm::Value *Args[] = { Arg };
-      //      llvm::CallInst::Create(createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_samuel_print),
-      //      Args, "", InsertPtr);
 
       // Check if there are uses of From before To and move them after To. These
       // are usually the function epilogue stores.
