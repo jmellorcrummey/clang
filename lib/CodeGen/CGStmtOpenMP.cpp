@@ -195,8 +195,7 @@ static Address castValueFromUintptr(CodeGenFunction &CGF, QualType DstType,
 }
 
 llvm::Function *
-CodeGenFunction::GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S,
-                                                    bool CastValToPtr) {
+CodeGenFunction::GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S) {
   assert(
       CapturedStmtInfo &&
       "CapturedStmtInfo should be set when generating the captured function");
@@ -220,11 +219,9 @@ CodeGenFunction::GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S,
     // uintptr. This is necessary given that the runtime library is only able to
     // deal with pointers. We can pass in the same way the VLA type sizes to the
     // outlined function.
-    if (CastValToPtr) {
-      if ((I->capturesVariableByCopy() && !ArgType->isAnyPointerType()) ||
-          I->capturesVariableArrayType())
-        ArgType = Ctx.getUIntPtrType();
-    }
+    if ((I->capturesVariableByCopy() && !ArgType->isAnyPointerType()) ||
+        I->capturesVariableArrayType())
+      ArgType = Ctx.getUIntPtrType();
 
     if (I->capturesVariable() || I->capturesVariableByCopy()) {
       CapVar = I->getCapturedVar();
@@ -278,12 +275,9 @@ CodeGenFunction::GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S,
                        AlignmentSource::Decl);
     if (FD->hasCapturedVLAType()) {
       LValue CastedArgLVal =
-          CastValToPtr
-              ? MakeAddrLValue(castValueFromUintptr(*this, FD->getType(),
-                                                    Args[Cnt]->getName(),
-                                                    ArgLVal),
-                               FD->getType(), AlignmentSource::Decl)
-              : ArgLVal;
+          MakeAddrLValue(castValueFromUintptr(*this, FD->getType(),
+                                              Args[Cnt]->getName(), ArgLVal),
+                         FD->getType(), AlignmentSource::Decl);
       auto *ExprArg =
           EmitLoadOfLValue(CastedArgLVal, SourceLocation()).getScalarVal();
       auto VAT = FD->getCapturedVLAType();
@@ -303,16 +297,9 @@ CodeGenFunction::GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S,
              "Not expecting a captured pointer.");
       auto *Var = I->getCapturedVar();
       QualType VarTy = Var->getType();
-      if (!CastValToPtr && VarTy->isReferenceType()) {
-        Address Temp = CreateMemTemp(VarTy);
-        Builder.CreateStore(ArgLVal.getPointer(), Temp);
-        ArgLVal = MakeAddrLValue(Temp, VarTy);
-      }
-      setAddrOfLocalVar(Var, CastValToPtr ? castValueFromUintptr(
-                                                *this, FD->getType(),
-                                                Args[Cnt]->getName(), ArgLVal,
-                                                VarTy->isReferenceType())
-                                          : ArgLVal.getAddress());
+      setAddrOfLocalVar(Var, castValueFromUintptr(*this, FD->getType(),
+                                                  Args[Cnt]->getName(), ArgLVal,
+                                                  VarTy->isReferenceType()));
     } else {
       // If 'this' is captured, load it into CXXThisValue.
       assert(I->capturesThis());

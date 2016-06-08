@@ -4815,8 +4815,7 @@ void CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(
   CGOpenMPTargetRegionInfo CGInfo(CS, CodeGen, EntryFnName);
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
 
-  OutlinedFn =
-      CGF.GenerateOpenMPCapturedStmtFunction(CS, /*CastValToPtr=*/true);
+  OutlinedFn = CGF.GenerateOpenMPCapturedStmtFunction(CS);
 
   // If this target outline function is not an offload entry, we don't need to
   // register it.
