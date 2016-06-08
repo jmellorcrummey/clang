@@ -2465,6 +2465,8 @@ void ASTStmtReader::VisitOMPLoopDirective(OMPLoopDirective *D) {
     D->setIsLastIterVariable(Reader.ReadSubExpr());
     D->setLowerBoundVariable(Reader.ReadSubExpr());
     D->setUpperBoundVariable(Reader.ReadSubExpr());
+    D->setPrevLowerBoundVariable(Reader.ReadSubExpr());
+    D->setPrevUpperBoundVariable(Reader.ReadSubExpr());
     D->setStrideVariable(Reader.ReadSubExpr());
     D->setEnsureUpperBound(Reader.ReadSubExpr());
     D->setNextLowerBound(Reader.ReadSubExpr());

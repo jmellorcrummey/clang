@@ -213,6 +213,10 @@ bool isOpenMPThreadPrivate(OpenMPClauseKind Kind);
 /// Checks if the specified directive kind is one of tasking directives - task,
 /// taskloop or taksloop simd.
 bool isOpenMPTaskingDirective(OpenMPDirectiveKind Kind);
+
+// Checks if the specified directive kind is a combined or composite one that
+/// requires sharing of bounds between different generated loops
+bool isOpenMPLoopBoundSharingDirective(OpenMPDirectiveKind Kind);
 }
 
 #endif

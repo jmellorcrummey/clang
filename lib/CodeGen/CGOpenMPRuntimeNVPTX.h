@@ -90,6 +90,7 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   llvm::Function *
   createKernelInitializerFunction(llvm::Function *WorkerFunction);
 
+public:
   // \brief Group the captures information for a given context.
   struct DataSharingInfo {
     enum DataSharingType {
@@ -118,6 +119,7 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
     QualType WorkerWarpRecordType;
   };
 
+private:
   // \brief Map between a context and its data sharing information.
   typedef llvm::DenseMap<const Decl *, DataSharingInfo> DataSharingInfoMapTy;
   DataSharingInfoMapTy DataSharingInfoMap;
@@ -155,7 +157,7 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // \brief Create the data sharing arguments and call the parallel outlined
   // function.
   llvm::Function *createDataSharingParallelWrapper(
-      llvm::Function &OutlinedParallelFn, const CapturedStmt &CS,
+      llvm::Function &OutlinedParallelFn, const OMPExecutableDirective &D,
       const Decl *CurrentContext, bool IsSimd = false);
 
   // \brief Map between an outlined function and its data-sharing-wrap version.
