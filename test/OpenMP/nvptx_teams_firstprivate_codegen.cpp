@@ -32,8 +32,8 @@ int foo(int n, double* ptr) {
   }
 
   // TCHECK:  define void @__omp_offloading_{{.+}}()
-  // TCHECK:  [[ATA:%.+]] = alloca i{{[0-9]+}},
-  // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK:  [[ATA:%.+]] = alloca i32,
+  // TCHECK:  [[ATE:%.+]] = alloca i32,
   // TCHECK-DAG:  store i{{[0-9]+}} [[ATA_VAL:%.+]], i{{[0-9]+}}* [[ATE]],
   // TCHECK-DAG:  [[ATA_VAL]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[ATA]],
   // TCHECK:  ret void
@@ -72,8 +72,9 @@ int foo(int n, double* ptr) {
   }
 
   // TCHECK:  define void @__omp_offloading_{{.+}}()
-  // TCHECK:  [[ATA:%.+]] = alloca i{{[0-9]+}},
-  // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK:  [[ATA:%.+]] = alloca i32,
+  // TCHECK:  alloca i{{32|64}},
+  // TCHECK:  [[ATE:%.+]] = alloca i32,
   // TCHECK-DAG:  store i{{[0-9]+}} [[ATA_VAL:%.+]], i{{[0-9]+}}* [[ATE]],
   // TCHECK-DAG:  [[ATA_VAL]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[ATA]],
   // TCHECK:  store i{{[0-9]+}} 1, i{{[0-9]+}}* [[ATE]],
@@ -87,6 +88,7 @@ int foo(int n, double* ptr) {
 
   // TCHECK:  define void @__omp_offloading_{{.+}}(i{{[0-9]+}} [[A_IN:%.+]])
   // TCHECK:  [[A_ADDR:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK:  alloca i{{[0-9]+}},
   // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  store i{{[0-9]+}} [[A_IN]], i{{[0-9]+}}* [[A_ADDR]],
   // TCHECK-64:  [[CONV:%.+]] = bitcast i{{[0-9]+}}* [[A_ADDR]] to i{{[0-9]+}}*
@@ -107,6 +109,7 @@ int foo(int n, double* ptr) {
 
   // TCHECK:  define void @__omp_offloading_{{.+}}(i{{[0-9]+}} [[A_IN:%.+]])
   // TCHECK:  [[A_ADDR:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK:  alloca i{{[0-9]+}},
   // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  store i{{[0-9]+}} [[A_IN]], i{{[0-9]+}}* [[A_ADDR]],
   // TCHECK-64:  [[CONV:%.+]] = bitcast i{{[0-9]+}}* [[A_ADDR]] to i{{[0-9]+}}*
@@ -129,6 +132,8 @@ int foo(int n, double* ptr) {
   // TCHECK:  define void @__omp_offloading_{{.+}}()
   // TCHECK:  [[ATA:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[A2TA:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK:  alloca i{{[0-9]+}},
+  // TCHECK:  alloca i{{[0-9]+}},
   // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[A2TE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK-DAG:  store i{{[0-9]+}} [[ATA_VAL:%.+]], i{{[0-9]+}}* [[ATE]],
@@ -149,6 +154,8 @@ int foo(int n, double* ptr) {
   // TCHECK:  define void @__omp_offloading_{{.+}}(i{{[0-9]+}} [[A_IN:%.+]], i{{[0-9]+}} [[A2_IN:%.+]])
   // TCHECK:  [[A_ADDR:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[A2_ADDR:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK:  alloca i{{[0-9]+}},
+  // TCHECK:  alloca i{{[0-9]+}},
   // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[A2TE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  store i{{[0-9]+}} [[A_IN]], i{{[0-9]+}}* [[A_ADDR]],
@@ -180,6 +187,8 @@ int foo(int n, double* ptr) {
   // TCHECK:  define void @__omp_offloading_{{.+}}(i{{[0-9]+}} [[A_IN:%.+]], i{{[0-9]+}} [[A2_IN:%.+]])
   // TCHECK:  [[A_ADDR:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[A2_ADDR:%.+]] = alloca i{{[0-9]+}},
+  // TCHECK:  alloca i{{[0-9]+}},
+  // TCHECK:  alloca i{{[0-9]+}},
   // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[A2TE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  store i{{[0-9]+}} [[A_IN]], i{{[0-9]+}}* [[A_ADDR]],
@@ -220,6 +229,7 @@ int foo(int n, double* ptr) {
   // TCHECK:  [[BTA:%.+]] = alloca [10 x float],
   // TCHECK:  [[CTA:%.+]] = alloca [5 x [10 x double]],
   // TCHECK:  [[DTA:%.+]] = alloca [[TT]],
+  // TCHECK:  alloca i{{[0-9]+}},
   // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[BTE:%.+]] = alloca [10 x float],
   // TCHECK:  [[CTE:%.+]] = alloca [5 x [10 x double]],
@@ -262,6 +272,7 @@ int foo(int n, double* ptr) {
   // TCHECK:  [[B_ADDR:%.+]] = alloca [10 x float]*,
   // TCHECK:  [[C_ADDR:%.+]] = alloca [5 x [10 x double]]*,
   // TCHECK:  [[D_ADDR:%.+]] = alloca [[TT]]*,
+  // TCHECK:  alloca i{{[0-9]+}},
   // TCHECK:  [[A:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[B:%.+]] = alloca [10 x float],
   // TCHECK:  [[C:%.+]] = alloca [5 x [10 x double]],
@@ -318,6 +329,7 @@ int foo(int n, double* ptr) {
   // TCHECK:  [[BTA:%.+]] = alloca [10 x float],
   // TCHECK:  [[CTA:%.+]] = alloca [5 x [10 x double]],
   // TCHECK:  [[DTA:%.+]] = alloca [[TT]],
+  // TCHECK:  alloca i{{[0-9]+}},
   // TCHECK:  [[A:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[BTE:%.+]] = alloca [10 x float],
   // TCHECK:  [[CTE:%.+]] = alloca [5 x [10 x double]],
@@ -459,6 +471,9 @@ int fstatic(int n) {
 // TCHECK:  [[A2TA:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[A3TA:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[BTA:%.+]] = alloca [10 x i{{[0-9]+}}],
+// TCHECK:  alloca i{{[0-9]+}},
+// TCHECK:  alloca i{{[0-9]+}},
+// TCHECK:  alloca i{{[0-9]+}},
 // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[A2TE:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[A3TE:%.+]] = alloca i{{[0-9]+}},
@@ -496,6 +511,9 @@ int fstatic(int n) {
 // TCHECK:  [[A2_ADDR:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[A3_ADDR:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[B_ADDR:%.+]] = alloca [10 x i{{[0-9]+}}]*,
+// TCHECK:  alloca i{{[0-9]+}},
+// TCHECK:  alloca i{{[0-9]+}},
+// TCHECK:  alloca i{{[0-9]+}},
 // TCHECK:  [[A:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[A2:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[A3:%.+]] = alloca i{{[0-9]+}},
@@ -544,6 +562,9 @@ int fstatic(int n) {
 // TCHECK:  [[A3_ADDR:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[B_ADDR:%.+]] = alloca [10 x i{{[0-9]+}}]*,
 // TCHECK:  [[BTA:%.+]] = alloca [10 x i{{[0-9]+}}],
+// TCHECK:  alloca i{{[0-9]+}},
+// TCHECK:  alloca i{{[0-9]+}},
+// TCHECK:  alloca i{{[0-9]+}},
 // TCHECK:  [[A:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[A2:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[A3:%.+]] = alloca i{{[0-9]+}},  
@@ -604,6 +625,7 @@ struct S1 {
   // TCHECK:  [[TH_ADDR:%.+]] = alloca [[S1]]*,
   // TCHECK:  [[BTA:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[CTA:%.+]] = alloca [2 x [5 x i{{[0-9]+}}]],
+  // TCHECK:  alloca i{{[0-9]+}},
   // TCHECK:  [[BTE:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[CTE:%.+]] = alloca [2 x [5 x i{{[0-9]+}}]],
   // TCHECK:  store [[S1]]* [[TH]], [[S1]]** [[TH_ADDR]],
@@ -644,6 +666,7 @@ struct S1 {
   // TCHECK:  [[B_ADDR:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[C_ADDR:%.+]] = alloca [2 x [5 x i{{[0-9]+}}]]*,
   // TCHECK:  [[TH_ADDR:%.+]] = alloca [[S1]]*,
+  // TCHECK:  alloca i{{[0-9]+}},
   // TCHECK:  [[B:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[C:%.+]] = alloca [2 x [5 x i{{[0-9]+}}]],
 
@@ -696,6 +719,7 @@ struct S1 {
   // TCHECK: [[C_ADDR:%.+]] = alloca [2 x [5 x i{{[0-9]+}}]]*,
   // TCHECK: [[TH_ADDR:%.+]] = alloca [[S1]]*,
   // TCHECK:  [[CTA:%.+]] = alloca [2 x [5 x i{{[0-9]+}}]],
+  // TCHECK:  alloca i{{[0-9]+}},
   // TCHECK: [[B:%.+]] = alloca i{{[0-9]+}},
   // TCHECK:  [[CTE:%.+]] = alloca [2 x [5 x i{{[0-9]+}}]],
 
@@ -755,6 +779,8 @@ int bar(int n, double* ptr){
 // TCHECK:  [[ATA:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[A2TA:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[BTA:%.+]] = alloca [10 x i{{[0-9]+}}],
+// TCHECK:  alloca i{{[0-9]+}},
+// TCHECK:  alloca i{{[0-9]+}},
 // TCHECK:  [[ATE:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[A2TE:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[BTE:%.+]] = alloca [10 x i{{[0-9]+}}],
@@ -779,6 +805,8 @@ int bar(int n, double* ptr){
 // TCHECK:  [[A_ADDR:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[A2_ADDR:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[B_ADDR:%.+]] = alloca [10 x i{{[0-9]+}}]*,
+// TCHECK:  alloca i{{[0-9]+}},
+// TCHECK:  alloca i{{[0-9]+}},
 // TCHECK:  [[A:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[A2:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[B:%.+]] = alloca [10 x i{{[0-9]+}}],
@@ -812,6 +840,8 @@ int bar(int n, double* ptr){
 // TCHECK:  [[A2_ADDR:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[B_ADDR:%.+]] = alloca [10 x i{{[0-9]+}}]*,
 // TCHECK:  [[BTA:%.+]] = alloca [10 x i{{[0-9]+}}],
+// TCHECK:  alloca i{{[0-9]+}},
+// TCHECK:  alloca i{{[0-9]+}},
 // TCHECK:  [[A:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[A2:%.+]] = alloca i{{[0-9]+}},
 // TCHECK:  [[BTE:%.+]] = alloca [10 x i{{[0-9]+}}],

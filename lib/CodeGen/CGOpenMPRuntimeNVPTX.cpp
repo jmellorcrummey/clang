@@ -1543,6 +1543,37 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
   return;
 }
 
+// Cast an address from the requested type to uintptr in such a way that it can
+// be loaded under the new type. If the provided address refers to a pointer
+// don't do anything an return the address as is.
+static LValue castValueToUintptr(CodeGenFunction &CGF, QualType SrcType,
+                                 StringRef Name, LValue AddrLV) {
+
+  // If the value is a pointer we don't have to do anything.
+  if (SrcType->isAnyPointerType())
+    return AddrLV;
+
+  ASTContext &Ctx = CGF.getContext();
+
+  // Value to be converted.
+  auto *Val = CGF.EmitLoadOfLValue(AddrLV, SourceLocation()).getScalarVal();
+
+  // Create a temporary variable of type uintptr to make the conversion and cast
+  // address to the desired type.
+  auto CastAddr =
+      CGF.CreateMemTemp(Ctx.getUIntPtrType(), Twine(Name) + ".casted");
+  auto *CastAddrConv =
+      CGF.EmitScalarConversion(CastAddr.getPointer(), Ctx.getUIntPtrType(),
+                               Ctx.getPointerType(SrcType), SourceLocation());
+  auto CastAddrConvLV = CGF.MakeNaturalAlignAddrLValue(CastAddrConv, SrcType);
+
+  // Save the value in the temporary variable.
+  CGF.EmitStoreOfScalar(Val, CastAddrConvLV);
+
+  // Return the temporary variable address.
+  return CGF.MakeAddrLValue(CastAddr, Ctx.getUIntPtrType());
+}
+
 void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
     CodeGenFunction &EnclosingCGF) {
   const Decl *CD = EnclosingCGF.CurCodeDecl;
@@ -2044,10 +2075,15 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
                                      Ctx.getPointerType(FI->getType()),
                                      SourceLocation());
 
-    // If this is a capture by value, we need to load the data.
+    // If this is a capture by value, we need to load the data. Additionally, if
+    // its not a pointer we may need to cast it to uintptr.
     if (CI->capturesVariableByCopy()) {
       auto LV = CGF.MakeNaturalAlignAddrLValue(Arg, FI->getType());
-      Arg = CGF.EmitLoadOfScalar(LV, SourceLocation());
+
+      auto CastLV = castValueToUintptr(CGF, FI->getType(),
+                                       CI->getCapturedVar()->getName(), LV);
+
+      Arg = CGF.EmitLoadOfScalar(CastLV, SourceLocation());
     }
 
     Args.push_back(Arg);
