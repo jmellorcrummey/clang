@@ -6337,17 +6337,16 @@ static Value *EmitX86MaskedLoad(CodeGenFunction &CGF,
 }
 
 static Value *EmitX86Select(CodeGenFunction &CGF,
-                            SmallVectorImpl<Value *> &Ops) {
+                            Value *Mask, Value *Op0, Value *Op1) {
 
   // If the mask is all ones just return first argument.
-  if (const auto *C = dyn_cast<Constant>(Ops[0]))
+  if (const auto *C = dyn_cast<Constant>(Mask))
     if (C->isAllOnesValue())
-      return Ops[1];
+      return Op0;
 
-  Value *MaskVec = getMaskVecValue(CGF, Ops[0],
-                                   Ops[1]->getType()->getVectorNumElements());
+  Mask = getMaskVecValue(CGF, Mask, Op0->getType()->getVectorNumElements());
 
-  return CGF.Builder.CreateSelect(MaskVec, Ops[1], Ops[2]);
+  return CGF.Builder.CreateSelect(Mask, Op0, Op1);
 }
 
 Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
@@ -6705,69 +6704,9 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
     if (Ops.size() == 3)
       return Align;
 
-    // If the mask is all ones just emit the align operation.
-    if (const auto *C = dyn_cast<Constant>(Ops[4]))
-      if (C->isAllOnesValue())
-        return Align;
-
-    llvm::VectorType *MaskTy = llvm::VectorType::get(Builder.getInt1Ty(),
-                                                     NumElts);
-    llvm::Value *Mask = Builder.CreateBitCast(Ops[4], MaskTy, "cast");
-    return Builder.CreateSelect(Mask, Align, Ops[3]);
+    return EmitX86Select(*this, Ops[4], Align, Ops[3]);
   }
 
-  case X86::BI__builtin_ia32_pslldqi256: {
-    // Shift value is in bits so divide by 8.
-    unsigned shiftVal = cast<llvm::ConstantInt>(Ops[1])->getZExtValue() >> 3;
-
-    // If pslldq is shifting the vector more than 15 bytes, emit zero.
-    if (shiftVal >= 16)
-      return llvm::Constant::getNullValue(ConvertType(E->getType()));
-
-    int Indices[32];
-    // 256-bit pslldq operates on 128-bit lanes so we need to handle that
-    for (unsigned l = 0; l != 32; l += 16) {
-      for (unsigned i = 0; i != 16; ++i) {
-        unsigned Idx = 32 + i - shiftVal;
-        if (Idx < 32) Idx -= 16; // end of lane, switch operand.
-        Indices[l + i] = Idx + l;
-      }
-    }
-
-    llvm::Type *VecTy = llvm::VectorType::get(Int8Ty, 32);
-    Ops[0] = Builder.CreateBitCast(Ops[0], VecTy, "cast");
-    Value *Zero = llvm::Constant::getNullValue(VecTy);
-
-    Value *SV = Builder.CreateShuffleVector(Zero, Ops[0], Indices, "pslldq");
-    llvm::Type *ResultType = ConvertType(E->getType());
-    return Builder.CreateBitCast(SV, ResultType, "cast");
-  }
-  case X86::BI__builtin_ia32_psrldqi256: {
-    // Shift value is in bits so divide by 8.
-    unsigned shiftVal = cast<llvm::ConstantInt>(Ops[1])->getZExtValue() >> 3;
-
-    // If psrldq is shifting the vector more than 15 bytes, emit zero.
-    if (shiftVal >= 16)
-      return llvm::Constant::getNullValue(ConvertType(E->getType()));
-
-    int Indices[32];
-    // 256-bit psrldq operates on 128-bit lanes so we need to handle that
-    for (unsigned l = 0; l != 32; l += 16) {
-      for (unsigned i = 0; i != 16; ++i) {
-        unsigned Idx = i + shiftVal;
-        if (Idx >= 16) Idx += 16; // end of lane, switch operand.
-        Indices[l + i] = Idx + l;
-      }
-    }
-
-    llvm::Type *VecTy = llvm::VectorType::get(Int8Ty, 32);
-    Ops[0] = Builder.CreateBitCast(Ops[0], VecTy, "cast");
-    Value *Zero = llvm::Constant::getNullValue(VecTy);
-
-    Value *SV = Builder.CreateShuffleVector(Ops[0], Zero, Indices, "psrldq");
-    llvm::Type *ResultType = ConvertType(E->getType());
-    return Builder.CreateBitCast(SV, ResultType, "cast");
-  }
   case X86::BI__builtin_ia32_movntps:
   case X86::BI__builtin_ia32_movntps256:
   case X86::BI__builtin_ia32_movntpd:
@@ -6815,7 +6754,7 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
   case X86::BI__builtin_ia32_selectpd_128:
   case X86::BI__builtin_ia32_selectpd_256:
   case X86::BI__builtin_ia32_selectpd_512:
-    return EmitX86Select(*this, Ops);
+    return EmitX86Select(*this, Ops[0], Ops[1], Ops[2]);
   // 3DNow!
   case X86::BI__builtin_ia32_pswapdsf:
   case X86::BI__builtin_ia32_pswapdsi: {
