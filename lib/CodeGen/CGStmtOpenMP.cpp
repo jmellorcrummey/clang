@@ -1217,31 +1217,11 @@ static void emitCommonOMPParallelDirective(CodeGenFunction &CGF,
     }
   }
 
+  OMPLexicalScope Scope(CGF, S);
   llvm::SmallVector<llvm::Value *, 16> CapturedVars;
-
-  // Combining 'distribute' with 'for' requires sharing each 'distribute' chunk
-  // lower and upper bounds with the pragma 'for' chunking mechanism. Also, the
-  // lexical scope was already initiated if parallel is not the first component
-  // of a combined directive.
-  if (S.getDirectiveKind() == OMPD_distribute_parallel_for) {
-    const OMPDistributeParallelForDirective &DPFDir =
-        cast<OMPDistributeParallelForDirective>(S);
-    LValue LB =
-        CGF.EmitLValue(cast<DeclRefExpr>(DPFDir.getLowerBoundVariable()));
-    CapturedVars.push_back(CGF.Builder.CreateLoad(LB.getAddress()));
-    LValue UB =
-        CGF.EmitLValue(cast<DeclRefExpr>(DPFDir.getUpperBoundVariable()));
-    CapturedVars.push_back(CGF.Builder.CreateLoad(UB.getAddress()));
-
-    CGF.CGM.getOpenMPRuntime().emitCapturedVars(CGF, S, CapturedVars);
-    CGF.CGM.getOpenMPRuntime().emitParallelCall(
-        CGF, S.getLocStart(), OutlinedFn, CapturedVars, IfCond);
-  } else {
-    OMPLexicalScope Scope(CGF, S);
-    CGF.CGM.getOpenMPRuntime().emitCapturedVars(CGF, S, CapturedVars);
-    CGF.CGM.getOpenMPRuntime().emitParallelCall(
-        CGF, S.getLocStart(), OutlinedFn, CapturedVars, IfCond);
-  }
+  CGF.CGM.getOpenMPRuntime().emitCapturedVars(CGF, S, CapturedVars);
+  CGF.CGM.getOpenMPRuntime().emitParallelCall(CGF, S.getLocStart(), OutlinedFn,
+                                              CapturedVars, IfCond);
 }
 
 void CodeGenFunction::EmitOMPParallelDirective(const OMPParallelDirective &S) {
@@ -1745,11 +1725,8 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
 }
 
 void CodeGenFunction::EmitOMPOuterLoop(bool DynamicOrOrdered, bool IsMonotonic,
-                                       bool IsDistribute,
-                                       const OMPLoopDirective &S,
-                                       OMPPrivateScope &LoopScope, bool Ordered,
-                                       Address LB, Address UB, Address ST,
-                                       Address IL, llvm::Value *Chunk) {
+    const OMPLoopDirective &S, OMPPrivateScope &LoopScope, bool Ordered,
+    Address LB, Address UB, Address ST, Address IL, llvm::Value *Chunk) {
   auto &RT = CGM.getOpenMPRuntime();
 
   const Expr *IVExpr = S.getIterationVariable();
@@ -1766,16 +1743,7 @@ void CodeGenFunction::EmitOMPOuterLoop(bool DynamicOrOrdered, bool IsMonotonic,
   llvm::Value *BoolCondVal = nullptr;
   if (!DynamicOrOrdered) {
     // UB = min(UB, GlobalUB)
-    // when dealing with composite distribute parallel for and when implementing
-    // the #for part: use the
-    // distribute UB instead, as it is not incremented and guaranteed to be
-    // less than GlobalUB
-    Expr *EUB = (S.getDirectiveKind() == OMPD_distribute_parallel_for &&
-                 IsDistribute == false)
-                    ? dyn_cast<OMPDistributeParallelForDirective>(&S)
-                          ->getPrevEnsureUpperBound()
-                    : S.getEnsureUpperBound();
-    EmitIgnoredExpr(EUB); // S.getEnsureUpperBound());
+    EmitIgnoredExpr(S.getEnsureUpperBound());
     // IV = LB
     EmitIgnoredExpr(S.getInit());
     // IV < UB
@@ -1925,14 +1893,14 @@ void CodeGenFunction::EmitOMPForOuterLoop(
                          Ordered, IL, LB, UB, ST, Chunk);
   }
 
-  EmitOMPOuterLoop(DynamicOrOrdered, IsMonotonic, /* IsDistribute =*/false, S,
-                   LoopScope, Ordered, LB, UB, ST, IL, Chunk);
+  EmitOMPOuterLoop(DynamicOrOrdered, IsMonotonic, S, LoopScope, Ordered, LB, UB,
+                   ST, IL, Chunk);
 }
 
 void CodeGenFunction::EmitOMPDistributeOuterLoop(
-    OpenMPDistScheduleClauseKind ScheduleKind, const OMPLoopDirective &S,
-    OMPPrivateScope &LoopScope, Address LB, Address UB, Address ST, Address IL,
-    llvm::Value *Chunk) {
+    OpenMPDistScheduleClauseKind ScheduleKind,
+    const OMPDistributeDirective &S, OMPPrivateScope &LoopScope,
+    Address LB, Address UB, Address ST, Address IL, llvm::Value *Chunk) {
 
   auto &RT = CGM.getOpenMPRuntime();
 
@@ -1950,8 +1918,7 @@ void CodeGenFunction::EmitOMPDistributeOuterLoop(
                               IL, LB, UB, ST, Chunk);
 
   EmitOMPOuterLoop(/* DynamicOrOrdered = */ false, /* IsMonotonic = */ false,
-                   /* IsDistribute = */ true, S, LoopScope,
-                   /* Ordered = */ false, LB, UB, ST, IL, Chunk);
+                   S, LoopScope, /* Ordered = */ false, LB, UB, ST, IL, Chunk);
 }
 
 /// \brief Emit a helper variable and return corresponding lvalue.
@@ -2023,7 +1990,6 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
     llvm::DenseSet<const Expr *> EmittedFinals;
     emitAlignedClause(*this, S);
     EmitOMPLinearClauseInit(S);
-
     // Emit helper vars inits.
     LValue LB =
         EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getLowerBoundVariable()));
@@ -2033,19 +1999,6 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
         EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getStrideVariable()));
     LValue IL =
         EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getIsLastIterVariable()));
-
-    if (S.getDirectiveKind() == OMPD_distribute_parallel_for) {
-      // When composing distribute with for we need to use the pragma distribute
-      // chunk lower and upper bounds rather than the whole loop iteration
-      // space. Therefore we copy the bounds of the previous schedule into the
-      // the current ones.
-      LValue PrevLB = EmitLValue(S.getPrevLowerBoundVariable());
-      LValue PrevUB = EmitLValue(S.getPrevUpperBoundVariable());
-      auto PrevLBVal = EmitLoadOfScalar(PrevLB, SourceLocation());
-      auto PrevUBVal = EmitLoadOfScalar(PrevUB, SourceLocation());
-      EmitStoreOfScalar(PrevLBVal, LB);
-      EmitStoreOfScalar(PrevUBVal, UB);
-    }
 
     // Emit 'then' code.
     {
@@ -2122,14 +2075,8 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
         // Start the loop with a block that tests the condition.
         auto CondBlock = createBasicBlock("omp.dispatch.cond");
         EmitBlock(CondBlock);
-
-        // UB = min(UB, GlobalUB); for all cases except
-        // UB = min(UB, PrevUB); for 'for' in composite #distribute parallel for
-        Expr *EUB = (S.getDirectiveKind() == OMPD_distribute_parallel_for)
-                        ? dyn_cast<OMPDistributeParallelForDirective>(&S)
-                              ->getPrevEnsureUpperBound()
-                        : S.getEnsureUpperBound();
-        EmitIgnoredExpr(EUB); // S.getEnsureUpperBound());
+        // UB = min(UB, GlobalUB);
+        EmitIgnoredExpr(S.getEnsureUpperBound());
         // IV = LB;
         EmitIgnoredExpr(S.getInit());
         // IV < UB;
@@ -2744,9 +2691,7 @@ void CodeGenFunction::EmitOMPFlushDirective(const OMPFlushDirective &S) {
   }(), S.getLocStart());
 }
 
-void CodeGenFunction::EmitOMPDistributeLoop(
-    const OMPLoopDirective &S,
-    const RegionCodeGenTy &CodeGenDistributeLoopContent) {
+void CodeGenFunction::EmitOMPDistributeLoop(const OMPDistributeDirective &S) {
   // Emit the loop iteration variable.
   auto IVExpr = cast<DeclRefExpr>(S.getIterationVariable());
   auto IVDecl = cast<VarDecl>(IVExpr->getDecl());
@@ -2844,21 +2789,13 @@ void CodeGenFunction::EmitOMPDistributeLoop(
         // IV = LB;
         EmitIgnoredExpr(S.getInit());
         // while (idx <= UB) { BODY; ++idx; }
-        EmitOMPInnerLoop(
-            S, LoopScope.requiresCleanups(), S.getCond(),
-            S.getDirectiveKind() == OMPD_distribute_parallel_for
-                ? (cast<OMPDistributeParallelForDirective>(S)).getDistInc()
-                : S.getInc(),
-            [&S, &LoopExit,
-             &CodeGenDistributeLoopContent](CodeGenFunction &CGF) {
-              if (S.getDirectiveKind() == OMPD_distribute) {
-                CGF.EmitOMPLoopBody(S, LoopExit);
-                CGF.EmitStopPoint(&S);
-              } else if (S.getDirectiveKind() == OMPD_distribute_parallel_for) {
-                CodeGenDistributeLoopContent(CGF);
-              }
-            },
-            [](CodeGenFunction &) {});
+        EmitOMPInnerLoop(S, LoopScope.requiresCleanups(), S.getCond(),
+                         S.getInc(),
+                         [&S, LoopExit](CodeGenFunction &CGF) {
+                           CGF.EmitOMPLoopBody(S, LoopExit);
+                           CGF.EmitStopPoint(&S);
+                         },
+                         [](CodeGenFunction &) {});
         EmitBlock(LoopExit.getBlock());
         // Tell the runtime we are done.
         RT.emitForStaticFinish(*this, S.getLocStart());
@@ -2882,7 +2819,7 @@ void CodeGenFunction::EmitOMPDistributeLoop(
 void CodeGenFunction::EmitOMPDistributeDirective(
     const OMPDistributeDirective &S) {
   auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-    CGF.EmitOMPDistributeLoop(S, [](CodeGenFunction &, PrePostActionTy &) {});
+    CGF.EmitOMPDistributeLoop(S);
   };
   OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
   CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_distribute, CodeGen,
@@ -2891,21 +2828,7 @@ void CodeGenFunction::EmitOMPDistributeDirective(
 
 void CodeGenFunction::EmitOMPDistributeParallelForDirective(
     const OMPDistributeParallelForDirective &S) {
-  auto &&CGParallelFor = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-    auto &&CGInlinedWorksharingLoop = [&S](CodeGenFunction &CGF,
-                                           PrePostActionTy &) {
-      CGF.EmitOMPWorksharingLoop(S);
-    };
-    emitCommonOMPParallelDirective(CGF, S, OMPD_for, CGInlinedWorksharingLoop);
-  };
-
-  auto &&CodeGen = [&S, &CGParallelFor](CodeGenFunction &CGF,
-                                        PrePostActionTy &) {
-    CGF.EmitOMPDistributeLoop(S, CGParallelFor);
-  };
-  OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
-  CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_distribute, CodeGen,
-                                              false);
+  // TODO: codegen for distribute parallel for.
 }
 
 static llvm::Function *emitOutlinedOrderedFunction(CodeGenModule &CGM,
