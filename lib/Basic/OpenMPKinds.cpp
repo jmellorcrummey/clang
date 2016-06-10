@@ -703,3 +703,7 @@ bool clang::isOpenMPThreadPrivate(OpenMPClauseKind Kind) {
 bool clang::isOpenMPTaskingDirective(OpenMPDirectiveKind Kind) {
   return Kind == OMPD_task || isOpenMPTaskLoopDirective(Kind);
 }
+
+bool clang::isOpenMPLoopBoundSharingDirective(OpenMPDirectiveKind Kind) {
+	return Kind == OMPD_distribute_parallel_for;
+}
