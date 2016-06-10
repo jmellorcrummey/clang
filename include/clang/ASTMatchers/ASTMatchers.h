@@ -482,7 +482,7 @@ const internal::VariadicDynCastAllOfMatcher<
 ///   };
 /// \endcode
 /// fieldDecl(isPublic())
-///   matches 'int a;' 
+///   matches 'int a;'
 AST_MATCHER(Decl, isPublic) {
   return Node.getAccess() == AS_public;
 }
@@ -498,7 +498,7 @@ AST_MATCHER(Decl, isPublic) {
 ///   };
 /// \endcode
 /// fieldDecl(isProtected())
-///   matches 'int b;' 
+///   matches 'int b;'
 AST_MATCHER(Decl, isProtected) {
   return Node.getAccess() == AS_protected;
 }
@@ -514,7 +514,7 @@ AST_MATCHER(Decl, isProtected) {
 ///   };
 /// \endcode
 /// fieldDecl(isPrivate())
-///   matches 'int c;' 
+///   matches 'int c;'
 AST_MATCHER(Decl, isPrivate) {
   return Node.getAccess() == AS_private;
 }
@@ -3768,6 +3768,47 @@ AST_MATCHER_P(CXXMethodDecl, ofClass,
   const CXXRecordDecl *Parent = Node.getParent();
   return (Parent != nullptr &&
           InnerMatcher.matches(*Parent, Finder, Builder));
+}
+
+/// \brief Matches each method overriden by the given method. This matcher may
+/// produce multiple matches.
+///
+/// Given
+/// \code
+///   class A { virtual void f(); };
+///   class B : public A { void f(); };
+///   class C : public B { void f(); };
+/// \endcode
+/// cxxMethodDecl(ofClass(hasName("C")),
+///               forEachOverridden(cxxMethodDecl().bind("b"))).bind("d")
+///   matches once, with "b" binding "A::f" and "d" binding "C::f" (Note
+///   that B::f is not overridden by C::f).
+///
+/// The check can produce multiple matches in case of multiple inheritance, e.g.
+/// \code
+///   class A1 { virtual void f(); };
+///   class A2 { virtual void f(); };
+///   class C : public A1, public A2 { void f(); };
+/// \endcode
+/// cxxMethodDecl(ofClass(hasName("C")),
+///               forEachOverridden(cxxMethodDecl().bind("b"))).bind("d")
+///   matches twice, once with "b" binding "A1::f" and "d" binding "C::f", and
+///   once with "b" binding "A2::f" and "d" binding "C::f".
+AST_MATCHER_P(CXXMethodDecl, forEachOverridden,
+              internal::Matcher<CXXMethodDecl>, InnerMatcher) {
+  BoundNodesTreeBuilder Result;
+  bool Matched = false;
+  for (const auto *Overridden : Node.overridden_methods()) {
+    BoundNodesTreeBuilder OverriddenBuilder(*Builder);
+    const bool OverriddenMatched =
+        InnerMatcher.matches(*Overridden, Finder, &OverriddenBuilder);
+    if (OverriddenMatched) {
+      Matched = true;
+      Result.addMatch(OverriddenBuilder);
+    }
+  }
+  *Builder = std::move(Result);
+  return Matched;
 }
 
 /// \brief Matches if the given method declaration is virtual.

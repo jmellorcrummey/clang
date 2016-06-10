@@ -16,6 +16,7 @@
 #ifndef LLVM_CLANG_AST_DECLCXX_H
 #define LLVM_CLANG_AST_DECLCXX_H
 
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/ASTUnresolvedSet.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
@@ -1828,6 +1829,8 @@ public:
   method_iterator begin_overridden_methods() const;
   method_iterator end_overridden_methods() const;
   unsigned size_overridden_methods() const;
+  typedef ASTContext::overridden_method_range overridden_method_range;
+  overridden_method_range overridden_methods() const;
 
   /// Returns the parent of this method declaration, which
   /// is the class in which this method is defined.
@@ -2165,16 +2168,17 @@ public:
 /// \endcode
 class CXXConstructorDecl : public CXXMethodDecl {
   void anchor() override;
-  /// \brief Whether this constructor declaration has the \c explicit keyword
-  /// specified.
-  bool IsExplicitSpecified : 1;
 
   /// \name Support for base and member initializers.
   /// \{
   /// \brief The arguments used to initialize the base or member.
   LazyCXXCtorInitializersPtr CtorInitializers;
-  unsigned NumCtorInitializers;
+  unsigned NumCtorInitializers : 31;
   /// \}
+
+  /// \brief Whether this constructor declaration has the \c explicit keyword
+  /// specified.
+  unsigned IsExplicitSpecified : 1;
 
   CXXConstructorDecl(ASTContext &C, CXXRecordDecl *RD, SourceLocation StartLoc,
                      const DeclarationNameInfo &NameInfo,
@@ -2183,8 +2187,8 @@ class CXXConstructorDecl : public CXXMethodDecl {
                      bool isImplicitlyDeclared, bool isConstexpr)
     : CXXMethodDecl(CXXConstructor, C, RD, StartLoc, NameInfo, T, TInfo,
                     SC_None, isInline, isConstexpr, SourceLocation()),
-      IsExplicitSpecified(isExplicitSpecified), CtorInitializers(nullptr),
-      NumCtorInitializers(0) {
+      CtorInitializers(nullptr), NumCtorInitializers(0),
+      IsExplicitSpecified(isExplicitSpecified) {
     setImplicit(isImplicitlyDeclared);
   }
 
