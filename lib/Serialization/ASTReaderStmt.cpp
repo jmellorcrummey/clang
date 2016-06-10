@@ -1448,7 +1448,6 @@ void ASTStmtReader::VisitExprWithCleanups(ExprWithCleanups *E) {
     E->getTrailingObjects<BlockDecl *>()[i] =
         ReadDeclAs<BlockDecl>(Record, Idx);
 
-  E->ExprWithCleanupsBits.CleanupsHaveSideEffects = Record[Idx++];
   E->SubExpr = Reader.ReadSubExpr();
 }
 
@@ -2473,6 +2472,10 @@ void ASTStmtReader::VisitOMPLoopDirective(OMPLoopDirective *D) {
     D->setNextLowerBound(Reader.ReadSubExpr());
     D->setNextUpperBound(Reader.ReadSubExpr());
     D->setNumIterations(Reader.ReadSubExpr());
+  }
+  if (isOpenMPLoopBoundSharingDirective(D->getDirectiveKind())) {
+      D->setPrevLowerBoundVariable(Reader.ReadSubExpr());
+      D->setPrevUpperBoundVariable(Reader.ReadSubExpr());
   }
   SmallVector<Expr *, 4> Sub;
   unsigned CollapsedNum = D->getCollapsedNumber();
