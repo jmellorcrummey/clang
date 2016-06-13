@@ -1685,12 +1685,12 @@ class OffloadingActionBuilder {
       Arg *PartialCompilationArg = Args.getLastArg(
           options::OPT_cuda_host_only, options::OPT_cuda_device_only,
           options::OPT_cuda_compile_host_device);
-      CompileHostOnly =
-          PartialCompilationArg &&
-          PartialCompilationArg->getOption().matches(options::OPT_cuda_host_only);
-      CompileDeviceOnly =
-          PartialCompilationArg &&
-          PartialCompilationArg->getOption().matches(options::OPT_cuda_device_only);
+      CompileHostOnly = PartialCompilationArg &&
+                        PartialCompilationArg->getOption().matches(
+                            options::OPT_cuda_host_only);
+      CompileDeviceOnly = PartialCompilationArg &&
+                          PartialCompilationArg->getOption().matches(
+                              options::OPT_cuda_device_only);
 
       // Collect all cuda_gpu_arch parameters, removing duplicates.
       llvm::StringSet<> GpuArchNames;
