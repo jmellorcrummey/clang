@@ -2127,7 +2127,6 @@ InputInfo Driver::BuildJobsForActionNoCache(
     if (OA->hasSingleDeviceDependence()) {
       return OffloadDeviceInputInfos.back();
     }
-
     // Override current action with a real host compile action and continue
     // processing it.
     A = OA->getHostDependence();
