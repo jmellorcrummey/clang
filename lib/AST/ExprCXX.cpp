@@ -432,12 +432,6 @@ SourceLocation CXXConstructExpr::getLocEnd() const {
   return End;
 }
 
-NamedDecl *CXXConstructExpr::getFoundDecl() const {
-  if (auto *Template = Constructor->getPrimaryTemplate())
-    return Template;
-  return Constructor;
-}
-
 SourceRange CXXOperatorCallExpr::getSourceRangeImpl() const {
   OverloadedOperatorKind Kind = getOperator();
   if (Kind == OO_PlusPlus || Kind == OO_MinusMinus) {
@@ -723,7 +717,6 @@ CXXBindTemporaryExpr *CXXBindTemporaryExpr::Create(const ASTContext &C,
 }
 
 CXXTemporaryObjectExpr::CXXTemporaryObjectExpr(const ASTContext &C,
-                                               NamedDecl *Found,
                                                CXXConstructorDecl *Cons,
                                                TypeSourceInfo *Type,
                                                ArrayRef<Expr*> Args,
@@ -735,7 +728,7 @@ CXXTemporaryObjectExpr::CXXTemporaryObjectExpr(const ASTContext &C,
   : CXXConstructExpr(C, CXXTemporaryObjectExprClass, 
                      Type->getType().getNonReferenceType(), 
                      Type->getTypeLoc().getBeginLoc(),
-                     Found, Cons, false, Args,
+                     Cons, false, Args,
                      HadMultipleCandidates,
                      ListInitialization,
                      StdInitListInitialization,
@@ -757,7 +750,6 @@ SourceLocation CXXTemporaryObjectExpr::getLocEnd() const {
 
 CXXConstructExpr *CXXConstructExpr::Create(const ASTContext &C, QualType T,
                                            SourceLocation Loc,
-                                           NamedDecl *Found,
                                            CXXConstructorDecl *Ctor,
                                            bool Elidable,
                                            ArrayRef<Expr*> Args,
@@ -768,7 +760,7 @@ CXXConstructExpr *CXXConstructExpr::Create(const ASTContext &C, QualType T,
                                            ConstructionKind ConstructKind,
                                            SourceRange ParenOrBraceRange) {
   return new (C) CXXConstructExpr(C, CXXConstructExprClass, T, Loc,
-                                  Found, Ctor, Elidable, Args,
+                                  Ctor, Elidable, Args,
                                   HadMultipleCandidates, ListInitialization,
                                   StdInitListInitialization,
                                   ZeroInitialization, ConstructKind,
@@ -777,7 +769,7 @@ CXXConstructExpr *CXXConstructExpr::Create(const ASTContext &C, QualType T,
 
 CXXConstructExpr::CXXConstructExpr(const ASTContext &C, StmtClass SC,
                                    QualType T, SourceLocation Loc,
-                                   NamedDecl *Found, CXXConstructorDecl *Ctor,
+                                   CXXConstructorDecl *Ctor,
                                    bool Elidable,
                                    ArrayRef<Expr*> Args,
                                    bool HadMultipleCandidates,
@@ -798,8 +790,6 @@ CXXConstructExpr::CXXConstructExpr(const ASTContext &C, StmtClass SC,
     ZeroInitialization(ZeroInitialization),
     ConstructKind(ConstructKind), Args(nullptr)
 {
-  assert(declaresSameEntity(Found, Ctor) ||
-         declaresSameEntity(Found, Ctor->getPrimaryTemplate()));
   if (NumArgs) {
     this->Args = new (C) Stmt*[Args.size()];
     
@@ -1039,7 +1029,6 @@ bool LambdaExpr::isMutable() const {
 }
 
 ExprWithCleanups::ExprWithCleanups(Expr *subexpr,
-                                   bool CleanupsHaveSideEffects,
                                    ArrayRef<CleanupObject> objects)
   : Expr(ExprWithCleanupsClass, subexpr->getType(),
          subexpr->getValueKind(), subexpr->getObjectKind(),
@@ -1047,19 +1036,16 @@ ExprWithCleanups::ExprWithCleanups(Expr *subexpr,
          subexpr->isInstantiationDependent(),
          subexpr->containsUnexpandedParameterPack()),
     SubExpr(subexpr) {
-  ExprWithCleanupsBits.CleanupsHaveSideEffects = CleanupsHaveSideEffects;
   ExprWithCleanupsBits.NumObjects = objects.size();
   for (unsigned i = 0, e = objects.size(); i != e; ++i)
     getTrailingObjects<CleanupObject>()[i] = objects[i];
 }
 
 ExprWithCleanups *ExprWithCleanups::Create(const ASTContext &C, Expr *subexpr,
-                                           bool CleanupsHaveSideEffects,
                                            ArrayRef<CleanupObject> objects) {
   void *buffer = C.Allocate(totalSizeToAlloc<CleanupObject>(objects.size()),
                             llvm::alignOf<ExprWithCleanups>());
-  return new (buffer)
-      ExprWithCleanups(subexpr, CleanupsHaveSideEffects, objects);
+  return new (buffer) ExprWithCleanups(subexpr, objects);
 }
 
 ExprWithCleanups::ExprWithCleanups(EmptyShell empty, unsigned numObjects)

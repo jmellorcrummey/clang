@@ -4807,8 +4807,8 @@ static void checkIndirectCopyRestoreSource(Sema &S, Expr *src) {
   // If isWeakAccess to true, there will be an implicit 
   // load which requires a cleanup.
   if (S.getLangOpts().ObjCAutoRefCount && isWeakAccess)
-    S.Cleanup.setExprNeedsCleanups(true);
-
+    S.ExprNeedsCleanups = true;
+  
   if (iik == IIK_okay) return;
 
   S.Diag(src->getExprLoc(), diag::err_arc_nonlocal_writeback)
@@ -5742,7 +5742,7 @@ PerformConstructorInitialization(Sema &S,
       : Kind.getParenRange();
 
     CurInit = new (S.Context) CXXTemporaryObjectExpr(
-        S.Context, Step.Function.FoundDecl, Constructor, TSInfo,
+        S.Context, Constructor, TSInfo,
         ConstructorArgs, ParenOrBraceRange, HadMultipleCandidates,
         IsListInitialization, IsStdInitListInitialization,
         ConstructorInitRequiresZeroInit);
@@ -6182,22 +6182,6 @@ static void CheckForNullPointerDereference(Sema &S, const Expr *E) {
   }
 }
 
-MaterializeTemporaryExpr *
-Sema::CreateMaterializeTemporaryExpr(QualType T, Expr *Temporary,
-                                     bool BoundToLvalueReference) {
-  auto MTE = new (Context)
-      MaterializeTemporaryExpr(T, Temporary, BoundToLvalueReference);
-
-  // Order an ExprWithCleanups for lifetime marks.
-  //
-  // TODO: It'll be good to have a single place to check the access of the
-  // destructor and generate ExprWithCleanups for various uses. Currently these
-  // are done in both CreateMaterializeTemporaryExpr and MaybeBindToTemporary,
-  // but there may be a chance to merge them.
-  Cleanup.setExprNeedsCleanups(false);
-  return MTE;
-}
-
 ExprResult
 InitializationSequence::Perform(Sema &S,
                                 const InitializedEntity &Entity,
@@ -6462,7 +6446,7 @@ InitializationSequence::Perform(Sema &S,
         return ExprError();
 
       // Materialize the temporary into memory.
-      MaterializeTemporaryExpr *MTE = S.CreateMaterializeTemporaryExpr(
+      MaterializeTemporaryExpr *MTE = new (S.Context) MaterializeTemporaryExpr(
           Entity.getType().getNonReferenceType(), CurInit.get(),
           Entity.getType()->isLValueReferenceType());
 
@@ -6482,7 +6466,7 @@ InitializationSequence::Perform(Sema &S,
            MTE->getType()->isObjCLifetimeType()) ||
           (MTE->getStorageDuration() == SD_Automatic &&
            MTE->getType().isDestructedType()))
-        S.Cleanup.setExprNeedsCleanups(true);
+        S.ExprNeedsCleanups = true;
 
       CurInit = MTE;
       break;
@@ -6874,9 +6858,9 @@ InitializationSequence::Perform(Sema &S,
         << CurInit.get()->getSourceRange();
 
       // Materialize the temporary into memory.
-      MaterializeTemporaryExpr *MTE = S.CreateMaterializeTemporaryExpr(
-          CurInit.get()->getType(), CurInit.get(),
-          /*BoundToLvalueReference=*/false);
+      MaterializeTemporaryExpr *MTE = new (S.Context)
+          MaterializeTemporaryExpr(CurInit.get()->getType(), CurInit.get(),
+                                   /*BoundToLvalueReference=*/false);
 
       // Maybe lifetime-extend the array temporary's subobjects to match the
       // entity's lifetime.
@@ -7292,7 +7276,7 @@ bool InitializationSequence::Diagnose(Sema &S,
             isa<CXXConstructorDecl>(S.CurContext)) {
           // This is implicit default initialization of a member or
           // base within a constructor. If no viable function was
-          // found, notify the user that she needs to explicitly
+          // found, notify the user that they need to explicitly
           // initialize this base/member.
           CXXConstructorDecl *Constructor
             = cast<CXXConstructorDecl>(S.CurContext);
