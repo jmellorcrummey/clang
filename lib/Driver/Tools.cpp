@@ -5606,7 +5606,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     addExceptionArgs(Args, InputType, getToolChain(), KernelOrKext, objcRuntime,
                      CmdArgs);
 
-  if (getToolChain().UseSjLjExceptions(Args))
+  if (Args.hasArg(options::OPT_fsjlj_exceptions) ||
+      getToolChain().UseSjLjExceptions(Args))
     CmdArgs.push_back("-fsjlj-exceptions");
 
   // C++ "sane" operator new.
