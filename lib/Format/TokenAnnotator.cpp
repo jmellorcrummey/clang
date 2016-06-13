@@ -690,10 +690,24 @@ private:
   }
 
   LineType parsePreprocessorDirective() {
+    bool IsFirstToken = CurrentToken->IsFirst;
     LineType Type = LT_PreprocessorDirective;
     next();
     if (!CurrentToken)
       return Type;
+
+    if (Style.Language == FormatStyle::LK_JavaScript && IsFirstToken) {
+      // JavaScript files can contain shebang lines of the form:
+      // #!/usr/bin/env node
+      // Treat these like C++ #include directives.
+      while (CurrentToken) {
+        // Tokens cannot be comments here.
+        CurrentToken->Type = TT_ImplicitStringLiteral;
+        next();
+      }
+      return LT_ImportStatement;
+    }
+
     if (CurrentToken->Tok.is(tok::numeric_constant)) {
       CurrentToken->SpacesRequiredBefore = 1;
       return Type;
@@ -1975,10 +1989,7 @@ bool TokenAnnotator::spaceRequiredBetween(const AnnotatedLine &Line,
   if (Left.is(tok::l_square) && Right.is(tok::amp))
     return false;
   if (Right.is(TT_PointerOrReference))
-    return (Left.is(tok::r_paren) && Left.MatchingParen &&
-            (Left.MatchingParen->is(TT_OverloadedOperatorLParen) ||
-             (Left.MatchingParen->Previous &&
-              Left.MatchingParen->Previous->is(TT_FunctionDeclarationName)))) ||
+    return (Left.is(tok::r_paren) && Line.MightBeFunctionDecl) ||
            (Left.Tok.isLiteral() ||
             (!Left.isOneOf(TT_PointerOrReference, tok::l_paren) &&
              (Style.PointerAlignment != FormatStyle::PAS_Left ||

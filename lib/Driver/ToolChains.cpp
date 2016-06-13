@@ -1790,6 +1790,10 @@ static void addMultilibFlag(bool Enabled, const char *const Flag,
     Flags.push_back(std::string("-") + Flag);
 }
 
+static bool isArmOrThumbArch(llvm::Triple::ArchType Arch) {
+  return Arch == llvm::Triple::arm || Arch == llvm::Triple::thumb;
+}
+
 static bool isMipsArch(llvm::Triple::ArchType Arch) {
   return Arch == llvm::Triple::mips || Arch == llvm::Triple::mipsel ||
          Arch == llvm::Triple::mips64 || Arch == llvm::Triple::mips64el;
@@ -2049,6 +2053,60 @@ static bool findMIPSMultilibs(const Driver &D, const llvm::Triple &TargetTriple,
     });
   }
 
+  // Check for Code Sourcery toolchain multilibs
+  MultilibSet CSMipsMultilibs;
+  {
+    auto MArchMips16 = makeMultilib("/mips16").flag("+m32").flag("+mips16");
+
+    auto MArchMicroMips =
+        makeMultilib("/micromips").flag("+m32").flag("+mmicromips");
+
+    auto MArchDefault = makeMultilib("").flag("-mips16").flag("-mmicromips");
+
+    auto UCLibc = makeMultilib("/uclibc").flag("+muclibc");
+
+    auto SoftFloat = makeMultilib("/soft-float").flag("+msoft-float");
+
+    auto Nan2008 = makeMultilib("/nan2008").flag("+mnan=2008");
+
+    auto DefaultFloat =
+        makeMultilib("").flag("-msoft-float").flag("-mnan=2008");
+
+    auto BigEndian = makeMultilib("").flag("+EB").flag("-EL");
+
+    auto LittleEndian = makeMultilib("/el").flag("+EL").flag("-EB");
+
+    // Note that this one's osSuffix is ""
+    auto MAbi64 = makeMultilib("")
+                      .gccSuffix("/64")
+                      .includeSuffix("/64")
+                      .flag("+mabi=n64")
+                      .flag("-mabi=n32")
+                      .flag("-m32");
+
+    CSMipsMultilibs =
+        MultilibSet()
+            .Either(MArchMips16, MArchMicroMips, MArchDefault)
+            .Maybe(UCLibc)
+            .Either(SoftFloat, Nan2008, DefaultFloat)
+            .FilterOut("/micromips/nan2008")
+            .FilterOut("/mips16/nan2008")
+            .Either(BigEndian, LittleEndian)
+            .Maybe(MAbi64)
+            .FilterOut("/mips16.*/64")
+            .FilterOut("/micromips.*/64")
+            .FilterOut(NonExistent)
+            .setIncludeDirsCallback([](const Multilib &M) {
+              std::vector<std::string> Dirs({"/include"});
+              if (StringRef(M.includeSuffix()).startswith("/uclibc"))
+                Dirs.push_back(
+                    "/../../../../mips-linux-gnu/libc/uclibc/usr/include");
+              else
+                Dirs.push_back("/../../../../mips-linux-gnu/libc/usr/include");
+              return Dirs;
+            });
+  }
+
   MultilibSet AndroidMipsMultilibs =
       MultilibSet()
           .Maybe(Multilib("/mips-r2").flag("+march=mips32r2"))
@@ -2208,9 +2266,9 @@ static bool findMIPSMultilibs(const Driver &D, const llvm::Triple &TargetTriple,
       TargetTriple.getOS() == llvm::Triple::Linux &&
       TargetTriple.getEnvironment() == llvm::Triple::GNU) {
     // Select mips-mti-linux-gnu toolchain.
-    for (auto candidate : {&MtiMipsMultilibsV1, &MtiMipsMultilibsV2}) {
-      if (candidate->select(Flags, Result.SelectedMultilib)) {
-        Result.Multilibs = *candidate;
+    for (auto Candidate : {&MtiMipsMultilibsV1, &MtiMipsMultilibsV2}) {
+      if (Candidate->select(Flags, Result.SelectedMultilib)) {
+        Result.Multilibs = *Candidate;
         return true;
       }
     }
@@ -2221,19 +2279,27 @@ static bool findMIPSMultilibs(const Driver &D, const llvm::Triple &TargetTriple,
       TargetTriple.getOS() == llvm::Triple::Linux &&
       TargetTriple.getEnvironment() == llvm::Triple::GNU) {
     // Select mips-img-linux-gnu toolchain.
-    for (auto candidate : {&ImgMultilibsV1, &ImgMultilibsV2}) {
-      if (candidate->select(Flags, Result.SelectedMultilib)) {
-        Result.Multilibs = *candidate;
+    for (auto Candidate : {&ImgMultilibsV1, &ImgMultilibsV2}) {
+      if (Candidate->select(Flags, Result.SelectedMultilib)) {
+        Result.Multilibs = *Candidate;
         return true;
       }
     }
     return false;
   }
 
-  if (DebianMipsMultilibs.select(Flags, Result.SelectedMultilib)) {
-    Result.BiarchSibling = Multilib();
-    Result.Multilibs = DebianMipsMultilibs;
-    return true;
+  // Sort candidates. Toolchain that best meets the directories tree goes first.
+  // Then select the first toolchains matches command line flags.
+  MultilibSet *Candidates[] = {&CSMipsMultilibs, &DebianMipsMultilibs};
+  if (CSMipsMultilibs.size() < DebianMipsMultilibs.size())
+    std::iter_swap(Candidates, Candidates + 1);
+  for (const MultilibSet *Candidate : Candidates) {
+    if (Candidate->select(Flags, Result.SelectedMultilib)) {
+      if (Candidate == &DebianMipsMultilibs)
+        Result.BiarchSibling = Multilib();
+      Result.Multilibs = *Candidate;
+      return true;
+    }
   }
 
   {
@@ -2249,6 +2315,48 @@ static bool findMIPSMultilibs(const Driver &D, const llvm::Triple &TargetTriple,
   }
 
   return false;
+}
+
+static void findAndroidArmMultilibs(const Driver &D,
+                                    const llvm::Triple &TargetTriple,
+                                    StringRef Path, const ArgList &Args,
+                                    DetectedMultilibs &Result) {
+  // Find multilibs with subdirectories like armv7-a, thumb, armv7-a/thumb.
+  FilterNonExistent NonExistent(Path, D.getVFS());
+  Multilib ArmV7Multilib = makeMultilib("/armv7-a")
+                               .flag("+armv7")
+                               .flag("-thumb");
+  Multilib ThumbMultilib = makeMultilib("/thumb")
+                               .flag("-armv7")
+                               .flag("+thumb");
+  Multilib ArmV7ThumbMultilib = makeMultilib("/armv7-a/thumb")
+                               .flag("+armv7")
+                               .flag("+thumb");
+  Multilib DefaultMultilib = makeMultilib("")
+                               .flag("-armv7")
+                               .flag("-thumb");
+  MultilibSet AndroidArmMultilibs =
+      MultilibSet()
+          .Either(ThumbMultilib, ArmV7Multilib,
+                  ArmV7ThumbMultilib, DefaultMultilib)
+          .FilterOut(NonExistent);
+
+  Multilib::flags_list Flags;
+  llvm::StringRef Arch = Args.getLastArgValue(options::OPT_march_EQ);
+  bool IsArmArch = TargetTriple.getArch() == llvm::Triple::arm;
+  bool IsThumbArch = TargetTriple.getArch() == llvm::Triple::thumb;
+  bool IsV7SubArch = TargetTriple.getSubArch() == llvm::Triple::ARMSubArch_v7;
+  bool IsThumbMode = IsThumbArch ||
+      Args.hasFlag(options::OPT_mthumb, options::OPT_mno_thumb, false) ||
+      (IsArmArch && llvm::ARM::parseArchISA(Arch) == llvm::ARM::IK_THUMB);
+  bool IsArmV7Mode = (IsArmArch || IsThumbArch) &&
+      (llvm::ARM::parseArchVersion(Arch) == 7 ||
+       (IsArmArch && Arch == "" && IsV7SubArch));
+  addMultilibFlag(IsArmV7Mode, "armv7", Flags);
+  addMultilibFlag(IsThumbMode, "thumb", Flags);
+
+  if (AndroidArmMultilibs.select(Flags, Result.SelectedMultilib))
+    Result.Multilibs = AndroidArmMultilibs;
 }
 
 static bool findBiarchMultilibs(const Driver &D,
@@ -2442,9 +2550,13 @@ void Generic_GCC::GCCInstallationDetector::ScanLibDirForGCCTriple(
 
       DetectedMultilibs Detected;
 
+      // Android standalone toolchain could have multilibs for ARM and Thumb.
       // Debian mips multilibs behave more like the rest of the biarch ones,
       // so handle them there
-      if (isMipsArch(TargetArch)) {
+      if (isArmOrThumbArch(TargetArch) && TargetTriple.isAndroid()) {
+        // It should also work without multilibs in a simplified toolchain.
+        findAndroidArmMultilibs(D, TargetTriple, LI->getName(), Args, Detected);
+      } else if (isMipsArch(TargetArch)) {
         if (!findMIPSMultilibs(D, TargetTriple, LI->getName(), Args, Detected))
           continue;
       } else if (!findBiarchMultilibs(D, TargetTriple, LI->getName(), Args,
@@ -3866,10 +3978,9 @@ Linux::Linux(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
   if (IsRedhat(Distro) && Distro != RHEL5 && Distro != RHEL6)
     ExtraOpts.push_back("--no-add-needed");
 
-  if ((IsDebian(Distro) && Distro >= DebianSqueeze) || IsOpenSUSE(Distro) ||
-      (IsRedhat(Distro) && Distro != RHEL5) ||
-      (IsUbuntu(Distro) && Distro >= UbuntuKarmic))
-    ExtraOpts.push_back("--build-id");
+#ifdef ENABLE_LINKER_BUILD_ID
+  ExtraOpts.push_back("--build-id");
+#endif
 
   if (IsOpenSUSE(Distro))
     ExtraOpts.push_back("--enable-new-dtags");

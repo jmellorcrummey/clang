@@ -1921,11 +1921,11 @@ static const char *const DataLayoutStringR600 =
   "-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64";
 
 static const char *const DataLayoutStringSI =
-  "e-p:32:32-p1:64:64-p2:64:64-p3:32:32-p4:64:64-p5:32:32-p24:64:64"
+  "e-p:32:32-p1:64:64-p2:64:64-p3:32:32-p4:64:64-p5:32:32"
   "-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128"
   "-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64";
 
-class AMDGPUTargetInfo : public TargetInfo {
+class AMDGPUTargetInfo final : public TargetInfo {
   static const Builtin::Info BuiltinInfo[];
   static const char * const GCCRegNames[];
 
@@ -1949,22 +1949,26 @@ class AMDGPUTargetInfo : public TargetInfo {
   bool hasFMAF:1;
   bool hasLDEXPF:1;
 
+  static bool isAMDGCN(const llvm::Triple &TT) {
+    return TT.getArch() == llvm::Triple::amdgcn;
+  }
+
 public:
   AMDGPUTargetInfo(const llvm::Triple &Triple, const TargetOptions &)
-      : TargetInfo(Triple) {
-    if (Triple.getArch() == llvm::Triple::amdgcn) {
-      resetDataLayout(DataLayoutStringSI);
-      GPU = GK_SOUTHERN_ISLANDS;
+    : TargetInfo(Triple) ,
+      GPU(isAMDGCN(Triple) ? GK_SOUTHERN_ISLANDS : GK_R600),
+      hasFP64(false),
+      hasFMAF(false),
+      hasLDEXPF(false) {
+    if (getTriple().getArch() == llvm::Triple::amdgcn) {
       hasFP64 = true;
       hasFMAF = true;
       hasLDEXPF = true;
-    } else {
-      resetDataLayout(DataLayoutStringR600);
-      GPU = GK_R600;
-      hasFP64 = false;
-      hasFMAF = false;
-      hasLDEXPF = false;
     }
+
+    resetDataLayout(getTriple().getArch() == llvm::Triple::amdgcn ?
+                    DataLayoutStringSI : DataLayoutStringR600);
+
     AddrSpaceMap = &AMDGPUAddrSpaceMap;
     UseAddrSpaceMapMangling = true;
   }
@@ -2005,6 +2009,10 @@ public:
     return false;
   }
 
+  bool initFeatureMap(llvm::StringMap<bool> &Features,
+                      DiagnosticsEngine &Diags, StringRef CPU,
+                      const std::vector<std::string> &FeatureVec) const override;
+
   ArrayRef<Builtin::Info> getTargetBuiltins() const override {
     return llvm::makeArrayRef(BuiltinInfo,
                         clang::AMDGPU::LastTSBuiltin - Builtin::FirstTSBuiltin);
@@ -2027,8 +2035,8 @@ public:
     return TargetInfo::CharPtrBuiltinVaList;
   }
 
-  bool setCPU(const std::string &Name) override {
-    GPU = llvm::StringSwitch<GPUKind>(Name)
+  static GPUKind parseR600Name(StringRef Name) {
+    return llvm::StringSwitch<GPUKind>(Name)
       .Case("r600" ,    GK_R600)
       .Case("rv610",    GK_R600)
       .Case("rv620",    GK_R600)
@@ -2054,6 +2062,11 @@ public:
       .Case("caicos",   GK_NORTHERN_ISLANDS)
       .Case("cayman",   GK_CAYMAN)
       .Case("aruba",    GK_CAYMAN)
+      .Default(GK_NONE);
+  }
+
+  static GPUKind parseAMDGCNName(StringRef Name) {
+    return llvm::StringSwitch<GPUKind>(Name)
       .Case("tahiti",   GK_SOUTHERN_ISLANDS)
       .Case("pitcairn", GK_SOUTHERN_ISLANDS)
       .Case("verde",    GK_SOUTHERN_ISLANDS)
@@ -2070,43 +2083,15 @@ public:
       .Case("fiji",     GK_VOLCANIC_ISLANDS)
       .Case("stoney",   GK_VOLCANIC_ISLANDS)
       .Default(GK_NONE);
+  }
 
-    if (GPU == GK_NONE) {
-      return false;
-    }
+  bool setCPU(const std::string &Name) override {
+    if (getTriple().getArch() == llvm::Triple::amdgcn)
+      GPU = parseAMDGCNName(Name);
+    else
+      GPU = parseR600Name(Name);
 
-    // Set the correct data layout
-    switch (GPU) {
-    case GK_NONE:
-    case GK_R600:
-    case GK_R700:
-    case GK_EVERGREEN:
-    case GK_NORTHERN_ISLANDS:
-      resetDataLayout(DataLayoutStringR600);
-      hasFP64 = false;
-      hasFMAF = false;
-      hasLDEXPF = false;
-      break;
-    case GK_R600_DOUBLE_OPS:
-    case GK_R700_DOUBLE_OPS:
-    case GK_EVERGREEN_DOUBLE_OPS:
-    case GK_CAYMAN:
-      resetDataLayout(DataLayoutStringR600);
-      hasFP64 = true;
-      hasFMAF = true;
-      hasLDEXPF = false;
-      break;
-    case GK_SOUTHERN_ISLANDS:
-    case GK_SEA_ISLANDS:
-    case GK_VOLCANIC_ISLANDS:
-      resetDataLayout(DataLayoutStringSI);
-      hasFP64 = true;
-      hasFMAF = true;
-      hasLDEXPF = true;
-      break;
-    }
-
-    return true;
+    return GPU != GK_NONE;
   }
 
    void setSupportedOpenCLOpts() override {
@@ -2138,6 +2123,8 @@ public:
 const Builtin::Info AMDGPUTargetInfo::BuiltinInfo[] = {
 #define BUILTIN(ID, TYPE, ATTRS)                \
   { #ID, TYPE, ATTRS, nullptr, ALL_LANGUAGES, nullptr },
+#define TARGET_BUILTIN(ID, TYPE, ATTRS, FEATURE)                               \
+  { #ID, TYPE, ATTRS, nullptr, ALL_LANGUAGES, FEATURE },
 #include "clang/Basic/BuiltinsAMDGPU.def"
 };
 const char * const AMDGPUTargetInfo::GCCRegNames[] = {
@@ -2195,6 +2182,57 @@ const char * const AMDGPUTargetInfo::GCCRegNames[] = {
 
 ArrayRef<const char *> AMDGPUTargetInfo::getGCCRegNames() const {
   return llvm::makeArrayRef(GCCRegNames);
+}
+
+bool AMDGPUTargetInfo::initFeatureMap(
+  llvm::StringMap<bool> &Features,
+  DiagnosticsEngine &Diags, StringRef CPU,
+  const std::vector<std::string> &FeatureVec) const {
+
+  // XXX - What does the member GPU mean if device name string passed here?
+  if (getTriple().getArch() == llvm::Triple::amdgcn) {
+    if (CPU.empty())
+      CPU = "tahiti";
+
+    switch (parseAMDGCNName(CPU)) {
+    case GK_SOUTHERN_ISLANDS:
+    case GK_SEA_ISLANDS:
+      break;
+
+    case GK_VOLCANIC_ISLANDS:
+      Features["s-memrealtime"] = true;
+      Features["16-bit-insts"] = true;
+      break;
+
+    case GK_NONE:
+      return false;
+    default:
+      llvm_unreachable("unhandled subtarget");
+    }
+  } else {
+    if (CPU.empty())
+      CPU = "r600";
+
+    switch (parseR600Name(CPU)) {
+    case GK_R600:
+    case GK_R700:
+    case GK_EVERGREEN:
+    case GK_NORTHERN_ISLANDS:
+      break;
+    case GK_R600_DOUBLE_OPS:
+    case GK_R700_DOUBLE_OPS:
+    case GK_EVERGREEN_DOUBLE_OPS:
+    case GK_CAYMAN:
+      Features["fp64"] = true;
+      break;
+    case GK_NONE:
+      return false;
+    default:
+      llvm_unreachable("unhandled subtarget");
+    }
+  }
+
+  return TargetInfo::initFeatureMap(Features, Diags, CPU, FeatureVec);
 }
 
 // Namespace for x86 abstract base class
@@ -4950,7 +4988,7 @@ public:
       } else if (Feature == "+dsp") {
         DSP = 1;
       } else if (Feature == "+fp-only-sp") {
-        HW_FP_remove |= HW_FP_DP; 
+        HW_FP_remove |= HW_FP_DP;
       } else if (Feature == "+strict-align") {
         Unaligned = 0;
       } else if (Feature == "+fp16") {
@@ -5669,6 +5707,7 @@ public:
                         .Case("generic", true)
                         .Cases("cortex-a53", "cortex-a57", "cortex-a72",
                                "cortex-a35", "exynos-m1", true)
+                        .Case("cortex-a73", true)
                         .Case("cyclone", true)
                         .Case("kryo", true)
                         .Default(false);
@@ -7008,25 +7047,21 @@ public:
 
 class MipsTargetInfo : public TargetInfo {
   void setDataLayout() {
-    if (BigEndian) {
-      if (ABI == "o32")
-        resetDataLayout("E-m:m-p:32:32-i8:8:32-i16:16:32-i64:64-n32-S64");
-      else if (ABI == "n32")
-        resetDataLayout("E-m:m-p:32:32-i8:8:32-i16:16:32-i64:64-n32:64-S128");
-      else if (ABI == "n64")
-        resetDataLayout("E-m:m-i8:8:32-i16:16:32-i64:64-n32:64-S128");
-      else
-        llvm_unreachable("Invalid ABI");
-    } else {
-      if (ABI == "o32")
-        resetDataLayout("e-m:m-p:32:32-i8:8:32-i16:16:32-i64:64-n32-S64");
-      else if (ABI == "n32")
-        resetDataLayout("e-m:m-p:32:32-i8:8:32-i16:16:32-i64:64-n32:64-S128");
-      else if (ABI == "n64")
-        resetDataLayout("e-m:m-i8:8:32-i16:16:32-i64:64-n32:64-S128");
-      else
-        llvm_unreachable("Invalid ABI");
-    }
+    StringRef Layout;
+
+    if (ABI == "o32")
+      Layout = "m:m-p:32:32-i8:8:32-i16:16:32-i64:64-n32-S64";
+    else if (ABI == "n32")
+      Layout = "m:m-p:32:32-i8:8:32-i16:16:32-i64:64-n32:64-S128";
+    else if (ABI == "n64")
+      Layout = "m:m-i8:8:32-i16:16:32-i64:64-n32:64-S128";
+    else
+      llvm_unreachable("Invalid ABI");
+
+    if (BigEndian)
+      resetDataLayout(("E-" + Layout).str());
+    else
+      resetDataLayout(("e-" + Layout).str());
   }
 
 
@@ -7050,38 +7085,19 @@ protected:
 
 public:
   MipsTargetInfo(const llvm::Triple &Triple, const TargetOptions &)
-      : TargetInfo(Triple), CPU((getTriple().getArch() == llvm::Triple::mips ||
-                                 getTriple().getArch() == llvm::Triple::mipsel)
-                                    ? "mips32r2"
-                                    : "mips64r2"),
-        IsMips16(false), IsMicromips(false), IsNan2008(false),
-        IsSingleFloat(false), FloatABI(HardFloat), DspRev(NoDSP), HasMSA(false),
-        HasFP64(false), ABI((getTriple().getArch() == llvm::Triple::mips ||
-                             getTriple().getArch() == llvm::Triple::mipsel)
-                                ? "o32"
-                                : "n64") {
+      : TargetInfo(Triple), IsMips16(false), IsMicromips(false),
+        IsNan2008(false), IsSingleFloat(false), FloatABI(HardFloat),
+        DspRev(NoDSP), HasMSA(false), HasFP64(false) {
     TheCXXABI.set(TargetCXXABI::GenericMIPS);
     BigEndian = getTriple().getArch() == llvm::Triple::mips ||
                 getTriple().getArch() == llvm::Triple::mips64;
 
-    if (getTriple().getArch() == llvm::Triple::mips ||
-        getTriple().getArch() == llvm::Triple::mipsel) {
-      SizeType = UnsignedInt;
-      PtrDiffType = SignedInt;
-      Int64Type = SignedLongLong;
-      IntMaxType = Int64Type;
-      MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 32;
-    } else {
-      LongDoubleWidth = LongDoubleAlign = 128;
-      LongDoubleFormat = &llvm::APFloat::IEEEquad;
-      if (getTriple().getOS() == llvm::Triple::FreeBSD) {
-        LongDoubleWidth = LongDoubleAlign = 64;
-        LongDoubleFormat = &llvm::APFloat::IEEEdouble;
-      }
-      setN64ABITypes();
-      SuitableAlign = 128;
-      MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 64;
-    }
+    setABI((getTriple().getArch() == llvm::Triple::mips ||
+            getTriple().getArch() == llvm::Triple::mipsel)
+               ? "o32"
+               : "n64");
+
+    CPU = ABI == "o32" ? "mips32r2" : "mips64r2";
   }
 
   bool isNaN2008Default() const {
@@ -7098,9 +7114,16 @@ public:
 
   StringRef getABI() const override { return ABI; }
   bool setABI(const std::string &Name) override {
+    // FIXME: The Arch component on the triple actually has no bearing on
+    //        whether the ABI is valid or not. It's features of the CPU that
+    //        matters and the size of the GPR's in particular.
+    //        However, we can't allow O32 on 64-bit processors just yet because
+    //        the backend still checks the Arch component instead of the ABI in
+    //        a few places.
     if (getTriple().getArch() == llvm::Triple::mips ||
         getTriple().getArch() == llvm::Triple::mipsel) {
       if (Name == "o32") {
+        setO32ABITypes();
         ABI = Name;
         return true;
       }
@@ -7121,46 +7144,71 @@ public:
     return false;
   }
 
+  void setO32ABITypes() {
+    Int64Type = SignedLongLong;
+    IntMaxType = Int64Type;
+    LongDoubleFormat = &llvm::APFloat::IEEEdouble;
+    LongDoubleWidth = LongDoubleAlign = 64;
+    LongWidth = LongAlign = 32;
+    MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 32;
+    PointerWidth = PointerAlign = 32;
+    PtrDiffType = SignedInt;
+    SizeType = UnsignedInt;
+    SuitableAlign = 64;
+  }
+
+  void setN32N64ABITypes() {
+    LongDoubleWidth = LongDoubleAlign = 128;
+    LongDoubleFormat = &llvm::APFloat::IEEEquad;
+    if (getTriple().getOS() == llvm::Triple::FreeBSD) {
+      LongDoubleWidth = LongDoubleAlign = 64;
+      LongDoubleFormat = &llvm::APFloat::IEEEdouble;
+    }
+    MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 64;
+    SuitableAlign = 128;
+  }
+
   void setN64ABITypes() {
-    LongWidth = LongAlign = 64;
-    PointerWidth = PointerAlign = 64;
-    SizeType = UnsignedLong;
-    PtrDiffType = SignedLong;
+    setN32N64ABITypes();
     Int64Type = SignedLong;
     IntMaxType = Int64Type;
+    LongWidth = LongAlign = 64;
+    PointerWidth = PointerAlign = 64;
+    PtrDiffType = SignedLong;
+    SizeType = UnsignedLong;
   }
 
   void setN32ABITypes() {
-    LongWidth = LongAlign = 32;
-    PointerWidth = PointerAlign = 32;
-    SizeType = UnsignedInt;
-    PtrDiffType = SignedInt;
+    setN32N64ABITypes();
     Int64Type = SignedLongLong;
     IntMaxType = Int64Type;
+    LongWidth = LongAlign = 32;
+    PointerWidth = PointerAlign = 32;
+    PtrDiffType = SignedInt;
+    SizeType = UnsignedInt;
   }
 
   bool setCPU(const std::string &Name) override {
-    bool IsMips32 = getTriple().getArch() == llvm::Triple::mips ||
-                    getTriple().getArch() == llvm::Triple::mipsel;
+    bool GPR64Required = ABI == "n32" || ABI == "n64";
     CPU = Name;
     return llvm::StringSwitch<bool>(Name)
-        .Case("mips1", IsMips32)
-        .Case("mips2", IsMips32)
+        .Case("mips1", !GPR64Required)
+        .Case("mips2", !GPR64Required)
         .Case("mips3", true)
         .Case("mips4", true)
         .Case("mips5", true)
-        .Case("mips32", IsMips32)
-        .Case("mips32r2", IsMips32)
-        .Case("mips32r3", IsMips32)
-        .Case("mips32r5", IsMips32)
-        .Case("mips32r6", IsMips32)
+        .Case("mips32", !GPR64Required)
+        .Case("mips32r2", !GPR64Required)
+        .Case("mips32r3", !GPR64Required)
+        .Case("mips32r5", !GPR64Required)
+        .Case("mips32r6", !GPR64Required)
         .Case("mips64", true)
         .Case("mips64r2", true)
         .Case("mips64r3", true)
         .Case("mips64r5", true)
         .Case("mips64r6", true)
         .Case("octeon", true)
-        .Case("p5600", true)
+        .Case("p5600", !GPR64Required)
         .Default(false);
   }
   const std::string& getCPU() const { return CPU; }
@@ -7192,8 +7240,7 @@ public:
     if (Opts.GNUMode)
       Builder.defineMacro("mips");
 
-    if (getTriple().getArch() == llvm::Triple::mips ||
-        getTriple().getArch() == llvm::Triple::mipsel) {
+    if (ABI == "o32") {
       Builder.defineMacro("__mips", "32");
       Builder.defineMacro("_MIPS_ISA", "_MIPS_ISA_MIPS32");
     } else {
@@ -7284,8 +7331,12 @@ public:
     Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_1");
     Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_2");
     Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4");
-    if (getTriple().getArch() == llvm::Triple::mips64 ||
-        getTriple().getArch() == llvm::Triple::mips64el)
+
+    // 32-bit MIPS processors don't have the necessary lld/scd instructions
+    // found in 64-bit processors. In the case of O32 on a 64-bit processor,
+    // the instructions exist but using them violates the ABI since they
+    // require 64-bit GPRs and O32 only supports 32-bit GPRs.
+    if (ABI == "n32" || ABI == "n64")
       Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8");
   }
 
@@ -7478,15 +7529,13 @@ public:
         {{"t9"}, "$25"}, {{"k0"}, "$26"},        {{"k1"}, "$27"},
         {{"gp"}, "$28"}, {{"sp", "$sp"}, "$29"}, {{"fp", "$fp"}, "$30"},
         {{"ra"}, "$31"}};
-    if (getTriple().getArch() == llvm::Triple::mips ||
-        getTriple().getArch() == llvm::Triple::mipsel)
+    if (ABI == "o32")
       return llvm::makeArrayRef(O32RegAliases);
     return llvm::makeArrayRef(NewABIRegAliases);
   }
 
   bool hasInt128Type() const override {
-    return getTriple().getArch() == llvm::Triple::mips64 ||
-           getTriple().getArch() == llvm::Triple::mips64el;
+    return ABI == "n32" || ABI == "n64";
   }
 };
 
