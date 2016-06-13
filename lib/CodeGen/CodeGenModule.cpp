@@ -1911,6 +1911,12 @@ CodeGenModule::GetOrCreateLLVMFunction(StringRef MangledName,
     addGlobalValReplacement(Entry, BC);
   }
 
+  if (MangledName == "_ZN3SSSC1Ei") {
+
+    llvm::errs() << "Hey!\n";
+
+  }
+
   assert(F->getName() == MangledName && "name was uniqued!");
   if (D)
     SetFunctionAttributes(GD, F, IsIncompleteFunction, IsThunk);
