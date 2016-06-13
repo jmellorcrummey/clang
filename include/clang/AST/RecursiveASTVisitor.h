@@ -839,10 +839,16 @@ bool RecursiveASTVisitor<Derived>::TraverseConstructorInitializer(
   if (Init->isWritten() || getDerived().shouldVisitImplicitCode())
     TRY_TO(TraverseStmt(Init->getInit()));
 
-  if (Init->getNumArrayIndices() && getDerived().shouldVisitImplicitCode())
-    for (VarDecl *VD : Init->getArrayIndexes()) {
+  if (getDerived().shouldVisitImplicitCode())
+    // The braces for this one-line loop are required for MSVC2013.  It
+    // refuses to compile
+    //     for (int i : int_vec)
+    //       do {} while(false);
+    // without braces on the for loop.
+    for (VarDecl *VD : Init->getArrayIndices()) {
       TRY_TO(TraverseDecl(VD));
     }
+
   return true;
 }
 
@@ -2496,6 +2502,9 @@ DEF_TRAVERSE_STMT(OMPTargetParallelForDirective,
 DEF_TRAVERSE_STMT(OMPTeamsDirective,
                   { TRY_TO(TraverseOMPExecutableDirective(S)); })
 
+DEF_TRAVERSE_STMT(OMPTargetUpdateDirective,
+                  { TRY_TO(TraverseOMPExecutableDirective(S)); })
+
 DEF_TRAVERSE_STMT(OMPTaskLoopDirective,
                   { TRY_TO(TraverseOMPExecutableDirective(S)); })
 
@@ -2517,6 +2526,7 @@ bool RecursiveASTVisitor<Derived>::TraverseOMPClause(OMPClause *C) {
     break;
 #include "clang/Basic/OpenMPKinds.def"
   case OMPC_threadprivate:
+  case OMPC_uniform:
   case OMPC_unknown:
     break;
   }
@@ -2871,6 +2881,18 @@ bool RecursiveASTVisitor<Derived>::VisitOMPDistScheduleClause(
 template <typename Derived>
 bool
 RecursiveASTVisitor<Derived>::VisitOMPDefaultmapClause(OMPDefaultmapClause *C) {
+  return true;
+}
+
+template <typename Derived>
+bool RecursiveASTVisitor<Derived>::VisitOMPToClause(OMPToClause *C) {
+  TRY_TO(VisitOMPClauseList(C));
+  return true;
+}
+
+template <typename Derived>
+bool RecursiveASTVisitor<Derived>::VisitOMPFromClause(OMPFromClause *C) {
+  TRY_TO(VisitOMPClauseList(C));
   return true;
 }
 

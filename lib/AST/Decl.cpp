@@ -1946,7 +1946,7 @@ VarDecl::isThisDeclarationADefinition(ASTContext &C) const {
   if (hasInit())
     return Definition;
 
-  if (hasAttr<AliasAttr>())
+  if (hasDefiningAttr())
     return Definition;
 
   if (const auto *SAA = getAttr<SelectAnyAttr>())
@@ -2486,7 +2486,7 @@ bool FunctionDecl::hasTrivialBody() const
 bool FunctionDecl::isDefined(const FunctionDecl *&Definition) const {
   for (auto I : redecls()) {
     if (I->IsDeleted || I->IsDefaulted || I->Body || I->IsLateTemplateParsed ||
-        I->hasAttr<AliasAttr>()) {
+        I->hasDefiningAttr()) {
       Definition = I->IsDeleted ? I->getCanonicalDecl() : I;
       return true;
     }
@@ -3685,6 +3685,21 @@ void EnumDecl::setTemplateSpecializationKind(TemplateSpecializationKind TSK,
       PointOfInstantiation.isValid() &&
       MSI->getPointOfInstantiation().isInvalid())
     MSI->setPointOfInstantiation(PointOfInstantiation);
+}
+
+EnumDecl *EnumDecl::getTemplateInstantiationPattern() const {
+  if (MemberSpecializationInfo *MSInfo = getMemberSpecializationInfo()) {
+    if (isTemplateInstantiation(MSInfo->getTemplateSpecializationKind())) {
+      EnumDecl *ED = getInstantiatedFromMemberEnum();
+      while (auto *NewED = ED->getInstantiatedFromMemberEnum())
+        ED = NewED;
+      return ED;
+    }
+  }
+
+  assert(!isTemplateInstantiation(getTemplateSpecializationKind()) &&
+         "couldn't find pattern for enum instantiation");
+  return nullptr;
 }
 
 EnumDecl *EnumDecl::getInstantiatedFromMemberEnum() const {

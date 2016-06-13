@@ -217,8 +217,13 @@ static bool checkLanguageOptions(const LangOptions &LangOpts,
   if (!AllowCompatibleDifferences)                                 \
     ENUM_LANGOPT(Name, Bits, Default, Description)
 
+#define COMPATIBLE_VALUE_LANGOPT(Name, Bits, Default, Description) \
+  if (!AllowCompatibleDifferences)                                 \
+    VALUE_LANGOPT(Name, Bits, Default, Description)
+
 #define BENIGN_LANGOPT(Name, Bits, Default, Description)
 #define BENIGN_ENUM_LANGOPT(Name, Type, Bits, Default, Description)
+#define BENIGN_VALUE_LANGOPT(Name, Type, Bits, Default, Description)
 #include "clang/Basic/LangOptions.def"
 
   if (ExistingLangOpts.ModuleFeatures != LangOpts.ModuleFeatures) {
@@ -1675,9 +1680,12 @@ void ASTReader::ReadDefinedMacros() {
           break;
           
         case PP_MACRO_OBJECT_LIKE:
-        case PP_MACRO_FUNCTION_LIKE:
-          getLocalIdentifier(*I, Record[0]);
+        case PP_MACRO_FUNCTION_LIKE: {
+          IdentifierInfo *II = getLocalIdentifier(*I, Record[0]);
+          if (II->isOutOfDate())
+            updateOutOfDateIdentifier(*II);
           break;
+        }
           
         case PP_TOKEN:
           // Ignore tokens.
@@ -3048,28 +3056,6 @@ ASTReader::ReadASTBlock(ModuleFile &F, unsigned ClientLoadCapabilities) {
       F.ObjCCategories.swap(Record);
       break;
 
-    case CXX_BASE_SPECIFIER_OFFSETS: {
-      if (F.LocalNumCXXBaseSpecifiers != 0) {
-        Error("duplicate CXX_BASE_SPECIFIER_OFFSETS record in AST file");
-        return Failure;
-      }
-
-      F.LocalNumCXXBaseSpecifiers = Record[0];
-      F.CXXBaseSpecifiersOffsets = (const uint32_t *)Blob.data();
-      break;
-    }
-
-    case CXX_CTOR_INITIALIZERS_OFFSETS: {
-      if (F.LocalNumCXXCtorInitializers != 0) {
-        Error("duplicate CXX_CTOR_INITIALIZERS_OFFSETS record in AST file");
-        return Failure;
-      }
-
-      F.LocalNumCXXCtorInitializers = Record[0];
-      F.CXXCtorInitializersOffsets = (const uint32_t *)Blob.data();
-      break;
-    }
-
     case DIAG_PRAGMA_MAPPINGS:
       if (F.PragmaDiagMappings.empty())
         F.PragmaDiagMappings.swap(Record);
@@ -3623,6 +3609,9 @@ ASTReader::ASTReadResult ASTReader::ReadAST(StringRef FileName,
          Id != IdEnd; ++Id)
       Id->second->setOutOfDate(true);
   }
+  // Mark selectors as out of date.
+  for (auto Sel : SelectorGeneration)
+    SelectorOutOfDate[Sel.first] = true;
   
   // Resolve any unresolved module exports.
   for (unsigned I = 0, N = UnresolvedModuleRefs.size(); I != N; ++I) {
@@ -6054,6 +6043,9 @@ QualType ASTReader::GetType(TypeID ID) {
     case PREDEF_TYPE_LONGDOUBLE_ID:
       T = Context.LongDoubleTy;
       break;
+    case PREDEF_TYPE_FLOAT128_ID:
+      T = Context.Float128Ty;
+      break;
     case PREDEF_TYPE_OVERLOAD_ID:
       T = Context.OverloadTy;
       break;
@@ -6087,42 +6079,11 @@ QualType ASTReader::GetType(TypeID ID) {
     case PREDEF_TYPE_OBJC_SEL:
       T = Context.ObjCBuiltinSelTy;
       break;
-    case PREDEF_TYPE_IMAGE1D_ID:
-      T = Context.OCLImage1dTy;
+#define IMAGE_TYPE(ImgType, Id, SingletonId, Access, Suffix) \
+    case PREDEF_TYPE_##Id##_ID: \
+      T = Context.SingletonId; \
       break;
-    case PREDEF_TYPE_IMAGE1D_ARR_ID:
-      T = Context.OCLImage1dArrayTy;
-      break;
-    case PREDEF_TYPE_IMAGE1D_BUFF_ID:
-      T = Context.OCLImage1dBufferTy;
-      break;
-    case PREDEF_TYPE_IMAGE2D_ID:
-      T = Context.OCLImage2dTy;
-      break;
-    case PREDEF_TYPE_IMAGE2D_ARR_ID:
-      T = Context.OCLImage2dArrayTy;
-      break;
-    case PREDEF_TYPE_IMAGE2D_DEP_ID:
-      T = Context.OCLImage2dDepthTy;
-      break;
-    case PREDEF_TYPE_IMAGE2D_ARR_DEP_ID:
-      T = Context.OCLImage2dArrayDepthTy;
-      break;
-    case PREDEF_TYPE_IMAGE2D_MSAA_ID:
-      T = Context.OCLImage2dMSAATy;
-      break;
-    case PREDEF_TYPE_IMAGE2D_ARR_MSAA_ID:
-      T = Context.OCLImage2dArrayMSAATy;
-      break;
-    case PREDEF_TYPE_IMAGE2D_MSAA_DEP_ID:
-      T = Context.OCLImage2dMSAADepthTy;
-      break;
-    case PREDEF_TYPE_IMAGE2D_ARR_MSAA_DEPTH_ID:
-      T = Context.OCLImage2dArrayMSAADepthTy;
-      break;
-    case PREDEF_TYPE_IMAGE3D_ID:
-      T = Context.OCLImage3dTy;
-      break;
+#include "clang/Basic/OpenCLImageTypes.def"
     case PREDEF_TYPE_SAMPLER_ID:
       T = Context.OCLSamplerTy;
       break;
@@ -6326,18 +6287,6 @@ void ASTReader::CompleteRedeclChain(const Decl *D) {
   }
 }
 
-uint64_t ASTReader::ReadCXXCtorInitializersRef(ModuleFile &M,
-                                               const RecordData &Record,
-                                               unsigned &Idx) {
-  if (Idx >= Record.size() || Record[Idx] > M.LocalNumCXXCtorInitializers) {
-    Error("malformed AST file: missing C++ ctor initializers");
-    return 0;
-  }
-
-  unsigned LocalID = Record[Idx++];
-  return getGlobalBitOffset(M, M.CXXCtorInitializersOffsets[LocalID - 1]);
-}
-
 CXXCtorInitializer **
 ASTReader::GetExternalCXXCtorInitializers(uint64_t Offset) {
   RecordLocation Loc = getLocalBitOffset(Offset);
@@ -6356,18 +6305,6 @@ ASTReader::GetExternalCXXCtorInitializers(uint64_t Offset) {
 
   unsigned Idx = 0;
   return ReadCXXCtorInitializers(*Loc.F, Record, Idx);
-}
-
-uint64_t ASTReader::readCXXBaseSpecifiers(ModuleFile &M,
-                                          const RecordData &Record,
-                                          unsigned &Idx) {
-  if (Idx >= Record.size() || Record[Idx] > M.LocalNumCXXBaseSpecifiers) {
-    Error("malformed AST file: missing C++ base specifier");
-    return 0;
-  }
-
-  unsigned LocalID = Record[Idx++];
-  return getGlobalBitOffset(M, M.CXXBaseSpecifiersOffsets[LocalID - 1]);
 }
 
 CXXBaseSpecifier *ASTReader::GetExternalCXXBaseSpecifiers(uint64_t Offset) {
@@ -7083,19 +7020,20 @@ namespace clang {
     /// the current AST file.
     ASTIdentifierLookupTable::key_iterator End;
 
+    /// \brief Whether to skip any modules in the ASTReader.
+    bool SkipModules;
+
   public:
-    explicit ASTIdentifierIterator(const ASTReader &Reader);
+    explicit ASTIdentifierIterator(const ASTReader &Reader,
+                                   bool SkipModules = false);
 
     StringRef Next() override;
   };
 }
 
-ASTIdentifierIterator::ASTIdentifierIterator(const ASTReader &Reader)
-  : Reader(Reader), Index(Reader.ModuleMgr.size() - 1) {
-  ASTIdentifierLookupTable *IdTable
-    = (ASTIdentifierLookupTable *)Reader.ModuleMgr[Index].IdentifierLookupTable;
-  Current = IdTable->key_begin();
-  End = IdTable->key_end();
+ASTIdentifierIterator::ASTIdentifierIterator(const ASTReader &Reader,
+                                             bool SkipModules)
+    : Reader(Reader), Index(Reader.ModuleMgr.size()), SkipModules(SkipModules) {
 }
 
 StringRef ASTIdentifierIterator::Next() {
@@ -7105,9 +7043,12 @@ StringRef ASTIdentifierIterator::Next() {
       return StringRef();
 
     --Index;
-    ASTIdentifierLookupTable *IdTable
-      = (ASTIdentifierLookupTable *)Reader.ModuleMgr[Index].
-        IdentifierLookupTable;
+    ModuleFile &F = Reader.ModuleMgr[Index];
+    if (SkipModules && F.isModule())
+      continue;
+
+    ASTIdentifierLookupTable *IdTable =
+        (ASTIdentifierLookupTable *)F.IdentifierLookupTable;
     Current = IdTable->key_begin();
     End = IdTable->key_end();
   }
@@ -7119,9 +7060,42 @@ StringRef ASTIdentifierIterator::Next() {
   return Result;
 }
 
+namespace {
+/// A utility for appending two IdentifierIterators.
+class ChainedIdentifierIterator : public IdentifierIterator {
+  std::unique_ptr<IdentifierIterator> Current;
+  std::unique_ptr<IdentifierIterator> Queued;
+
+public:
+  ChainedIdentifierIterator(std::unique_ptr<IdentifierIterator> First,
+                            std::unique_ptr<IdentifierIterator> Second)
+      : Current(std::move(First)), Queued(std::move(Second)) {}
+
+  StringRef Next() override {
+    if (!Current)
+      return StringRef();
+
+    StringRef result = Current->Next();
+    if (!result.empty())
+      return result;
+
+    // Try the queued iterator, which may itself be empty.
+    Current.reset();
+    std::swap(Current, Queued);
+    return Next();
+  }
+};
+} // end anonymous namespace.
+
 IdentifierIterator *ASTReader::getIdentifiers() {
-  if (!loadGlobalIndex())
-    return GlobalIndex->createIdentifierIterator();
+  if (!loadGlobalIndex()) {
+    std::unique_ptr<IdentifierIterator> ReaderIter(
+        new ASTIdentifierIterator(*this, /*SkipModules=*/true));
+    std::unique_ptr<IdentifierIterator> ModulesIter(
+        GlobalIndex->createIdentifierIterator());
+    return new ChainedIdentifierIterator(std::move(ReaderIter),
+                                         std::move(ModulesIter));
+  }
 
   return new ASTIdentifierIterator(*this);
 }
@@ -7211,6 +7185,7 @@ void ASTReader::ReadMethodPool(Selector Sel) {
   unsigned &Generation = SelectorGeneration[Sel];
   unsigned PriorGeneration = Generation;
   Generation = getGeneration();
+  SelectorOutOfDate[Sel] = false;
   
   // Search for methods defined with this selector.
   ++NumMethodPoolLookups;
@@ -7240,6 +7215,11 @@ void ASTReader::ReadMethodPool(Selector Sel) {
   // update hasMoreThanOneDecl as we add the methods.
   addMethodsToPool(S, Visitor.getInstanceMethods(), Pos->second.first);
   addMethodsToPool(S, Visitor.getFactoryMethods(), Pos->second.second);
+}
+
+void ASTReader::updateOutOfDateSelector(Selector Sel) {
+  if (SelectorOutOfDate[Sel])
+    ReadMethodPool(Sel);
 }
 
 void ASTReader::ReadKnownNamespaces(
@@ -7638,8 +7618,9 @@ ASTReader::getSourceDescriptor(unsigned ID) {
   if (ModuleMgr.size() == 1) {
     ModuleFile &MF = ModuleMgr.getPrimaryModule();
     StringRef ModuleName = llvm::sys::path::filename(MF.OriginalSourceFileName);
-    return ASTReader::ASTSourceDescriptor(ModuleName, MF.OriginalDir,
-                                          MF.FileName, MF.Signature);
+    StringRef FileName = llvm::sys::path::filename(MF.FileName);
+    return ASTReader::ASTSourceDescriptor(ModuleName, MF.OriginalDir, FileName,
+                                          MF.Signature);
   }
   return None;
 }
@@ -8720,6 +8701,7 @@ ASTReader::ASTReader(
       FileMgr(PP.getFileManager()), PCHContainerRdr(PCHContainerRdr),
       Diags(PP.getDiagnostics()), SemaObj(nullptr), PP(PP), Context(Context),
       Consumer(nullptr), ModuleMgr(PP.getFileManager(), PCHContainerRdr),
+      DummyIdResolver(PP),
       ReadTimer(std::move(ReadTimer)),
       PragmaMSStructState(-1),
       PragmaMSPointersToMembersState(-1),
@@ -8757,4 +8739,8 @@ ASTReader::ASTReader(
 ASTReader::~ASTReader() {
   if (OwnsDeserializationListener)
     delete DeserializationListener;
+}
+
+IdentifierResolver &ASTReader::getIdResolver() {
+  return SemaObj ? SemaObj->IdResolver : DummyIdResolver;
 }

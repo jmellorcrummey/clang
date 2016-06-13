@@ -153,7 +153,7 @@ public:
   const char *getOffloadingArch() const { return OffloadingArch; }
 
   /// \brief Check if this action have any offload kinds. Note that host offload
-  /// kinds are only set if the action is a dependence to an host offload
+  /// kinds are only set if the action is a dependence to a host offload
   /// action.
   bool isHostOffloading(OffloadKind OKind) const {
     return ActiveOffloadKindMask & OKind;

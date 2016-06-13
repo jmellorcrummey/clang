@@ -55,6 +55,7 @@ OpenMPClauseKind clang::getOpenMPClauseKind(StringRef Str) {
   return llvm::StringSwitch<OpenMPClauseKind>(Str)
 #define OPENMP_CLAUSE(Name, Class) .Case(#Name, OMPC_##Name)
 #include "clang/Basic/OpenMPKinds.def"
+      .Case("uniform", OMPC_uniform)
       .Default(OMPC_unknown);
 }
 
@@ -67,6 +68,8 @@ const char *clang::getOpenMPClauseName(OpenMPClauseKind Kind) {
   case OMPC_##Name:                                                            \
     return #Name;
 #include "clang/Basic/OpenMPKinds.def"
+  case OMPC_uniform:
+    return "uniform";
   case OMPC_threadprivate:
     return "threadprivate or thread local";
   }
@@ -158,6 +161,9 @@ unsigned clang::getOpenMPSimpleClauseType(OpenMPClauseKind Kind,
   case OMPC_nogroup:
   case OMPC_num_tasks:
   case OMPC_hint:
+  case OMPC_uniform:
+  case OMPC_to:
+  case OMPC_from:
     break;
   }
   llvm_unreachable("Invalid OpenMP simple clause kind");
@@ -292,6 +298,9 @@ const char *clang::getOpenMPSimpleClauseTypeName(OpenMPClauseKind Kind,
   case OMPC_nogroup:
   case OMPC_num_tasks:
   case OMPC_hint:
+  case OMPC_uniform:
+  case OMPC_to:
+  case OMPC_from:
     break;
   }
   llvm_unreachable("Invalid OpenMP simple clause kind");
@@ -475,6 +484,16 @@ bool clang::isAllowedClauseForDirective(OpenMPDirectiveKind DKind,
       break;
     }
     break;
+  case OMPD_target_update:
+    switch (CKind) {
+#define OPENMP_TARGET_UPDATE_CLAUSE(Name)                                      \
+  case OMPC_##Name:                                                            \
+    return true;
+#include "clang/Basic/OpenMPKinds.def"
+    default:
+      break;
+    }
+    break;
   case OMPD_teams:
     switch (CKind) {
 #define OPENMP_TEAMS_CLAUSE(Name)                                              \
@@ -547,6 +566,8 @@ bool clang::isAllowedClauseForDirective(OpenMPDirectiveKind DKind,
       break;
     }
     break;
+  case OMPD_declare_target:
+  case OMPD_end_declare_target:
   case OMPD_unknown:
   case OMPD_threadprivate:
   case OMPD_section:
@@ -598,7 +619,7 @@ bool clang::isOpenMPTargetExecutionDirective(OpenMPDirectiveKind DKind) {
 bool clang::isOpenMPTargetDataManagementDirective(OpenMPDirectiveKind DKind) {
   // TODO add target update directive check.
   return DKind == OMPD_target_data || DKind == OMPD_target_enter_data ||
-         DKind == OMPD_target_exit_data;
+         DKind == OMPD_target_exit_data || DKind == OMPD_target_update;
 }
 
 bool clang::isOpenMPTeamsDirective(OpenMPDirectiveKind DKind) {
@@ -625,3 +646,6 @@ bool clang::isOpenMPThreadPrivate(OpenMPClauseKind Kind) {
   return Kind == OMPC_threadprivate || Kind == OMPC_copyin;
 }
 
+bool clang::isOpenMPTaskingDirective(OpenMPDirectiveKind Kind) {
+  return Kind == OMPD_task || isOpenMPTaskLoopDirective(Kind);
+}

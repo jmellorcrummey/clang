@@ -82,6 +82,12 @@
 // RUN: %clang_cl /I myincludedir -### -- %s 2>&1 | FileCheck -check-prefix=SLASH_I %s
 // SLASH_I: "-I" "myincludedir"
 
+// RUN: %clang_cl /imsvcmyincludedir -### -- %s 2>&1 | FileCheck -check-prefix=SLASH_imsvc %s
+// RUN: %clang_cl /imsvc myincludedir -### -- %s 2>&1 | FileCheck -check-prefix=SLASH_imsvc %s
+// Clang's resource header directory should be first:
+// SLASH_imsvc: "-internal-isystem" "{{[^"]*}}lib{{(64)?/|\\\\}}clang{{[^"]*}}include"
+// SLASH_imsvc: "-internal-isystem" "myincludedir"
+
 // RUN: %clang_cl /J -### -- %s 2>&1 | FileCheck -check-prefix=J %s
 // J: -fno-signed-char
 
@@ -90,6 +96,12 @@
 
 // RUN: %clang_cl /Ob0 -### -- %s 2>&1 | FileCheck -check-prefix=Ob0 %s
 // Ob0: -fno-inline
+
+// RUN: %clang_cl /Ob2 -### -- %s 2>&1 | FileCheck -check-prefix=Ob2 %s
+// RUN: %clang_cl /Odb2 -### -- %s 2>&1 | FileCheck -check-prefix=Ob2 %s
+// RUN: %clang_cl /O2 /Ob2 -### -- %s 2>&1 | FileCheck -check-prefix=Ob2 %s
+// Ob2-NOT: warning: argument unused during compilation: '/O2'
+// Ob2: -finline-functions
 
 // RUN: %clang_cl /Od -### -- %s 2>&1 | FileCheck -check-prefix=Od %s
 // Od: -O0
@@ -259,7 +271,6 @@
 // RUN:    /kernel- \
 // RUN:    /nologo \
 // RUN:    /Ob1 \
-// RUN:    /Ob2 \
 // RUN:    /openmp- \
 // RUN:    /RTC1 \
 // RUN:    /sdl \
@@ -381,7 +392,7 @@
 // RTTI-NOT: "-fno-rtti"
 
 // thread safe statics are off for versions < 19.
-// RUN: %clang_cl /c -### -- %s 2>&1 | FileCheck -check-prefix=NoThreadSafeStatics %s
+// RUN: %clang_cl /c -### -fms-compatibility-version=18 -- %s 2>&1 | FileCheck -check-prefix=NoThreadSafeStatics %s
 // RUN: %clang_cl /Zc:threadSafeInit /Zc:threadSafeInit- /c -### -- %s 2>&1 | FileCheck -check-prefix=NoThreadSafeStatics %s
 // NoThreadSafeStatics: "-fno-threadsafe-statics"
 
@@ -452,7 +463,6 @@
 // RUN:     -fno-ms-compatibility \
 // RUN:     -fms-extensions \
 // RUN:     -fno-ms-extensions \
-// RUN:     -isystem=some/path \
 // RUN:     -mllvm -disable-llvm-optzns \
 // RUN:     -Wunused-variable \
 // RUN:     -fmacro-backtrace-limit=0 \

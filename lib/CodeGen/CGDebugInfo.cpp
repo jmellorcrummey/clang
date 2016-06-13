@@ -396,16 +396,27 @@ void CGDebugInfo::CreateCompileUnit() {
   if (LO.ObjC1)
     RuntimeVers = LO.ObjCRuntime.isNonFragile() ? 2 : 1;
 
+  llvm::DICompileUnit::DebugEmissionKind EmissionKind;
+  switch (DebugKind) {
+  case codegenoptions::NoDebugInfo:
+  case codegenoptions::LocTrackingOnly:
+    EmissionKind = llvm::DICompileUnit::NoDebug;
+    break;
+  case codegenoptions::DebugLineTablesOnly:
+    EmissionKind = llvm::DICompileUnit::LineTablesOnly;
+    break;
+  case codegenoptions::LimitedDebugInfo:
+  case codegenoptions::FullDebugInfo:
+    EmissionKind = llvm::DICompileUnit::FullDebug;
+    break;
+  }
+
   // Create new compile unit.
   // FIXME - Eliminate TheCU.
   TheCU = DBuilder.createCompileUnit(
       LangTag, remapDIPath(MainFileName), remapDIPath(getCurrentDirname()),
       Producer, LO.Optimize, CGM.getCodeGenOpts().DwarfDebugFlags, RuntimeVers,
-      CGM.getCodeGenOpts().SplitDwarfFile,
-      DebugKind <= codegenoptions::DebugLineTablesOnly
-          ? llvm::DICompileUnit::LineTablesOnly
-          : llvm::DICompileUnit::FullDebug,
-      0 /* DWOid */, DebugKind != codegenoptions::LocTrackingOnly);
+      CGM.getCodeGenOpts().SplitDwarfFile, EmissionKind, 0 /* DWOid */);
 }
 
 llvm::DIType *CGDebugInfo::CreateType(const BuiltinType *BT) {
@@ -463,39 +474,11 @@ llvm::DIType *CGDebugInfo::CreateType(const BuiltinType *BT) {
     return SelTy;
   }
 
-  case BuiltinType::OCLImage1d:
-    return getOrCreateStructPtrType("opencl_image1d_t", OCLImage1dDITy);
-  case BuiltinType::OCLImage1dArray:
-    return getOrCreateStructPtrType("opencl_image1d_array_t",
-                                    OCLImage1dArrayDITy);
-  case BuiltinType::OCLImage1dBuffer:
-    return getOrCreateStructPtrType("opencl_image1d_buffer_t",
-                                    OCLImage1dBufferDITy);
-  case BuiltinType::OCLImage2d:
-    return getOrCreateStructPtrType("opencl_image2d_t", OCLImage2dDITy);
-  case BuiltinType::OCLImage2dArray:
-    return getOrCreateStructPtrType("opencl_image2d_array_t",
-                                    OCLImage2dArrayDITy);
-  case BuiltinType::OCLImage2dDepth:
-    return getOrCreateStructPtrType("opencl_image2d_depth_t",
-                                    OCLImage2dDepthDITy);
-  case BuiltinType::OCLImage2dArrayDepth:
-    return getOrCreateStructPtrType("opencl_image2d_array_depth_t",
-                                    OCLImage2dArrayDepthDITy);
-  case BuiltinType::OCLImage2dMSAA:
-    return getOrCreateStructPtrType("opencl_image2d_msaa_t",
-                                    OCLImage2dMSAADITy);
-  case BuiltinType::OCLImage2dArrayMSAA:
-    return getOrCreateStructPtrType("opencl_image2d_array_msaa_t",
-                                    OCLImage2dArrayMSAADITy);
-  case BuiltinType::OCLImage2dMSAADepth:
-    return getOrCreateStructPtrType("opencl_image2d_msaa_depth_t",
-                                    OCLImage2dMSAADepthDITy);
-  case BuiltinType::OCLImage2dArrayMSAADepth:
-    return getOrCreateStructPtrType("opencl_image2d_array_msaa_depth_t",
-                                    OCLImage2dArrayMSAADepthDITy);
-  case BuiltinType::OCLImage3d:
-    return getOrCreateStructPtrType("opencl_image3d_t", OCLImage3dDITy);
+#define IMAGE_TYPE(ImgType, Id, SingletonId, Access, Suffix) \
+  case BuiltinType::Id: \
+    return getOrCreateStructPtrType("opencl_" #ImgType "_" #Suffix "_t", \
+                                    SingletonId);
+#include "clang/Basic/OpenCLImageTypes.def"
   case BuiltinType::OCLSampler:
     return DBuilder.createBasicType(
         "opencl_sampler_t", CGM.getContext().getTypeSize(BT),
@@ -545,7 +528,13 @@ llvm::DIType *CGDebugInfo::CreateType(const BuiltinType *BT) {
   case BuiltinType::Half:
   case BuiltinType::Float:
   case BuiltinType::LongDouble:
+  case BuiltinType::Float128:
   case BuiltinType::Double:
+    // FIXME: For targets where long double and __float128 have the same size,
+    // they are currently indistinguishable in the debugger without some
+    // special treatment. However, there is currently no consensus on encoding
+    // and this should be updated once a DWARF encoding exists for distinct
+    // floating point types of the same size.
     Encoding = llvm::dwarf::DW_ATE_float;
     break;
   }
@@ -842,6 +831,39 @@ llvm::DIType *CGDebugInfo::CreateType(const TypedefType *Ty,
       getDeclContextDescriptor(Ty->getDecl()));
 }
 
+static unsigned getDwarfCC(CallingConv CC) {
+  switch (CC) {
+  case CC_C:
+    // Avoid emitting DW_AT_calling_convention if the C convention was used.
+    return 0;
+
+  case CC_X86StdCall:
+    return llvm::dwarf::DW_CC_BORLAND_stdcall;
+  case CC_X86FastCall:
+    return llvm::dwarf::DW_CC_BORLAND_msfastcall;
+  case CC_X86ThisCall:
+    return llvm::dwarf::DW_CC_BORLAND_thiscall;
+  case CC_X86VectorCall:
+    return llvm::dwarf::DW_CC_LLVM_vectorcall;
+  case CC_X86Pascal:
+    return llvm::dwarf::DW_CC_BORLAND_pascal;
+
+  // FIXME: Create new DW_CC_ codes for these calling conventions.
+  case CC_X86_64Win64:
+  case CC_X86_64SysV:
+  case CC_AAPCS:
+  case CC_AAPCS_VFP:
+  case CC_IntelOclBicc:
+  case CC_SpirFunction:
+  case CC_SpirKernel:
+  case CC_Swift:
+  case CC_PreserveMost:
+  case CC_PreserveAll:
+    return 0;
+  }
+  return 0;
+}
+
 llvm::DIType *CGDebugInfo::CreateType(const FunctionType *Ty,
                                       llvm::DIFile *Unit) {
   SmallVector<llvm::Metadata *, 16> EltTys;
@@ -861,7 +883,8 @@ llvm::DIType *CGDebugInfo::CreateType(const FunctionType *Ty,
   }
 
   llvm::DITypeRefArray EltTypeArray = DBuilder.getOrCreateTypeArray(EltTys);
-  return DBuilder.createSubroutineType(EltTypeArray);
+  return DBuilder.createSubroutineType(EltTypeArray, 0,
+                                       getDwarfCC(Ty->getCallConv()));
 }
 
 /// Convert an AccessSpecifier into the corresponding DINode flag.
@@ -1031,6 +1054,8 @@ void CGDebugInfo::CollectRecordFields(
     // the corresponding declarations in the source program.
     for (const auto *I : record->decls())
       if (const auto *V = dyn_cast<VarDecl>(I)) {
+        if (V->hasAttr<NoDebugAttr>())
+          continue;
         // Reuse the existing static member declaration if one exists
         auto MI = StaticDataMemberCache.find(V->getCanonicalDecl());
         if (MI != StaticDataMemberCache.end()) {
@@ -1112,7 +1137,8 @@ llvm::DISubroutineType *CGDebugInfo::getOrCreateInstanceMethodType(
   if (Func->getExtProtoInfo().RefQualifier == RQ_RValue)
     Flags |= llvm::DINode::FlagRValueReference;
 
-  return DBuilder.createSubroutineType(EltTypeArray, Flags);
+  return DBuilder.createSubroutineType(EltTypeArray, Flags,
+                                       getDwarfCC(Func->getCallConv()));
 }
 
 /// isFunctionLocalClass - Return true if CXXRecordDecl is defined
@@ -1136,6 +1162,11 @@ llvm::DISubprogram *CGDebugInfo::CreateCXXMemberFunction(
   // Since a single ctor/dtor corresponds to multiple functions, it doesn't
   // make sense to give a single ctor/dtor a linkage name.
   StringRef MethodLinkageName;
+  // FIXME: 'isFunctionLocalClass' seems like an arbitrary/unintentional
+  // property to use here. It may've been intended to model "is non-external
+  // type" but misses cases of non-function-local but non-external classes such
+  // as those in anonymous namespaces as well as the reverse - external types
+  // that are function local, such as those in (non-local) inline functions.
   if (!IsCtorOrDtor && !isFunctionLocalClass(Method->getParent()))
     MethodLinkageName = CGM.getMangledName(Method);
 
@@ -1463,11 +1494,6 @@ llvm::DIType *CGDebugInfo::getOrCreateStandaloneType(QualType D,
   llvm::DIType *T = getOrCreateType(D, getOrCreateFile(Loc));
   assert(T && "could not create debug info for type");
 
-  // Composite types with UIDs were already retained by DIBuilder
-  // because they are only referenced by name in the IR.
-  if (auto *CTy = dyn_cast<llvm::DICompositeType>(T))
-    if (!CTy->getIdentifier().empty())
-      return T;
   RetainedTypes.push_back(D.getAsOpaquePtr());
   return T;
 }
@@ -1531,12 +1557,27 @@ static bool hasExplicitMemberDefinition(CXXRecordDecl::method_iterator I,
   return false;
 }
 
+/// Does a type definition exist in an imported clang module?
+static bool isDefinedInClangModule(const RecordDecl *RD) {
+  if (!RD || !RD->isFromASTFile())
+    return false;
+  if (!RD->isExternallyVisible() && RD->getName().empty())
+    return false;
+  if (auto *CXXDecl = dyn_cast<CXXRecordDecl>(RD)) {
+    assert(CXXDecl->isCompleteDefinition() && "incomplete record definition");
+    if (CXXDecl->getTemplateSpecializationKind() != TSK_Undeclared)
+      // Make sure the instantiation is actually in a module.
+      if (CXXDecl->field_begin() != CXXDecl->field_end())
+        return CXXDecl->field_begin()->isFromASTFile();
+  }
+
+  return true;
+}
+
 static bool shouldOmitDefinition(codegenoptions::DebugInfoKind DebugKind,
                                  bool DebugTypeExtRefs, const RecordDecl *RD,
                                  const LangOptions &LangOpts) {
-  // Does the type exist in an imported clang module?
-  if (DebugTypeExtRefs && RD->isFromASTFile() && RD->getDefinition() &&
-      (RD->isExternallyVisible() || !RD->getName().empty()))
+  if (DebugTypeExtRefs && isDefinedInClangModule(RD->getDefinition()))
     return true;
 
   if (DebugKind > codegenoptions::LimitedDebugInfo)
@@ -1676,8 +1717,11 @@ llvm::DIType *CGDebugInfo::CreateType(const ObjCInterfaceType *Ty,
   if (!ID)
     return nullptr;
 
-  // Return a forward declaration if this type was imported from a clang module.
-  if (DebugTypeExtRefs && ID->isFromASTFile() && ID->getDefinition())
+  // Return a forward declaration if this type was imported from a clang module,
+  // and this is not the compile unit with the implementation of the type (which
+  // may contain hidden ivars).
+  if (DebugTypeExtRefs && ID->isFromASTFile() && ID->getDefinition() &&
+      !ID->getImplementation())
     return DBuilder.createForwardDecl(llvm::dwarf::DW_TAG_structure_type,
                                       ID->getName(),
                                       getDeclContextDescriptor(ID), Unit, 0);
@@ -2386,6 +2430,30 @@ llvm::DICompositeType *CGDebugInfo::CreateLimitedType(const RecordType *Ty) {
       getTagForRecord(RD), RDName, RDContext, DefUnit, Line, 0, Size, Align, 0,
       FullName);
 
+  // Elements of composite types usually have back to the type, creating
+  // uniquing cycles.  Distinct nodes are more efficient.
+  switch (RealDecl->getTag()) {
+  default:
+    llvm_unreachable("invalid composite type tag");
+
+  case llvm::dwarf::DW_TAG_array_type:
+  case llvm::dwarf::DW_TAG_enumeration_type:
+    // Array elements and most enumeration elements don't have back references,
+    // so they don't tend to be involved in uniquing cycles and there is some
+    // chance of merging them when linking together two modules.  Only make
+    // them distinct if they are ODR-uniqued.
+    if (FullName.empty())
+      break;
+
+  case llvm::dwarf::DW_TAG_structure_type:
+  case llvm::dwarf::DW_TAG_union_type:
+  case llvm::dwarf::DW_TAG_class_type:
+    // Immediatley resolve to a distinct node.
+    RealDecl =
+        llvm::MDNode::replaceWithDistinct(llvm::TempDICompositeType(RealDecl));
+    break;
+  }
+
   RegionMap[Ty->getDecl()].reset(RealDecl);
   TypeCache[QualType(Ty, 0).getAsOpaquePtr()].reset(RealDecl);
 
@@ -2529,9 +2597,9 @@ CGDebugInfo::getFunctionForwardDeclaration(const FunctionDecl *FD) {
   SmallVector<QualType, 16> ArgTypes;
   for (const ParmVarDecl *Parm: FD->parameters())
     ArgTypes.push_back(Parm->getType());
-  QualType FnType =
-    CGM.getContext().getFunctionType(FD->getReturnType(), ArgTypes,
-                                     FunctionProtoType::ExtProtoInfo());
+  CallingConv CC = FD->getType()->castAs<FunctionType>()->getCallConv();
+  QualType FnType = CGM.getContext().getFunctionType(
+      FD->getReturnType(), ArgTypes, FunctionProtoType::ExtProtoInfo(CC));
   llvm::DISubprogram *SP = DBuilder.createTempFunctionFwdDecl(
       DContext, Name, LinkageName, Unit, Line,
       getOrCreateFunctionType(FD, FnType, Unit), !FD->isExternallyVisible(),
@@ -2635,6 +2703,10 @@ llvm::DISubroutineType *CGDebugInfo::getOrCreateFunctionType(const Decl *D,
 
   if (const CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(D))
     return getOrCreateMethodType(Method, F);
+
+  const auto *FTy = FnType->getAs<FunctionType>();
+  CallingConv CC = FTy ? FTy->getCallConv() : CallingConv::CC_C;
+
   if (const ObjCMethodDecl *OMethod = dyn_cast<ObjCMethodDecl>(D)) {
     // Add "self" and "_cmd"
     SmallVector<llvm::Metadata *, 16> Elts;
@@ -2668,7 +2740,7 @@ llvm::DISubroutineType *CGDebugInfo::getOrCreateFunctionType(const Decl *D,
       Elts.push_back(DBuilder.createUnspecifiedParameter());
 
     llvm::DITypeRefArray EltTypeArray = DBuilder.getOrCreateTypeArray(Elts);
-    return DBuilder.createSubroutineType(EltTypeArray);
+    return DBuilder.createSubroutineType(EltTypeArray, 0, getDwarfCC(CC));
   }
 
   // Handle variadic function types; they need an additional
@@ -2682,7 +2754,7 @@ llvm::DISubroutineType *CGDebugInfo::getOrCreateFunctionType(const Decl *D,
           EltTys.push_back(getOrCreateType(FPT->getParamType(i), F));
       EltTys.push_back(DBuilder.createUnspecifiedParameter());
       llvm::DITypeRefArray EltTypeArray = DBuilder.getOrCreateTypeArray(EltTys);
-      return DBuilder.createSubroutineType(EltTypeArray);
+      return DBuilder.createSubroutineType(EltTypeArray, 0, getDwarfCC(CC));
     }
 
   return cast<llvm::DISubroutineType>(getOrCreateType(FnType, F));
@@ -2799,11 +2871,11 @@ void CGDebugInfo::EmitFunctionDecl(GlobalDecl GD, SourceLocation Loc,
   unsigned LineNo = getLineNumber(Loc);
   unsigned ScopeLine = 0;
 
-  DBuilder.createFunction(FDContext, Name, LinkageName, Unit, LineNo,
-                          getOrCreateFunctionType(D, FnType, Unit),
-                          false /*internalLinkage*/, true /*definition*/,
-                          ScopeLine, Flags, CGM.getLangOpts().Optimize,
-                          TParamsArray.get(), getFunctionDeclaration(D));
+  DBuilder.retainType(DBuilder.createFunction(
+      FDContext, Name, LinkageName, Unit, LineNo,
+      getOrCreateFunctionType(D, FnType, Unit), false /*internalLinkage*/,
+      false /*definition*/, ScopeLine, Flags, CGM.getLangOpts().Optimize,
+      TParamsArray.get(), getFunctionDeclaration(D)));
 }
 
 void CGDebugInfo::EmitLocation(CGBuilderTy &Builder, SourceLocation Loc) {
@@ -3250,9 +3322,14 @@ void CGDebugInfo::EmitDeclareOfBlockLiteralArgVariable(const CGBlockInfo &block,
 
     // If we have a null capture, this must be the C++ 'this' capture.
     if (!capture) {
-      const CXXMethodDecl *method =
-          cast<CXXMethodDecl>(blockDecl->getNonClosureContext());
-      QualType type = method->getThisType(C);
+      QualType type;
+      if (auto *Method =
+              cast_or_null<CXXMethodDecl>(blockDecl->getNonClosureContext()))
+        type = Method->getThisType(C);
+      else if (auto *RDecl = dyn_cast<CXXRecordDecl>(blockDecl->getParent()))
+        type = QualType(RDecl->getTypeForDecl(), 0);
+      else
+        llvm_unreachable("unexpected block declcontext");
 
       fields.push_back(createFieldType("this", type, 0, loc, AS_public,
                                        offsetInBits, tunit, tunit));
@@ -3360,6 +3437,8 @@ llvm::DIGlobalVariable *CGDebugInfo::CollectAnonRecordDecls(
 void CGDebugInfo::EmitGlobalVariable(llvm::GlobalVariable *Var,
                                      const VarDecl *D) {
   assert(DebugKind >= codegenoptions::LimitedDebugInfo);
+  if (D->hasAttr<NoDebugAttr>())
+    return;
   // Create global variable debug descriptor.
   llvm::DIFile *Unit = nullptr;
   llvm::DIScope *DContext = nullptr;
@@ -3392,6 +3471,8 @@ void CGDebugInfo::EmitGlobalVariable(llvm::GlobalVariable *Var,
 void CGDebugInfo::EmitGlobalVariable(const ValueDecl *VD,
                                      llvm::Constant *Init) {
   assert(DebugKind >= codegenoptions::LimitedDebugInfo);
+  if (VD->hasAttr<NoDebugAttr>())
+    return;
   // Create the descriptor for the variable.
   llvm::DIFile *Unit = getOrCreateFile(VD->getLocation());
   StringRef Name = VD->getName();
@@ -3415,6 +3496,9 @@ void CGDebugInfo::EmitGlobalVariable(const ValueDecl *VD,
     auto *RD = cast<RecordDecl>(VarD->getDeclContext());
     getDeclContextDescriptor(VarD);
     // Ensure that the type is retained even though it's otherwise unreferenced.
+    //
+    // FIXME: This is probably unnecessary, since Ty should reference RD
+    // through its scope.
     RetainedTypes.push_back(
         CGM.getContext().getRecordType(RD).getAsOpaquePtr());
     return;
@@ -3466,6 +3550,8 @@ void CGDebugInfo::EmitUsingDecl(const UsingDecl &UD) {
 }
 
 void CGDebugInfo::EmitImportDecl(const ImportDecl &ID) {
+  if (CGM.getCodeGenOpts().getDebuggerTuning() != llvm::DebuggerKind::LLDB)
+    return;
   if (Module *M = ID.getImportedModule()) {
     auto Info = ExternalASTSource::ASTSourceDescriptor(*M);
     DBuilder.createImportedDeclaration(

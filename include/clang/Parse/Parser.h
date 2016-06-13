@@ -647,6 +647,8 @@ private:
   /// Should only be used in Objective-C language modes.
   bool isObjCInstancetype() {
     assert(getLangOpts().ObjC1);
+    if (Tok.isAnnotation())
+      return false;
     if (!Ident_instancetype)
       Ident_instancetype = PP.getIdentifierInfo("instancetype");
     return Tok.getIdentifierInfo() == Ident_instancetype;
@@ -1873,7 +1875,6 @@ private:
 
   bool isDeclarationSpecifier(bool DisambiguatingWithExpression = false);
   bool isTypeSpecifierQualifier();
-  bool isTypeQualifier() const;
 
   /// isKnownToBeTypeSpecifier - Return true if we know that the specified token
   /// is definitely a type-specifier.  Return false if it isn't part of a type
@@ -2456,6 +2457,10 @@ private:
 
   //===--------------------------------------------------------------------===//
   // OpenMP: Directives and clauses.
+  /// Parse clauses for '#pragma omp declare simd'.
+  DeclGroupPtrTy ParseOMPDeclareSimdClauses(DeclGroupPtrTy Ptr,
+                                            CachedTokens &Toks,
+                                            SourceLocation Loc);
   /// \brief Parses declarative OpenMP directives.
   DeclGroupPtrTy ParseOpenMPDeclarativeDirectiveWithExtDecl(
       AccessSpecifier &AS, ParsedAttributesWithRange &Attrs,
@@ -2463,16 +2468,19 @@ private:
       Decl *TagDecl = nullptr);
   /// \brief Parse 'omp declare reduction' construct.
   DeclGroupPtrTy ParseOpenMPDeclareReductionDirective(AccessSpecifier AS);
+
   /// \brief Parses simple list of variables.
   ///
   /// \param Kind Kind of the directive.
-  /// \param [out] VarList List of referenced variables.
+  /// \param Callback Callback function to be called for the list elements.
   /// \param AllowScopeSpecifier true, if the variables can have fully
   /// qualified names.
   ///
-  bool ParseOpenMPSimpleVarList(OpenMPDirectiveKind Kind,
-                                SmallVectorImpl<Expr *> &VarList,
-                                bool AllowScopeSpecifier);
+  bool ParseOpenMPSimpleVarList(
+      OpenMPDirectiveKind Kind,
+      const llvm::function_ref<void(CXXScopeSpec &, DeclarationNameInfo)> &
+          Callback,
+      bool AllowScopeSpecifier);
   /// \brief Parses declarative or executable directive.
   ///
   /// \param Allowed ACK_Any, if any directives are allowed,
@@ -2520,6 +2528,29 @@ private:
                                       OpenMPClauseKind Kind);
 
 public:
+  /// Parses simple expression in parens for single-expression clauses of OpenMP
+  /// constructs.
+  /// \param RLoc Returned location of right paren.
+  ExprResult ParseOpenMPParensExpr(StringRef ClauseName, SourceLocation &RLoc);
+
+  /// Data used for parsing list of variables in OpenMP clauses.
+  struct OpenMPVarListDataTy {
+    Expr *TailExpr = nullptr;
+    SourceLocation ColonLoc;
+    CXXScopeSpec ReductionIdScopeSpec;
+    DeclarationNameInfo ReductionId;
+    OpenMPDependClauseKind DepKind = OMPC_DEPEND_unknown;
+    OpenMPLinearClauseKind LinKind = OMPC_LINEAR_val;
+    OpenMPMapClauseKind MapTypeModifier = OMPC_MAP_unknown;
+    OpenMPMapClauseKind MapType = OMPC_MAP_unknown;
+    bool IsMapTypeImplicit = false;
+    SourceLocation DepLinMapLoc;
+  };
+
+  /// Parses clauses with list.
+  bool ParseOpenMPVarList(OpenMPDirectiveKind DKind, OpenMPClauseKind Kind,
+                          SmallVectorImpl<Expr *> &Vars,
+                          OpenMPVarListDataTy &Data);
   bool ParseUnqualifiedId(CXXScopeSpec &SS, bool EnteringContext,
                           bool AllowDestructorName,
                           bool AllowConstructorName,

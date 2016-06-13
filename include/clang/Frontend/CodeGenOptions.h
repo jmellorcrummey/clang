@@ -86,6 +86,13 @@ public:
     ProfileIRInstr,    // IR level PGO instrumentation in LLVM.
   };
 
+  enum EmbedBitcodeKind {
+    Embed_Off,      // No embedded bitcode.
+    Embed_All,      // Embed both bitcode and commandline in the output.
+    Embed_Bitcode,  // Embed just the bitcode in the output.
+    Embed_Marker    // Embed a marker as a placeholder for bitcode.
+  };
+
   /// The code model to use (-mcmodel).
   std::string CodeModel;
 
@@ -159,9 +166,6 @@ public:
   /// importing.
   std::string ThinLTOIndexFile;
 
-  /// The EABI version to use
-  std::string EABIVersion;
-
   /// A list of file names passed with -fcuda-include-gpubinary options to
   /// forward to CUDA runtime back-end for incorporating them into host-side
   /// object file.
@@ -199,11 +203,11 @@ public:
   /// Set of sanitizer checks that trap rather than diagnose.
   SanitizerSet SanitizeTrap;
 
+  /// List of backend command-line options for -fembed-bitcode.
+  std::vector<uint8_t> CmdArgs;
+
   /// \brief A list of all -fno-builtin-* function names (e.g., memset).
   std::vector<std::string> NoBuiltinFuncs;
-
-  /// List of blacklist files for the whole-program vtable optimization feature.
-  std::vector<std::string> WholeProgramVTablesBlacklistFiles;
 
 public:
   // Define accessors/mutators for code generation options of enumeration type.
@@ -242,6 +246,7 @@ public:
   bool hasProfileIRUse() const {
     return getProfileUse() == ProfileIRInstr;
   }
+
 };
 
 }  // end namespace clang

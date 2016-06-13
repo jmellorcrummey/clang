@@ -35,6 +35,7 @@ enum OpenMPClauseKind {
   OMPC_##Name,
 #include "clang/Basic/OpenMPKinds.def"
   OMPC_threadprivate,
+  OMPC_uniform,
   OMPC_unknown
 };
 
@@ -117,6 +118,13 @@ enum OpenMPDefaultmapClauseModifier {
   OMPC_DEFAULTMAP_MODIFIER_##Name,
 #include "clang/Basic/OpenMPKinds.def"
   OMPC_DEFAULTMAP_MODIFIER_last
+};
+
+/// Scheduling data for loop-based OpenMP directives.
+struct OpenMPScheduleTy final {
+  OpenMPScheduleClauseKind Schedule = OMPC_SCHEDULE_unknown;
+  OpenMPScheduleClauseModifier M1 = OMPC_SCHEDULE_MODIFIER_unknown;
+  OpenMPScheduleClauseModifier M2 = OMPC_SCHEDULE_MODIFIER_unknown;
 };
 
 OpenMPDirectiveKind getOpenMPDirectiveKind(llvm::StringRef Str);
@@ -202,6 +210,9 @@ bool isOpenMPPrivate(OpenMPClauseKind Kind);
 /// \return true - the clause is a threadprivate clause, otherwise - false.
 bool isOpenMPThreadPrivate(OpenMPClauseKind Kind);
 
+/// Checks if the specified directive kind is one of tasking directives - task,
+/// taskloop or taksloop simd.
+bool isOpenMPTaskingDirective(OpenMPDirectiveKind Kind);
 }
 
 #endif

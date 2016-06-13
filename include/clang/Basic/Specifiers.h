@@ -54,6 +54,7 @@ namespace clang {
     TST_half,         // OpenCL half, ARM NEON __fp16
     TST_float,
     TST_double,
+    TST_float128,
     TST_bool,         // _Bool
     TST_decimal32,    // _Decimal32
     TST_decimal64,    // _Decimal64
@@ -73,9 +74,11 @@ namespace clang {
     TST_auto_type,        // __auto_type extension
     TST_unknown_anytype,  // __unknown_anytype extension
     TST_atomic,           // C11 _Atomic
-    TST_error         // erroneous type
+#define GENERIC_IMAGE_TYPE(ImgType, Id) TST_##ImgType##_t, // OpenCL image types
+#include "clang/Basic/OpenCLImageTypes.def"
+    TST_error // erroneous type
   };
-  
+
   /// \brief Structure that packs information about the type specifiers that
   /// were written in a particular type specifier sequence.
   struct WrittenBuiltinSpecs {

@@ -173,6 +173,8 @@ namespace clang {
           return;
       }
 
+      EmbedBitcode(getModule(), CodeGenOpts, llvm::MemoryBufferRef());
+
       EmitBackendOutput(Diags, CodeGenOpts, TargetOpts, LangOpts,
                         C.getTargetInfo().getDataLayout(),
                         getModule(), Action, AsmOutStream);
@@ -454,7 +456,7 @@ const FullSourceLoc BackendConsumer::getBestLocationFromDebugLoc(
     // we could not translate this location. This can happen in the
     // case of #line directives.
     Diags.Report(Loc, diag::note_fe_backend_invalid_loc)
-        << Filename << Line;
+        << Filename << Line << Column;
 
   return Loc;
 }
@@ -756,6 +758,28 @@ CodeGenAction::CreateASTConsumer(CompilerInstance &CI, StringRef InFile) {
   return std::move(Result);
 }
 
+static void BitcodeInlineAsmDiagHandler(const llvm::SMDiagnostic &SM,
+                                         void *Context,
+                                         unsigned LocCookie) {
+  SM.print(nullptr, llvm::errs());
+
+  auto Diags = static_cast<DiagnosticsEngine *>(Context);
+  unsigned DiagID;
+  switch (SM.getKind()) {
+  case llvm::SourceMgr::DK_Error:
+    DiagID = diag::err_fe_inline_asm;
+    break;
+  case llvm::SourceMgr::DK_Warning:
+    DiagID = diag::warn_fe_inline_asm;
+    break;
+  case llvm::SourceMgr::DK_Note:
+    DiagID = diag::note_fe_inline_asm;
+    break;
+  }
+
+  Diags->Report(DiagID).AddString("cannot compile inline asm");
+}
+
 void CodeGenAction::ExecuteAction() {
   // If this is an IR file, we have to treat it specially.
   if (getCurrentFileKind() == IK_LLVM_IR) {
@@ -771,6 +795,11 @@ void CodeGenAction::ExecuteAction() {
     llvm::MemoryBuffer *MainFile = SM.getBuffer(FID, &Invalid);
     if (Invalid)
       return;
+
+    // For ThinLTO backend invocations, ensure that the context
+    // merges types based on ODR identifiers.
+    if (!CI.getCodeGenOpts().ThinLTOIndexFile.empty())
+      VMContext->enableDebugTypeODRUniquing();
 
     llvm::SMDiagnostic Err;
     TheModule = parseIR(MainFile->getMemBufferRef(), Err, *VMContext);
@@ -803,6 +832,13 @@ void CodeGenAction::ExecuteAction() {
           << TargetOpts.Triple;
       TheModule->setTargetTriple(TargetOpts.Triple);
     }
+
+    EmbedBitcode(TheModule.get(), CI.getCodeGenOpts(),
+                 MainFile->getMemBufferRef());
+
+    LLVMContext &Ctx = TheModule->getContext();
+    Ctx.setInlineAsmDiagnosticHandler(BitcodeInlineAsmDiagHandler,
+                                      &CI.getDiagnostics());
 
     EmitBackendOutput(CI.getDiagnostics(), CI.getCodeGenOpts(), TargetOpts,
                       CI.getLangOpts(), CI.getTarget().getDataLayout(),

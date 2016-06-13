@@ -897,21 +897,29 @@ CodeGenFunction::generateObjCGetterBody(const ObjCImplementationDecl *classImpl,
 
     // Currently, all atomic accesses have to be through integer
     // types, so there's no point in trying to pick a prettier type.
-    llvm::Type *bitcastType =
-      llvm::Type::getIntNTy(getLLVMContext(),
-                            getContext().toBits(strategy.getIvarSize()));
+    uint64_t ivarSize = getContext().toBits(strategy.getIvarSize());
+    llvm::Type *bitcastType = llvm::Type::getIntNTy(getLLVMContext(), ivarSize);
     bitcastType = bitcastType->getPointerTo(); // addrspace 0 okay
 
     // Perform an atomic load.  This does not impose ordering constraints.
     Address ivarAddr = LV.getAddress();
     ivarAddr = Builder.CreateBitCast(ivarAddr, bitcastType);
     llvm::LoadInst *load = Builder.CreateLoad(ivarAddr, "load");
-    load->setAtomic(llvm::Unordered);
+    load->setAtomic(llvm::AtomicOrdering::Unordered);
 
     // Store that value into the return address.  Doing this with a
     // bitcast is likely to produce some pretty ugly IR, but it's not
     // the *most* terrible thing in the world.
-    Builder.CreateStore(load, Builder.CreateBitCast(ReturnValue, bitcastType));
+    llvm::Type *retTy = ConvertType(getterMethod->getReturnType());
+    uint64_t retTySize = CGM.getDataLayout().getTypeSizeInBits(retTy);
+    llvm::Value *ivarVal = load;
+    if (ivarSize > retTySize) {
+      llvm::Type *newTy = llvm::Type::getIntNTy(getLLVMContext(), retTySize);
+      ivarVal = Builder.CreateTrunc(load, newTy);
+      bitcastType = newTy->getPointerTo();
+    }
+    Builder.CreateStore(ivarVal,
+                        Builder.CreateBitCast(ReturnValue, bitcastType));
 
     // Make sure we don't do an autorelease.
     AutoreleaseResult = false;
@@ -1010,7 +1018,6 @@ CodeGenFunction::generateObjCGetterBody(const ObjCImplementationDecl *classImpl,
           AutoreleaseResult = false;
         }
 
-        value = Builder.CreateBitCast(value, ConvertType(propType));
         value = Builder.CreateBitCast(
             value, ConvertType(GetterMethodDecl->getReturnType()));
       }
@@ -1183,7 +1190,7 @@ CodeGenFunction::generateObjCSetterBody(const ObjCImplementationDecl *classImpl,
 
     // Perform an atomic store.  There are no memory ordering requirements.
     llvm::StoreInst *store = Builder.CreateStore(load, ivarAddr);
-    store->setAtomic(llvm::Unordered);
+    store->setAtomic(llvm::AtomicOrdering::Unordered);
     return;
   }
 
@@ -1485,6 +1492,8 @@ void CodeGenFunction::EmitObjCForCollectionStmt(const ObjCForCollectionStmt &S){
                                       ArrayType::Normal, 0);
   Address ItemsPtr = CreateMemTemp(ItemsTy, "items.ptr");
 
+  RunCleanupsScope ForScope(*this);
+
   // Emit the collection pointer.  In ARC, we do a retain.
   llvm::Value *Collection;
   if (getLangOpts().ObjCAutoRefCount) {
@@ -1725,10 +1734,7 @@ void CodeGenFunction::EmitObjCForCollectionStmt(const ObjCForCollectionStmt &S){
   if (DI)
     DI->EmitLexicalBlockEnd(Builder, S.getSourceRange().getEnd());
 
-  // Leave the cleanup we entered in ARC.
-  if (getLangOpts().ObjCAutoRefCount)
-    PopCleanupBlock();
-
+  ForScope.ForceCleanup();
   EmitBlock(LoopEnd.getBlock());
 }
 
