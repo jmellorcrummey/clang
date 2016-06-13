@@ -154,7 +154,7 @@ static bool warnByDefaultOnWrongCase(StringRef Include) {
 
   // "condition_variable" is the longest standard header name at 18 characters.
   // If the include file name is longer than that, it can't be a standard header.
-  static constexpr std::size_t MaxStdHeaderNameLen = 18u;
+  static constexpr size_t MaxStdHeaderNameLen = 18u;
   if (Include.size() > MaxStdHeaderNameLen)
     return false;
 
