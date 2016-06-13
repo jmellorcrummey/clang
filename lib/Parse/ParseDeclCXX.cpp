@@ -1269,6 +1269,7 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
       Tok.isOneOf(tok::kw___is_abstract,
                   tok::kw___is_arithmetic,
                   tok::kw___is_array,
+                  tok::kw___is_assignable,
                   tok::kw___is_base_of,
                   tok::kw___is_class,
                   tok::kw___is_complete_type,
@@ -1670,7 +1671,7 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
           // template specialization.
           FakedParamLists.push_back(Actions.ActOnTemplateParameterList(
               0, SourceLocation(), TemplateInfo.TemplateLoc, LAngleLoc, None,
-              LAngleLoc));
+              LAngleLoc, nullptr));
           TemplateParams = &FakedParamLists;
         }
       }
