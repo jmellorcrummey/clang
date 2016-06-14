@@ -2410,9 +2410,10 @@ public:
   static std::pair<llvm::Function * /*OutlinedFn*/,
                    llvm::Constant * /*OutlinedFnID*/>
   EmitOMPTargetDirectiveOutlinedFunction(CodeGenModule &CGM,
-                                         const OMPTargetDirective &S,
+                                         const OMPExecutableDirective &S,
                                          StringRef ParentName,
-                                         bool IsOffloadEntry);
+                                         bool IsOffloadEntry,
+                                         const RegionCodeGenTy &CodeGen);
   /// \brief Emit inner loop of the worksharing/simd construct.
   ///
   /// \param S Directive, for which the inner loop must be emitted.
