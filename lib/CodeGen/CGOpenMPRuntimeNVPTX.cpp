@@ -2560,8 +2560,8 @@ void CGOpenMPRuntimeNVPTX::emitSimdCall(CodeGenFunction &CGF,
 //
 bool CGOpenMPRuntimeNVPTX::generateCoalescedSchedule(
     OpenMPScheduleClauseKind ScheduleKind, bool ChunkSizeOne,
-    bool ordered) const {
-  return !ordered && (ScheduleKind == OMPC_SCHEDULE_unknown ||
+    bool Ordered) const {
+  return !Ordered && (ScheduleKind == OMPC_SCHEDULE_unknown ||
                       ScheduleKind == OMPC_SCHEDULE_auto ||
                       (ScheduleKind == OMPC_SCHEDULE_static && ChunkSizeOne));
 }

@@ -410,7 +410,7 @@ public:
   ///
   bool generateCoalescedSchedule(OpenMPScheduleClauseKind ScheduleKind,
                                  bool ChunkSizeOne,
-                                 bool ordered) const override;
+                                 bool Ordered) const override;
 
   /// \brief Check if we must always generate a barrier at the end of a
   /// particular construct regardless of the presence of a nowait clause.

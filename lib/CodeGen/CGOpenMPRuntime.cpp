@@ -2539,7 +2539,7 @@ bool CGOpenMPRuntime::isStaticNonchunked(
 
 bool CGOpenMPRuntime::generateCoalescedSchedule(
     OpenMPScheduleClauseKind ScheduleKind, bool ChunkSizeOne,
-    bool ordered) const {
+    bool Ordered) const {
   return false;
 }
 
