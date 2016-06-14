@@ -1235,7 +1235,7 @@ public:
   virtual void emitDoacrossOrdered(CodeGenFunction &CGF,
                                    const OMPDependClause *C);
 
-  /// Return true if the current openMP implementation supports RTTI. The return
+  /// Return true if the current OpenMP implementation supports RTTI. The return
   /// default value is 'true'.
   virtual bool requiresRTTIDescriptor() { return true; }
 };
