@@ -916,13 +916,6 @@ static Address createIdentFieldGEP(CodeGenFunction &CGF, Address Addr,
   return CGF.Builder.CreateStructGEP(Addr, Field, Offset, Name);
 }
 
-void CGOpenMPRuntime::emitCapturedVars(
-    CodeGenFunction &CGF, const OMPExecutableDirective &S,
-    llvm::SmallVector<llvm::Value *, 16> &CapturedVars) {
-  auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
-  CGF.GenerateOpenMPCapturedVars(*CS, CapturedVars);
-}
-
 llvm::Value *CGOpenMPRuntime::emitParallelOrTeamsOutlinedFunction(
     const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
     OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen) {

@@ -1001,17 +1001,6 @@ llvm::Value *CGOpenMPRuntimeNVPTX::getThreadID(CodeGenFunction &CGF,
   return getGlobalThreadId(CGF);
 }
 
-void CGOpenMPRuntimeNVPTX::emitCapturedVars(
-    CodeGenFunction &CGF, const OMPExecutableDirective &S,
-    llvm::SmallVector<llvm::Value *, 16> &CapturedVars) {
-
-  // We emit the variables exactly like the default implementation, but we
-  // record the context because it is important to derive the enclosing
-  // environment.
-
-  CGOpenMPRuntime::emitCapturedVars(CGF, S, CapturedVars);
-}
-
 /// \brief Registers the context of a parallel region with the runtime
 /// codegen implementation.
 void CGOpenMPRuntimeNVPTX::registerParallelContext(

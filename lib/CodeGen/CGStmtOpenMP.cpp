@@ -1233,12 +1233,12 @@ static void emitCommonOMPParallelDirective(CodeGenFunction &CGF,
         CGF.EmitLValue(cast<DeclRefExpr>(DPFDir.getUpperBoundVariable()));
     CapturedVars.push_back(CGF.Builder.CreateLoad(UB.getAddress()));
 
-    CGF.CGM.getOpenMPRuntime().emitCapturedVars(CGF, S, CapturedVars);
+    CGF.GenerateOpenMPCapturedVars(*CS, CapturedVars);
     CGF.CGM.getOpenMPRuntime().emitParallelCall(
         CGF, S.getLocStart(), OutlinedFn, CapturedVars, IfCond);
   } else {
     OMPLexicalScope Scope(CGF, S);
-    CGF.CGM.getOpenMPRuntime().emitCapturedVars(CGF, S, CapturedVars);
+    CGF.GenerateOpenMPCapturedVars(*CS, CapturedVars);
     CGF.CGM.getOpenMPRuntime().emitParallelCall(
         CGF, S.getLocStart(), OutlinedFn, CapturedVars, IfCond);
   }

@@ -303,12 +303,6 @@ private:
   ///
   llvm::Value *getThreadID(CodeGenFunction &CGF, SourceLocation Loc) override;
 
-  /// \brief Emits captured variables for the outlined function for the
-  /// specified OpenMP parallel directive \a D.
-  void
-  emitCapturedVars(CodeGenFunction &CGF, const OMPExecutableDirective &S,
-                   llvm::SmallVector<llvm::Value *, 16> &CapturedVars) override;
-
   /// \brief Registers the context of a parallel region with the runtime
   /// codegen implementation.
   void registerParallelContext(CodeGenFunction &CGF,

@@ -613,12 +613,6 @@ public:
   virtual ~CGOpenMPRuntime() {}
   virtual void clear();
 
-  /// \brief Emits captured variables for the outlined function for the
-  /// specified OpenMP parallel directive \a D.
-  virtual void
-  emitCapturedVars(CodeGenFunction &CGF, const OMPExecutableDirective &S,
-                   llvm::SmallVector<llvm::Value *, 16> &CapturedVars);
-
   /// \brief Registers the context of a parallel region with the runtime
   /// codegen implementation.
   virtual void registerParallelContext(CodeGenFunction &CGF,
