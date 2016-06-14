@@ -7567,6 +7567,31 @@ OMPClause *Sema::ActOnOpenMPSingleExprClause(OpenMPClauseKind Kind, Expr *Expr,
   return Res;
 }
 
+static unsigned getOpenMPCaptureLevel(OpenMPDirectiveKind DKind,
+                                      OpenMPClauseKind CKind) {
+  switch (CKind) {
+  case OMPC_num_threads:
+  case OMPC_if:
+    switch (DKind) {
+    case OMPD_target_teams_distribute_parallel_for:
+      return 2;
+    default:
+      return 1;
+    }
+  case OMPC_schedule:
+    switch (DKind) {
+    case OMPD_target_teams_distribute_parallel_for:
+      return 3;
+    case OMPD_target_parallel_for:
+      return 2;
+    default:
+      return 1;
+    }
+  default:
+    return 1;
+  }
+}
+
 OMPClause *Sema::ActOnOpenMPIfClause(OpenMPDirectiveKind NameModifier,
                                      Expr *Condition, SourceLocation StartLoc,
                                      SourceLocation LParenLoc,
@@ -7574,6 +7599,7 @@ OMPClause *Sema::ActOnOpenMPIfClause(OpenMPDirectiveKind NameModifier,
                                      SourceLocation ColonLoc,
                                      SourceLocation EndLoc) {
   Expr *ValExpr = Condition;
+  Stmt *HelperValStmt = nullptr;
   if (!Condition->isValueDependent() && !Condition->isTypeDependent() &&
       !Condition->isInstantiationDependent() &&
       !Condition->containsUnexpandedParameterPack()) {
@@ -7583,10 +7609,19 @@ OMPClause *Sema::ActOnOpenMPIfClause(OpenMPDirectiveKind NameModifier,
       return nullptr;
 
     ValExpr = Val.get();
+
+    OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
+    if (isOpenMPTargetExecutionDirective(DKind)) {
+      llvm::MapVector<Expr *, DeclRefExpr *> Captures;
+      unsigned CaptureLevel = getOpenMPCaptureLevel(DKind, OMPC_if);
+      ValExpr = tryBuildCapture(*this, ValExpr, Captures, CaptureLevel).get();
+      HelperValStmt = buildPreInits(Context, Captures);
+    }
   }
 
-  return new (Context) OMPIfClause(NameModifier, ValExpr, StartLoc, LParenLoc,
-                                   NameModifierLoc, ColonLoc, EndLoc);
+  return new (Context)
+      OMPIfClause(NameModifier, ValExpr, HelperValStmt, StartLoc, LParenLoc,
+                  NameModifierLoc, ColonLoc, EndLoc);
 }
 
 OMPClause *Sema::ActOnOpenMPFinalClause(Expr *Condition,
@@ -7683,6 +7718,7 @@ OMPClause *Sema::ActOnOpenMPNumThreadsClause(Expr *NumThreads,
                                              SourceLocation LParenLoc,
                                              SourceLocation EndLoc) {
   Expr *ValExpr = NumThreads;
+  Stmt *HelperValStmt = nullptr;
 
   // OpenMP [2.5, Restrictions]
   //  The num_threads expression must evaluate to a positive integer value.
@@ -7690,8 +7726,16 @@ OMPClause *Sema::ActOnOpenMPNumThreadsClause(Expr *NumThreads,
                                  /*StrictlyPositive=*/true))
     return nullptr;
 
+  OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
+  if (isOpenMPTargetExecutionDirective(DKind)) {
+    llvm::MapVector<Expr *, DeclRefExpr *> Captures;
+    unsigned CaptureLevel = getOpenMPCaptureLevel(DKind, OMPC_num_threads);
+    ValExpr = tryBuildCapture(*this, ValExpr, Captures, CaptureLevel).get();
+    HelperValStmt = buildPreInits(Context, Captures);
+  }
+
   return new (Context)
-      OMPNumThreadsClause(ValExpr, StartLoc, LParenLoc, EndLoc);
+      OMPNumThreadsClause(ValExpr, HelperValStmt, StartLoc, LParenLoc, EndLoc);
 }
 
 ExprResult Sema::VerifyPositiveIntegerConstantInClause(Expr *E,
@@ -8102,7 +8146,9 @@ OMPClause *Sema::ActOnOpenMPScheduleClause(
         }
       } else if (isParallelOrTaskRegion(DSAStack->getCurrentDirective())) {
         llvm::MapVector<Expr *, DeclRefExpr *> Captures;
-        ValExpr = tryBuildCapture(*this, ValExpr, Captures).get();
+        OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
+        unsigned CaptureLevel = getOpenMPCaptureLevel(DKind, OMPC_schedule);
+        ValExpr = tryBuildCapture(*this, ValExpr, Captures, CaptureLevel).get();
         HelperValStmt = buildPreInits(Context, Captures);
       }
     }
@@ -11638,7 +11684,10 @@ OMPClause *Sema::ActOnOpenMPDistScheduleClause(
         }
       } else if (isParallelOrTaskRegion(DSAStack->getCurrentDirective())) {
         llvm::MapVector<Expr *, DeclRefExpr *> Captures;
-        ValExpr = tryBuildCapture(*this, ValExpr, Captures).get();
+        OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
+        unsigned CaptureLevel =
+            getOpenMPCaptureLevel(DKind, OMPC_dist_schedule);
+        ValExpr = tryBuildCapture(*this, ValExpr, Captures, CaptureLevel).get();
         HelperValStmt = buildPreInits(Context, Captures);
       }
     }
