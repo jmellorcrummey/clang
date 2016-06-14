@@ -3549,6 +3549,26 @@ static void emitCommonOMPTargetDirective(CodeGenFunction &CGF,
                                         CapturedVars);
 }
 
+void CodeGenFunction::EmitOMPTargetDeviceFunction(CodeGenModule &CGM,
+                                                  StringRef ParentName,
+                                                  const OMPTargetDirective &S) {
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
+    OMPPrivateScope PrivateScope(CGF);
+    (void)CGF.EmitOMPFirstprivateClause(S, PrivateScope);
+    CGF.EmitOMPPrivateClause(S, PrivateScope);
+    (void)PrivateScope.Privatize();
+
+    Action.Enter(CGF);
+    CGF.EmitStmt(cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
+  };
+  llvm::Function *Fn;
+  llvm::Constant *Addr;
+  std::tie(Fn, Addr) =
+      EmitOMPTargetDirectiveOutlinedFunction(CGM, S, ParentName,
+                                             /*isOffloadEntry=*/true, CodeGen);
+  assert(Fn && Addr && "Target device function emission failed.");
+}
+
 void CodeGenFunction::EmitOMPTargetDirective(const OMPTargetDirective &S) {
   auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
     OMPPrivateScope PrivateScope(CGF);
