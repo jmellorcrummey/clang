@@ -634,7 +634,8 @@ public:
   /// \param CodeGen Code generation sequence for the \a D directive.
   virtual llvm::Value *emitParallelOrTeamsOutlinedFunction(
       const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
-      OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen);
+      OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen,
+      unsigned CaptureLevel = 1);
 
   /// \brief Emits outlined function for the specified OpenMP simd directive
   /// \a D. This outlined function has type void(*)(kmp_int32 *LaneID,

@@ -123,13 +123,21 @@ llvm::Value *CodeGenFunction::getTypeSize(QualType Ty) {
 }
 
 void CodeGenFunction::GenerateOpenMPCapturedVars(
-    const CapturedStmt &S, SmallVectorImpl<llvm::Value *> &CapturedVars) {
+    const CapturedStmt &S, SmallVectorImpl<llvm::Value *> &CapturedVars,
+    unsigned CaptureLevel) {
   const RecordDecl *RD = S.getCapturedRecordDecl();
   auto CurField = RD->field_begin();
   auto CurCap = S.captures().begin();
   for (CapturedStmt::const_capture_init_iterator I = S.capture_init_begin(),
                                                  E = S.capture_init_end();
        I != E; ++I, ++CurField, ++CurCap) {
+    if (CurCap->capturesVariable() || CurCap->capturesVariableByCopy()) {
+      auto *Var = CurCap->getCapturedVar();
+      if (auto *C = dyn_cast<OMPCapturedExprDecl>(Var))
+        if (C->getCaptureLevel() < CaptureLevel)
+          continue;
+    }
+
     if (CurField->hasCapturedVLAType()) {
       auto VAT = CurField->getCapturedVLAType();
       auto *Val = VLASizeMap[VAT->getSizeExpr()];
@@ -194,8 +202,8 @@ static Address castValueFromUintptr(CodeGenFunction &CGF, QualType DstType,
   return TmpAddr;
 }
 
-llvm::Function *
-CodeGenFunction::GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S) {
+llvm::Function *CodeGenFunction::GenerateOpenMPCapturedStmtFunction(
+    const CapturedStmt &S, bool SkipThreadVars, unsigned CaptureLevel) {
   assert(
       CapturedStmtInfo &&
       "CapturedStmtInfo should be set when generating the captured function");
@@ -206,13 +214,24 @@ CodeGenFunction::GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S) {
   // Build the argument list.
   ASTContext &Ctx = CGM.getContext();
   FunctionArgList Args;
-  Args.append(CD->param_begin(),
-              std::next(CD->param_begin(), CD->getContextParamPosition()));
+  if (!SkipThreadVars)
+    Args.append(CD->param_begin(),
+                std::next(CD->param_begin(), CD->getContextParamPosition()));
   auto I = S.captures().begin();
   for (auto *FD : RD->fields()) {
     QualType ArgType = FD->getType();
     IdentifierInfo *II = nullptr;
     VarDecl *CapVar = nullptr;
+
+    if (I->capturesVariable() || I->capturesVariableByCopy()) {
+      CapVar = I->getCapturedVar();
+      if (auto *C = dyn_cast<OMPCapturedExprDecl>(CapVar)) {
+        if (C->getCaptureLevel() < CaptureLevel) {
+          ++I;
+          continue;
+        }
+      }
+    }
 
     // If this is a capture by copy and the type is not a pointer, the outlined
     // function argument type should be uintptr and the value properly casted to
@@ -258,9 +277,19 @@ CodeGenFunction::GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S) {
   // Generate the function.
   StartFunction(CD, Ctx.VoidTy, F, FuncInfo, Args, CD->getLocation(),
                 CD->getBody()->getLocStart());
-  unsigned Cnt = CD->getContextParamPosition();
+  unsigned Cnt = SkipThreadVars ? 0 : CD->getContextParamPosition();
   I = S.captures().begin();
   for (auto *FD : RD->fields()) {
+    if (I->capturesVariable() || I->capturesVariableByCopy()) {
+      auto *Var = I->getCapturedVar();
+      if (auto *C = dyn_cast<OMPCapturedExprDecl>(Var)) {
+        if (C->getCaptureLevel() < CaptureLevel) {
+          ++I;
+          continue;
+        }
+      }
+    }
+
     // If we are capturing a pointer by copy we don't need to do anything, just
     // use the value that we get from the arguments.
     if (I->capturesVariableByCopy() && FD->getType()->isAnyPointerType()) {
@@ -1190,12 +1219,14 @@ static void emitPostUpdateForReductionClause(
 static void emitCommonOMPParallelDirective(CodeGenFunction &CGF,
                                            const OMPExecutableDirective &S,
                                            OpenMPDirectiveKind InnermostKind,
-                                           const RegionCodeGenTy &CodeGen) {
+                                           const RegionCodeGenTy &CodeGen,
+                                           unsigned CaptureLevel = 1) {
   CGF.CGM.getOpenMPRuntime().registerParallelContext(CGF, S);
   auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
-  auto OutlinedFn = CGF.CGM.getOpenMPRuntime().
-      emitParallelOrTeamsOutlinedFunction(S,
-          *CS->getCapturedDecl()->param_begin(), InnermostKind, CodeGen);
+  auto OutlinedFn =
+      CGF.CGM.getOpenMPRuntime().emitParallelOrTeamsOutlinedFunction(
+          S, *CS->getCapturedDecl()->param_begin(), InnermostKind, CodeGen,
+          CaptureLevel);
   if (const auto *NumThreadsClause = S.getSingleClause<OMPNumThreadsClause>()) {
     CodeGenFunction::RunCleanupsScope NumThreadsScope(CGF);
     auto NumThreads = CGF.EmitScalarExpr(NumThreadsClause->getNumThreads(),
@@ -1238,7 +1269,7 @@ static void emitCommonOMPParallelDirective(CodeGenFunction &CGF,
         CGF, S.getLocStart(), OutlinedFn, CapturedVars, IfCond);
   } else {
     OMPLexicalScope Scope(CGF, S);
-    CGF.GenerateOpenMPCapturedVars(*CS, CapturedVars);
+    CGF.GenerateOpenMPCapturedVars(*CS, CapturedVars, CaptureLevel);
     CGF.CGM.getOpenMPRuntime().emitParallelCall(
         CGF, S.getLocStart(), OutlinedFn, CapturedVars, IfCond);
   }

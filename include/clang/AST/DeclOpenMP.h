@@ -169,21 +169,29 @@ public:
 /// functions. This pseudo-declaration allows properly handle this kind of
 /// capture by wrapping captured expression into a variable-like declaration.
 class OMPCapturedExprDecl final : public VarDecl {
+  unsigned CaptureLevel;
+
   friend class ASTDeclReader;
   void anchor() override;
 
   OMPCapturedExprDecl(ASTContext &C, DeclContext *DC, IdentifierInfo *Id,
-                      QualType Type)
+                      QualType Type, unsigned CaptureLevel)
       : VarDecl(OMPCapturedExpr, C, DC, SourceLocation(), SourceLocation(), Id,
-                Type, nullptr, SC_None) {
+                Type, nullptr, SC_None),
+        CaptureLevel(CaptureLevel) {
     setImplicit();
   }
 
 public:
   static OMPCapturedExprDecl *Create(ASTContext &C, DeclContext *DC,
-                                     IdentifierInfo *Id, QualType T);
+                                     IdentifierInfo *Id, QualType T,
+                                     unsigned CaptureLevel);
 
-  static OMPCapturedExprDecl *CreateDeserialized(ASTContext &C, unsigned ID);
+  static OMPCapturedExprDecl *CreateDeserialized(ASTContext &C, unsigned ID,
+                                                 unsigned CaptureLevel = 1);
+
+  unsigned getCaptureLevel() const;
+  void setCaptureLevel(unsigned CaptureLevel);
 
   // Implement isa/cast/dyncast/etc.
   static bool classof(const Decl *D) { return classofKind(D->getKind()); }

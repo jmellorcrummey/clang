@@ -1312,7 +1312,8 @@ public:
 
 llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
     const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
-    OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen) {
+    OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen,
+    unsigned CaptureLevel) {
   assert(ThreadIDVar->getType()->isPointerType() &&
          "thread id variable must be of type kmp_int32 *");
 
@@ -1349,7 +1350,8 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
       ParallelNestingLevelRAII NestingRAII(ParallelNestingLevel);
       // The outlined function takes as arguments the global_tid, bound_tid,
       // and a capture structure created from the captured variables.
-      OutlinedFun = CGF.GenerateOpenMPCapturedStmtFunction(*CS);
+      OutlinedFun = CGF.GenerateOpenMPCapturedStmtFunction(
+          *CS, /*SkipThreadVars=*/false, CaptureLevel);
     }
     auto *WrapperFun =
         createDataSharingParallelWrapper(*OutlinedFun, D, CurrentContext);

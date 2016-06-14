@@ -429,11 +429,11 @@ public:
   /// \param InnermostKind Kind of innermost directive (for simple directives it
   /// is a directive itself, for combined - its innermost directive).
   /// \param CodeGen Code generation sequence for the \a D directive.
-  llvm::Value *
-  emitParallelOrTeamsOutlinedFunction(const OMPExecutableDirective &D,
-                                      const VarDecl *ThreadIDVar,
-                                      OpenMPDirectiveKind InnermostKind,
-                                      const RegionCodeGenTy &CodeGen) override;
+  /// \param CaptureLevel Codegening level of a combined construct.
+  llvm::Value *emitParallelOrTeamsOutlinedFunction(
+      const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
+      OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen,
+      unsigned CaptureLevel = 1) override;
 
   /// \brief Emits outlined function for the specified OpenMP simd directive
   /// \a D. This outlined function has type void(*)(kmp_int32 *LaneID,

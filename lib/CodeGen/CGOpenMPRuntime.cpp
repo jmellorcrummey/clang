@@ -918,7 +918,8 @@ static Address createIdentFieldGEP(CodeGenFunction &CGF, Address Addr,
 
 llvm::Value *CGOpenMPRuntime::emitParallelOrTeamsOutlinedFunction(
     const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
-    OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen) {
+    OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen,
+    unsigned CaptureLevel) {
   assert(ThreadIDVar->getType()->isPointerType() &&
          "thread id variable must be of type kmp_int32 *");
   const CapturedStmt *CS = cast<CapturedStmt>(D.getAssociatedStmt());
@@ -933,7 +934,8 @@ llvm::Value *CGOpenMPRuntime::emitParallelOrTeamsOutlinedFunction(
   CGOpenMPOutlinedRegionInfo CGInfo(*CS, ThreadIDVar, CodeGen, InnermostKind,
                                     HasCancel);
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
-  return CGF.GenerateOpenMPCapturedStmtFunction(*CS);
+  return CGF.GenerateOpenMPCapturedStmtFunction(*CS, /*SkipThreadVars=*/false,
+                                                CaptureLevel);
 }
 
 llvm::Value *CGOpenMPRuntime::emitSimdOutlinedFunction(
@@ -5123,7 +5125,8 @@ void CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(
   CGOpenMPTargetRegionInfo CGInfo(CS, CodeGen, EntryFnName);
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
 
-  OutlinedFn = CGF.GenerateOpenMPCapturedStmtFunction(CS);
+  bool SkipThreadVars = isOpenMPParallelDirective(D.getDirectiveKind());
+  OutlinedFn = CGF.GenerateOpenMPCapturedStmtFunction(CS, SkipThreadVars);
 
   // If this target outline function is not an offload entry, we don't need to
   // register it.
