@@ -1614,7 +1614,7 @@ static void emitCommonOMPSimdDirective(CodeGenFunction &CGF,
   CGF.CGM.getOpenMPRuntime().registerParallelContext(CGF, S);
   auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
   llvm::SmallVector<llvm::Value *, 16> CapturedVars;
-  CGF.CGM.getOpenMPRuntime().emitCapturedVars(CGF, S, CapturedVars);
+  CGF.GenerateOpenMPCapturedVars(*CS, CapturedVars);
   auto *LaneId = CS->getCapturedDecl()->param_begin();
   auto *NumLanes = std::next(LaneId);
   auto OutlinedFn = CGF.CGM.getOpenMPRuntime().emitSimdOutlinedFunction(
