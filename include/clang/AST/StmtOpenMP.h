@@ -2907,7 +2907,6 @@ public:
   /// with for directive in same construct.
   Expr *DistIncExpr;
 
-  // \brief
   /// \brief EnsureUpperBound for #for-- expression LB = PrevUB;
   Expr *PrevEUBExpr;
 

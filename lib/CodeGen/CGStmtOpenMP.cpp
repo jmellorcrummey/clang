@@ -1780,9 +1780,20 @@ void CodeGenFunction::EmitOMPOuterLoop(bool DynamicOrOrdered, bool IsMonotonic,
     EmitIgnoredExpr(S.getInit());
     // IV < UB
     BoolCondVal = EvaluateExprAsBool(S.getCond());
+
   } else {
     BoolCondVal = RT.emitForNext(*this, S.getLocStart(), IVSize, IVSigned, IL,
                                  LB, UB, ST);
+
+    // carlo
+    if (S.getDirectiveKind() == OMPD_distribute_parallel_for && CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX()) {
+      // de-normalize loop
+      auto PrevLB = EmitLValue(S.getPrevLowerBoundVariable());
+      Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(LB),
+          Builder.CreateLoad(PrevLB.getAddress())), LB);
+      Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(UB),
+          Builder.CreateLoad(PrevLB.getAddress())), UB);
+    }
   }
 
   // If there are any cleanups between here and the loop-exit scope,
@@ -1911,15 +1922,45 @@ void CodeGenFunction::EmitOMPForOuterLoop(
   //   UB = UB + ST;
   // }
   //
+  // When pragma for is found composed or combined with distribute, the loop
+  // bounds are not normalized. Codegen the following (init: LB == DIST_LB)
+  // LB = 0;
+  // UB = UB - DIST_LB;
+  // kmpc_dispatch_init(.., LB, UB, ..)
+  // while (!kmpc_dispatch_next(.., &LB, &UB, ..) {
+  //   LB += DIST_LB;
+  //   UB += DIST_LB;
+  //   idx = LB;
+  //   while (idx <= UB) { BODY; ++idx; } // inner loop
+  // }
+  // kmpc_dispatch_fini();
 
   const Expr *IVExpr = S.getIterationVariable();
   const unsigned IVSize = getContext().getTypeSize(IVExpr->getType());
   const bool IVSigned = IVExpr->getType()->hasSignedIntegerRepresentation();
 
+  // carlo
   if (DynamicOrOrdered) {
-    llvm::Value *UBVal = EmitScalarExpr(S.getLastIteration());
+    llvm::Value *LBVal = nullptr;
+    llvm::Value *UBVal = nullptr;
+    if (S.getDirectiveKind() == OMPD_distribute_parallel_for) {
+      if(CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX()) {
+        // normalize loop
+        auto PrevLB = EmitLValue(S.getPrevLowerBoundVariable());
+        LBVal = Builder.getIntN(IVSize, 0);
+        UBVal = Builder.CreateSub(Builder.CreateLoad(UB), Builder.CreateLoad(
+            PrevLB.getAddress()));
+      } else {
+        LBVal = Builder.CreateLoad(LB);
+        UBVal = Builder.CreateLoad(UB);
+      }
+    } else {
+      LBVal = Builder.getIntN(IVSize, 0);
+      UBVal = EmitScalarExpr(S.getLastIteration());
+    }
     RT.emitForDispatchInit(*this, S.getLocStart(), ScheduleKind, IVSize,
-                           IVSigned, Ordered, UBVal, Chunk);
+			     IVSigned, Ordered, LBVal,
+			     UBVal, Chunk);
   } else {
     RT.emitForStaticInit(*this, S.getLocStart(), ScheduleKind, IVSize, IVSigned,
                          Ordered, IL, LB, UB, ST, Chunk);
@@ -2034,12 +2075,14 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
     LValue IL =
         EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getIsLastIterVariable()));
 
+    // carlo
+    LValue PrevLB;
     if (S.getDirectiveKind() == OMPD_distribute_parallel_for) {
       // When composing distribute with for we need to use the pragma distribute
       // chunk lower and upper bounds rather than the whole loop iteration
       // space. Therefore we copy the bounds of the previous schedule into the
       // the current ones.
-      LValue PrevLB = EmitLValue(S.getPrevLowerBoundVariable());
+      PrevLB = EmitLValue(S.getPrevLowerBoundVariable());
       LValue PrevUB = EmitLValue(S.getPrevUpperBoundVariable());
       auto PrevLBVal = EmitLoadOfScalar(PrevLB, SourceLocation());
       auto PrevUBVal = EmitLoadOfScalar(PrevUB, SourceLocation());
