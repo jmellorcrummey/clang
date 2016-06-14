@@ -27,6 +27,11 @@ enum OpenMPRTLFunctionNVPTX {
   OMPRTL_NVPTX__kmpc_kernel_init,
   /// \brief Call to void __kmpc_kernel_deinit();
   OMPRTL_NVPTX__kmpc_kernel_deinit,
+  /// \brief Call to void __kmpc_spmd_kernel_init(kmp_int32 thread_limit,
+  /// bool noOMPMode);
+  OMPRTL_NVPTX__kmpc_spmd_kernel_init,
+  /// \brief Call to void __kmpc_spmd_kernel_deinit();
+  OMPRTL_NVPTX__kmpc_spmd_kernel_deinit,
   // Call to void __kmpc_serialized_parallel(ident_t *loc, kmp_int32
   // global_tid);
   OMPRTL_NVPTX__kmpc_serialized_parallel,
@@ -734,9 +739,9 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
 }
 
 // Setup NVPTX threads for master-worker OpenMP scheme.
-void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
-                                           EntryFunctionState &EST,
-                                           WorkerFunctionState &WST) {
+void CGOpenMPRuntimeNVPTX::emitGenericEntryHeader(CodeGenFunction &CGF,
+                                                  EntryFunctionState &EST,
+                                                  WorkerFunctionState &WST) {
   //  // Setup BBs in entry function.
   //  llvm::BasicBlock *WorkerCheckBB =
   //  CGF.createBasicBlock(".check.for.worker");
@@ -795,8 +800,8 @@ void CGOpenMPRuntimeNVPTX::emitEntryHeader(CodeGenFunction &CGF,
       createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_init), Args);
 }
 
-void CGOpenMPRuntimeNVPTX::emitEntryFooter(CodeGenFunction &CGF,
-                                           EntryFunctionState &EST) {
+void CGOpenMPRuntimeNVPTX::emitGenericEntryFooter(CodeGenFunction &CGF,
+                                                  EntryFunctionState &EST) {
   llvm::BasicBlock *TerminateBB = CGF.createBasicBlock(".termination.notifier");
   CGF.EmitBranch(TerminateBB);
 
@@ -807,6 +812,59 @@ void CGOpenMPRuntimeNVPTX::emitEntryFooter(CodeGenFunction &CGF,
   // Barrier to terminate worker threads.
   syncCTAThreads(CGF);
   // Master thread jumps to exit point.
+  CGF.EmitBranch(EST.ExitBB);
+
+  CGF.EmitBlock(EST.ExitBB);
+}
+
+void CGOpenMPRuntimeNVPTX::emitSPMDEntryHeader(CodeGenFunction &CGF,
+                                               EntryFunctionState &EST) {
+  auto &Bld = CGF.Builder;
+
+  // Setup BBs in entry function.
+  llvm::BasicBlock *OMPInitBB = CGF.createBasicBlock(".omp.init");
+  llvm::BasicBlock *ExecuteBB = CGF.createBasicBlock(".execute");
+  EST.ExitBB = CGF.createBasicBlock(".sleepy.hollow");
+
+  // Get the thread limit.
+  llvm::Value *ThreadLimit = getThreadLimit(CGF);
+  // Current thread's identifier.
+  llvm::Value *ThreadID = getNVPTXThreadID(CGF);
+
+  // The runtime starts cuda threads as follows:
+  //   - the last warp is reserved for the master warp but is not used in SPMD
+  //     mode.
+  //   - it always starts thread_limit + warpSize number of cuda threads.
+  //
+  // In SPMD mode we simply ignore all cuda threads in excess of the
+  // thread_limit.
+  llvm::Value *ThreadLimitExcess =
+      Bld.CreateICmpUGE(ThreadID, ThreadLimit, "thread_limit_excess");
+  Bld.CreateCondBr(ThreadLimitExcess, EST.ExitBB, OMPInitBB);
+
+  // Initialize the OMP state in the runtime; called by all active threads.
+  CGF.EmitBlock(OMPInitBB);
+  llvm::Value *Mode = Bld.getInt1(EST.RequiresOpenMP ? 0 : 1);
+  llvm::Value *Args[] = {getThreadLimit(CGF), Mode};
+  CGF.EmitRuntimeCall(
+      createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_spmd_kernel_init), Args);
+  CGF.EmitBranch(ExecuteBB);
+
+  CGF.EmitBlock(ExecuteBB);
+}
+
+void CGOpenMPRuntimeNVPTX::emitSPMDEntryFooter(CodeGenFunction &CGF,
+                                               EntryFunctionState &EST) {
+  llvm::BasicBlock *OMPDeInitBB = CGF.createBasicBlock(".omp.deinit");
+  CGF.EmitBranch(OMPDeInitBB);
+
+  CGF.EmitBlock(OMPDeInitBB);
+  if (EST.RequiresOpenMP) {
+    // DeInitialize the OMP state in the runtime; called by all active threads.
+    CGF.EmitRuntimeCall(
+        createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_spmd_kernel_deinit),
+        None);
+  }
   CGF.EmitBranch(EST.ExitBB);
 
   CGF.EmitBlock(EST.ExitBB);
@@ -833,6 +891,23 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
     llvm::FunctionType *FnTy =
         llvm::FunctionType::get(CGM.VoidTy, {}, /*isVarArg*/ false);
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_deinit");
+    break;
+  }
+  case OMPRTL_NVPTX__kmpc_spmd_kernel_init: {
+    // Build void __kmpc_spmd_kernel_init(kmp_int32 thread_limit,
+    // bool noOMPMode);
+    llvm::Type *TypeParams[] = {CGM.Int32Ty,
+                                llvm::Type::getInt1Ty(CGM.getLLVMContext())};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_spmd_kernel_init");
+    break;
+  }
+  case OMPRTL_NVPTX__kmpc_spmd_kernel_deinit: {
+    // Build void __kmpc_spmd_kernel_deinit();
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, {}, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_spmd_kernel_deinit");
     break;
   }
   case OMPRTL_NVPTX__kmpc_serialized_parallel: {
@@ -1034,15 +1109,36 @@ void CGOpenMPRuntimeNVPTX::createOffloadEntry(llvm::Constant *ID,
   MD->addOperand(llvm::MDNode::get(Ctx, MDVals));
 }
 
-void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
-    const OMPExecutableDirective &D, StringRef ParentName,
-    llvm::Function *&OutlinedFn, llvm::Constant *&OutlinedFnID,
-    bool IsOffloadEntry, const RegionCodeGenTy &CodeGen) {
-  if (!IsOffloadEntry) // Nothing to do.
-    return;
+namespace {
+/// \brief Specialization of codegen based on Programming models of the
+/// OpenMP construct.
+enum ExecutionMode {
+  /// \brief Single Program Multiple Data.
+  SPMD,
+  /// \brief Generic codegen to support fork-join model.
+  GENERIC,
+  Unknown,
+};
 
-  assert(!ParentName.empty() && "Invalid target region parent name!");
+ExecutionMode getExecutionMode(OpenMPDirectiveKind DirectiveKind) {
+  if (DirectiveKind == OMPD_target || DirectiveKind == OMPD_target_teams)
+    return ExecutionMode::GENERIC;
+  else if (DirectiveKind == OMPD_target_parallel ||
+           DirectiveKind == OMPD_target_parallel_for ||
+           DirectiveKind == OMPD_target_teams_distribute_parallel_for)
+    return ExecutionMode::SPMD;
 
+  llvm_unreachable(
+      "Unknown programming model for OpenMP directive on NVPTX target.");
+}
+};
+
+void CGOpenMPRuntimeNVPTX::emitGenericKernel(const OMPExecutableDirective &D,
+                                             StringRef ParentName,
+                                             llvm::Function *&OutlinedFn,
+                                             llvm::Constant *&OutlinedFnID,
+                                             bool IsOffloadEntry,
+                                             const RegionCodeGenTy &CodeGen) {
   EntryFunctionState EST;
   WorkerFunctionState WST(CGM);
   Work.clear();
@@ -1060,9 +1156,11 @@ void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
                          CGOpenMPRuntimeNVPTX::WorkerFunctionState &WST)
         : RT(RT), EST(EST), WST(WST) {}
     void Enter(CodeGenFunction &CGF) override {
-      RT.emitEntryHeader(CGF, EST, WST);
+      RT.emitGenericEntryHeader(CGF, EST, WST);
     }
-    void Exit(CodeGenFunction &CGF) override { RT.emitEntryFooter(CGF, EST); }
+    void Exit(CodeGenFunction &CGF) override {
+      RT.emitGenericEntryFooter(CGF, EST);
+    }
   } Action(*this, EST, WST);
   CodeGen.setAction(Action);
   emitTargetOutlinedFunctionHelper(D, ParentName, OutlinedFn, OutlinedFnID,
@@ -1074,6 +1172,67 @@ void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
   // Now change the name of the worker function to correspond to this target
   // region's entry function.
   WST.WorkerFn->setName(OutlinedFn->getName() + "_worker");
+  return;
+}
+
+void CGOpenMPRuntimeNVPTX::emitSPMDKernel(const OMPExecutableDirective &D,
+                                          StringRef ParentName,
+                                          llvm::Function *&OutlinedFn,
+                                          llvm::Constant *&OutlinedFnID,
+                                          bool IsOffloadEntry,
+                                          const RegionCodeGenTy &CodeGen) {
+  // Can we emit optimized code for this target region?
+  // TODO: Check if OpenMP runtime is required in target region.
+  bool RequiresOpenMP = true;
+  EntryFunctionState EST(RequiresOpenMP);
+
+  // Emit target region as a standalone region.
+  class NVPTXPrePostActionTy : public PrePostActionTy {
+    CGOpenMPRuntimeNVPTX &RT;
+    CGOpenMPRuntimeNVPTX::EntryFunctionState &EST;
+
+  public:
+    NVPTXPrePostActionTy(CGOpenMPRuntimeNVPTX &RT,
+                         CGOpenMPRuntimeNVPTX::EntryFunctionState &EST)
+        : RT(RT), EST(EST) {}
+    void Enter(CodeGenFunction &CGF) override {
+      RT.emitSPMDEntryHeader(CGF, EST);
+    }
+    void Exit(CodeGenFunction &CGF) override {
+      RT.emitSPMDEntryFooter(CGF, EST);
+    }
+  } Action(*this, EST);
+  CodeGen.setAction(Action);
+  emitTargetOutlinedFunctionHelper(D, ParentName, OutlinedFn, OutlinedFnID,
+                                   IsOffloadEntry, CodeGen);
+  return;
+}
+
+void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
+    const OMPExecutableDirective &D, StringRef ParentName,
+    llvm::Function *&OutlinedFn, llvm::Constant *&OutlinedFnID,
+    bool IsOffloadEntry, const RegionCodeGenTy &CodeGen) {
+  if (!IsOffloadEntry) // Nothing to do.
+    return;
+
+  assert(!ParentName.empty() && "Invalid target region parent name!");
+
+  OpenMPDirectiveKind DirectiveKind = D.getDirectiveKind();
+  ExecutionMode mode = getExecutionMode(DirectiveKind);
+  switch (mode) {
+  case ExecutionMode::GENERIC:
+    emitGenericKernel(D, ParentName, OutlinedFn, OutlinedFnID, IsOffloadEntry,
+                      CodeGen);
+    break;
+  case ExecutionMode::SPMD:
+    emitSPMDKernel(D, ParentName, OutlinedFn, OutlinedFnID, IsOffloadEntry,
+                   CodeGen);
+    break;
+  default:
+    llvm_unreachable(
+        "Unknown programming model for OpenMP directive on NVPTX target.");
+  }
+
   return;
 }
 
