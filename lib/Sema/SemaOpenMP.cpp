@@ -8144,7 +8144,8 @@ OMPClause *Sema::ActOnOpenMPScheduleClause(
               << "schedule" << 1 << ChunkSize->getSourceRange();
           return nullptr;
         }
-      } else if (isParallelOrTaskRegion(DSAStack->getCurrentDirective())) {
+      } else if (isParallelOrTaskRegion(DSAStack->getCurrentDirective()) &&
+                 !CurContext->isDependentContext()) {
         llvm::MapVector<Expr *, DeclRefExpr *> Captures;
         OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
         unsigned CaptureLevel = getOpenMPCaptureLevel(DKind, OMPC_schedule);
@@ -11682,7 +11683,8 @@ OMPClause *Sema::ActOnOpenMPDistScheduleClause(
               << "dist_schedule" << ChunkSize->getSourceRange();
           return nullptr;
         }
-      } else if (isParallelOrTaskRegion(DSAStack->getCurrentDirective())) {
+      } else if (isParallelOrTaskRegion(DSAStack->getCurrentDirective()) &&
+                 !CurContext->isDependentContext()) {
         llvm::MapVector<Expr *, DeclRefExpr *> Captures;
         OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
         unsigned CaptureLevel =
