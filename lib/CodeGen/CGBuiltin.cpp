@@ -246,8 +246,8 @@ static Value *EmitSignBit(CodeGenFunction &CGF, Value *V) {
     if (CGF.getTarget().isBigEndian()) {
       Value *ShiftCst = llvm::ConstantInt::get(IntTy, Width);
       V = CGF.Builder.CreateLShr(V, ShiftCst);
-    } 
-    // We are truncating value in order to extract the higher-order 
+    }
+    // We are truncating value in order to extract the higher-order
     // double, which we will be using to extract the sign from.
     IntTy = llvm::IntegerType::get(C, Width);
     V = CGF.Builder.CreateTrunc(V, IntTy);
@@ -1818,7 +1818,7 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
       break;
     }
 
-    
+
     llvm::Value *Carry;
     llvm::Value *Sum = EmitOverflowIntrinsic(*this, IntrinsicId, X, Y, Carry);
     Builder.CreateStore(Sum, SumOutPtr);
@@ -3271,7 +3271,7 @@ Value *CodeGenFunction::EmitCommonNeonBuiltinExpr(
   case NEON::BI__builtin_neon_vext_v:
   case NEON::BI__builtin_neon_vextq_v: {
     int CV = cast<ConstantInt>(Ops[2])->getSExtValue();
-    SmallVector<int, 16> Indices;
+    SmallVector<uint32_t, 16> Indices;
     for (unsigned i = 0, e = VTy->getNumElements(); i != e; ++i)
       Indices.push_back(i+CV);
 
@@ -3475,7 +3475,7 @@ Value *CodeGenFunction::EmitCommonNeonBuiltinExpr(
     Value *SV = nullptr;
 
     for (unsigned vi = 0; vi != 2; ++vi) {
-      SmallVector<int, 16> Indices;
+      SmallVector<uint32_t, 16> Indices;
       for (unsigned i = 0, e = VTy->getNumElements(); i != e; i += 2) {
         Indices.push_back(i+vi);
         Indices.push_back(i+e+vi);
@@ -3503,7 +3503,7 @@ Value *CodeGenFunction::EmitCommonNeonBuiltinExpr(
     Value *SV = nullptr;
 
     for (unsigned vi = 0; vi != 2; ++vi) {
-      SmallVector<int, 16> Indices;
+      SmallVector<uint32_t, 16> Indices;
       for (unsigned i = 0, e = VTy->getNumElements(); i != e; ++i)
         Indices.push_back(2*i+vi);
 
@@ -3521,7 +3521,7 @@ Value *CodeGenFunction::EmitCommonNeonBuiltinExpr(
     Value *SV = nullptr;
 
     for (unsigned vi = 0; vi != 2; ++vi) {
-      SmallVector<int, 16> Indices;
+      SmallVector<uint32_t, 16> Indices;
       for (unsigned i = 0, e = VTy->getNumElements(); i != e; i += 2) {
         Indices.push_back((i + vi*e) >> 1);
         Indices.push_back(((i + vi*e) >> 1)+e);
@@ -3575,8 +3575,8 @@ static Value *packTBLDVectorList(CodeGenFunction &CGF, ArrayRef<Value *> Ops,
   if (ExtOp)
     TblOps.push_back(ExtOp);
 
-  // Build a vector containing sequential number like (0, 1, 2, ..., 15)  
-  SmallVector<int, 16> Indices;
+  // Build a vector containing sequential number like (0, 1, 2, ..., 15)
+  SmallVector<uint32_t, 16> Indices;
   llvm::VectorType *TblTy = cast<llvm::VectorType>(Ops[0]->getType());
   for (unsigned i = 0, e = TblTy->getNumElements(); i != e; ++i) {
     Indices.push_back(2*i);
@@ -3602,7 +3602,7 @@ static Value *packTBLDVectorList(CodeGenFunction &CGF, ArrayRef<Value *> Ops,
   Function *TblF;
   TblOps.push_back(IndexOp);
   TblF = CGF.CGM.getIntrinsic(IntID, ResTy);
-  
+
   return CGF.EmitNeonCall(TblF, TblOps, Name);
 }
 
@@ -4108,7 +4108,7 @@ Value *CodeGenFunction::EmitARMBuiltinExpr(unsigned BuiltinID,
   // the first argument, but the LLVM intrinsic expects it as the third one.
   case ARM::BI_MoveToCoprocessor:
   case ARM::BI_MoveToCoprocessor2: {
-    Function *F = CGM.getIntrinsic(BuiltinID == ARM::BI_MoveToCoprocessor ? 
+    Function *F = CGM.getIntrinsic(BuiltinID == ARM::BI_MoveToCoprocessor ?
                                    Intrinsic::arm_mcr : Intrinsic::arm_mcr2);
     return Builder.CreateCall(F, {Ops[1], Ops[2], Ops[0],
                                   Ops[3], Ops[4], Ops[5]});
@@ -6161,7 +6161,7 @@ Value *CodeGenFunction::EmitAArch64BuiltinExpr(unsigned BuiltinID,
     Value *SV = nullptr;
 
     for (unsigned vi = 0; vi != 2; ++vi) {
-      SmallVector<int, 16> Indices;
+      SmallVector<uint32_t, 16> Indices;
       for (unsigned i = 0, e = VTy->getNumElements(); i != e; i += 2) {
         Indices.push_back(i+vi);
         Indices.push_back(i+e+vi);
@@ -6180,7 +6180,7 @@ Value *CodeGenFunction::EmitAArch64BuiltinExpr(unsigned BuiltinID,
     Value *SV = nullptr;
 
     for (unsigned vi = 0; vi != 2; ++vi) {
-      SmallVector<int, 16> Indices;
+      SmallVector<uint32_t, 16> Indices;
       for (unsigned i = 0, e = VTy->getNumElements(); i != e; ++i)
         Indices.push_back(2*i+vi);
 
@@ -6198,7 +6198,7 @@ Value *CodeGenFunction::EmitAArch64BuiltinExpr(unsigned BuiltinID,
     Value *SV = nullptr;
 
     for (unsigned vi = 0; vi != 2; ++vi) {
-      SmallVector<int, 16> Indices;
+      SmallVector<uint32_t, 16> Indices;
       for (unsigned i = 0, e = VTy->getNumElements(); i != e; i += 2) {
         Indices.push_back((i + vi*e) >> 1);
         Indices.push_back(((i + vi*e) >> 1)+e);
@@ -6291,7 +6291,7 @@ static Value *getMaskVecValue(CodeGenFunction &CGF, Value *Mask,
   // If we have less than 8 elements, then the starting mask was an i8 and
   // we need to extract down to the right number of elements.
   if (NumElts < 8) {
-    int Indices[4];
+    uint32_t Indices[4];
     for (unsigned i = 0; i != NumElts; ++i)
       Indices[i] = i;
     MaskVec = CGF.Builder.CreateShuffleVector(MaskVec, MaskVec,
@@ -6347,6 +6347,29 @@ static Value *EmitX86Select(CodeGenFunction &CGF,
   Mask = getMaskVecValue(CGF, Mask, Op0->getType()->getVectorNumElements());
 
   return CGF.Builder.CreateSelect(Mask, Op0, Op1);
+}
+
+static Value *EmitX86MaskedCompare(CodeGenFunction &CGF, CmpInst::Predicate P,
+                                   SmallVectorImpl<Value *> &Ops) {
+  unsigned NumElts = Ops[0]->getType()->getVectorNumElements();
+  Value *Cmp = CGF.Builder.CreateICmp(P, Ops[0], Ops[1]);
+
+  const auto *C = dyn_cast<Constant>(Ops[2]);
+  if (!C || !C->isAllOnesValue())
+    Cmp = CGF.Builder.CreateAnd(Cmp, getMaskVecValue(CGF, Ops[2], NumElts));
+
+  if (NumElts < 8) {
+    uint32_t Indices[8];
+    for (unsigned i = 0; i != NumElts; ++i)
+      Indices[i] = i;
+    for (unsigned i = NumElts; i != 8; ++i)
+      Indices[i] = NumElts;
+    Cmp = CGF.Builder.CreateShuffleVector(Cmp, UndefValue::get(Cmp->getType()),
+                                          Indices);
+  }
+  return CGF.Builder.CreateBitCast(Cmp,
+                                   IntegerType::get(CGF.getLLVMContext(),
+                                                    std::max(NumElts, 8U)));
 }
 
 Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
@@ -6685,7 +6708,7 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
       Ops[0] = llvm::Constant::getNullValue(Ops[0]->getType());
     }
 
-    int Indices[64];
+    uint32_t Indices[64];
     // 256-bit palignr operates on 128-bit lanes so we need to handle that
     for (unsigned l = 0; l != NumElts; l += 16) {
       for (unsigned i = 0; i != 16; ++i) {
@@ -6707,12 +6730,6 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
     return EmitX86Select(*this, Ops[4], Align, Ops[3]);
   }
 
-  case X86::BI__builtin_ia32_movntps:
-  case X86::BI__builtin_ia32_movntps256:
-  case X86::BI__builtin_ia32_movntpd:
-  case X86::BI__builtin_ia32_movntpd256:
-  case X86::BI__builtin_ia32_movntdq:
-  case X86::BI__builtin_ia32_movntdq256:
   case X86::BI__builtin_ia32_movnti:
   case X86::BI__builtin_ia32_movnti64: {
     llvm::MDNode *Node = llvm::MDNode::get(
@@ -6725,15 +6742,8 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
     StoreInst *SI = Builder.CreateDefaultAlignedStore(Ops[1], BC);
     SI->setMetadata(CGM.getModule().getMDKindID("nontemporal"), Node);
 
-    // If the operand is an integer, we can't assume alignment. Otherwise,
-    // assume natural alignment.
-    QualType ArgTy = E->getArg(1)->getType();
-    unsigned Align;
-    if (ArgTy->isIntegerType())
-      Align = 1;
-    else
-      Align = getContext().getTypeSizeInChars(ArgTy).getQuantity();
-    SI->setAlignment(Align);
+    // No alignment for scalar intrinsic store.
+    SI->setAlignment(1);
     return SI;
   }
   case X86::BI__builtin_ia32_selectb_128:
@@ -6755,6 +6765,59 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
   case X86::BI__builtin_ia32_selectpd_256:
   case X86::BI__builtin_ia32_selectpd_512:
     return EmitX86Select(*this, Ops[0], Ops[1], Ops[2]);
+  case X86::BI__builtin_ia32_pcmpeqb128_mask:
+  case X86::BI__builtin_ia32_pcmpeqb256_mask:
+  case X86::BI__builtin_ia32_pcmpeqb512_mask:
+  case X86::BI__builtin_ia32_pcmpeqw128_mask:
+  case X86::BI__builtin_ia32_pcmpeqw256_mask:
+  case X86::BI__builtin_ia32_pcmpeqw512_mask:
+  case X86::BI__builtin_ia32_pcmpeqd128_mask:
+  case X86::BI__builtin_ia32_pcmpeqd256_mask:
+  case X86::BI__builtin_ia32_pcmpeqd512_mask:
+  case X86::BI__builtin_ia32_pcmpeqq128_mask:
+  case X86::BI__builtin_ia32_pcmpeqq256_mask:
+  case X86::BI__builtin_ia32_pcmpeqq512_mask:
+    return EmitX86MaskedCompare(*this, ICmpInst::ICMP_EQ, Ops);
+  case X86::BI__builtin_ia32_pcmpgtb128_mask:
+  case X86::BI__builtin_ia32_pcmpgtb256_mask:
+  case X86::BI__builtin_ia32_pcmpgtb512_mask:
+  case X86::BI__builtin_ia32_pcmpgtw128_mask:
+  case X86::BI__builtin_ia32_pcmpgtw256_mask:
+  case X86::BI__builtin_ia32_pcmpgtw512_mask:
+  case X86::BI__builtin_ia32_pcmpgtd128_mask:
+  case X86::BI__builtin_ia32_pcmpgtd256_mask:
+  case X86::BI__builtin_ia32_pcmpgtd512_mask:
+  case X86::BI__builtin_ia32_pcmpgtq128_mask:
+  case X86::BI__builtin_ia32_pcmpgtq256_mask:
+  case X86::BI__builtin_ia32_pcmpgtq512_mask:
+    return EmitX86MaskedCompare(*this, ICmpInst::ICMP_SGT, Ops);
+
+  // TODO: Handle 64/256/512-bit vector widths of min/max.
+  case X86::BI__builtin_ia32_pmaxsb128:
+  case X86::BI__builtin_ia32_pmaxsw128:
+  case X86::BI__builtin_ia32_pmaxsd128: {
+    Value *Cmp = Builder.CreateICmp(ICmpInst::ICMP_SGT, Ops[0], Ops[1]);
+    return Builder.CreateSelect(Cmp, Ops[0], Ops[1]);
+  }
+  case X86::BI__builtin_ia32_pmaxub128:
+  case X86::BI__builtin_ia32_pmaxuw128:
+  case X86::BI__builtin_ia32_pmaxud128: {
+    Value *Cmp = Builder.CreateICmp(ICmpInst::ICMP_UGT, Ops[0], Ops[1]);
+    return Builder.CreateSelect(Cmp, Ops[0], Ops[1]);
+  }
+  case X86::BI__builtin_ia32_pminsb128:
+  case X86::BI__builtin_ia32_pminsw128:
+  case X86::BI__builtin_ia32_pminsd128: {
+    Value *Cmp = Builder.CreateICmp(ICmpInst::ICMP_SLT, Ops[0], Ops[1]);
+    return Builder.CreateSelect(Cmp, Ops[0], Ops[1]);
+  }
+  case X86::BI__builtin_ia32_pminub128:
+  case X86::BI__builtin_ia32_pminuw128:
+  case X86::BI__builtin_ia32_pminud128: {
+    Value *Cmp = Builder.CreateICmp(ICmpInst::ICMP_ULT, Ops[0], Ops[1]);
+    return Builder.CreateSelect(Cmp, Ops[0], Ops[1]);
+  }
+
   // 3DNow!
   case X86::BI__builtin_ia32_pswapdsf:
   case X86::BI__builtin_ia32_pswapdsi: {

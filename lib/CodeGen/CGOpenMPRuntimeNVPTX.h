@@ -259,8 +259,10 @@ private:
   class EntryFunctionState {
   public:
     llvm::BasicBlock *ExitBB;
+    bool RequiresOpenMP;
 
-    EntryFunctionState() : ExitBB(nullptr){};
+    EntryFunctionState(bool RequiresOpenMP = false)
+        : ExitBB(nullptr), RequiresOpenMP(RequiresOpenMP){};
   };
 
   class WorkerFunctionState {
@@ -285,13 +287,20 @@ private:
   /// \brief Helper for worker function. Emit body of worker loop.
   void emitWorkerLoop(CodeGenFunction &CGF, WorkerFunctionState &WST);
 
-  /// \brief Helper for target entry function. Guide the master and worker
-  /// threads to their respective locations.
-  void emitEntryHeader(CodeGenFunction &CGF, EntryFunctionState &EST,
-                       WorkerFunctionState &WST);
+  /// \brief Helper for generic target entry function. Guide the master and
+  /// worker threads to their respective locations.
+  void emitGenericEntryHeader(CodeGenFunction &CGF, EntryFunctionState &EST,
+                              WorkerFunctionState &WST);
 
-  /// \brief Signal termination of OMP execution.
-  void emitEntryFooter(CodeGenFunction &CGF, EntryFunctionState &EST);
+  /// \brief Signal termination of OMP execution for generic target entry
+  /// function.
+  void emitGenericEntryFooter(CodeGenFunction &CGF, EntryFunctionState &EST);
+
+  /// \brief Helper for SPMD target entry function.
+  void emitSPMDEntryHeader(CodeGenFunction &CGF, EntryFunctionState &EST);
+
+  /// \brief Signal termination of SPMD OMP execution.
+  void emitSPMDEntryFooter(CodeGenFunction &CGF, EntryFunctionState &EST);
 
   /// \brief Returns specified OpenMP runtime function for the current OpenMP
   /// implementation.  Specialized for the NVPTX device.
@@ -302,12 +311,6 @@ private:
   /// \brief Gets thread id value for the current thread.
   ///
   llvm::Value *getThreadID(CodeGenFunction &CGF, SourceLocation Loc) override;
-
-  /// \brief Emits captured variables for the outlined function for the
-  /// specified OpenMP parallel directive \a D.
-  void
-  emitCapturedVars(CodeGenFunction &CGF, const OMPExecutableDirective &S,
-                   llvm::SmallVector<llvm::Value *, 16> &CapturedVars) override;
 
   /// \brief Registers the context of a parallel region with the runtime
   /// codegen implementation.
@@ -322,6 +325,35 @@ private:
   /// address \a Addr and size \a Size.
   void createOffloadEntry(llvm::Constant *ID, llvm::Constant *Addr,
                           uint64_t Size) override;
+
+  /// \brief Emit outlined function specialized for the Fork-Join
+  /// programming model for applicable target directives on the NVPTX device.
+  /// \param D Directive to emit.
+  /// \param ParentName Name of the function that encloses the target region.
+  /// \param OutlinedFn Outlined function value to be defined by this call.
+  /// \param OutlinedFnID Outlined function ID value to be defined by this call.
+  /// \param IsOffloadEntry True if the outlined function is an offload entry.
+  /// An outlined function may not be an entry if, e.g. the if clause always
+  /// evaluates to false.
+  void emitGenericKernel(const OMPExecutableDirective &D, StringRef ParentName,
+                         llvm::Function *&OutlinedFn,
+                         llvm::Constant *&OutlinedFnID, bool IsOffloadEntry,
+                         const RegionCodeGenTy &CodeGen);
+
+  /// \brief Emit outlined function specialized for the Single Program
+  /// Multiple Data programming model for applicable target directives on the
+  /// NVPTX device.
+  /// \param D Directive to emit.
+  /// \param ParentName Name of the function that encloses the target region.
+  /// \param OutlinedFn Outlined function value to be defined by this call.
+  /// \param OutlinedFnID Outlined function ID value to be defined by this call.
+  /// \param IsOffloadEntry True if the outlined function is an offload entry.
+  /// An outlined function may not be an entry if, e.g. the if clause always
+  /// evaluates to false.
+  void emitSPMDKernel(const OMPExecutableDirective &D, StringRef ParentName,
+                      llvm::Function *&OutlinedFn,
+                      llvm::Constant *&OutlinedFnID, bool IsOffloadEntry,
+                      const RegionCodeGenTy &CodeGen);
 
   /// \brief Emit outlined function for 'target' directive on the NVPTX
   /// device.
@@ -410,7 +442,7 @@ public:
   ///
   bool generateCoalescedSchedule(OpenMPScheduleClauseKind ScheduleKind,
                                  bool ChunkSizeOne,
-                                 bool ordered) const override;
+                                 bool Ordered) const override;
 
   /// \brief Check if we must always generate a barrier at the end of a
   /// particular construct regardless of the presence of a nowait clause.
@@ -435,11 +467,11 @@ public:
   /// \param InnermostKind Kind of innermost directive (for simple directives it
   /// is a directive itself, for combined - its innermost directive).
   /// \param CodeGen Code generation sequence for the \a D directive.
-  llvm::Value *
-  emitParallelOrTeamsOutlinedFunction(const OMPExecutableDirective &D,
-                                      const VarDecl *ThreadIDVar,
-                                      OpenMPDirectiveKind InnermostKind,
-                                      const RegionCodeGenTy &CodeGen) override;
+  /// \param CaptureLevel Codegening level of a combined construct.
+  llvm::Value *emitParallelOrTeamsOutlinedFunction(
+      const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
+      OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen,
+      unsigned CaptureLevel = 1) override;
 
   /// \brief Emits outlined function for the specified OpenMP simd directive
   /// \a D. This outlined function has type void(*)(kmp_int32 *LaneID,

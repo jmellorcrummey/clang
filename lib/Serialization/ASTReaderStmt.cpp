@@ -1930,6 +1930,7 @@ void OMPClauseReader::VisitOMPClauseWithPostUpdate(OMPClauseWithPostUpdate *C) {
 }
 
 void OMPClauseReader::VisitOMPIfClause(OMPIfClause *C) {
+  VisitOMPClauseWithPreInit(C);
   C->setNameModifier(static_cast<OpenMPDirectiveKind>(Record[Idx++]));
   C->setNameModifierLoc(Reader->ReadSourceLocation(Record, Idx));
   C->setColonLoc(Reader->ReadSourceLocation(Record, Idx));
@@ -1943,6 +1944,7 @@ void OMPClauseReader::VisitOMPFinalClause(OMPFinalClause *C) {
 }
 
 void OMPClauseReader::VisitOMPNumThreadsClause(OMPNumThreadsClause *C) {
+  VisitOMPClauseWithPreInit(C);
   C->setNumThreads(Reader->Reader.ReadSubExpr());
   C->setLParenLoc(Reader->ReadSourceLocation(Record, Idx));
 }

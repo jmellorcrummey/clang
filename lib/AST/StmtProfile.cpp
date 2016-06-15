@@ -287,6 +287,7 @@ void OMPClauseProfiler::VistOMPClauseWithPostUpdate(
 }
 
 void OMPClauseProfiler::VisitOMPIfClause(const OMPIfClause *C) {
+  VistOMPClauseWithPreInit(C);
   if (C->getCondition())
     Profiler->VisitStmt(C->getCondition());
 }
@@ -297,6 +298,7 @@ void OMPClauseProfiler::VisitOMPFinalClause(const OMPFinalClause *C) {
 }
 
 void OMPClauseProfiler::VisitOMPNumThreadsClause(const OMPNumThreadsClause *C) {
+  VistOMPClauseWithPreInit(C);
   if (C->getNumThreads())
     Profiler->VisitStmt(C->getNumThreads());
 }

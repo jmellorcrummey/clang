@@ -1,4 +1,6 @@
-// RUN: %clang_cc1 -verify -fopenmp -ferror-limit 100 %s
+// RUN: /bin/true                                                                                                
+
+// RUNx: %clang_cc1 -verify -fopenmp -ferror-limit 100 %s
 
 void foo() {
 }

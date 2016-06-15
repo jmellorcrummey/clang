@@ -2230,9 +2230,13 @@ public:
   llvm::Function *EmitCapturedStmt(const CapturedStmt &S, CapturedRegionKind K);
   llvm::Function *GenerateCapturedStmtFunction(const CapturedStmt &S);
   Address GenerateCapturedStmtArgument(const CapturedStmt &S);
-  llvm::Function *GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S);
+  llvm::Function *
+  GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S,
+                                     bool SkipThreadVars = false,
+                                     unsigned CaptureLevel = 1);
   void GenerateOpenMPCapturedVars(const CapturedStmt &S,
-                                  SmallVectorImpl<llvm::Value *> &CapturedVars);
+                                  SmallVectorImpl<llvm::Value *> &CapturedVars,
+                                  unsigned CaptureLevel = 1);
   void emitOMPSimpleStore(LValue LVal, RValue RVal, QualType RValTy,
                           SourceLocation Loc);
   /// \brief Perform element by element copying of arrays with type \a
@@ -2402,13 +2406,27 @@ public:
   void EmitOMPTargetTeamsDistributeParallelForDirective(
       const OMPTargetTeamsDistributeParallelForDirective &S);
 
+  /// Emit device code for the target directive.
+  static void EmitOMPTargetDeviceFunction(CodeGenModule &CGM,
+                                          StringRef ParentName,
+                                          const OMPTargetDirective &S);
+  /// Emit device code for the target parallel directive.
+  static void
+  EmitOMPTargetParallelDeviceFunction(CodeGenModule &CGM, StringRef ParentName,
+                                      const OMPTargetParallelDirective &S);
+  /// Emit device code for the target parallel for directive.
+  static void EmitOMPTargetParallelForDeviceFunction(
+      CodeGenModule &CGM, StringRef ParentName,
+      const OMPTargetParallelForDirective &S);
+
   /// Emit outlined function for the target directive.
   static std::pair<llvm::Function * /*OutlinedFn*/,
                    llvm::Constant * /*OutlinedFnID*/>
   EmitOMPTargetDirectiveOutlinedFunction(CodeGenModule &CGM,
-                                         const OMPTargetDirective &S,
+                                         const OMPExecutableDirective &S,
                                          StringRef ParentName,
-                                         bool IsOffloadEntry);
+                                         bool IsOffloadEntry,
+                                         const RegionCodeGenTy &CodeGen);
   /// \brief Emit inner loop of the worksharing/simd construct.
   ///
   /// \param S Directive, for which the inner loop must be emitted.

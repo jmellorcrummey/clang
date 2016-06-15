@@ -1827,7 +1827,8 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
 
   Opts.RTTI = Opts.CPlusPlus && !Args.hasArg(OPT_fno_rtti);
   Opts.RTTIData = Opts.RTTI && !Args.hasArg(OPT_fno_rtti_data);
-  Opts.Blocks = Args.hasArg(OPT_fblocks);
+  Opts.Blocks = Args.hasArg(OPT_fblocks) || (Opts.OpenCL
+    && Opts.OpenCLVersion >= 200);
   Opts.BlocksRuntimeOptional = Args.hasArg(OPT_fblocks_runtime_optional);
   Opts.Coroutines = Args.hasArg(OPT_fcoroutines);
   Opts.Modules = Args.hasArg(OPT_fmodules);
@@ -2035,6 +2036,14 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
         break;
       }
     }
+    // Set the flag to prevent the implementation from emitting device exception
+    // handling code for those requiring so.
+    if (Opts.OpenMPIsDevice && (T.getArch() == llvm::Triple::nvptx ||
+                                T.getArch() == llvm::Triple::nvptx64)) {
+      Opts.CXXExceptions = 0;
+      Opts.OpenMPNoDeviceEH = 1;
+    } else
+      Opts.OpenMPNoDeviceEH = 0;
   }
 
   // Get the OpenMP target triples if any.

@@ -1635,6 +1635,7 @@ void ASTDeclWriter::VisitOMPDeclareReductionDecl(OMPDeclareReductionDecl *D) {
 
 void ASTDeclWriter::VisitOMPCapturedExprDecl(OMPCapturedExprDecl *D) {
   VisitVarDecl(D);
+  Record.push_back(D->getCaptureLevel());
   Code = serialization::DECL_OMP_CAPTUREDEXPR;
 }
 
