@@ -3582,6 +3582,30 @@ void CodeGenFunction::EmitOMPTargetDirective(const OMPTargetDirective &S) {
   emitCommonOMPTargetDirective(*this, S, OMPD_target, CodeGen);
 }
 
+void CodeGenFunction::EmitOMPTargetParallelDeviceFunction(
+    CodeGenModule &CGM, StringRef ParentName,
+    const OMPTargetParallelDirective &S) {
+  // Emit SPMD target parallel region as a standalone region.
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
+    Action.Enter(CGF);
+    OMPPrivateScope PrivateScope(CGF);
+    (void)CGF.EmitOMPFirstprivateClause(S, PrivateScope);
+    CGF.EmitOMPPrivateClause(S, PrivateScope);
+    //    CGF.EmitOMPReductionClauseInit(S, PrivateScope);
+    (void)PrivateScope.Privatize();
+    CGF.EmitStmt(cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
+    //    CGF.EmitOMPReductionClauseFinal(S);
+    //  emitPostUpdateForReductionClause(
+    //      CGF, S, [](CodeGenFunction &) -> llvm::Value * { return nullptr; });
+  };
+  llvm::Function *Fn;
+  llvm::Constant *Addr;
+  std::tie(Fn, Addr) =
+      EmitOMPTargetDirectiveOutlinedFunction(CGM, S, ParentName,
+                                             /*isOffloadEntry=*/true, CodeGen);
+  assert(Fn && Addr && "Target device function emission failed.");
+}
+
 void CodeGenFunction::EmitOMPTargetParallelDirective(
     const OMPTargetParallelDirective &S) {
   auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
@@ -3610,6 +3634,22 @@ void CodeGenFunction::EmitOMPTargetParallelDirective(
         CGF, S, [](CodeGenFunction &) -> llvm::Value * { return nullptr; });
   };
   emitCommonOMPTargetDirective(*this, S, OMPD_target_parallel, CodeGen);
+}
+
+void CodeGenFunction::EmitOMPTargetParallelForDeviceFunction(
+    CodeGenModule &CGM, StringRef ParentName,
+    const OMPTargetParallelForDirective &S) {
+  // Emit SPMD target parallel for region as a standalone region.
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
+    Action.Enter(CGF);
+    CGF.EmitOMPWorksharingLoop(S);
+  };
+  llvm::Function *Fn;
+  llvm::Constant *Addr;
+  std::tie(Fn, Addr) =
+      EmitOMPTargetDirectiveOutlinedFunction(CGM, S, ParentName,
+                                             /*isOffloadEntry=*/true, CodeGen);
+  assert(Fn && Addr && "Target device function emission failed.");
 }
 
 void CodeGenFunction::EmitOMPTargetParallelForDirective(

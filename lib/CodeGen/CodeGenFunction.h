@@ -2410,6 +2410,14 @@ public:
   static void EmitOMPTargetDeviceFunction(CodeGenModule &CGM,
                                           StringRef ParentName,
                                           const OMPTargetDirective &S);
+  /// Emit device code for the target parallel directive.
+  static void
+  EmitOMPTargetParallelDeviceFunction(CodeGenModule &CGM, StringRef ParentName,
+                                      const OMPTargetParallelDirective &S);
+  /// Emit device code for the target parallel for directive.
+  static void EmitOMPTargetParallelForDeviceFunction(
+      CodeGenModule &CGM, StringRef ParentName,
+      const OMPTargetParallelForDirective &S);
 
   /// Emit outlined function for the target directive.
   static std::pair<llvm::Function * /*OutlinedFn*/,

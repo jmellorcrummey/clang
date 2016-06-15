@@ -6280,6 +6280,14 @@ void CGOpenMPRuntime::scanForTargetRegionsFunctions(const Stmt *S,
       CodeGenFunction::EmitOMPTargetDeviceFunction(
           CGM, ParentName, cast<OMPTargetDirective>(*S));
       break;
+    case Stmt::OMPTargetParallelDirectiveClass:
+      CodeGenFunction::EmitOMPTargetParallelDeviceFunction(
+          CGM, ParentName, cast<OMPTargetParallelDirective>(*S));
+      break;
+    case Stmt::OMPTargetParallelForDirectiveClass:
+      CodeGenFunction::EmitOMPTargetParallelForDeviceFunction(
+          CGM, ParentName, cast<OMPTargetParallelForDirective>(*S));
+      break;
     default:
       llvm_unreachable("Unknown target directive for OpenMP device codegen.");
     }
