@@ -17,6 +17,8 @@
 #include "CodeGenFunction.h"
 #include "clang/AST/DeclOpenMP.h"
 #include "clang/AST/StmtOpenMP.h"
+#include "clang/AST/StmtVisitor.h"
+#include "llvm/ADT/SmallPtrSet.h"
 
 using namespace clang;
 using namespace CodeGen;
@@ -1175,6 +1177,64 @@ void CGOpenMPRuntimeNVPTX::emitGenericKernel(const OMPExecutableDirective &D,
   return;
 }
 
+namespace {
+class OpenMPFinder : public ConstStmtVisitor<OpenMPFinder> {
+private:
+  bool ContainsOpenMP;
+  llvm::SmallPtrSet<const Stmt *, 8> Visited;
+
+public:
+  OpenMPFinder() : ContainsOpenMP(false) {}
+
+  void Visit(const Stmt *S) {
+    if (ContainsOpenMP)
+      return;
+
+    ConstStmtVisitor<OpenMPFinder>::Visit(S);
+    for (const Stmt *Child : S->children()) {
+      if (Child && !ContainsOpenMP)
+        Visit(Child);
+    }
+  }
+
+  void VisitCallExpr(const CallExpr *E) {
+    const FunctionDecl *FD = E->getDirectCallee();
+    if (FD && FD->doesThisDeclarationHaveABody()) {
+      auto Body = FD->getBody();
+      if (Visited.insert(Body).second)
+        Visit(FD->getBody());
+    } else if (!FD->getBuiltinID()) {
+      ContainsOpenMP = true;
+    }
+  }
+
+  void VisitOMPExecutableDirective(const Stmt *S) { ContainsOpenMP = true; }
+
+  bool containsOpenMP() { return ContainsOpenMP; }
+};
+
+// Check the target region to determine if it needs the OpenMP runtime.
+static bool requiresOpenMP(const OMPExecutableDirective &D) {
+  // Does the target directive require the OMP runtime?
+  // Schedule types dynamic, guided, runtime require the runtime.
+  // An ordered schedule requires the runtime.
+  OpenMPScheduleClauseKind ScheduleKind = OMPC_SCHEDULE_unknown;
+  if (auto *C = D.getSingleClause<OMPScheduleClause>())
+    ScheduleKind = C->getScheduleKind();
+  if (D.getSingleClause<OMPOrderedClause>() != nullptr ||
+      ScheduleKind == OMPC_SCHEDULE_dynamic ||
+      ScheduleKind == OMPC_SCHEDULE_guided ||
+      ScheduleKind == OMPC_SCHEDULE_runtime)
+    return true;
+
+  // If this target region can never call into the OMP runtime, don't setup
+  // the runtime.
+  OpenMPFinder Finder;
+  Finder.Visit(cast<CapturedStmt>(D.getAssociatedStmt())->getCapturedStmt());
+  return Finder.containsOpenMP();
+}
+};
+
 void CGOpenMPRuntimeNVPTX::emitSPMDKernel(const OMPExecutableDirective &D,
                                           StringRef ParentName,
                                           llvm::Function *&OutlinedFn,
@@ -1182,8 +1242,7 @@ void CGOpenMPRuntimeNVPTX::emitSPMDKernel(const OMPExecutableDirective &D,
                                           bool IsOffloadEntry,
                                           const RegionCodeGenTy &CodeGen) {
   // Can we emit optimized code for this target region?
-  // TODO: Check if OpenMP runtime is required in target region.
-  bool RequiresOpenMP = true;
+  bool RequiresOpenMP = requiresOpenMP(D);
   EntryFunctionState EST(RequiresOpenMP);
 
   // Emit target region as a standalone region.
