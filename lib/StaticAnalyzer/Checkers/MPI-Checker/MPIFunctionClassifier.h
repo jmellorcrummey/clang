@@ -23,7 +23,10 @@ namespace mpi {
 
 class MPIFunctionClassifier {
 public:
-  MPIFunctionClassifier(ASTContext &ASTCtx) { identifierInit(ASTCtx); }
+  MPIFunctionClassifier(ASTContext &ASTCtx) {
+    MPICollToCollTypes.clear();
+    identifierInit(ASTCtx);
+  }
 
   // general identifiers
   bool isMPIType(const IdentifierInfo *const IdentInfo) const;
