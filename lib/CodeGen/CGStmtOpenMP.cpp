@@ -105,7 +105,8 @@ public:
 class OMPParallelScope final : public CodeGenFunction::LexicalScope {
   void emitPreInitStmt(CodeGenFunction &CGF, const OMPExecutableDirective &S) {
     OpenMPDirectiveKind Kind = S.getDirectiveKind();
-    if (!isOpenMPTargetExecutionDirective(Kind) &&
+    if (!(isOpenMPTargetExecutionDirective(Kind) ||
+          isOpenMPLoopBoundSharingDirective(Kind)) &&
         isOpenMPParallelDirective(Kind)) {
       for (const auto *C : S.clauses()) {
         if (auto *CPI = OMPClauseWithPreInit::get(C)) {
