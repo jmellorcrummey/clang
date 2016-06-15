@@ -2591,8 +2591,8 @@ void CGOpenMPRuntime::emitForDispatchInit(CodeGenFunction &CGF,
                                           SourceLocation Loc,
                                           const OpenMPScheduleTy &ScheduleKind,
                                           unsigned IVSize, bool IVSigned,
-                                          bool Ordered, llvm::Value *LB, llvm::Value *UB,
-                                          llvm::Value *Chunk) {
+                                          bool Ordered, llvm::Value *LB,
+                                          llvm::Value *UB, llvm::Value *Chunk) {
   if (!CGF.HaveInsertPoint())
     return;
   OpenMPSchedType Schedule =
@@ -2613,12 +2613,12 @@ void CGOpenMPRuntime::emitForDispatchInit(CodeGenFunction &CGF,
       emitUpdateLocation(CGF, Loc), getThreadID(CGF, Loc),
       CGF.Builder.getInt32(addMonoNonMonoModifier(
           Schedule, ScheduleKind.M1, ScheduleKind.M2)), // Schedule type
-      LB, 			                        // Lower
+      LB,                                               // Lower
       UB,                                               // Upper
       CGF.Builder.getIntN(IVSize, 1),                   // Stride
       Chunk                                             // Chunk
   };
-  //CGF.Builder.getIntN(IVSize, 0),
+  // CGF.Builder.getIntN(IVSize, 0),
   CGF.EmitRuntimeCall(createDispatchInitFunction(IVSize, IVSigned), Args);
 }
 

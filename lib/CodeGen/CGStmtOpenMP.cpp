@@ -1783,13 +1783,18 @@ void CodeGenFunction::EmitOMPOuterLoop(bool DynamicOrOrdered, bool IsMonotonic,
   } else {
     BoolCondVal = RT.emitForNext(*this, S.getLocStart(), IVSize, IVSigned, IL,
                                  LB, UB, ST);
-    if (S.getDirectiveKind() == OMPD_distribute_parallel_for && CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX()) {
+    if (S.getDirectiveKind() == OMPD_distribute_parallel_for &&
+        CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX()) {
       // de-normalize loop
       auto PrevLB = EmitLValue(S.getPrevLowerBoundVariable());
-      Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(LB),
-          Builder.CreateLoad(PrevLB.getAddress())), LB);
-      Builder.CreateStore(Builder.CreateAdd(Builder.CreateLoad(UB),
-          Builder.CreateLoad(PrevLB.getAddress())), UB);
+      Builder.CreateStore(
+          Builder.CreateAdd(Builder.CreateLoad(LB),
+                            Builder.CreateLoad(PrevLB.getAddress())),
+          LB);
+      Builder.CreateStore(
+          Builder.CreateAdd(Builder.CreateLoad(UB),
+                            Builder.CreateLoad(PrevLB.getAddress())),
+          UB);
     }
   }
 
@@ -1940,12 +1945,12 @@ void CodeGenFunction::EmitOMPForOuterLoop(
     llvm::Value *LBVal = nullptr;
     llvm::Value *UBVal = nullptr;
     if (S.getDirectiveKind() == OMPD_distribute_parallel_for) {
-      if(CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX()) {
+      if (CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX()) {
         // normalize loop
         auto PrevLB = EmitLValue(S.getPrevLowerBoundVariable());
         LBVal = Builder.getIntN(IVSize, 0);
-        UBVal = Builder.CreateSub(Builder.CreateLoad(UB), Builder.CreateLoad(
-            PrevLB.getAddress()));
+        UBVal = Builder.CreateSub(Builder.CreateLoad(UB),
+                                  Builder.CreateLoad(PrevLB.getAddress()));
       } else {
         LBVal = Builder.CreateLoad(LB);
         UBVal = Builder.CreateLoad(UB);
@@ -1955,8 +1960,7 @@ void CodeGenFunction::EmitOMPForOuterLoop(
       UBVal = EmitScalarExpr(S.getLastIteration());
     }
     RT.emitForDispatchInit(*this, S.getLocStart(), ScheduleKind, IVSize,
-			     IVSigned, Ordered, LBVal,
-			     UBVal, Chunk);
+                           IVSigned, Ordered, LBVal, UBVal, Chunk);
   } else {
     RT.emitForStaticInit(*this, S.getLocStart(), ScheduleKind, IVSize, IVSigned,
                          Ordered, IL, LB, UB, ST, Chunk);
