@@ -846,7 +846,7 @@ void CGOpenMPRuntimeNVPTX::emitSPMDEntryHeader(CodeGenFunction &CGF,
 
   // Initialize the OMP state in the runtime; called by all active threads.
   CGF.EmitBlock(OMPInitBB);
-  llvm::Value *Mode = Bld.getInt1(EST.RequiresOpenMP ? 0 : 1);
+  llvm::Value *Mode = Bld.getInt1(EST.RequiresOMPRuntime ? 0 : 1);
   llvm::Value *Args[] = {getThreadLimit(CGF), Mode};
   CGF.EmitRuntimeCall(
       createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_spmd_kernel_init), Args);
@@ -861,7 +861,7 @@ void CGOpenMPRuntimeNVPTX::emitSPMDEntryFooter(CodeGenFunction &CGF,
   CGF.EmitBranch(OMPDeInitBB);
 
   CGF.EmitBlock(OMPDeInitBB);
-  if (EST.RequiresOpenMP) {
+  if (EST.RequiresOMPRuntime) {
     // DeInitialize the OMP state in the runtime; called by all active threads.
     CGF.EmitRuntimeCall(
         createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_spmd_kernel_deinit),
@@ -1214,7 +1214,7 @@ public:
 };
 
 // Check the target region to determine if it needs the OpenMP runtime.
-static bool requiresOpenMP(const OMPExecutableDirective &D) {
+static bool requiresOMPRuntime(const OMPExecutableDirective &D) {
   // Does the target directive require the OMP runtime?
   // Schedule types dynamic, guided, runtime require the runtime.
   // An ordered schedule requires the runtime.
@@ -1242,8 +1242,8 @@ void CGOpenMPRuntimeNVPTX::emitSPMDKernel(const OMPExecutableDirective &D,
                                           bool IsOffloadEntry,
                                           const RegionCodeGenTy &CodeGen) {
   // Can we emit optimized code for this target region?
-  bool RequiresOpenMP = requiresOpenMP(D);
-  EntryFunctionState EST(RequiresOpenMP);
+  bool RequiresOMPRuntime = requiresOMPRuntime(D);
+  EntryFunctionState EST(RequiresOMPRuntime);
 
   // Emit target region as a standalone region.
   class NVPTXPrePostActionTy : public PrePostActionTy {
