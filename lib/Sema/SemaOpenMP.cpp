@@ -7611,7 +7611,8 @@ OMPClause *Sema::ActOnOpenMPIfClause(OpenMPDirectiveKind NameModifier,
     ValExpr = Val.get();
 
     OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
-    if (isOpenMPTargetExecutionDirective(DKind)) {
+    if (isOpenMPTargetExecutionDirective(DKind) &&
+        !CurContext->isDependentContext()) {
       llvm::MapVector<Expr *, DeclRefExpr *> Captures;
       unsigned CaptureLevel = getOpenMPCaptureLevel(DKind, OMPC_if);
       ValExpr = tryBuildCapture(*this, ValExpr, Captures, CaptureLevel).get();
@@ -7727,7 +7728,8 @@ OMPClause *Sema::ActOnOpenMPNumThreadsClause(Expr *NumThreads,
     return nullptr;
 
   OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
-  if (isOpenMPTargetExecutionDirective(DKind)) {
+  if (isOpenMPTargetExecutionDirective(DKind) &&
+      !CurContext->isDependentContext()) {
     llvm::MapVector<Expr *, DeclRefExpr *> Captures;
     unsigned CaptureLevel = getOpenMPCaptureLevel(DKind, OMPC_num_threads);
     ValExpr = tryBuildCapture(*this, ValExpr, Captures, CaptureLevel).get();
