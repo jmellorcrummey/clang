@@ -2129,7 +2129,6 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
     llvm::DenseSet<const Expr *> EmittedFinals;
     emitAlignedClause(*this, S);
     EmitOMPLinearClauseInit(S);
-
     // Emit helper vars inits.
     LValue LB =
         EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getLowerBoundVariable()));
