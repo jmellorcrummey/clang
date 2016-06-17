@@ -167,6 +167,8 @@ void CodeGenFunction::GenerateOpenMPCapturedVars(
     if (CurCap->capturesVariable() || CurCap->capturesVariableByCopy()) {
       auto *Var = CurCap->getCapturedVar();
       if (auto *C = dyn_cast<OMPCapturedExprDecl>(Var))
+        // Check to see if the capture is to be a parameter in the
+        // outlined function at this level.
         if (C->getCaptureLevel() < CaptureLevel)
           continue;
     }
@@ -259,6 +261,8 @@ llvm::Function *CodeGenFunction::GenerateOpenMPCapturedStmtFunction(
     if (I->capturesVariable() || I->capturesVariableByCopy()) {
       CapVar = I->getCapturedVar();
       if (auto *C = dyn_cast<OMPCapturedExprDecl>(CapVar)) {
+        // Check to see if the capture is to be a parameter in the
+        // outlined function at this level.
         if (C->getCaptureLevel() < CaptureLevel) {
           ++I;
           continue;
@@ -316,6 +320,8 @@ llvm::Function *CodeGenFunction::GenerateOpenMPCapturedStmtFunction(
     if (I->capturesVariable() || I->capturesVariableByCopy()) {
       auto *Var = I->getCapturedVar();
       if (auto *C = dyn_cast<OMPCapturedExprDecl>(Var)) {
+        // Check to see if the capture is to be a parameter in the
+        // outlined function at this level.
         if (C->getCaptureLevel() < CaptureLevel) {
           ++I;
           continue;
