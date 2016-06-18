@@ -259,10 +259,10 @@ private:
   class EntryFunctionState {
   public:
     llvm::BasicBlock *ExitBB;
-    bool RequiresOpenMP;
+    bool RequiresOMPRuntime;
 
-    EntryFunctionState(bool RequiresOpenMP = false)
-        : ExitBB(nullptr), RequiresOpenMP(RequiresOpenMP){};
+    EntryFunctionState(bool RequiresOMPRuntime = false)
+        : ExitBB(nullptr), RequiresOMPRuntime(RequiresOMPRuntime){};
   };
 
   class WorkerFunctionState {
