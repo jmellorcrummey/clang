@@ -278,10 +278,11 @@ def warn_missing_whitespace_after_macro_name : Warning<
 class NonportablePath  : Warning<
   "non-portable path to file '%0'; specified path differs in case from file"
   " name on disk">;
-def pp_nonportable_path : NonportablePath, InGroup<DiagGroup<"nonportable-include-path">>;
+def pp_nonportable_path : NonportablePath,
+  InGroup<DiagGroup<"nonportable-include-path">>;
 def pp_nonportable_system_path : NonportablePath, DefaultIgnore,
   InGroup<DiagGroup<"nonportable-system-include-path">>;
-
+  
 def pp_pragma_once_in_main_file : Warning<"#pragma once in main file">,
   InGroup<DiagGroup<"pragma-once-outside-header">>;
 def pp_pragma_sysheader_in_main_file : Warning<
