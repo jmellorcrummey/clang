@@ -813,6 +813,13 @@ void CGOpenMPRuntime::clear() {
   InternalVars.clear();
 }
 
+std::string CGOpenMPRuntime::sanitizeIdentifier(const llvm::Twine &Name) {
+  std::string ValidName;
+  llvm::raw_string_ostream ValidNameStream(ValidName);
+  ValidNameStream << Name;
+  return ValidNameStream.str();
+}
+
 static llvm::Function *
 emitCombinerOrInitializer(CodeGenModule &CGM, QualType Ty,
                           const Expr *CombinerInitializer, const VarDecl *In,
@@ -2163,7 +2170,8 @@ CGOpenMPRuntime::getOrCreateInternalVariable(llvm::Type *Ty,
 
 llvm::Value *CGOpenMPRuntime::getCriticalRegionLock(StringRef CriticalName) {
   llvm::Twine Name(".gomp_critical_user_", CriticalName);
-  return getOrCreateInternalVariable(KmpCriticalNameTy, Name.concat(".var"));
+  return getOrCreateInternalVariable(KmpCriticalNameTy,
+                                     sanitizeIdentifier(Name.concat(".var")));
 }
 
 namespace {
