@@ -134,6 +134,10 @@ int foo(int n) {
   }
 
   // CHECK:       [[IF:%.+]] = icmp sgt i32 {{[^,]+}}, 10
+  // CHECK:       [[FB:%.+]] = zext i1 [[IF]] to i8
+  // CHECK:       store i8 [[FB]], i8* [[CE:%.+]]
+  // CHECK:       [[LC:%.+]] = load i8, i8* [[CE]]
+  // CHECK:       [[IF:%.+]] = trunc i8 [[LC]] to i1
   // CHECK:       br i1 [[IF]], label %[[IFTHEN:[^,]+]], label %[[IFELSE:[^,]+]]
   // CHECK:       [[IFTHEN]]
   // CHECK-DAG:   [[RET:%.+]] = call i32 @__tgt_target(i32 -1, i8* @{{[^,]+}}, i32 2, i8** [[BPR:%[^,]+]], i8** [[PR:%[^,]+]], i[[SZ]]* getelementptr inbounds ([2 x i[[SZ]]], [2 x i[[SZ]]]* [[SIZET3]], i32 0, i32 0), i32* getelementptr inbounds ([2 x i32], [2 x i32]* [[MAPT3]], i32 0, i32 0))
@@ -174,6 +178,9 @@ int foo(int n) {
     aa += 1;
   }
 
+  // CHECK:       [[IF:%.+]] = icmp sgt i32 {{[^,]+}}, 20
+  // CHECK:       [[FB:%.+]] = zext i1 [[IF]] to i8
+  // CHECK:       store i8 [[FB]], i8* [[CE:%.+]]
   // We capture 3 VLA sizes in this target region
   // CHECK-64:       [[A_VAL:%.+]] = load i32, i32* %{{.+}},
   // CHECK-64:       [[A_ADDR:%.+]] = bitcast i[[SZ]]* [[A_CADDR:%.+]] to i32*
@@ -188,7 +195,8 @@ int foo(int n) {
   // CHECK:       [[CNELEMSIZE2:%.+]] = mul nuw i[[SZ]] 5, [[VLA1:%.+]]
   // CHECK:       [[CNSIZE:%.+]] = mul nuw i[[SZ]] [[CNELEMSIZE2]], 8
 
-  // CHECK:       [[IF:%.+]] = icmp sgt i32 {{[^,]+}}, 20
+  // CHECK:       [[LC:%.+]] = load i8, i8* [[CE]]
+  // CHECK:       [[IF:%.+]] = trunc i8 [[LC]] to i1
   // CHECK:       br i1 [[IF]], label %[[TRY:[^,]+]], label %[[FAIL:[^,]+]]
   // CHECK:       [[TRY]]
   // CHECK-DAG:   [[RET:%.+]] = call i32 @__tgt_target(i32 -1, i8* @{{[^,]+}}, i32 9, i8** [[BPR:%[^,]+]], i8** [[PR:%[^,]+]], i[[SZ]]* [[SR:%[^,]+]], i32* getelementptr inbounds ([9 x i32], [9 x i32]* [[MAPT4]], i32 0, i32 0))
@@ -448,6 +456,9 @@ int bar(int n){
 // CHECK: define {{.*}}[[FS1]]
 //
 // CHECK:          i8* @llvm.stacksave()
+// CHECK:          [[IF:%.+]] = icmp sgt i32 {{[^,]+}}, 60
+// CHECK:          [[FB:%.+]] = zext i1 [[IF]] to i8
+// CHECK:          store i8 [[FB]], i8* [[CE:%.+]]
 // CHECK-64:       [[B_ADDR:%.+]] = bitcast i[[SZ]]* [[B_CADDR:%.+]] to i32*
 // CHECK-64:       store i32 %{{.+}}, i32* [[B_ADDR]],
 // CHECK-64:       [[B_CVAL:%.+]] = load i[[SZ]], i[[SZ]]* [[B_CADDR]],
@@ -459,7 +470,8 @@ int bar(int n){
 // CHECK:       [[CELEMSIZE2:%.+]] = mul nuw i[[SZ]] 2, [[VLA0:%.+]]
 // CHECK:       [[CSIZE:%.+]] = mul nuw i[[SZ]] [[CELEMSIZE2]], 2
 
-// CHECK:       [[IF:%.+]] = icmp sgt i32 {{[^,]+}}, 60
+// CHECK:       [[LC:%.+]] = load i8, i8* [[CE]]
+// CHECK:       [[IF:%.+]] = trunc i8 [[LC]] to i1
 // CHECK:       br i1 [[IF]], label %[[TRY:[^,]+]], label %[[FAIL:[^,]+]]
 // CHECK:       [[TRY]]
 // CHECK-DAG:   [[RET:%.+]] = call i32 @__tgt_target(i32 -1, i8* @{{[^,]+}}, i32 5, i8** [[BPR:%[^,]+]], i8** [[PR:%[^,]+]], i[[SZ]]* [[SR:%[^,]+]], i32* getelementptr inbounds ([5 x i32], [5 x i32]* [[MAPT7]], i32 0, i32 0))
@@ -523,6 +535,10 @@ int bar(int n){
 // CHECK: define {{.*}}[[FSTATIC]]
 //
 // CHECK:       [[IF:%.+]] = icmp sgt i32 {{[^,]+}}, 50
+// CHECK:       [[FB:%.+]] = zext i1 [[IF]] to i8
+// CHECK:       store i8 [[FB]], i8* [[CE:%.+]]
+// CHECK:       [[LC:%.+]] = load i8, i8* [[CE]]
+// CHECK:       [[IF:%.+]] = trunc i8 [[LC]] to i1
 // CHECK:       br i1 [[IF]], label %[[IFTHEN:[^,]+]], label %[[IFELSE:[^,]+]]
 // CHECK:       [[IFTHEN]]
 // CHECK-DAG:   [[RET:%.+]] = call i32 @__tgt_target(i32 -1, i8* @{{[^,]+}}, i32 4, i8** [[BPR:%[^,]+]], i8** [[PR:%[^,]+]], i[[SZ]]* getelementptr inbounds ([4 x i[[SZ]]], [4 x i[[SZ]]]* [[SIZET6]], i32 0, i32 0), i32* getelementptr inbounds ([4 x i32], [4 x i32]* [[MAPT6]], i32 0, i32 0))
@@ -575,6 +591,10 @@ int bar(int n){
 // CHECK: define {{.*}}[[FTEMPLATE]]
 //
 // CHECK:       [[IF:%.+]] = icmp sgt i32 {{[^,]+}}, 40
+// CHECK:       [[FB:%.+]] = zext i1 [[IF]] to i8
+// CHECK:       store i8 [[FB]], i8* [[CE:%.+]]
+// CHECK:       [[LC:%.+]] = load i8, i8* [[CE]]
+// CHECK:       [[IF:%.+]] = trunc i8 [[LC]] to i1
 // CHECK:       br i1 [[IF]], label %[[IFTHEN:[^,]+]], label %[[IFELSE:[^,]+]]
 // CHECK:       [[IFTHEN]]
 // CHECK-DAG:   [[RET:%.+]] = call i32 @__tgt_target(i32 -1, i8* @{{[^,]+}}, i32 3, i8** [[BPR:%[^,]+]], i8** [[PR:%[^,]+]], i[[SZ]]* getelementptr inbounds ([3 x i[[SZ]]], [3 x i[[SZ]]]* [[SIZET5]], i32 0, i32 0), i32* getelementptr inbounds ([3 x i32], [3 x i32]* [[MAPT5]], i32 0, i32 0))
