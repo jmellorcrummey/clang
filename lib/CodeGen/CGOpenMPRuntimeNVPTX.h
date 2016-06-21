@@ -507,6 +507,10 @@ public:
   /// Return false for the current NVPTX OpenMP implementation as it does NOT
   /// supports RTTI.
   bool requiresRTTIDescriptor() override { return false; }
+
+  // \brief Sanitize identifiers for NVPTX backend.
+  //
+  virtual std::string sanitizeIdentifier(const llvm::Twine &Name) override;
 };
 
 } // CodeGen namespace.
