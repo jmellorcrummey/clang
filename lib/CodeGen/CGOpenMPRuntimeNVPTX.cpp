@@ -1122,15 +1122,18 @@ enum ExecutionMode {
 };
 
 ExecutionMode getExecutionMode(OpenMPDirectiveKind DirectiveKind) {
-  if (DirectiveKind == OMPD_target || DirectiveKind == OMPD_target_teams)
+  switch (DirectiveKind) {
+  case OMPD_target:
+  case OMPD_target_teams:
     return ExecutionMode::GENERIC;
-  else if (DirectiveKind == OMPD_target_parallel ||
-           DirectiveKind == OMPD_target_parallel_for ||
-           DirectiveKind == OMPD_target_teams_distribute_parallel_for)
+  case OMPD_target_parallel:
+  case OMPD_target_parallel_for:
+  case OMPD_target_teams_distribute_parallel_for:
     return ExecutionMode::SPMD;
-
-  llvm_unreachable(
-      "Unknown programming model for OpenMP directive on NVPTX target.");
+  default:
+    llvm_unreachable(
+        "Unknown programming model for OpenMP directive on NVPTX target.");
+  }
 }
 };
 
