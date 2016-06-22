@@ -30,7 +30,7 @@ enum OpenMPRTLFunctionNVPTX {
   /// \brief Call to void __kmpc_kernel_deinit();
   OMPRTL_NVPTX__kmpc_kernel_deinit,
   /// \brief Call to void __kmpc_spmd_kernel_init(kmp_int32 thread_limit,
-  /// bool noOMPMode);
+  /// short noOMPMode);
   OMPRTL_NVPTX__kmpc_spmd_kernel_init,
   /// \brief Call to void __kmpc_spmd_kernel_deinit();
   OMPRTL_NVPTX__kmpc_spmd_kernel_deinit,
@@ -846,7 +846,7 @@ void CGOpenMPRuntimeNVPTX::emitSPMDEntryHeader(CodeGenFunction &CGF,
 
   // Initialize the OMP state in the runtime; called by all active threads.
   CGF.EmitBlock(OMPInitBB);
-  llvm::Value *Mode = Bld.getInt1(EST.RequiresOMPRuntime ? 0 : 1);
+  llvm::Value *Mode = Bld.getInt16(EST.RequiresOMPRuntime ? 0 : 1);
   llvm::Value *Args[] = {getThreadLimit(CGF), Mode};
   CGF.EmitRuntimeCall(
       createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_spmd_kernel_init), Args);
@@ -897,9 +897,8 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
   }
   case OMPRTL_NVPTX__kmpc_spmd_kernel_init: {
     // Build void __kmpc_spmd_kernel_init(kmp_int32 thread_limit,
-    // bool noOMPMode);
-    llvm::Type *TypeParams[] = {CGM.Int32Ty,
-                                llvm::Type::getInt1Ty(CGM.getLLVMContext())};
+    // short noOMPMode);
+    llvm::Type *TypeParams[] = {CGM.Int32Ty, CGM.Int16Ty};
     llvm::FunctionType *FnTy =
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_spmd_kernel_init");
