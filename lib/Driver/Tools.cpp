@@ -607,6 +607,13 @@ void Clang::AddPreprocessingOptions(Compilation &C, const JobAction &JA,
                                                        << A->getAsString(Args);
         }
       }
+    } else if (A->getOption().matches(options::OPT_isystem_after)) {
+      // Handling of paths which must come late.  These entries are handled by
+      // the toolchain itself after the resource dir is inserted in the right
+      // search order.
+      // Do not claim the argument so that the use of the argument does not
+      // silently go unnoticed on toolchains which do not honour the option.
+      continue;
     }
 
     // Not translated, render as usual.
@@ -2341,10 +2348,12 @@ void Clang::AddX86TargetArgs(const ArgList &Args,
   }
 
   // Set flags to support MCU ABI.
-  if (Args.hasArg(options::OPT_miamcu)) {
-    CmdArgs.push_back("-mfloat-abi");
-    CmdArgs.push_back("soft");
-    CmdArgs.push_back("-mstack-alignment=4");
+  if (Arg *A = Args.getLastArg(options::OPT_miamcu, options::OPT_mno_iamcu)) {
+    if (A->getOption().matches(options::OPT_miamcu)) {
+      CmdArgs.push_back("-mfloat-abi");
+      CmdArgs.push_back("soft");
+      CmdArgs.push_back("-mstack-alignment=4");
+    }
   }
 }
 
@@ -2935,7 +2944,7 @@ static void CollectArgsForIntegratedAssembler(Compilation &C,
   // options.
   bool CompressDebugSections = false;
 
-  bool UseRelaxRelocations = false;
+  bool UseRelaxRelocations = ENABLE_X86_RELAX_RELOCATIONS;
   const char *MipsTargetFeature = nullptr;
   for (const Arg *A :
        Args.filtered(options::OPT_Wa_COMMA, options::OPT_Xassembler)) {
@@ -5507,6 +5516,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-fno-inline");
 
   if (Arg* InlineArg = Args.getLastArg(options::OPT_finline_functions,
+                                       options::OPT_finline_hint_functions,
                                        options::OPT_fno_inline_functions))
     InlineArg->render(Args, CmdArgs);
 

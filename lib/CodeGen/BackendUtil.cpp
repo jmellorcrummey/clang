@@ -328,7 +328,8 @@ void EmitAssemblyHelper::CreatePasses(ModuleSummaryIndex *ModuleSummary) {
   switch (Inlining) {
   case CodeGenOptions::NoInlining:
     break;
-  case CodeGenOptions::NormalInlining: {
+  case CodeGenOptions::NormalInlining:
+  case CodeGenOptions::OnlyHintInlining: {
     PMBuilder.Inliner =
         createFunctionInliningPass(OptLevel, CodeGenOpts.OptimizeSize);
     break;
@@ -488,6 +489,7 @@ void EmitAssemblyHelper::CreatePasses(ModuleSummaryIndex *ModuleSummary) {
     PMBuilder.PGOInstrUse = CodeGenOpts.ProfileInstrumentUsePath;
 
   if (!CodeGenOpts.SampleProfileFile.empty()) {
+    MPM->add(createPruneEHPass());
     MPM->add(createSampleProfileLoaderPass(CodeGenOpts.SampleProfileFile));
     PMBuilder.addExtension(PassManagerBuilder::EP_EarlyAsPossible,
                            addInstructionCombiningPass);
