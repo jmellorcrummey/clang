@@ -941,8 +941,8 @@ llvm::Value *CGOpenMPRuntime::emitParallelOrTeamsOutlinedFunction(
   CGOpenMPOutlinedRegionInfo CGInfo(*CS, ThreadIDVar, CodeGen, InnermostKind,
                                     HasCancel);
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
-  return CGF.GenerateOpenMPCapturedStmtFunction(*CS, /*SkipThreadVars=*/false,
-                                                CaptureLevel);
+  return CGF.GenerateOpenMPCapturedStmtFunction(
+      *CS, /*UseCapturedArgumentsOnly=*/false, CaptureLevel);
 }
 
 llvm::Value *CGOpenMPRuntime::emitSimdOutlinedFunction(
@@ -5134,8 +5134,10 @@ void CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(
   CGOpenMPTargetRegionInfo CGInfo(CS, CodeGen, EntryFnName);
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
 
-  bool SkipThreadVars = isOpenMPParallelDirective(D.getDirectiveKind());
-  OutlinedFn = CGF.GenerateOpenMPCapturedStmtFunction(CS, SkipThreadVars);
+  bool UseCapturedArgumentsOnly =
+      isOpenMPParallelDirective(D.getDirectiveKind());
+  OutlinedFn =
+      CGF.GenerateOpenMPCapturedStmtFunction(CS, UseCapturedArgumentsOnly);
 
   // If this target outline function is not an offload entry, we don't need to
   // register it.

@@ -105,5 +105,6 @@ OMPCapturedExprDecl::CreateDeserialized(ASTContext &C, unsigned ID,
 unsigned OMPCapturedExprDecl::getCaptureLevel() const { return CaptureLevel; }
 
 void OMPCapturedExprDecl::setCaptureLevel(unsigned CaptureLevel) {
+  assert(CaptureLevel >= 1 && "Invalid capture level for omp expression");
   this->CaptureLevel = CaptureLevel;
 }

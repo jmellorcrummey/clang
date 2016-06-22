@@ -2232,7 +2232,7 @@ public:
   Address GenerateCapturedStmtArgument(const CapturedStmt &S);
   llvm::Function *
   GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S,
-                                     bool SkipThreadVars = false,
+                                     bool UseCapturedArgumentsOnly = false,
                                      unsigned CaptureLevel = 1);
   void GenerateOpenMPCapturedVars(const CapturedStmt &S,
                                   SmallVectorImpl<llvm::Value *> &CapturedVars,

@@ -238,7 +238,8 @@ static Address castValueFromUintptr(CodeGenFunction &CGF, QualType DstType,
 }
 
 llvm::Function *CodeGenFunction::GenerateOpenMPCapturedStmtFunction(
-    const CapturedStmt &S, bool SkipThreadVars, unsigned CaptureLevel) {
+    const CapturedStmt &S, bool UseCapturedArgumentsOnly,
+    unsigned CaptureLevel) {
   assert(
       CapturedStmtInfo &&
       "CapturedStmtInfo should be set when generating the captured function");
@@ -249,7 +250,7 @@ llvm::Function *CodeGenFunction::GenerateOpenMPCapturedStmtFunction(
   // Build the argument list.
   ASTContext &Ctx = CGM.getContext();
   FunctionArgList Args;
-  if (!SkipThreadVars)
+  if (!UseCapturedArgumentsOnly)
     Args.append(CD->param_begin(),
                 std::next(CD->param_begin(), CD->getContextParamPosition()));
   auto I = S.captures().begin();
@@ -314,7 +315,7 @@ llvm::Function *CodeGenFunction::GenerateOpenMPCapturedStmtFunction(
   // Generate the function.
   StartFunction(CD, Ctx.VoidTy, F, FuncInfo, Args, CD->getLocation(),
                 CD->getBody()->getLocStart());
-  unsigned Cnt = SkipThreadVars ? 0 : CD->getContextParamPosition();
+  unsigned Cnt = UseCapturedArgumentsOnly ? 0 : CD->getContextParamPosition();
   I = S.captures().begin();
   for (auto *FD : RD->fields()) {
     if (I->capturesVariable() || I->capturesVariableByCopy()) {
