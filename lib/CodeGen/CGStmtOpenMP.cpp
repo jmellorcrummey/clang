@@ -3523,18 +3523,6 @@ void CodeGenFunction::EmitOMPAtomicDirective(const OMPAtomicDirective &S) {
   CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_atomic, CodeGen);
 }
 
-std::pair<llvm::Function * /*OutlinedFn*/, llvm::Constant * /*OutlinedFnID*/>
-CodeGenFunction::EmitOMPTargetDirectiveOutlinedFunction(
-    CodeGenModule &CGM, const OMPExecutableDirective &S, StringRef ParentName,
-    bool IsOffloadEntry, const RegionCodeGenTy &CodeGen) {
-  llvm::Function *OutlinedFn = nullptr;
-  llvm::Constant *OutlinedFnID = nullptr;
-  // Emit target region as a standalone region.
-  CGM.getOpenMPRuntime().emitTargetOutlinedFunction(
-      S, ParentName, OutlinedFn, OutlinedFnID, IsOffloadEntry, CodeGen);
-  return std::make_pair(OutlinedFn, OutlinedFnID);
-}
-
 static void emitCommonOMPTargetDirective(CodeGenFunction &CGF,
                                          const OMPExecutableDirective &S,
                                          OpenMPDirectiveKind InnermostKind,
@@ -3587,8 +3575,9 @@ static void emitCommonOMPTargetDirective(CodeGenFunction &CGF,
     ParentName =
         CGM.getMangledName(GlobalDecl(cast<FunctionDecl>(CGF.CurFuncDecl)));
 
-  std::tie(Fn, FnID) = CGF.EmitOMPTargetDirectiveOutlinedFunction(
-      CGM, S, ParentName, IsOffloadEntry, CodeGen);
+  // Emit target region as a standalone region.
+  CGM.getOpenMPRuntime().emitTargetOutlinedFunction(
+      S, ParentName, Fn, FnID, IsOffloadEntry, CodeGen);
   OMPLexicalScope Scope(CGF, S);
   llvm::SmallVector<llvm::Value *, 16> CapturedVars;
   CGF.GenerateOpenMPCapturedVars(CS, CapturedVars);
@@ -3610,9 +3599,9 @@ void CodeGenFunction::EmitOMPTargetDeviceFunction(CodeGenModule &CGM,
   };
   llvm::Function *Fn;
   llvm::Constant *Addr;
-  std::tie(Fn, Addr) =
-      EmitOMPTargetDirectiveOutlinedFunction(CGM, S, ParentName,
-                                             /*isOffloadEntry=*/true, CodeGen);
+  // Emit target region as a standalone region.
+  CGM.getOpenMPRuntime().emitTargetOutlinedFunction(
+      S, ParentName, Fn, Addr, /*IsOffloadEntry=*/true, CodeGen);
   assert(Fn && Addr && "Target device function emission failed.");
 }
 
@@ -3647,9 +3636,9 @@ void CodeGenFunction::EmitOMPTargetParallelDeviceFunction(
   };
   llvm::Function *Fn;
   llvm::Constant *Addr;
-  std::tie(Fn, Addr) =
-      EmitOMPTargetDirectiveOutlinedFunction(CGM, S, ParentName,
-                                             /*isOffloadEntry=*/true, CodeGen);
+  // Emit target region as a standalone region.
+  CGM.getOpenMPRuntime().emitTargetOutlinedFunction(
+      S, ParentName, Fn, Addr, /*IsOffloadEntry=*/true, CodeGen);
   assert(Fn && Addr && "Target device function emission failed.");
 }
 
@@ -3693,9 +3682,9 @@ void CodeGenFunction::EmitOMPTargetParallelForDeviceFunction(
   };
   llvm::Function *Fn;
   llvm::Constant *Addr;
-  std::tie(Fn, Addr) =
-      EmitOMPTargetDirectiveOutlinedFunction(CGM, S, ParentName,
-                                             /*isOffloadEntry=*/true, CodeGen);
+  // Emit target region as a standalone region.
+  CGM.getOpenMPRuntime().emitTargetOutlinedFunction(
+      S, ParentName, Fn, Addr, /*IsOffloadEntry=*/true, CodeGen);
   assert(Fn && Addr && "Target device function emission failed.");
 }
 
