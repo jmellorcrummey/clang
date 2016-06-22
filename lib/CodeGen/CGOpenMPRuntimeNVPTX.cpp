@@ -1590,7 +1590,7 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
       // The outlined function takes as arguments the global_tid, bound_tid,
       // and a capture structure created from the captured variables.
       OutlinedFun = CGF.GenerateOpenMPCapturedStmtFunction(
-          *CS, /*SkipThreadVars=*/false, CaptureLevel);
+          *CS, /*UseCapturedArgumentsOnly=*/false, CaptureLevel);
     }
     auto *WrapperFun =
         createDataSharingParallelWrapper(*OutlinedFun, D, CurrentContext);
