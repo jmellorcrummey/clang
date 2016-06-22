@@ -259,10 +259,19 @@ private:
   class EntryFunctionState {
   public:
     llvm::BasicBlock *ExitBB;
+    // This variable records if the current target region requires a valid
+    // OMP runtime.  In SPMD mode it is possible to disable the OMP runtime
+    // and thus reduce runtime overhead.
     bool RequiresOMPRuntime;
 
-    EntryFunctionState(bool RequiresOMPRuntime = false)
-        : ExitBB(nullptr), RequiresOMPRuntime(RequiresOMPRuntime){};
+    EntryFunctionState() : ExitBB(nullptr), RequiresOMPRuntime(true){};
+
+    EntryFunctionState(const OMPExecutableDirective &D)
+        : ExitBB(nullptr), RequiresOMPRuntime(true) {
+      setRequiresOMPRuntime(D);
+    };
+
+    void setRequiresOMPRuntime(const OMPExecutableDirective &D);
   };
 
   class WorkerFunctionState {

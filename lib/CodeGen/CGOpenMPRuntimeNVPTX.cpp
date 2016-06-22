@@ -30,7 +30,7 @@ enum OpenMPRTLFunctionNVPTX {
   /// \brief Call to void __kmpc_kernel_deinit();
   OMPRTL_NVPTX__kmpc_kernel_deinit,
   /// \brief Call to void __kmpc_spmd_kernel_init(kmp_int32 thread_limit,
-  /// bool noOMPMode);
+  /// short noOMPMode);
   OMPRTL_NVPTX__kmpc_spmd_kernel_init,
   /// \brief Call to void __kmpc_spmd_kernel_deinit();
   OMPRTL_NVPTX__kmpc_spmd_kernel_deinit,
@@ -846,7 +846,7 @@ void CGOpenMPRuntimeNVPTX::emitSPMDEntryHeader(CodeGenFunction &CGF,
 
   // Initialize the OMP state in the runtime; called by all active threads.
   CGF.EmitBlock(OMPInitBB);
-  llvm::Value *Mode = Bld.getInt1(EST.RequiresOMPRuntime ? 0 : 1);
+  llvm::Value *Mode = Bld.getInt16(EST.RequiresOMPRuntime ? 0 : 1);
   llvm::Value *Args[] = {getThreadLimit(CGF), Mode};
   CGF.EmitRuntimeCall(
       createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_spmd_kernel_init), Args);
@@ -897,9 +897,8 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
   }
   case OMPRTL_NVPTX__kmpc_spmd_kernel_init: {
     // Build void __kmpc_spmd_kernel_init(kmp_int32 thread_limit,
-    // bool noOMPMode);
-    llvm::Type *TypeParams[] = {CGM.Int32Ty,
-                                llvm::Type::getInt1Ty(CGM.getLLVMContext())};
+    // short noOMPMode);
+    llvm::Type *TypeParams[] = {CGM.Int32Ty, CGM.Int16Ty};
     llvm::FunctionType *FnTy =
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
     RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_spmd_kernel_init");
@@ -1123,15 +1122,18 @@ enum ExecutionMode {
 };
 
 ExecutionMode getExecutionMode(OpenMPDirectiveKind DirectiveKind) {
-  if (DirectiveKind == OMPD_target || DirectiveKind == OMPD_target_teams)
+  switch (DirectiveKind) {
+  case OMPD_target:
+  case OMPD_target_teams:
     return ExecutionMode::GENERIC;
-  else if (DirectiveKind == OMPD_target_parallel ||
-           DirectiveKind == OMPD_target_parallel_for ||
-           DirectiveKind == OMPD_target_teams_distribute_parallel_for)
+  case OMPD_target_parallel:
+  case OMPD_target_parallel_for:
+  case OMPD_target_teams_distribute_parallel_for:
     return ExecutionMode::SPMD;
-
-  llvm_unreachable(
-      "Unknown programming model for OpenMP directive on NVPTX target.");
+  default:
+    llvm_unreachable(
+        "Unknown programming model for OpenMP directive on NVPTX target.");
+  }
 }
 };
 
@@ -1178,6 +1180,18 @@ void CGOpenMPRuntimeNVPTX::emitGenericKernel(const OMPExecutableDirective &D,
 }
 
 namespace {
+// In SPMD codegen mode we may not need the OMP runtime, in which case
+// we can avoid initializing it.
+//
+// This class is used to determine if there can be any calls to the OMP
+// runtime in the given target region.
+//
+// The OpenMP runtime is required if:
+//
+//    There is an OpenMP construct in the target region.
+//    There are calls in the target region to externally defined functions and
+//    they are not builtins.
+//
 class OpenMPFinder : public ConstStmtVisitor<OpenMPFinder> {
 private:
   bool ContainsOpenMP;
@@ -1200,21 +1214,30 @@ public:
   void VisitCallExpr(const CallExpr *E) {
     const FunctionDecl *FD = E->getDirectCallee();
     if (FD && FD->doesThisDeclarationHaveABody()) {
+      // If the call is to a function whose body we have parsed in
+      // the frontend, look inside it.
       auto Body = FD->getBody();
       if (Visited.insert(Body).second)
         Visit(FD->getBody());
     } else if (!FD->getBuiltinID()) {
+      // If this is an externally defined function that is not a builtin,
+      // assume it contains OMP directives.
       ContainsOpenMP = true;
     }
   }
 
+  // Found an OMP directive, we need the runtime.
   void VisitOMPExecutableDirective(const Stmt *S) { ContainsOpenMP = true; }
 
   bool containsOpenMP() { return ContainsOpenMP; }
 };
+};
 
 // Check the target region to determine if it needs the OpenMP runtime.
-static bool requiresOMPRuntime(const OMPExecutableDirective &D) {
+// In SPMD codegen mode we may not need the OMP runtime, in which case
+// we can avoid initializing it.  This reduces runtime overhead.
+void CGOpenMPRuntimeNVPTX::EntryFunctionState::setRequiresOMPRuntime(
+    const OMPExecutableDirective &D) {
   // Does the target directive require the OMP runtime?
   // Schedule types dynamic, guided, runtime require the runtime.
   // An ordered schedule requires the runtime.
@@ -1224,16 +1247,16 @@ static bool requiresOMPRuntime(const OMPExecutableDirective &D) {
   if (D.getSingleClause<OMPOrderedClause>() != nullptr ||
       ScheduleKind == OMPC_SCHEDULE_dynamic ||
       ScheduleKind == OMPC_SCHEDULE_guided ||
-      ScheduleKind == OMPC_SCHEDULE_runtime)
-    return true;
-
-  // If this target region can never call into the OMP runtime, don't setup
-  // the runtime.
-  OpenMPFinder Finder;
-  Finder.Visit(cast<CapturedStmt>(D.getAssociatedStmt())->getCapturedStmt());
-  return Finder.containsOpenMP();
+      ScheduleKind == OMPC_SCHEDULE_runtime) {
+    RequiresOMPRuntime = true;
+  } else {
+    // If this target region can never call into the OMP runtime, don't setup
+    // the runtime.
+    OpenMPFinder Finder;
+    Finder.Visit(cast<CapturedStmt>(D.getAssociatedStmt())->getCapturedStmt());
+    RequiresOMPRuntime = Finder.containsOpenMP();
+  }
 }
-};
 
 void CGOpenMPRuntimeNVPTX::emitSPMDKernel(const OMPExecutableDirective &D,
                                           StringRef ParentName,
@@ -1241,9 +1264,7 @@ void CGOpenMPRuntimeNVPTX::emitSPMDKernel(const OMPExecutableDirective &D,
                                           llvm::Constant *&OutlinedFnID,
                                           bool IsOffloadEntry,
                                           const RegionCodeGenTy &CodeGen) {
-  // Can we emit optimized code for this target region?
-  bool RequiresOMPRuntime = requiresOMPRuntime(D);
-  EntryFunctionState EST(RequiresOMPRuntime);
+  EntryFunctionState EST(D);
 
   // Emit target region as a standalone region.
   class NVPTXPrePostActionTy : public PrePostActionTy {
