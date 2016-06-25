@@ -144,11 +144,14 @@ OffloadAction::OffloadAction(const DeviceDependences &DDeps, types::ID Ty)
   auto &OKinds = DDeps.getOffloadKinds();
   auto &BArchs = DDeps.getBoundArchs();
 
-  // If we have a single dependency, inherit the offloading info from it.
-  if (OKinds.size() == 1) {
+  // If all inputs agree on the same kind, use it also for this action.
+  if (llvm::all_of(OKinds, [&](OffloadKind K) { return K == OKinds.front(); }))
     OffloadingDeviceKind = OKinds.front();
+
+  // If we have a single dependency, inherit the architecture from it.
+  if (OKinds.size() == 1)
     OffloadingArch = BArchs.front();
-  }
+
   // Propagate info to the dependencies.
   for (unsigned i = 0; i < getInputs().size(); ++i)
     getInputs()[i]->propagateDeviceOffloadInfo(OKinds[i], BArchs[i]);
@@ -195,13 +198,21 @@ void OffloadAction::doOnEachDeviceDependence(
     ++I;
 
   auto TI = DevToolChains.begin();
-  for (; I != E; ++I)
+  for (; I != E; ++I, ++TI)
     Work(*I, *TI, (*I)->getOffloadingArch());
 }
 
 void OffloadAction::doOnEachDependence(const OffloadActionWorkTy &Work) const {
   doOnHostDependence(Work);
   doOnEachDeviceDependence(Work);
+}
+
+void OffloadAction::doOnEachDependence(bool IsHostDependence,
+                                       const OffloadActionWorkTy &Work) const {
+  if (IsHostDependence)
+    doOnHostDependence(Work);
+  else
+    doOnEachDeviceDependence(Work);
 }
 
 bool OffloadAction::hasHostDependence() const { return HostTC != nullptr; }
@@ -211,14 +222,18 @@ Action *OffloadAction::getHostDependence() const {
   return HostTC ? getInputs().front() : nullptr;
 }
 
-bool OffloadAction::hasSingleDeviceDependence() const {
-  return !HostTC && getInputs().size() == 1;
+bool OffloadAction::hasSingleDeviceDependence(
+    bool DoNotConsiderHostActions) const {
+  if (DoNotConsiderHostActions)
+    return getInputs().size() == (HostTC ? 2 : 1);
+  return getInputs().size() == 1;
 }
 
-Action *OffloadAction::getSingleDeviceDependence() const {
-  assert(hasSingleDeviceDependence() &&
+Action *
+OffloadAction::getSingleDeviceDependence(bool DoNotConsiderHostActions) const {
+  assert(hasSingleDeviceDependence(DoNotConsiderHostActions) &&
          "Single device dependence does not exist!");
-  return getInputs().front();
+  return HostTC ? getInputs()[1] : getInputs().front();
 }
 
 void OffloadAction::DeviceDependences::add(Action &A, const ToolChain &TC,

@@ -1889,7 +1889,8 @@ void Driver::BuildJobs(Compilation &C) const {
                        /*BoundArch*/ nullptr,
                        /*AtTopLevel*/ true,
                        /*MultipleArchs*/ ArchNames.size() > 1,
-                       /*LinkingOutput*/ LinkingOutput, CachedResults);
+                       /*LinkingOutput*/ LinkingOutput, CachedResults,
+                       /*BuildForOffloadDevice*/ false);
   }
 
   // If the user passed -Qunused-arguments or there were errors, don't warn
@@ -2079,11 +2080,12 @@ static const Tool *selectToolForJob(Compilation &C, bool SaveTemps,
 InputInfo Driver::BuildJobsForAction(
     Compilation &C, const Action *A, const ToolChain *TC, const char *BoundArch,
     bool AtTopLevel, bool MultipleArchs, const char *LinkingOutput,
-    std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults)
-    const {
+    std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults,
+    bool BuildForOffloadDevice) const {
   // The bound arch is not necessarily represented in the toolchain's triple --
   // for example, armv7 and armv7s both map to the same triple -- so we need
-  // both in our map.
+  // both in our map. Also, we need to add the offloading device kind, as the
+  // same tool chain can be used for host and device.
   std::string TriplePlusArch = TC->getTriple().normalize();
   if (BoundArch) {
     TriplePlusArch += "-";
@@ -2094,9 +2096,9 @@ InputInfo Driver::BuildJobsForAction(
   if (CachedResult != CachedResults.end()) {
     return CachedResult->second;
   }
-  InputInfo Result =
-      BuildJobsForActionNoCache(C, A, TC, BoundArch, AtTopLevel, MultipleArchs,
-                                LinkingOutput, CachedResults);
+  InputInfo Result = BuildJobsForActionNoCache(
+      C, A, TC, BoundArch, AtTopLevel, MultipleArchs, LinkingOutput,
+      CachedResults, BuildForOffloadDevice);
   CachedResults[ActionTC] = Result;
   return Result;
 }
@@ -2104,32 +2106,66 @@ InputInfo Driver::BuildJobsForAction(
 InputInfo Driver::BuildJobsForActionNoCache(
     Compilation &C, const Action *A, const ToolChain *TC, const char *BoundArch,
     bool AtTopLevel, bool MultipleArchs, const char *LinkingOutput,
-    std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults)
-    const {
+    std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults,
+    bool BuildForOffloadDevice) const {
   llvm::PrettyStackTraceString CrashInfo("Building compilation jobs");
 
-  InputInfoList OffloadDeviceInputInfos;
+  InputInfoList OffloadDependencesInputInfo;
+  bool ConsumerIsHost = TC == C.getSingleOffloadToolChain<Action::OFK_Host>();
   if (const OffloadAction *OA = dyn_cast<OffloadAction>(A)) {
+    // The offload action is expected to be used in four different situations.
+    //
+    // a) Set a toolchain/architecture/kind for a host action:
+    //    Host Action 1 -> OffloadAction -> Host Action 2
+    //
+    // b) Set a toolchain/architecture/kind for a device action;
+    //    Device Action 1 -> OffloadAction -> Device Action 2
+    //
+    // c) Specify a device dependences to a host action;
+    //    Device Action 1  _
+    //                      \
+    //      Host Action 1  ---> OffloadAction -> Host Action 2
+    //
+    // d) Specify a host dependence to a device action.
+    //      Host Action 1  _
+    //                      \
+    //    Device Action 1  ---> OffloadAction -> Device Action 2
+    //
+    // For a) and b), we just return the job generated for the dependence. For
+    // c) and d) we override the current action with the host/device dependence
+    // if the current toolchain is host/device and set the offload dependences
+    // info with the jobs obtained from the device/host dependence(s).
 
-    OA->doOnEachDeviceDependence(
+    // If there is a single device option, just generate the job for it.
+    if (OA->hasSingleDeviceDependence()) {
+      InputInfo DevA;
+      OA->doOnEachDeviceDependence([&](Action *DepA, const ToolChain *DepTC,
+                                       const char *DepBoundArch) {
+        DevA =
+            BuildJobsForAction(C, DepA, DepTC, DepBoundArch, AtTopLevel,
+                               /*MultipleArchs*/ !!DepBoundArch, LinkingOutput,
+                               CachedResults, /*BuildForOffloadDevice=*/true);
+      });
+      return DevA;
+    }
+
+    // If 'Action 2' is host, we generate jobs for the device dependences and
+    // override the current action with the host dependence. Otherwise, we
+    // generate the host dependences and override the action with the device
+    // dependence. The dependences can't therefore be a top-level action.
+    OA->doOnEachDependence(
+        /*IsHostDependence=*/!ConsumerIsHost,
         [&](Action *DepA, const ToolChain *DepTC, const char *DepBoundArch) {
-          OffloadDeviceInputInfos.push_back(BuildJobsForAction(
-              C, DepA, DepTC, DepBoundArch, AtTopLevel,
-              /*MultipleArchs*/ !!DepBoundArch, LinkingOutput, CachedResults));
+          OffloadDependencesInputInfo.push_back(BuildJobsForAction(
+              C, DepA, DepTC, DepBoundArch, /*AtTopLevel=*/false,
+              /*MultipleArchs*/ !!DepBoundArch, LinkingOutput, CachedResults,
+              /*BuildForOffloadDevice=*/DepA->getOffloadingDeviceKind() !=
+                  Action::OFK_None));
         });
 
-    // If we have a single device action, just return its info - it is a
-    // dependence to some other device action or host action. If we have
-    // multiple device dependences, we expect them to be combined with the host
-    // action (we do not expect having to combine different devices/programming
-    // models actions with an offload action). Therefore, when we have multiple
-    // device dependences, we expect to have an host dependence as well.
-    if (OA->hasSingleDeviceDependence()) {
-      return OffloadDeviceInputInfos.back();
-    }
-    // Override current action with a real host compile action and continue
-    // processing it.
-    A = OA->getHostDependence();
+    A = ConsumerIsHost
+            ? OA->getHostDependence()
+            : OA->getSingleDeviceDependence(/*DoNotConsiderHostActions=*/true);
   }
 
   if (const InputAction *IA = dyn_cast<InputAction>(A)) {
@@ -2156,7 +2192,8 @@ InputInfo Driver::BuildJobsForActionNoCache(
       TC = &C.getDefaultToolChain();
 
     return BuildJobsForAction(C, *BAA->input_begin(), TC, ArchName, AtTopLevel,
-                              MultipleArchs, LinkingOutput, CachedResults);
+                              MultipleArchs, LinkingOutput, CachedResults,
+                              BuildForOffloadDevice);
   }
 
 
@@ -2172,15 +2209,17 @@ InputInfo Driver::BuildJobsForActionNoCache(
     return InputInfo();
 
   // If we've collapsed action list that contained OffloadAction we
-  // need to build jobs for device-side inputs it may have held.
-  for (const auto *OA : CollapsedOffloadActions) {
-    cast<OffloadAction>(OA)->doOnEachDeviceDependence(
+  // need to build jobs for host/device-side inputs it may have held.
+  for (const auto *OA : CollapsedOffloadActions)
+    cast<OffloadAction>(OA)->doOnEachDependence(
+        /*IsHostDependence=*/!ConsumerIsHost,
         [&](Action *DepA, const ToolChain *DepTC, const char *DepBoundArch) {
-          OffloadDeviceInputInfos.push_back(BuildJobsForAction(
+          OffloadDependencesInputInfo.push_back(BuildJobsForAction(
               C, DepA, DepTC, DepBoundArch, AtTopLevel,
-              /*MultipleArchs=*/!!DepBoundArch, LinkingOutput, CachedResults));
+              /*MultipleArchs=*/!!DepBoundArch, LinkingOutput, CachedResults,
+              /*BuildForOffloadDevice=*/DepA->getOffloadingDeviceKind() !=
+                  Action::OFK_None));
         });
-  }
 
   // Only use pipes when there is exactly one input.
   InputInfoList InputInfos;
@@ -2190,9 +2229,9 @@ InputInfo Driver::BuildJobsForActionNoCache(
     // FIXME: Clean this up.
     bool SubJobAtTopLevel =
         AtTopLevel && (isa<DsymutilJobAction>(A) || isa<VerifyJobAction>(A));
-    InputInfos.push_back(BuildJobsForAction(C, Input, TC, BoundArch,
-                                            SubJobAtTopLevel, MultipleArchs,
-                                            LinkingOutput, CachedResults));
+    InputInfos.push_back(BuildJobsForAction(
+        C, Input, TC, BoundArch, SubJobAtTopLevel, MultipleArchs, LinkingOutput,
+        CachedResults, BuildForOffloadDevice));
   }
 
   // Always use the first input as the base input.
@@ -2204,9 +2243,9 @@ InputInfo Driver::BuildJobsForActionNoCache(
     BaseInput = InputInfos[0].getFilename();
 
   // Append outputs of offload device jobs to the input list
-  if (!OffloadDeviceInputInfos.empty())
-    InputInfos.append(OffloadDeviceInputInfos.begin(),
-                      OffloadDeviceInputInfos.end());
+  if (!OffloadDependencesInputInfo.empty())
+    InputInfos.append(OffloadDependencesInputInfo.begin(),
+                      OffloadDependencesInputInfo.end());
 
   // Determine the place to write output to, if any.
   InputInfo Result;

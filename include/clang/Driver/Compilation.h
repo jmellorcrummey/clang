@@ -116,8 +116,8 @@ public:
     return OrderedOffloadingToolchains.equal_range(Kind);
   }
 
-  // Return an offload toolchain of the provided kind. Only one is expected to
-  // exist.
+  /// Return an offload toolchain of the provided kind. Only one is expected to
+  /// exist.
   template <Action::OffloadKind Kind>
   const ToolChain *getSingleOffloadToolChain() const {
     auto TCs = getOffloadToolChains<Kind>();

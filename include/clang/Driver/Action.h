@@ -96,11 +96,11 @@ protected:
   /// \brief Multiple programming models may be supported simultaneously by the
   /// same host. Therefore, the host offloading kind is a combination of kinds
   /// encoded in a mask.
-  unsigned ActiveOffloadKindMask;
+  unsigned ActiveOffloadKindMask = 0u;
   /// \brief Offloading kind of the device.
-  OffloadKind OffloadingDeviceKind;
+  OffloadKind OffloadingDeviceKind = OFK_None;
   /// \brief The Offloading architecture associated with this action.
-  const char *OffloadingArch;
+  const char *OffloadingArch = nullptr;
 
   Action(ActionClass Kind, types::ID Type) : Action(Kind, ActionList(), Type) {}
   Action(ActionClass Kind, Action *Input, types::ID Type)
@@ -108,8 +108,7 @@ protected:
   Action(ActionClass Kind, Action *Input)
       : Action(Kind, ActionList({Input}), Input->getType()) {}
   Action(ActionClass Kind, const ActionList &Inputs, types::ID Type)
-      : Kind(Kind), Type(Type), Inputs(Inputs), ActiveOffloadKindMask(0u),
-        OffloadingDeviceKind(OFK_None), OffloadingArch(nullptr) {}
+      : Kind(Kind), Type(Type), Inputs(Inputs) {}
 
 public:
   virtual ~Action();
@@ -133,7 +132,10 @@ public:
     return input_const_range(input_begin(), input_end());
   }
 
+  /// \brief Return a string containing the offload kind of the action.
   std::string getOffloadingKindPrefix() const;
+  /// \brief Return a string that can be used as prefix in order to generate
+  /// unique files for each offloading kind.
   std::string getOffloadingFileNamePrefix(StringRef NormalizedTriple) const;
 
   /// \brief Set the device offload info of this action and propagate it to its
@@ -291,6 +293,11 @@ public:
   /// \brief Execute the work specified in \a Work on each dependence.
   void doOnEachDependence(const OffloadActionWorkTy &Work) const;
 
+  /// \brief Execute the work specified in \a Work on each host or device
+  /// dependence if \a IsHostDependenceto is true or false, respectively.
+  void doOnEachDependence(bool IsHostDependence,
+                          const OffloadActionWorkTy &Work) const;
+
   /// \brief Return true if the action has a host dependence.
   bool hasHostDependence() const;
 
@@ -298,12 +305,16 @@ public:
   /// expected to be called if the host dependence exists.
   Action *getHostDependence() const;
 
-  /// \brief Return true if the action has a single device dependence.
-  bool hasSingleDeviceDependence() const;
+  /// \brief Return true if the action has a single device dependence. If \a
+  /// DoNotConsiderHostActions is set, ignore the host dependence, if any, while
+  /// accounting for the number of dependences.
+  bool hasSingleDeviceDependence(bool DoNotConsiderHostActions = false) const;
 
   /// \brief Return the single device dependence of this action. This function
-  /// is only expected to be called if a single device dependence exists.
-  Action *getSingleDeviceDependence() const;
+  /// is only expected to be called if a single device dependence exists. If \a
+  /// DoNotConsiderHostActions is set, a host dependence is allowed.
+  Action *
+  getSingleDeviceDependence(bool DoNotConsiderHostActions = false) const;
 
   static bool classof(const Action *A) { return A->getKind() == OffloadClass; }
 };
