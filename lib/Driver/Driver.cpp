@@ -2084,8 +2084,7 @@ InputInfo Driver::BuildJobsForAction(
     bool BuildForOffloadDevice) const {
   // The bound arch is not necessarily represented in the toolchain's triple --
   // for example, armv7 and armv7s both map to the same triple -- so we need
-  // both in our map. Also, we need to add the offloading device kind, as the
-  // same tool chain can be used for host and device.
+  // both in our map.
   std::string TriplePlusArch = TC->getTriple().normalize();
   if (BoundArch) {
     TriplePlusArch += "-";
@@ -2111,7 +2110,6 @@ InputInfo Driver::BuildJobsForActionNoCache(
   llvm::PrettyStackTraceString CrashInfo("Building compilation jobs");
 
   InputInfoList OffloadDependencesInputInfo;
-  bool ConsumerIsHost = TC == C.getSingleOffloadToolChain<Action::OFK_Host>();
   if (const OffloadAction *OA = dyn_cast<OffloadAction>(A)) {
     // The offload action is expected to be used in four different situations.
     //
@@ -2154,7 +2152,7 @@ InputInfo Driver::BuildJobsForActionNoCache(
     // generate the host dependences and override the action with the device
     // dependence. The dependences can't therefore be a top-level action.
     OA->doOnEachDependence(
-        /*IsHostDependence=*/!ConsumerIsHost,
+        /*IsHostDependence=*/BuildForOffloadDevice,
         [&](Action *DepA, const ToolChain *DepTC, const char *DepBoundArch) {
           OffloadDependencesInputInfo.push_back(BuildJobsForAction(
               C, DepA, DepTC, DepBoundArch, /*AtTopLevel=*/false,
@@ -2163,9 +2161,9 @@ InputInfo Driver::BuildJobsForActionNoCache(
                   Action::OFK_None));
         });
 
-    A = ConsumerIsHost
-            ? OA->getHostDependence()
-            : OA->getSingleDeviceDependence(/*DoNotConsiderHostActions=*/true);
+    A = BuildForOffloadDevice
+            ? OA->getSingleDeviceDependence(/*DoNotConsiderHostActions=*/true)
+            : OA->getHostDependence();
   }
 
   if (const InputAction *IA = dyn_cast<InputAction>(A)) {
@@ -2212,7 +2210,7 @@ InputInfo Driver::BuildJobsForActionNoCache(
   // need to build jobs for host/device-side inputs it may have held.
   for (const auto *OA : CollapsedOffloadActions)
     cast<OffloadAction>(OA)->doOnEachDependence(
-        /*IsHostDependence=*/!ConsumerIsHost,
+        /*IsHostDependence=*/BuildForOffloadDevice,
         [&](Action *DepA, const ToolChain *DepTC, const char *DepBoundArch) {
           OffloadDependencesInputInfo.push_back(BuildJobsForAction(
               C, DepA, DepTC, DepBoundArch, AtTopLevel,

@@ -226,7 +226,7 @@ bool OffloadAction::hasSingleDeviceDependence(
     bool DoNotConsiderHostActions) const {
   if (DoNotConsiderHostActions)
     return getInputs().size() == (HostTC ? 2 : 1);
-  return getInputs().size() == 1;
+  return !HostTC && getInputs().size() == 1;
 }
 
 Action *
