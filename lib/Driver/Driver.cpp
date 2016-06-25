@@ -443,6 +443,65 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
   }
 
   //
+  // OpenMP
+  //
+  // We need to generate an OpenMP toolchain if the user specified targets with
+  // the -fopenmp-targets option.
+  if (Arg *OpenMPTargets =
+          C.getInputArgs().getLastArg(options::OPT_fopenmp_targets_EQ)) {
+    if (OpenMPTargets->getNumValues()) {
+      // We expect that -fopenmp-targets is always used in conjunction with the
+      // option -fopenmp specifying a valid runtime with offloading support,
+      // i.e. libomp or libiomp.
+      bool HasCompatibleOpenMP = C.getInputArgs().hasFlag(
+          options::OPT_fopenmp, options::OPT_fopenmp_EQ,
+          options::OPT_fno_openmp, false);
+      if (HasCompatibleOpenMP) {
+        StringRef RuntimeName(CLANG_DEFAULT_OPENMP_RUNTIME);
+        const Arg *A = C.getInputArgs().getLastArg(options::OPT_fopenmp_EQ);
+        if (A)
+          RuntimeName = A->getValue();
+        HasCompatibleOpenMP = llvm::StringSwitch<bool>(RuntimeName)
+                                  .Case("libomp", true)
+                                  .Case("libgomp", false)
+                                  .Case("libiomp5", true)
+                                  .Default(false);
+      }
+
+      if (HasCompatibleOpenMP) {
+        llvm::StringMap<const char *> FoundNormalizedTriples;
+        for (const char *Val : OpenMPTargets->getValues()) {
+          llvm::Triple TT(Val);
+          std::string NormalizedName = TT.normalize();
+
+          // Make sure we don't have a duplicate triple.
+          auto Duplicate = FoundNormalizedTriples.find(NormalizedName);
+          if (Duplicate != FoundNormalizedTriples.end()) {
+            Diag(clang::diag::warn_drv_omp_offload_target_duplicate)
+                << Val << Duplicate->second;
+            continue;
+          }
+
+          // Store the current triple so that we can check for duplicates in the
+          // following iterations.
+          FoundNormalizedTriples[NormalizedName] = Val;
+
+          // If the specified target is invalid, emit a diagnostic.
+          if (TT.getArch() == llvm::Triple::UnknownArch)
+            Diag(clang::diag::err_drv_invalid_omp_target) << Val;
+          else {
+            const ToolChain &TC = getToolChain(C.getInputArgs(), TT);
+            C.addOffloadDeviceToolChain(&TC, Action::OFK_OpenMP);
+          }
+        }
+      } else
+        Diag(clang::diag::err_drv_expecting_fopenmp_with_fopenmp_targets);
+    } else
+      Diag(clang::diag::warn_drv_empty_joined_argument)
+          << OpenMPTargets->getAsString(C.getInputArgs());
+  }
+
+  //
   // TODO: Add support for other offloading programming models here.
   //
 
