@@ -154,8 +154,12 @@
 ///
 // RUN:   %clang -### -fopenmp -o %t.out -target powerpc64le-linux -fopenmp-targets=powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu %s 2>&1 \
 // RUN:   | FileCheck -check-prefix=CHK-COMMANDS %s
+// Run the save temp test in a temporary folder as the linker script will be
+// created there.
+// RUN:   cd %T &&  \
 // RUN:   %clang -### -fopenmp -o %t.out -target powerpc64le-linux -fopenmp-targets=powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu %s -save-temps 2>&1 \
 // RUN:   | FileCheck -check-prefix=CHK-COMMANDS-ST %s
+// RUN:   FileCheck -check-prefix=CHK-LKS %s --input-file %t.lk
 //
 // Generate host BC file.
 //
@@ -172,7 +176,7 @@
 // CHK-COMMANDS-ST: clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" "-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1BC:.+\.bc]]" "-x" "cpp-output" "[[T1PP]]" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[HOSTBC]]"
 // CHK-COMMANDS-ST: clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" "-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1ASM:.+\.s]]" "-x" "ir" "[[T1BC]]"
 // CHK-COMMANDS-ST: clang{{.*}}" "-cc1as" "-triple" "powerpc64le-ibm-linux-gnu" "-filetype" "obj" {{.*}}"-o" "[[T1OBJ:.+\.o]]" "[[T1ASM]]"
-// CHK-COMMANDS-ST: ld" {{.*}}"-o" "[[T1BIN:.+-powerpc64le-ibm-linux-gnu\.out]]" {{.*}}[[T1OBJ]]
+// CHK-COMMANDS-ST: ld" {{.*}}"-o" "[[T1BIN:.+\.out-device-openmp-powerpc64le-ibm-linux-gnu]]" {{.*}}[[T1OBJ]]
 
 //
 // Compile for the x86 device.
@@ -183,7 +187,7 @@
 // CHK-COMMANDS-ST: clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[T2BC:.+\.bc]]" "-x" "cpp-output" "[[T2PP]]" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[HOSTBC]]"
 // CHK-COMMANDS-ST: clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[T2ASM:.+\.s]]" "-x" "ir" "[[T2BC]]"
 // CHK-COMMANDS-ST: clang{{.*}}" "-cc1as" "-triple" "x86_64-pc-linux-gnu" "-filetype" "obj" {{.*}}"-o" "[[T2OBJ:.+\.o]]" "[[T2ASM]]"
-// CHK-COMMANDS-ST: ld" {{.*}}"-o" "[[T2BIN:.+-x86_64-pc-linux-gnu\.out]]" {{.*}}[[T2OBJ]]
+// CHK-COMMANDS-ST: ld" {{.*}}"-o" "[[T2BIN:.+\.out-device-openmp-x86_64-pc-linux-gnu]]" {{.*}}[[T2OBJ]]
 
 //
 // Generate host object from the BC file and link using the linker script.
@@ -193,3 +197,36 @@
 // CHK-COMMANDS-ST: clang-3.9" "-cc1" "-triple" "powerpc64le--linux" "-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[HOSTASM:.+\.s]]" "-x" "ir" "[[HOSTBC]]"
 // CHK-COMMANDS-ST: clang-3.9" "-cc1as" "-triple" "powerpc64le--linux" "-filetype" "obj" {{.*}}"-o" [[HOSTOBJ:.+\.o]]" [[HOSTASM:.+\.s]]
 // CHK-COMMANDS-ST: ld" {{.*}}"-o" "[[HOSTBIN:.+\.out]]"  {{.*}}"-lomptarget" {{.*}}"-T" "[[HOSTLK:.+\.lk]]"
+
+//
+// Check the linker script contains what we expect.
+//
+// CHK-LKS: TARGET(binary)
+// CHK-LKS: INPUT({{.+}}.out-device-openmp-powerpc64le-ibm-linux-gnu)
+// CHK-LKS: INPUT({{.+}}.out-device-openmp-x86_64-pc-linux-gnu)
+// CHK-LKS: SECTIONS
+// CHK-LKS: {
+// CHK-LKS:   .omp_offloading :
+// CHK-LKS:   ALIGN(0x10)
+// CHK-LKS:   {
+// CHK-LKS:     . = ALIGN(0x10);
+// CHK-LKS:     PROVIDE_HIDDEN(.omp_offloading.img_start.powerpc64le-ibm-linux-gnu = .);
+// CHK-LKS:     {{.+}}.out-device-openmp-powerpc64le-ibm-linux-gnu
+// CHK-LKS:     PROVIDE_HIDDEN(.omp_offloading.img_end.powerpc64le-ibm-linux-gnu = .);
+// CHK-LKS:     . = ALIGN(0x10);
+// CHK-LKS:     PROVIDE_HIDDEN(.omp_offloading.img_start.x86_64-pc-linux-gnu = .);
+// CHK-LKS:     {{.+}}.out-device-openmp-x86_64-pc-linux-gnu
+// CHK-LKS:     PROVIDE_HIDDEN(.omp_offloading.img_end.x86_64-pc-linux-gnu = .);
+// CHK-LKS:   }
+// CHK-LKS:   .omp_offloading.entries :
+// CHK-LKS:   ALIGN(0x10)
+// CHK-LKS:   SUBALIGN(0x01)
+// CHK-LKS:   {
+// CHK-LKS:     PROVIDE_HIDDEN(.omp_offloading.entries_begin = .);
+// CHK-LKS:     *(.omp_offloading.entries)
+// CHK-LKS:     PROVIDE_HIDDEN(.omp_offloading.entries_end = .);
+// CHK-LKS:   }
+// CHK-LKS: }
+// CHK-LKS: INSERT BEFORE .data
+
+

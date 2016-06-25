@@ -3112,19 +3112,19 @@ const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
             ->getValue();
     NamedOutput =
         MakeCLOutputFilename(C.getArgs(), Val, BaseName, types::TY_Image);
-  } else if (JA.getType() == types::TY_Image && /*AtTopLevel*/ true) {
+  } else if (JA.getType() == types::TY_Image) {
     if (IsCLMode()) {
       // clang-cl uses BaseName for the executable name.
       NamedOutput =
           MakeCLOutputFilename(C.getArgs(), "", BaseName, types::TY_Image);
-    } else if (MultipleArchs && BoundArch) {
+    } else {
       SmallString<128> Output(getDefaultImageName());
       Output += JA.getOffloadingFileNamePrefix(NormalizedTriple);
-      Output += "-";
-      Output.append(BoundArch);
+      if (MultipleArchs && BoundArch) {
+        Output += "-";
+        Output.append(BoundArch);
+      }
       NamedOutput = C.getArgs().MakeArgString(Output.c_str());
-    } else {
-      NamedOutput = getDefaultImageName();
     }
   } else if (JA.getType() == types::TY_PCH && IsCLMode()) {
     NamedOutput = C.getArgs().MakeArgString(GetClPchPath(C, BaseName).c_str());
