@@ -2801,11 +2801,14 @@ InputInfo Driver::BuildJobsForAction(
   // The bound arch is not necessarily represented in the toolchain's triple --
   // for example, armv7 and armv7s both map to the same triple -- so we need
   // both in our map. Also, we need to add the offloading device kind, as the
-  // same tool chain can be used for host and device.
+  // same tool chain can be used for host and device for some programming
+  // models, e.g. OpenMP.
   std::string TriplePlusArch = TC->getTriple().normalize();
   if (BoundArch) {
     TriplePlusArch += "-";
     TriplePlusArch += BoundArch;
+    TriplePlusArch += "-";
+    TriplePlusArch += A->getOffloadingKindPrefix();
   }
   std::pair<const Action *, std::string> ActionTC = {A, TriplePlusArch};
   auto CachedResult = CachedResults.find(ActionTC);
@@ -3109,7 +3112,7 @@ const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
             ->getValue();
     NamedOutput =
         MakeCLOutputFilename(C.getArgs(), Val, BaseName, types::TY_Image);
-  } else if (JA.getType() == types::TY_Image) {
+  } else if (JA.getType() == types::TY_Image && /*AtTopLevel*/ true) {
     if (IsCLMode()) {
       // clang-cl uses BaseName for the executable name.
       NamedOutput =

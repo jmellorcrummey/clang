@@ -225,7 +225,8 @@ static void addDirectoryList(const ArgList &Args, ArgStringList &CmdArgs,
 }
 
 static void AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
-                            const ArgList &Args, ArgStringList &CmdArgs) {
+                            const ArgList &Args, ArgStringList &CmdArgs,
+                            const JobAction &JA) {
   const Driver &D = TC.getDriver();
 
   // Add extra linker input arguments which are not treated as inputs
@@ -233,6 +234,14 @@ static void AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
   Args.AddAllArgValues(CmdArgs, options::OPT_Zlinker_input);
 
   for (const auto &II : Inputs) {
+    // If the current tool chain refers to an OpenMP offloading host, we should
+    // ignore inputs that refer to OpenMP offloading devices - they will be
+    // embedded recurring to a proper linker script.
+    if (auto *IA = II.getAction())
+      if (JA.isHostOffloading(Action::OFK_OpenMP) &&
+          IA->isDeviceOffloading(Action::OFK_OpenMP))
+        continue;
+
     if (!TC.HasNativeLLVMSupport() && types::isLLVMIR(II.getType()))
       // Don't try to pass LLVM inputs unless we have native support.
       D.Diag(diag::err_drv_no_linker_llvm_support) << TC.getTripleString();
@@ -264,6 +273,113 @@ static void AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
   //                and only supported on native toolchains.
   if (!TC.isCrossCompiling())
     addDirectoryList(Args, CmdArgs, "-L", "LIBRARY_PATH");
+}
+
+/// \brief Add OpenMP linker script arguments at the end of the argument list
+/// so that the fat binary is built by embedding each of the device images into
+/// the host. The linker script also defines a few symbols required by the
+/// code generation so that the images can be easily retrieved at runtime by the
+/// offloading library. This should be used only in tool chains that support
+/// linker scripts.
+static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
+                                  const InputInfo &Output,
+                                  const InputInfoList &Inputs,
+                                  const ArgList &Args, ArgStringList &CmdArgs,
+                                  const JobAction &JA) {
+
+  // If this is not an OpenMP host toolchain, we don't need to do anything.
+  if (!JA.isHostOffloading(Action::OFK_OpenMP))
+    return;
+
+  // Create temporary linker script. Keep it if save-temps is enabled.
+  const char *LKS;
+  StringRef Name = llvm::sys::path::filename(Output.getFilename());
+  StringRef Prefix = Name.rsplit('.').first;
+  if (C.getDriver().isSaveTempsEnabled()) {
+    SmallString<256> ResName(Prefix);
+    ResName += ".lk";
+    LKS = C.getArgs().MakeArgString(ResName.c_str());
+  } else {
+    SmallString<256> ResName(C.getDriver().GetTemporaryPath(Prefix, "lk"));
+    LKS = C.addTempFile(C.getArgs().MakeArgString(ResName.c_str()));
+  }
+
+  // Open script file in order to write contents.
+  std::error_code EC;
+  llvm::raw_fd_ostream Lksf(LKS, EC, llvm::sys::fs::F_None);
+
+  if (EC) {
+    C.getDriver().Diag(clang::diag::err_unable_to_make_temp) << EC.message();
+    return;
+  }
+
+  // Get the OpenMP offload tool chains so that we can extract the triple
+  // associated with each device input.
+  auto OpenMPToolChains = C.getOffloadToolChains<Action::OFK_OpenMP>();
+  assert(OpenMPToolChains.first != OpenMPToolChains.second &&
+         "No OpenMP toolchains??");
+
+  // Track the input file name and device triple in order to build the script,
+  // inserting binaries in the designated sections.
+  SmallVector<std::pair<std::string, const char *>, 8> InputBinaryInfo;
+
+  // Add commands to embed target binaries. We ensure that each section and
+  // image is 16-byte aligned. This is not mandatory, but increases the
+  // likelihood of data to be aligned with a cache block in several main host
+  // machines.
+  Lksf << "TARGET(binary)\n";
+  auto DTC = OpenMPToolChains.first;
+  for (auto &II : Inputs) {
+    const Action *A = II.getAction();
+    // Is this a device linking action?
+    if (A && isa<LinkJobAction>(A) &&
+        A->isDeviceOffloading(Action::OFK_OpenMP)) {
+      assert(DTC != OpenMPToolChains.second &&
+             "More device inputs than device toolchains??");
+      InputBinaryInfo.push_back(std::make_pair(
+          DTC->second->getTriple().normalize(), II.getFilename()));
+      ++DTC;
+      Lksf << "INPUT(" << II.getFilename() << ")\n";
+    }
+  }
+
+  assert(DTC == OpenMPToolChains.second &&
+         "Less device inputs than device toolchains??");
+
+  Lksf << "SECTIONS\n";
+  Lksf << "{\n";
+  Lksf << "  .omp_offloading :\n";
+  Lksf << "  ALIGN(0x10)\n";
+  Lksf << "  {\n";
+
+  for (auto &BI : InputBinaryInfo) {
+    Lksf << "    . = ALIGN(0x10);\n";
+    Lksf << "    PROVIDE_HIDDEN(.omp_offloading.img_start." << BI.first
+         << " = .);\n";
+    Lksf << "    " << BI.second << "\n";
+    Lksf << "    PROVIDE_HIDDEN(.omp_offloading.img_end." << BI.first
+         << " = .);\n";
+  }
+
+  Lksf << "  }\n";
+  // Add commands to define host entries begin and end. We use 1-byte subalign
+  // so that the linker does not add any padding and the elements in this
+  // section form an array.
+  Lksf << "  .omp_offloading.entries :\n";
+  Lksf << "  ALIGN(0x10)\n";
+  Lksf << "  SUBALIGN(0x01)\n";
+  Lksf << "  {\n";
+  Lksf << "    PROVIDE_HIDDEN(.omp_offloading.entries_begin = .);\n";
+  Lksf << "    *(.omp_offloading.entries)\n";
+  Lksf << "    PROVIDE_HIDDEN(.omp_offloading.entries_end = .);\n";
+  Lksf << "  }\n";
+  Lksf << "}\n";
+  Lksf << "INSERT BEFORE .data\n";
+
+  Lksf.close();
+
+  CmdArgs.push_back("-T");
+  CmdArgs.push_back(LKS);
 }
 
 /// \brief Determine whether Objective-C automated reference counting is
@@ -3784,10 +3900,14 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   assert(Inputs.size() >= 1 && "Must have at least one input.");
   const InputInfo &Input = Inputs[0];
   // CUDA compilation may have multiple inputs (source file + results of
-  // device-side compilations). All other jobs are expected to have exactly one
+  // device-side compilations). OpenMP device jobs also take the host IR as a
+  // second input. All other jobs are expected to have exactly one
   // input.
   bool IsCuda = JA.isOffloading(Action::OFK_Cuda);
-  assert((IsCuda || Inputs.size() == 1) && "Unable to handle multiple inputs.");
+  bool IsOpenMPDevice = JA.isDeviceOffloading(Action::OFK_OpenMP);
+  assert((IsCuda || (IsOpenMPDevice && Inputs.size() == 2) ||
+          Inputs.size() == 1) &&
+         "Unable to handle multiple inputs.");
 
   // C++ is not supported for IAMCU.
   if (IsIAMCU && types::isCXX(Input.getType()))
@@ -5914,6 +6034,36 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back(I->getFilename());
     }
 
+  // OpenMP offloading device jobs take the argument -fopenmp-host-ir-file-path
+  // to specify the result of the compile phase on the host, so the meaningful
+  // device declarations can be identified. Also, -fopenmp-is-device is passed
+  // along to tell the frontend that it is generating code for a device, so that
+  // only the relevant declarations are emitted.
+  if (IsOpenMPDevice && Inputs.size() == 2) {
+    CmdArgs.push_back("-fopenmp-is-device");
+    CmdArgs.push_back("-fopenmp-host-ir-file-path");
+    CmdArgs.push_back(Args.MakeArgString(Inputs.back().getFilename()));
+  }
+
+  // For all the host OpenMP offloading compile jobs we need to pass the targets
+  // information using -fopenmp-targets= option.
+  if (isa<CompileJobAction>(JA) && JA.isHostOffloading(Action::OFK_OpenMP)) {
+    SmallString<128> TargetInfo("-fopenmp-targets=");
+
+    Arg *Tgts = Args.getLastArg(options::OPT_fopenmp_targets_EQ);
+    assert(Tgts && Tgts->getNumValues() &&
+           "OpenMP offloading has to have targets specified.");
+    for (unsigned i = 0; i < Tgts->getNumValues(); ++i) {
+      if (i)
+        TargetInfo += ',';
+      // We need to get the string from the triple because it may be not exactly
+      // the same as the one we get directly from the arguments.
+      llvm::Triple T(Tgts->getValue(i));
+      TargetInfo += T.getTriple();
+    }
+    CmdArgs.push_back(Args.MakeArgString(TargetInfo.str()));
+  }
+
   bool WholeProgramVTables =
       Args.hasFlag(options::OPT_fwhole_program_vtables,
                    options::OPT_fno_whole_program_vtables, false);
@@ -6888,7 +7038,7 @@ constructHexagonLinkArgs(Compilation &C, const JobAction &JA,
                   {options::OPT_T_Group, options::OPT_e, options::OPT_s,
                    options::OPT_t, options::OPT_u_Group});
 
-  AddLinkerInputs(HTC, Inputs, Args, CmdArgs);
+  AddLinkerInputs(HTC, Inputs, Args, CmdArgs, JA);
 
   //----------------------------------------------------------------------------
   // Libraries
@@ -6947,7 +7097,7 @@ void amdgpu::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   std::string Linker = getToolChain().GetProgramPath(getShortName());
   ArgStringList CmdArgs;
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
   CmdArgs.push_back("-shared");
   CmdArgs.push_back("-o");
   CmdArgs.push_back(Output.getFilename());
@@ -7010,7 +7160,7 @@ void wasm::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("crti.o")));
   }
 
-  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
+  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs, JA);
 
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
     if (D.CCCIsCXX())
@@ -7354,7 +7504,7 @@ void cloudabi::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   if (D.isUsingLTO())
     AddGoldPlugin(ToolChain, Args, CmdArgs, D.getLTOMode() == LTOK_Thin);
 
-  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
+  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs, JA);
 
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
     if (D.CCCIsCXX())
@@ -7730,7 +7880,7 @@ void darwin::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   Args.AddAllArgs(CmdArgs, options::OPT_L);
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
   // Build the input file for -filelist (list of linker input files) in case we
   // need it later
   for (const auto &II : Inputs) {
@@ -7948,7 +8098,7 @@ void solaris::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddAllArgs(CmdArgs, {options::OPT_L, options::OPT_T_Group,
                             options::OPT_e, options::OPT_r});
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
 
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
     if (getToolChain().getDriver().CCCIsCXX())
@@ -8121,7 +8271,7 @@ void openbsd::Linker::ConstructJob(Compilation &C, const JobAction &JA,
                             options::OPT_e, options::OPT_s, options::OPT_t,
                             options::OPT_Z_Flag, options::OPT_r});
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
 
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
     if (D.CCCIsCXX()) {
@@ -8240,7 +8390,7 @@ void bitrig::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddAllArgs(CmdArgs,
                   {options::OPT_L, options::OPT_T_Group, options::OPT_e});
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
 
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
     if (D.CCCIsCXX()) {
@@ -8506,7 +8656,7 @@ void freebsd::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     AddGoldPlugin(ToolChain, Args, CmdArgs, D.getLTOMode() == LTOK_Thin);
 
   bool NeedsSanitizerDeps = addSanitizerRuntimes(ToolChain, Args, CmdArgs);
-  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
+  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs, JA);
 
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
     addOpenMPRuntime(CmdArgs, ToolChain, Args);
@@ -8803,7 +8953,7 @@ void netbsd::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddAllArgs(CmdArgs, options::OPT_Z_Flag);
   Args.AddAllArgs(CmdArgs, options::OPT_r);
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
 
   unsigned Major, Minor, Micro;
   getToolChain().getTriple().getOSVersion(Major, Minor, Micro);
@@ -9346,7 +9496,7 @@ void gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("--no-demangle");
 
   bool NeedsSanitizerDeps = addSanitizerRuntimes(ToolChain, Args, CmdArgs);
-  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
+  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs, JA);
   // The profile runtime also needs access to system libraries.
   getToolChain().addProfileRTLibs(Args, CmdArgs);
 
@@ -9400,6 +9550,8 @@ void gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
           // Already diagnosed.
           break;
         }
+        if (JA.isHostOffloading(Action::OFK_OpenMP))
+          CmdArgs.push_back("-lomptarget");
       }
 
       AddRunTimeLibs(ToolChain, D, CmdArgs, Args);
@@ -9444,6 +9596,9 @@ void gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
         CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("crtn.o")));
     }
   }
+
+  // Add OpenMP offloading linker script args if required.
+  AddOpenMPLinkerScript(getToolChain(), C, Output, Inputs, Args, CmdArgs, JA);
 
   C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, Inputs));
 }
@@ -9554,7 +9709,7 @@ void nacltools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.hasArg(options::OPT_Z_Xlinker__no_demangle))
     CmdArgs.push_back("--no-demangle");
 
-  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
+  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs, JA);
 
   if (D.CCCIsCXX() &&
       !Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
@@ -9666,7 +9821,7 @@ void minix::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddAllArgs(CmdArgs,
                   {options::OPT_L, options::OPT_T_Group, options::OPT_e});
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
 
   getToolChain().addProfileRTLibs(Args, CmdArgs);
 
@@ -9787,7 +9942,7 @@ void dragonfly::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddAllArgs(CmdArgs,
                   {options::OPT_L, options::OPT_T_Group, options::OPT_e});
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
 
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
     CmdArgs.push_back("-L/usr/lib/gcc50");
@@ -10309,7 +10464,7 @@ void MinGW::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   Args.AddAllArgs(CmdArgs, options::OPT_L);
   TC.AddFilePathLibArgs(Args, CmdArgs);
-  AddLinkerInputs(TC, Inputs, Args, CmdArgs);
+  AddLinkerInputs(TC, Inputs, Args, CmdArgs, JA);
 
   // TODO: Add ASan stuff here
 
@@ -10433,7 +10588,7 @@ void XCore::Linker::ConstructJob(Compilation &C, const JobAction &JA,
                    false))
     CmdArgs.push_back("-fexceptions");
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
 
   const char *Exec = Args.MakeArgString(getToolChain().GetProgramPath("xcc"));
   C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, Inputs));
@@ -10587,7 +10742,7 @@ void CrossWindows::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   Args.AddAllArgs(CmdArgs, options::OPT_L);
   TC.AddFilePathLibArgs(Args, CmdArgs);
-  AddLinkerInputs(TC, Inputs, Args, CmdArgs);
+  AddLinkerInputs(TC, Inputs, Args, CmdArgs, JA);
 
   if (D.CCCIsCXX() && !Args.hasArg(options::OPT_nostdlib) &&
       !Args.hasArg(options::OPT_nodefaultlibs)) {
@@ -10768,7 +10923,7 @@ void tools::Myriad::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   TC.AddFilePathLibArgs(Args, CmdArgs);
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
 
   if (UseDefaultLibs) {
     if (C.getDriver().CCCIsCXX())
@@ -10877,7 +11032,7 @@ static void ConstructPS4LinkJob(const Tool &T, Compilation &C,
   if (Args.hasArg(options::OPT_Z_Xlinker__no_demangle))
     CmdArgs.push_back("--no-demangle");
 
-  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
+  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs, JA);
 
   if (Args.hasArg(options::OPT_pthread)) {
     CmdArgs.push_back("-lpthread");
@@ -10973,7 +11128,7 @@ static void ConstructGoldLinkJob(const Tool &T, Compilation &C,
   if (Args.hasArg(options::OPT_Z_Xlinker__no_demangle))
     CmdArgs.push_back("--no-demangle");
 
-  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
+  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs, JA);
 
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
     // For PS4, we always want to pass libm, libstdc++ and libkernel
