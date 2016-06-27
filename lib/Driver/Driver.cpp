@@ -2985,8 +2985,10 @@ InputInfo Driver::BuildJobsForActionNoCache(
     }
     llvm::errs() << "], output: " << Result.getAsString() << "\n";
   } else {
-    T->ConstructJob(C, *JA, Result, InputInfos,
-                    C.getArgsForToolChain(TC, BoundArch), LinkingOutput);
+    T->ConstructJob(
+        C, *JA, Result, InputInfos,
+        C.getArgsForToolChain(TC, BoundArch, JA->getOffloadingDeviceKind()),
+        LinkingOutput);
   }
   return Result;
 }

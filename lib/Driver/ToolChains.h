@@ -208,6 +208,9 @@ public:
   bool isPIEDefault() const override;
   bool isPICDefaultForced() const override;
   bool IsIntegratedAssemblerDefault() const override;
+  llvm::opt::DerivedArgList *
+  TranslateArgs(const llvm::opt::DerivedArgList &Args, const char *BoundArch,
+                Action::OffloadKind DeviceOffloadKind) const override;
 
 protected:
   Tool *getTool(Action::ActionClass AC) const override;
@@ -306,8 +309,8 @@ public:
   bool HasNativeLLVMSupport() const override;
 
   llvm::opt::DerivedArgList *
-  TranslateArgs(const llvm::opt::DerivedArgList &Args,
-                const char *BoundArch) const override;
+  TranslateArgs(const llvm::opt::DerivedArgList &Args, const char *BoundArch,
+                Action::OffloadKind DeviceOffloadKind) const override;
 
   bool IsBlocksDefault() const override {
     // Always allow blocks on Apple; users interested in versioning are
@@ -511,8 +514,8 @@ public:
   bool isCrossCompiling() const override { return false; }
 
   llvm::opt::DerivedArgList *
-  TranslateArgs(const llvm::opt::DerivedArgList &Args,
-                const char *BoundArch) const override;
+  TranslateArgs(const llvm::opt::DerivedArgList &Args, const char *BoundArch,
+                Action::OffloadKind DeviceOffloadKind) const override;
 
   CXXStdlibType GetDefaultCXXStdlibType() const override;
   ObjCRuntime getDefaultObjCRuntime(bool isNonFragile) const override;
@@ -843,8 +846,8 @@ public:
                 const llvm::opt::ArgList &Args);
 
   llvm::opt::DerivedArgList *
-  TranslateArgs(const llvm::opt::DerivedArgList &Args,
-                const char *BoundArch) const override;
+  TranslateArgs(const llvm::opt::DerivedArgList &Args, const char *BoundArch,
+                Action::OffloadKind DeviceOffloadKind) const override;
   void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
                              llvm::opt::ArgStringList &CC1Args) const override;
 
@@ -1011,8 +1014,8 @@ public:
                 const llvm::opt::ArgList &Args);
 
   llvm::opt::DerivedArgList *
-  TranslateArgs(const llvm::opt::DerivedArgList &Args,
-                const char *BoundArch) const override;
+  TranslateArgs(const llvm::opt::DerivedArgList &Args, const char *BoundArch,
+                Action::OffloadKind DeviceOffloadKind) const override;
 
   bool IsIntegratedAssemblerDefault() const override;
   bool IsUnwindTablesDefault() const override;

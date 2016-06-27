@@ -68,10 +68,24 @@ class Compilation {
   /// The root list of jobs.
   JobList Jobs;
 
-  /// Cache of translated arguments for a particular tool chain and bound
-  /// architecture.
-  llvm::DenseMap<std::pair<const ToolChain *, const char *>,
-                 llvm::opt::DerivedArgList *> TCArgs;
+  /// Cache of translated arguments for a particular tool chain, bound
+  /// architecture, and device offload kind.
+  struct TCArgsKey {
+    const ToolChain *TC;
+    const char *BoundArch;
+    Action::OffloadKind DeviceOffloadKind;
+    bool operator<(const TCArgsKey &K) const {
+      if (TC < K.TC)
+        return true;
+      else if (TC == K.TC && BoundArch < K.BoundArch)
+        return true;
+      else if (TC == K.TC && BoundArch == K.BoundArch &&
+               DeviceOffloadKind < K.DeviceOffloadKind)
+        return true;
+      return false;
+    }
+  };
+  std::map<TCArgsKey, llvm::opt::DerivedArgList *> TCArgs;
 
   /// Temporary files which should be removed on exit.
   llvm::opt::ArgStringList TempFiles;
@@ -182,10 +196,15 @@ public:
 
   /// getArgsForToolChain - Return the derived argument list for the
   /// tool chain \p TC (or the default tool chain, if TC is not specified).
+  /// If a device offloading kind is specified, a translation specific for that
+  /// kind is performed, if any.
   ///
   /// \param BoundArch - The bound architecture name, or 0.
-  const llvm::opt::DerivedArgList &getArgsForToolChain(const ToolChain *TC,
-                                                       const char *BoundArch);
+  /// \param DeviceOffloadKind - The offload device kind that should be used in
+  /// the translation, if any.
+  const llvm::opt::DerivedArgList &
+  getArgsForToolChain(const ToolChain *TC, const char *BoundArch,
+                      Action::OffloadKind DeviceOffloadKind);
 
   /// addTempFile - Add a file to remove on exit, and returns its
   /// argument.
