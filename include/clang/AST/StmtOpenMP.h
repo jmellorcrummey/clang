@@ -597,6 +597,8 @@ public:
       EUB = nullptr;
       NLB = nullptr;
       NUB = nullptr;
+      PrevLB = nullptr;
+      PrevUB = nullptr;
       NumIterations = nullptr;
       Counters.resize(Size);
       PrivateCounters.resize(Size);
