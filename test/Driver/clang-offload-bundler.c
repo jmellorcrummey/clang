@@ -6,6 +6,7 @@
 // RUN: %clang -O0 -target powerpc64le-ibm-linux-gnu %s -S -emit-llvm -o %t.ll
 // RUN: %clang -O0 -target powerpc64le-ibm-linux-gnu %s -c -emit-llvm -o %t.bc
 // RUN: %clang -O0 -target powerpc64le-ibm-linux-gnu %s -S -o %t.s
+// RUN: %clang -O0 -target powerpc64le-ibm-linux-gnu %s -c -o %t.o
 // RUN: %clang -O0 -target powerpc64le-ibm-linux-gnu %s -emit-ast -o %t.ast
 
 //
@@ -178,6 +179,67 @@
 // Check if we can unbundle a file with no magic strings.
 // RUN: clang-offload-bundler -type=bc -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.bc,%t.res.tgt1,%t.res.tgt2 -inputs=%t.bc -unbundle
 // RUN: diff %t.bc %t.res.bc
+// RUN: diff %t.empty %t.res.tgt1
+// RUN: diff %t.empty %t.res.tgt2
+
+//
+// Check object bundle/unbundle. The content should be bundled into an ELF section (we are using a PowerPC little-endian host which uses ELF).
+//
+// RUN: clang-offload-bundler -type=o -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -inputs=%t.o,%t.tgt1,%t.tgt2 -outputs=%t.bundle3.o
+// RUN: llvm-readobj -sections %t.bundle3.o | FileCheck %s --check-prefix CK-OBJ
+// RUN: clang-offload-bundler -type=o -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.o,%t.res.tgt1,%t.res.tgt2 -inputs=%t.bundle3.o -unbundle
+// RUN: diff %t.bundle3.o %t.res.o
+// RUN: diff %t.tgt1 %t.res.tgt1
+// RUN: diff %t.tgt2 %t.res.tgt2
+// CK-OBJ: Section {
+// CK-OBJ:  Index:
+// CK-OBJ:  Name: __CLANG_OFFLOAD_BUNDLE__host-powerpc64le-ibm-linux-gnu (
+// CK-OBJ:  Type: SHT_PROGBITS (0x1)
+// CK-OBJ:  Flags [ (0x2)
+// CK-OBJ:    SHF_ALLOC (0x2)
+// CK-OBJ:  ]
+// CK-OBJ:  Address: 0x0
+// CK-OBJ:  Offset: 0x
+// CK-OBJ:  Size: 1
+// CK-OBJ:  Link: 0
+// CK-OBJ:  Info: 0
+// CK-OBJ:  AddressAlignment:
+// CK-OBJ:  EntrySize: 0
+// CK-OBJ: }
+// CK-OBJ: Section {
+// CK-OBJ:  Index:
+// CK-OBJ:  Name: __CLANG_OFFLOAD_BUNDLE__openmp-powerpc64le-ibm-linux-gnu (
+// CK-OBJ:  Type: SHT_PROGBITS (0x1)
+// CK-OBJ:  Flags [ (0x2)
+// CK-OBJ:    SHF_ALLOC (0x2)
+// CK-OBJ:  ]
+// CK-OBJ:  Address: 0x0
+// CK-OBJ:  Offset: 0x
+// CK-OBJ:  Size: 25
+// CK-OBJ:  Link: 0
+// CK-OBJ:  Info: 0
+// CK-OBJ:  AddressAlignment:
+// CK-OBJ:  EntrySize: 0
+// CK-OBJ: }
+// CK-OBJ: Section {
+// CK-OBJ:  Index:
+// CK-OBJ:  Name: __CLANG_OFFLOAD_BUNDLE__openmp-x86_64-pc-linux-gnu (
+// CK-OBJ:  Type: SHT_PROGBITS (0x1)
+// CK-OBJ:  Flags [ (0x2)
+// CK-OBJ:    SHF_ALLOC (0x2)
+// CK-OBJ:  ]
+// CK-OBJ:  Address: 0x0
+// CK-OBJ:  Offset: 0x
+// CK-OBJ:  Size: 25
+// CK-OBJ:  Link: 0
+// CK-OBJ:  Info: 0
+// CK-OBJ:  AddressAlignment:
+// CK-OBJ:  EntrySize: 0
+// CK-OBJ: }
+
+// Check if we can unbundle a file with no magic strings.
+// RUN: clang-offload-bundler -type=o -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.o,%t.res.tgt1,%t.res.tgt2 -inputs=%t.o -unbundle
+// RUN: diff %t.o %t.res.o
 // RUN: diff %t.empty %t.res.tgt1
 // RUN: diff %t.empty %t.res.tgt2
 
