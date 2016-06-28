@@ -1530,6 +1530,9 @@ class OffloadingActionBuilder {
     // are found.
     virtual bool initialize() { return false; }
 
+    // \brief Return true if the builder can use bundling/unbundling.
+    virtual bool canUseBundlerUnbundler() const { return false; }
+
     // \brief Return true if this builder is valid. We have a valid builder if
     // we have associated device tool chains.
     bool isValid() { return !ToolChains.empty(); }
@@ -1853,6 +1856,26 @@ class OffloadingActionBuilder {
       return ABRT_Success;
     }
 
+    void appendTopLevelActions(ActionList &AL) override {
+      if (OpenMPDeviceActions.empty())
+        return;
+
+      // We should always have an action for each input.
+      assert(OpenMPDeviceActions.size() == ToolChains.size() &&
+             "Number of OpenMP actions and toolchains do not match.");
+
+      // Append all device actions followed by the proper offload action.
+      auto TI = ToolChains.begin();
+      for (auto *A : OpenMPDeviceActions) {
+        OffloadAction::DeviceDependences Dep;
+        Dep.add(*A, **TI, /*BoundArch=*/nullptr, Action::OFK_OpenMP);
+        AL.push_back(C.MakeAction<OffloadAction>(Dep, A->getType()));
+        ++TI;
+      }
+      // We no longer need the action stored in this builder.
+      OpenMPDeviceActions.clear();
+    }
+
     void appendLinkDependences(OffloadAction::DeviceDependences &DA) override {
       assert(ToolChains.size() == DeviceLinkerInputs.size() &&
              "Toolchains and linker inputs sizes do not match.");
@@ -1879,6 +1902,11 @@ class OffloadingActionBuilder {
       DeviceLinkerInputs.resize(ToolChains.size());
       return false;
     }
+
+    bool canUseBundlerUnbundler() const override {
+      // OpenMP should use bundled files whenever possible.
+      return true;
+    }
   };
 
   ///
@@ -1887,6 +1915,10 @@ class OffloadingActionBuilder {
 
   /// \brief Specialized builders being used by this offloading action builder.
   SmallVector<DeviceActionBuilder *, 4> SpecializedBuilders;
+
+  /// \brief Flag set to true if all valid builders allow file
+  /// bundling/unbundling.
+  bool CanUseBundler;
 
 public:
   OffloadingActionBuilder(Compilation &C, DerivedArgList &Args,
@@ -1906,9 +1938,22 @@ public:
     // TODO: Build other specialized builders here.
     //
 
-    // Initialize all the builders, keeping track of errors.
-    for (auto *SB : SpecializedBuilders)
+    // Initialize all the builders, keeping track of errors. If all valid
+    // builders agree that we can use bundling, set the flag to true.
+    unsigned ValidBuilders = 0u;
+    unsigned ValidBuildersSupportingBundling = 0u;
+    for (auto *SB : SpecializedBuilders) {
       IsValid = IsValid && !SB->initialize();
+
+      // Update the counters if the builder is valid.
+      if (SB->isValid()) {
+        ++ValidBuilders;
+        if (SB->canUseBundlerUnbundler())
+          ++ValidBuildersSupportingBundling;
+      }
+    }
+    CanUseBundler =
+        ValidBuilders && ValidBuilders == ValidBuildersSupportingBundling;
   }
 
   ~OffloadingActionBuilder() {
@@ -2008,17 +2053,31 @@ public:
   }
 
   /// \brief Add the offloading top level actions to the provided action list.
+  /// This function can replace the host action by a bundling action if the
+  /// programming models allow it.
   bool appendTopLevelActions(ActionList &AL, Action *HostAction,
                              const Arg *InputArg) {
-    auto NumActions = AL.size();
-
+    // Get the device actions to be appended.
+    ActionList OffloadAL;
     for (auto *SB : SpecializedBuilders) {
       if (!SB->isValid())
         continue;
-      SB->appendTopLevelActions(AL);
+      SB->appendTopLevelActions(OffloadAL);
     }
 
-    assert(NumActions <= AL.size() && "Expecting more actions, not less!");
+    // If we can use the bundler, replace the host action by the bundling one in
+    // the resulting list. Otherwise, just append the device actions.
+    if (CanUseBundler && !OffloadAL.empty()) {
+      // Add the host action to the list in order to create the bundling action.
+      OffloadAL.push_back(HostAction);
+
+      // We expect that the host action was just appended to the action list
+      // before this method was called.
+      assert(HostAction == AL.back() && "Host action not in the list??");
+      HostAction = C.MakeAction<OffloadBundlingJobAction>(OffloadAL);
+      AL.back() = HostAction;
+    } else
+      AL.append(OffloadAL.begin(), OffloadAL.end());
 
     // Propagate to the current host action (if any) the offload information
     // associated with the current input.
@@ -2027,8 +2086,8 @@ public:
                                            /*BoundArch=*/nullptr);
 
     // If any action is added by the builders, -o is ambiguous if we have more
-    // than one top-level action.
-    if (NumActions < AL.size() && Args.hasArg(options::OPT_o) &&
+    // than one top-level action. If a bundler is used, there is no ambiguity.
+    if (!CanUseBundler && !OffloadAL.empty() && Args.hasArg(options::OPT_o) &&
         AL.size() > 1) {
       C.getDriver().Diag(
           clang::diag::err_drv_output_argument_with_multiple_files);
