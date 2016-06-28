@@ -2907,19 +2907,19 @@ public:
     return T->getStmtClass() == OMPDistributeParallelForDirectiveClass;
   }
 
-  /// \brief Loop iteration variable init for distribute loop only when combined
-  /// with for directive in same construct.
-  Expr *DistIncExpr;
-
-  /// \brief EnsureUpperBound for #for-- expression LB = PrevUB;
-  Expr *PrevEUBExpr;
-
   Expr *getDistInc() const { return DistIncExpr; }
   Expr *getPrevEnsureUpperBound() const { return PrevEUBExpr; }
 
 protected:
   void setDistInc(Expr *DistInc) { DistIncExpr = DistInc; }
   void setPrevEnsureUpperBound(Expr *PrevEUB) { PrevEUBExpr = PrevEUB; }
+
+  /// \brief Loop iteration variable init for distribute loop only when combined
+  /// with for directive in same construct.
+  Expr *DistIncExpr;
+
+  /// \brief EnsureUpperBound for #for-- expression LB = PrevUB;
+  Expr *PrevEUBExpr;
 };
 
 /// \brief This represents '#pragma omp target teams' directive.
