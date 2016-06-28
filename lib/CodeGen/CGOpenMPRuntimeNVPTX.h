@@ -119,6 +119,16 @@ public:
     QualType WorkerWarpRecordType;
   };
 
+  /// \brief Specialization of codegen based on Programming models of the
+  /// OpenMP construct.
+  enum ExecutionMode {
+    /// \brief Single Program Multiple Data.
+    SPMD,
+    /// \brief Generic codegen to support fork-join model.
+    GENERIC,
+    Unknown,
+  };
+
 private:
   // \brief Map between a context and its data sharing information.
   typedef llvm::DenseMap<const Decl *, DataSharingInfo> DataSharingInfoMapTy;
@@ -290,6 +300,10 @@ private:
   // Track parallel nesting level.
   int ParallelNestingLevel;
 
+  // The current codegen mode.  This is used to customize code generation of
+  // certain constructs.
+  ExecutionMode CurrMode;
+
   /// \brief Emit the worker function for the current target region.
   void emitWorkerFunction(WorkerFunctionState &WST);
 
@@ -306,7 +320,8 @@ private:
   void emitGenericEntryFooter(CodeGenFunction &CGF, EntryFunctionState &EST);
 
   /// \brief Helper for SPMD target entry function.
-  void emitSPMDEntryHeader(CodeGenFunction &CGF, EntryFunctionState &EST);
+  void emitSPMDEntryHeader(CodeGenFunction &CGF, EntryFunctionState &EST,
+                           const OMPExecutableDirective &D);
 
   /// \brief Signal termination of SPMD OMP execution.
   void emitSPMDEntryFooter(CodeGenFunction &CGF, EntryFunctionState &EST);
@@ -380,6 +395,20 @@ private:
                                   bool IsOffloadEntry,
                                   const RegionCodeGenTy &CodeGen) override;
 
+  /// \brief Emits call to void __kmpc_push_num_threads(ident_t *loc, kmp_int32
+  /// global_tid, kmp_int32 num_threads) to generate code for 'num_threads'
+  /// clause.
+  /// \param NumThreads An integer value of threads.
+  virtual void emitNumThreadsClause(CodeGenFunction &CGF,
+                                    llvm::Value *NumThreads,
+                                    SourceLocation Loc) override;
+
+  /// \brief Emit call to void __kmpc_push_proc_bind(ident_t *loc, kmp_int32
+  /// global_tid, int proc_bind) to generate code for 'proc_bind' clause.
+  virtual void emitProcBindClause(CodeGenFunction &CGF,
+                                  OpenMPProcBindClauseKind ProcBind,
+                                  SourceLocation Loc) override;
+
   /// \brief Emit the code that each thread requires to execute when it
   /// encounters one of the three possible parallelism level. This also emits
   /// the required data sharing code for each level.
@@ -394,11 +423,37 @@ private:
                                 const RegionCodeGenTy &Level1,
                                 const RegionCodeGenTy &Sequential);
 
-  //  // \brief Initialize state on entry to a target region.
-  //  void enterTarget();
-  //
-  //  // \brief Reset state on exit from a target region.
-  //  void exitTarget();
+  /// \brief Emits code for parallel or serial call of the \a OutlinedFn with
+  /// variables captured in a record which address is stored in \a
+  /// CapturedStruct.
+  /// This call is for the Generic Execution Mode.
+  /// \param OutlinedFn Outlined function to be run in parallel threads. Type of
+  /// this function is void(*)(kmp_int32 *, kmp_int32, struct context_vars*).
+  /// \param CapturedVars A pointer to the record with the references to
+  /// variables used in \a OutlinedFn function.
+  /// \param IfCond Condition in the associated 'if' clause, if it was
+  /// specified, nullptr otherwise.
+  ///
+  void emitGenericParallelCall(CodeGenFunction &CGF, SourceLocation Loc,
+                               llvm::Value *OutlinedFn,
+                               ArrayRef<llvm::Value *> CapturedVars,
+                               const Expr *IfCond);
+
+  /// \brief Emits code for parallel or serial call of the \a OutlinedFn with
+  /// variables captured in a record which address is stored in \a
+  /// CapturedStruct.
+  /// This call is for the SPMD Execution Mode.
+  /// \param OutlinedFn Outlined function to be run in parallel threads. Type of
+  /// this function is void(*)(kmp_int32 *, kmp_int32, struct context_vars*).
+  /// \param CapturedVars A pointer to the record with the references to
+  /// variables used in \a OutlinedFn function.
+  /// \param IfCond Condition in the associated 'if' clause, if it was
+  /// specified, nullptr otherwise.
+  ///
+  void emitSPMDParallelCall(CodeGenFunction &CGF, SourceLocation Loc,
+                            llvm::Value *OutlinedFn,
+                            ArrayRef<llvm::Value *> CapturedVars,
+                            const Expr *IfCond);
 
   // \brief Test if a construct is always encountered at nesting level 0.
   bool InL0();
@@ -413,6 +468,10 @@ private:
   // \brief Test if the nesting level at which a construct is encountered is
   // indeterminate.  This happens for orphaned parallel directives.
   bool IndeterminateLevel();
+
+  // \brief Test if we are codegen'ing a target construct in generic or spmd
+  // mode.
+  bool IsSPMDExecutionMode();
 
 public:
   explicit CGOpenMPRuntimeNVPTX(CodeGenModule &CGM);

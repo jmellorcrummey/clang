@@ -3586,17 +3586,22 @@ static void emitCommonOMPTargetDirective(CodeGenFunction &CGF,
                                         CapturedVars);
 }
 
+void TargetCodegen(CodeGenFunction &CGF, PrePostActionTy &Action,
+                   const OMPTargetDirective &S) {
+  CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
+  (void)CGF.EmitOMPFirstprivateClause(S, PrivateScope);
+  CGF.EmitOMPPrivateClause(S, PrivateScope);
+  (void)PrivateScope.Privatize();
+
+  Action.Enter(CGF);
+  CGF.EmitStmt(cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
+}
+
 void CodeGenFunction::EmitOMPTargetDeviceFunction(CodeGenModule &CGM,
                                                   StringRef ParentName,
                                                   const OMPTargetDirective &S) {
   auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
-    OMPPrivateScope PrivateScope(CGF);
-    (void)CGF.EmitOMPFirstprivateClause(S, PrivateScope);
-    CGF.EmitOMPPrivateClause(S, PrivateScope);
-    (void)PrivateScope.Privatize();
-
-    Action.Enter(CGF);
-    CGF.EmitStmt(cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
+    TargetCodegen(CGF, Action, S);
   };
   llvm::Function *Fn;
   llvm::Constant *Addr;
@@ -3608,32 +3613,34 @@ void CodeGenFunction::EmitOMPTargetDeviceFunction(CodeGenModule &CGM,
 
 void CodeGenFunction::EmitOMPTargetDirective(const OMPTargetDirective &S) {
   auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
-    OMPPrivateScope PrivateScope(CGF);
-    (void)CGF.EmitOMPFirstprivateClause(S, PrivateScope);
-    CGF.EmitOMPPrivateClause(S, PrivateScope);
-    (void)PrivateScope.Privatize();
-
-    Action.Enter(CGF);
-    CGF.EmitStmt(cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
+    TargetCodegen(CGF, Action, S);
   };
   emitCommonOMPTargetDirective(*this, S, OMPD_target, CodeGen);
+}
+
+void TargetParallelCodegen(CodeGenFunction &CGF, PrePostActionTy &Action,
+                           const OMPTargetParallelDirective &S) {
+  Action.Enter(CGF);
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+    CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
+    (void)CGF.EmitOMPFirstprivateClause(S, PrivateScope);
+    CGF.EmitOMPPrivateClause(S, PrivateScope);
+    CGF.EmitOMPReductionClauseInit(S, PrivateScope);
+    (void)PrivateScope.Privatize();
+    CGF.EmitStmt(cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
+    CGF.EmitOMPReductionClauseFinal(S);
+  };
+  emitCommonOMPParallelDirective(CGF, S, OMPD_parallel, CodeGen,
+                                 /*CaptureLevel=*/2);
+  emitPostUpdateForReductionClause(
+      CGF, S, [](CodeGenFunction &) -> llvm::Value * { return nullptr; });
 }
 
 void CodeGenFunction::EmitOMPTargetParallelDeviceFunction(
     CodeGenModule &CGM, StringRef ParentName,
     const OMPTargetParallelDirective &S) {
-  // Emit SPMD target parallel region as a standalone region.
   auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
-    Action.Enter(CGF);
-    OMPPrivateScope PrivateScope(CGF);
-    (void)CGF.EmitOMPFirstprivateClause(S, PrivateScope);
-    CGF.EmitOMPPrivateClause(S, PrivateScope);
-    //    CGF.EmitOMPReductionClauseInit(S, PrivateScope);
-    (void)PrivateScope.Privatize();
-    CGF.EmitStmt(cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
-    //    CGF.EmitOMPReductionClauseFinal(S);
-    //  emitPostUpdateForReductionClause(
-    //      CGF, S, [](CodeGenFunction &) -> llvm::Value * { return nullptr; });
+    TargetParallelCodegen(CGF, Action, S);
   };
   llvm::Function *Fn;
   llvm::Constant *Addr;
@@ -3645,32 +3652,22 @@ void CodeGenFunction::EmitOMPTargetParallelDeviceFunction(
 
 void CodeGenFunction::EmitOMPTargetParallelDirective(
     const OMPTargetParallelDirective &S) {
-  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-    auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-      OMPPrivateScope PrivateScope(CGF);
-      bool Copyins = CGF.EmitOMPCopyinClause(S);
-      (void)CGF.EmitOMPFirstprivateClause(S, PrivateScope);
-      if (Copyins) {
-        // Emit implicit barrier to synchronize threads and avoid data races on
-        // propagation master's thread values of threadprivate variables to
-        // local instances of that variables of all other implicit threads.
-        CGF.CGM.getOpenMPRuntime().emitBarrierCall(
-            CGF, S.getLocStart(), OMPD_unknown, /*EmitChecks=*/false,
-            /*ForceSimpleCall=*/true);
-      }
-      CGF.EmitOMPPrivateClause(S, PrivateScope);
-      CGF.EmitOMPReductionClauseInit(S, PrivateScope);
-      (void)PrivateScope.Privatize();
-      CGF.EmitStmt(
-          cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
-      CGF.EmitOMPReductionClauseFinal(S);
-    };
-    emitCommonOMPParallelDirective(CGF, S, OMPD_parallel, CodeGen,
-                                   /*CaptureLevel=*/2);
-    emitPostUpdateForReductionClause(
-        CGF, S, [](CodeGenFunction &) -> llvm::Value * { return nullptr; });
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
+    TargetParallelCodegen(CGF, Action, S);
   };
   emitCommonOMPTargetDirective(*this, S, OMPD_target_parallel, CodeGen);
+}
+
+void TargetParallelForCodegen(CodeGenFunction &CGF, PrePostActionTy &Action,
+                              const OMPTargetParallelForDirective &S) {
+  Action.Enter(CGF);
+  // Emit directive as a combined directive that consists of two implicit
+  // directives: 'parallel' with 'for' directive.
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+    CGF.EmitOMPWorksharingLoop(S);
+  };
+  emitCommonOMPParallelDirective(CGF, S, OMPD_parallel_for, CodeGen,
+                                 /*CaptureLevel=*/2);
 }
 
 void CodeGenFunction::EmitOMPTargetParallelForDeviceFunction(
@@ -3678,8 +3675,7 @@ void CodeGenFunction::EmitOMPTargetParallelForDeviceFunction(
     const OMPTargetParallelForDirective &S) {
   // Emit SPMD target parallel for region as a standalone region.
   auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
-    Action.Enter(CGF);
-    CGF.EmitOMPWorksharingLoop(S);
+    TargetParallelForCodegen(CGF, Action, S);
   };
   llvm::Function *Fn;
   llvm::Constant *Addr;
@@ -3691,14 +3687,8 @@ void CodeGenFunction::EmitOMPTargetParallelForDeviceFunction(
 
 void CodeGenFunction::EmitOMPTargetParallelForDirective(
     const OMPTargetParallelForDirective &S) {
-  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-    // Emit directive as a combined directive that consists of two implicit
-    // directives: 'parallel' with 'for' directive.
-    auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-      CGF.EmitOMPWorksharingLoop(S);
-    };
-    emitCommonOMPParallelDirective(CGF, S, OMPD_parallel_for, CodeGen,
-                                   /*CaptureLevel=*/2);
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
+    TargetParallelForCodegen(CGF, Action, S);
   };
   emitCommonOMPTargetDirective(*this, S, OMPD_target_parallel_for, CodeGen);
 }

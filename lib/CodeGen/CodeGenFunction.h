@@ -2447,10 +2447,14 @@ private:
   void EmitOMPSimdFinal(
       const OMPLoopDirective &D,
       const llvm::function_ref<llvm::Value *(CodeGenFunction &)> &CondGen);
+
+public:
   /// \brief Emit code for the worksharing loop-based directive.
   /// \return true, if this construct has any lastprivate clause, false -
   /// otherwise.
   bool EmitOMPWorksharingLoop(const OMPLoopDirective &S);
+
+private:
   void EmitOMPOuterLoop(bool IsMonotonic, bool DynamicOrOrdered,
                         bool IsDistribute, const OMPLoopDirective &S,
                         OMPPrivateScope &LoopScope, bool Ordered, Address LB,
