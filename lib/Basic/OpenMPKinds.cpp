@@ -687,7 +687,8 @@ bool clang::isOpenMPSimdDirective(OpenMPDirectiveKind DKind) {
 }
 
 bool clang::isOpenMPDistributeDirective(OpenMPDirectiveKind Kind) {
-  return Kind == OMPD_distribute; // TODO add next directives.
+  return Kind == OMPD_distribute ||
+         Kind == OMPD_distribute_parallel_for; // TODO add next directives.
 }
 
 bool clang::isOpenMPPrivate(OpenMPClauseKind Kind) {

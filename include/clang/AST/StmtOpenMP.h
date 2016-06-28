@@ -299,9 +299,11 @@ class OMPLoopDirective : public OMPExecutableDirective {
   /// This enumeration contains offsets to all the pointers to children
   /// expressions stored in OMPLoopDirective.
   /// The first 9 children are nesessary for all the loop directives, and
-  /// the next 7 are specific to the worksharing ones.
+  /// the next 10 are specific to the worksharing ones.
   /// After the fixed children, three arrays of length CollapsedNum are
   /// allocated: loop counters, their updates and final values.
+  /// PrevLowerBound and PrevUpperBound are used to communicate blocking
+  /// information in composite constructs which require loop blocking
   ///
   enum {
     AssociatedStmtOffset = 0,
@@ -323,13 +325,13 @@ class OMPLoopDirective : public OMPExecutableDirective {
     IsLastIterVariableOffset = 11,
     LowerBoundVariableOffset = 12,
     UpperBoundVariableOffset = 13,
-    PrevLowerBoundVariableOffset = 14,
-    PrevUpperBoundVariableOffset = 15,
-    StrideVariableOffset = 16,
-    EnsureUpperBoundOffset = 17,
-    NextLowerBoundOffset = 18,
-    NextUpperBoundOffset = 19,
-    NumIterationsOffset = 20,
+    StrideVariableOffset = 14,
+    EnsureUpperBoundOffset = 15,
+    NextLowerBoundOffset = 16,
+    NextUpperBoundOffset = 17,
+    NumIterationsOffset = 18,
+    PrevLowerBoundVariableOffset = 19,
+    PrevUpperBoundVariableOffset = 20,
     // Offset to the end (and start of the following counters/updates/finals
     // arrays) for worksharing loop directives.
     WorksharingEnd = 21,
@@ -458,20 +460,6 @@ protected:
            "expected worksharing loop directive");
     *std::next(child_begin(), UpperBoundVariableOffset) = UB;
   }
-  void setPrevLowerBoundVariable(Expr *PrevLB) {
-    assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
-            isOpenMPTaskLoopDirective(getDirectiveKind()) ||
-            isOpenMPDistributeDirective(getDirectiveKind())) &&
-           "expected worksharing loop directive");
-    *std::next(child_begin(), PrevLowerBoundVariableOffset) = PrevLB;
-  }
-  void setPrevUpperBoundVariable(Expr *PrevUB) {
-    assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
-            isOpenMPTaskLoopDirective(getDirectiveKind()) ||
-            isOpenMPDistributeDirective(getDirectiveKind())) &&
-           "expected worksharing loop directive");
-    *std::next(child_begin(), PrevUpperBoundVariableOffset) = PrevUB;
-  }
   void setStrideVariable(Expr *ST) {
     assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
             isOpenMPTaskLoopDirective(getDirectiveKind()) ||
@@ -506,6 +494,20 @@ protected:
             isOpenMPDistributeDirective(getDirectiveKind())) &&
            "expected worksharing loop directive");
     *std::next(child_begin(), NumIterationsOffset) = NI;
+  }
+  void setPrevLowerBoundVariable(Expr *PrevLB) {
+    assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
+            isOpenMPTaskLoopDirective(getDirectiveKind()) ||
+            isOpenMPDistributeDirective(getDirectiveKind())) &&
+           "expected worksharing loop directive");
+    *std::next(child_begin(), PrevLowerBoundVariableOffset) = PrevLB;
+  }
+  void setPrevUpperBoundVariable(Expr *PrevUB) {
+    assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
+            isOpenMPTaskLoopDirective(getDirectiveKind()) ||
+            isOpenMPDistributeDirective(getDirectiveKind())) &&
+           "expected worksharing loop directive");
+    *std::next(child_begin(), PrevUpperBoundVariableOffset) = PrevUB;
   }
   void setCounters(ArrayRef<Expr *> A);
   void setPrivateCounters(ArrayRef<Expr *> A);
@@ -543,12 +545,6 @@ public:
     Expr *LB;
     /// \brief UpperBound - local variable passed to runtime.
     Expr *UB;
-    /// \brief PreviousLowerBound - local variable passed to runtime in the
-    /// enclosing schedule or null if that does not apply.
-    Expr *PrevLB;
-    /// \brief PreviousUpperBound - local variable passed to runtime in the
-    /// enclosing schedule or null if that does not apply.
-    Expr *PrevUB;
     /// \brief Stride - local variable passed to runtime.
     Expr *ST;
     /// \brief EnsureUpperBound -- expression LB = min(LB, NumIterations).
@@ -557,6 +553,12 @@ public:
     Expr *NLB;
     /// \brief Update of UpperBound for statically sheduled 'omp for' loops.
     Expr *NUB;
+    /// \brief PreviousLowerBound - local variable passed to runtime in the
+    /// enclosing schedule or null if that does not apply.
+    Expr *PrevLB;
+    /// \brief PreviousUpperBound - local variable passed to runtime in the
+    /// enclosing schedule or null if that does not apply.
+    Expr *PrevUB;
     /// \brief Counters Loop counters.
     SmallVector<Expr *, 4> Counters;
     /// \brief PrivateCounters Loop counters.
@@ -597,9 +599,9 @@ public:
       EUB = nullptr;
       NLB = nullptr;
       NUB = nullptr;
+      NumIterations = nullptr;
       PrevLB = nullptr;
       PrevUB = nullptr;
-      NumIterations = nullptr;
       Counters.resize(Size);
       PrivateCounters.resize(Size);
       Inits.resize(Size);
@@ -683,22 +685,6 @@ public:
     return const_cast<Expr *>(reinterpret_cast<const Expr *>(
         *std::next(child_begin(), UpperBoundVariableOffset)));
   }
-  Expr *getPrevLowerBoundVariable() const {
-    assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
-            isOpenMPTaskLoopDirective(getDirectiveKind()) ||
-            isOpenMPDistributeDirective(getDirectiveKind())) &&
-           "expected worksharing loop directive");
-    return const_cast<Expr *>(reinterpret_cast<const Expr *>(
-        *std::next(child_begin(), PrevLowerBoundVariableOffset)));
-  }
-  Expr *getPrevUpperBoundVariable() const {
-    assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
-            isOpenMPTaskLoopDirective(getDirectiveKind()) ||
-            isOpenMPDistributeDirective(getDirectiveKind())) &&
-           "expected worksharing loop directive");
-    return const_cast<Expr *>(reinterpret_cast<const Expr *>(
-        *std::next(child_begin(), PrevUpperBoundVariableOffset)));
-  }
   Expr *getStrideVariable() const {
     assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
             isOpenMPTaskLoopDirective(getDirectiveKind()) ||
@@ -738,6 +724,22 @@ public:
            "expected worksharing loop directive");
     return const_cast<Expr *>(reinterpret_cast<const Expr *>(
         *std::next(child_begin(), NumIterationsOffset)));
+  }
+  Expr *getPrevLowerBoundVariable() const {
+    assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
+            isOpenMPTaskLoopDirective(getDirectiveKind()) ||
+            isOpenMPDistributeDirective(getDirectiveKind())) &&
+           "expected worksharing loop directive");
+    return const_cast<Expr *>(reinterpret_cast<const Expr *>(
+        *std::next(child_begin(), PrevLowerBoundVariableOffset)));
+  }
+  Expr *getPrevUpperBoundVariable() const {
+    assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
+            isOpenMPTaskLoopDirective(getDirectiveKind()) ||
+            isOpenMPDistributeDirective(getDirectiveKind())) &&
+           "expected worksharing loop directive");
+    return const_cast<Expr *>(reinterpret_cast<const Expr *>(
+        *std::next(child_begin(), PrevUpperBoundVariableOffset)));
   }
   const Stmt *getBody() const {
     // This relies on the loop form is already checked by Sema.

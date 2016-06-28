@@ -3008,6 +3008,13 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
     break;
   }
 
+  case CXXInheritedCtorInitExprClass: {
+    const auto *ICIE = cast<CXXInheritedCtorInitExpr>(this);
+    if (!ICIE->getConstructor()->isTrivial() && IncludePossibleEffects)
+      return true;
+    break;
+  }
+
   case LambdaExprClass: {
     const LambdaExpr *LE = cast<LambdaExpr>(this);
     for (LambdaExpr::capture_iterator I = LE->capture_begin(),
@@ -3510,8 +3517,7 @@ IdentifierInfo *DesignatedInitExpr::Designator::getFieldName() const {
 }
 
 DesignatedInitExpr::DesignatedInitExpr(const ASTContext &C, QualType Ty,
-                                       unsigned NumDesignators,
-                                       const Designator *Designators,
+                                       llvm::ArrayRef<Designator> Designators,
                                        SourceLocation EqualOrColonLoc,
                                        bool GNUSyntax,
                                        ArrayRef<Expr*> IndexExprs,
@@ -3522,7 +3528,7 @@ DesignatedInitExpr::DesignatedInitExpr(const ASTContext &C, QualType Ty,
          Init->isInstantiationDependent(),
          Init->containsUnexpandedParameterPack()),
     EqualOrColonLoc(EqualOrColonLoc), GNUSyntax(GNUSyntax),
-    NumDesignators(NumDesignators), NumSubExprs(IndexExprs.size() + 1) {
+    NumDesignators(Designators.size()), NumSubExprs(IndexExprs.size() + 1) {
   this->Designators = new (C) Designator[NumDesignators];
 
   // Record the initializer itself.
@@ -3576,14 +3582,14 @@ DesignatedInitExpr::DesignatedInitExpr(const ASTContext &C, QualType Ty,
 }
 
 DesignatedInitExpr *
-DesignatedInitExpr::Create(const ASTContext &C, Designator *Designators,
-                           unsigned NumDesignators,
+DesignatedInitExpr::Create(const ASTContext &C,
+                           llvm::ArrayRef<Designator> Designators,
                            ArrayRef<Expr*> IndexExprs,
                            SourceLocation ColonOrEqualLoc,
                            bool UsesColonSyntax, Expr *Init) {
   void *Mem = C.Allocate(totalSizeToAlloc<Stmt *>(IndexExprs.size() + 1),
                          llvm::alignOf<DesignatedInitExpr>());
-  return new (Mem) DesignatedInitExpr(C, C.VoidTy, NumDesignators, Designators,
+  return new (Mem) DesignatedInitExpr(C, C.VoidTy, Designators,
                                       ColonOrEqualLoc, UsesColonSyntax,
                                       IndexExprs, Init);
 }
@@ -3614,8 +3620,8 @@ SourceRange DesignatedInitExpr::getDesignatorsSourceRange() const {
 
 SourceLocation DesignatedInitExpr::getLocStart() const {
   SourceLocation StartLoc;
-  Designator &First =
-    *const_cast<DesignatedInitExpr*>(this)->designators_begin();
+  auto *DIE = const_cast<DesignatedInitExpr *>(this);
+  Designator &First = *DIE->getDesignator(0);
   if (First.isFieldDesignator()) {
     if (GNUSyntax)
       StartLoc = SourceLocation::getFromRawEncoding(First.Field.FieldLoc);

@@ -184,6 +184,7 @@ void ASTStmtReader::VisitAttributedStmt(AttributedStmt *S) {
 
 void ASTStmtReader::VisitIfStmt(IfStmt *S) {
   VisitStmt(S);
+  S->setConstexpr(Record[Idx++]);
   S->setConditionVariable(Reader.getContext(),
                           ReadDeclAs<VarDecl>(Record, Idx));
   S->setCond(Reader.ReadSubExpr());
@@ -1247,6 +1248,14 @@ void ASTStmtReader::VisitCXXConstructExpr(CXXConstructExpr *E) {
   E->setRequiresZeroInitialization(Record[Idx++]);
   E->setConstructionKind((CXXConstructExpr::ConstructionKind)Record[Idx++]);
   E->ParenOrBraceRange = ReadSourceRange(Record, Idx);
+}
+
+void ASTStmtReader::VisitCXXInheritedCtorInitExpr(CXXInheritedCtorInitExpr *E) {
+  VisitExpr(E);
+  E->Constructor = ReadDeclAs<CXXConstructorDecl>(Record, Idx);
+  E->Loc = ReadSourceLocation(Record, Idx);
+  E->ConstructsVirtualBase = Record[Idx++];
+  E->InheritedFromVirtualBase = Record[Idx++];
 }
 
 void ASTStmtReader::VisitCXXTemporaryObjectExpr(CXXTemporaryObjectExpr *E) {
@@ -2468,8 +2477,6 @@ void ASTStmtReader::VisitOMPLoopDirective(OMPLoopDirective *D) {
     D->setIsLastIterVariable(Reader.ReadSubExpr());
     D->setLowerBoundVariable(Reader.ReadSubExpr());
     D->setUpperBoundVariable(Reader.ReadSubExpr());
-    D->setPrevLowerBoundVariable(Reader.ReadSubExpr());
-    D->setPrevUpperBoundVariable(Reader.ReadSubExpr());
     D->setStrideVariable(Reader.ReadSubExpr());
     D->setEnsureUpperBound(Reader.ReadSubExpr());
     D->setNextLowerBound(Reader.ReadSubExpr());
@@ -2477,8 +2484,8 @@ void ASTStmtReader::VisitOMPLoopDirective(OMPLoopDirective *D) {
     D->setNumIterations(Reader.ReadSubExpr());
   }
   if (isOpenMPLoopBoundSharingDirective(D->getDirectiveKind())) {
-      D->setPrevLowerBoundVariable(Reader.ReadSubExpr());
-      D->setPrevUpperBoundVariable(Reader.ReadSubExpr());
+    D->setPrevLowerBoundVariable(Reader.ReadSubExpr());
+    D->setPrevUpperBoundVariable(Reader.ReadSubExpr());
   }
   SmallVector<Expr *, 4> Sub;
   unsigned CollapsedNum = D->getCollapsedNumber();
@@ -2712,7 +2719,6 @@ void ASTStmtReader::VisitOMPTargetUpdateDirective(OMPTargetUpdateDirective *D) {
   ++Idx;
   VisitOMPExecutableDirective(D);
 }
-
 void ASTStmtReader::VisitOMPDistributeParallelForDirective(
     OMPDistributeParallelForDirective *D) {
   VisitOMPLoopDirective(D);
@@ -3449,6 +3455,10 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
 
     case EXPR_CXX_CONSTRUCT:
       S = new (Context) CXXConstructExpr(Empty);
+      break;
+
+    case EXPR_CXX_INHERITED_CTOR_INIT:
+      S = new (Context) CXXInheritedCtorInitExpr(Empty);
       break;
 
     case EXPR_CXX_TEMPORARY_OBJECT:
