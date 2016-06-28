@@ -1833,6 +1833,17 @@ class OffloadingActionBuilder {
         return ABRT_Success;
       }
 
+      // If this is an unbundling action use it as is for each OpenMP toolchain.
+      if (auto *UA = dyn_cast<OffloadUnbundlingJobAction>(HostAction)) {
+        OpenMPDeviceActions.clear();
+        for (unsigned I = 0; I < ToolChains.size(); ++I) {
+          OpenMPDeviceActions.push_back(UA);
+          UA->registerDependingActionInfo(ToolChains[I], /*BoundArch=*/nullptr,
+                                          Action::OFK_OpenMP);
+        }
+        return ABRT_Success;
+      }
+
       // When generating code for OpenMP we use the host compile phase result as
       // dependence to the device compile phase so that it can learn what
       // declaration should be emitted. However, this is not the only use for
@@ -2021,12 +2032,27 @@ public:
   }
 
   /// \brief Generate an action that adds a host dependence to a device action.
-  /// The results will be kept in this action builder. Return true if an error
+  /// The results will be kept in this action builder. This method will replace
+  /// the host action if a unbundling action is legal. Return true if an error
   /// was found.
-  bool addHostDependenceToDeviceActions(Action *HostAction,
+  bool addHostDependenceToDeviceActions(Action *&HostAction,
                                         const Arg *InputArg) {
     if (!IsValid)
       return true;
+
+    // If we are supporting bundling/unbundling and the current action is an
+    // input action of non-source file, we replace the host action by the
+    // unbundling action.
+    if (CanUseBundler && isa<InputAction>(HostAction) &&
+        InputArg->getOption().getKind() == llvm::opt::Option::InputClass &&
+        !types::isSrcFile(HostAction->getType())) {
+      auto UnbundlingHostAction =
+          C.MakeAction<OffloadUnbundlingJobAction>(HostAction);
+      UnbundlingHostAction->registerDependingActionInfo(
+          C.getSingleOffloadToolChain<Action::OFK_Host>(),
+          /*BoundArch=*/nullptr, Action::OFK_Host);
+      HostAction = UnbundlingHostAction;
+    }
 
     assert(HostAction && "Invalid host action!");
 

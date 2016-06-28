@@ -66,9 +66,10 @@ public:
     VerifyDebugInfoJobClass,
     VerifyPCHJobClass,
     OffloadBundlingJobClass,
+    OffloadUnbundlingJobClass,
 
     JobClassFirst = PreprocessJobClass,
-    JobClassLast = OffloadBundlingJobClass
+    JobClassLast = OffloadUnbundlingJobClass
   };
 
   // The offloading kind determines if this action is binded to a particular
@@ -489,6 +490,45 @@ public:
   }
 };
 
+class OffloadUnbundlingJobAction : public JobAction {
+  void anchor() override;
+
+public:
+  /// \brief Type that provides information about the actions that depend on
+  /// this unbundling action.
+  struct DependingActionInfoTy {
+    /// \brief The tool chain of the depending action.
+    const ToolChain *DependingToolChain;
+    /// \brief The bound architecture of the depending action.
+    const char *DependingBoundArch;
+    /// \brief The offload kind of the depending action.
+    const OffloadKind DependingOffloadKind;
+  };
+
+private:
+  /// \brief Constainer that kepps information about each dependence of this
+  /// unbundling action.
+  SmallVector<DependingActionInfoTy, 6> DependingActionInfo;
+
+public:
+  // Offloading unbundling doesn't change the type of output.
+  OffloadUnbundlingJobAction(Action *Input);
+
+  /// \brief Register information about a depending action.
+  void registerDependingActionInfo(const ToolChain *TC, const char *BoundArch,
+                                   OffloadKind Kind) {
+    DependingActionInfo.push_back({TC, BoundArch, Kind});
+  }
+
+  /// \brief Return the information about all depending actions.
+  ArrayRef<DependingActionInfoTy> getDependingActionsInfo() const {
+    return DependingActionInfo;
+  }
+
+  static bool classof(const Action *A) {
+    return A->getKind() == OffloadUnbundlingJobClass;
+  }
+};
 
 } // end namespace driver
 } // end namespace clang
