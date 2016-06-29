@@ -2394,7 +2394,8 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
       // Bounds are passed by value, so we need to load the data.
       auto LV = CGF.MakeNaturalAlignAddrLValue(Arg, L->getType());
       Arg = CGF.EmitLoadOfScalar(LV, SourceLocation());
-      Args.push_back(Arg);
+      auto ArgCast = CGF.Builder.CreateIntCast(Arg,CGF.SizeTy,/* isSigned = */ false);
+      Args.push_back(ArgCast);
       ++Idx;
     }
   });
