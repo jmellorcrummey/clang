@@ -141,7 +141,7 @@ static void getDarwinDefines(MacroBuilder &Builder, const LangOptions &Opts,
   unsigned Maj, Min, Rev;
   if (Triple.isMacOSX()) {
     Triple.getMacOSXVersion(Maj, Min, Rev);
-    PlatformName = "macosx";
+    PlatformName = "macos";
   } else {
     Triple.getOSVersion(Maj, Min, Rev);
     PlatformName = llvm::Triple::getOSTypeName(Triple.getOS());
@@ -734,6 +734,13 @@ protected:
 
       if (Opts.CPlusPlus11 && Opts.isCompatibleWithMSVC(LangOptions::MSVC2015))
         Builder.defineMacro("_HAS_CHAR16_T_LANGUAGE_SUPPORT", Twine(1));
+
+      if (Opts.isCompatibleWithMSVC(LangOptions::MSVC2015)) {
+        if (Opts.CPlusPlus1z)
+          Builder.defineMacro("_MSVC_LANG", "201403L");
+        else if (Opts.CPlusPlus14)
+          Builder.defineMacro("_MSVC_LANG", "201402L");
+      }
     }
 
     if (Opts.MicrosoftExt) {
@@ -1862,6 +1869,19 @@ public:
 
     return GPU != GK_NONE;
   }
+  void setSupportedOpenCLOpts() override {
+    auto &Opts = getSupportedOpenCLOpts();
+    Opts.cl_clang_storage_class_specifiers = 1;
+    Opts.cl_khr_gl_sharing = 1;
+    Opts.cl_khr_icd = 1;
+
+    Opts.cl_khr_fp64 = 1;
+    Opts.cl_khr_byte_addressable_store = 1;
+    Opts.cl_khr_global_int32_base_atomics = 1;
+    Opts.cl_khr_global_int32_extended_atomics = 1;
+    Opts.cl_khr_local_int32_base_atomics = 1;
+    Opts.cl_khr_local_int32_extended_atomics = 1;
+  }
 };
 
 const Builtin::Info NVPTXTargetInfo::BuiltinInfo[] = {
@@ -2029,6 +2049,8 @@ public:
       Builder.defineMacro("__HAS_FMAF__");
     if (hasLDEXPF)
       Builder.defineMacro("__HAS_LDEXPF__");
+    if (hasFP64)
+      Builder.defineMacro("__HAS_FP64__");
   }
 
   BuiltinVaListKind getBuiltinVaListKind() const override {
@@ -2094,29 +2116,26 @@ public:
     return GPU != GK_NONE;
   }
 
-   void setSupportedOpenCLOpts() override {
-     auto &Opts = getSupportedOpenCLOpts();
-     Opts.cl_clang_storage_class_specifiers = 1;
-     Opts.cl_khr_gl_sharing = 1;
-     Opts.cl_khr_gl_event = 1;
-     Opts.cl_khr_d3d10_sharing = 1;
-     Opts.cl_khr_subgroups = 1;
+  void setSupportedOpenCLOpts() override {
+    auto &Opts = getSupportedOpenCLOpts();
+    Opts.cl_clang_storage_class_specifiers = 1;
+    Opts.cl_khr_icd = 1;
 
-     if (hasFP64)
-       Opts.cl_khr_fp64 = 1;
-     if (GPU >= GK_NORTHERN_ISLANDS) {
-       Opts.cl_khr_byte_addressable_store = 1;
-       Opts.cl_khr_global_int32_base_atomics = 1;
-       Opts.cl_khr_global_int32_extended_atomics = 1;
-       Opts.cl_khr_local_int32_base_atomics = 1;
-       Opts.cl_khr_local_int32_extended_atomics = 1;
-     }
-     if (GPU >= GK_SOUTHERN_ISLANDS)
-       Opts.cl_khr_fp16 = 1;
-       Opts.cl_khr_int64_base_atomics = 1;
-       Opts.cl_khr_int64_extended_atomics = 1;
-       Opts.cl_khr_3d_image_writes = 1;
-       Opts.cl_khr_gl_msaa_sharing = 1;
+    if (hasFP64)
+      Opts.cl_khr_fp64 = 1;
+    if (GPU >= GK_EVERGREEN) {
+      Opts.cl_khr_byte_addressable_store = 1;
+      Opts.cl_khr_global_int32_base_atomics = 1;
+      Opts.cl_khr_global_int32_extended_atomics = 1;
+      Opts.cl_khr_local_int32_base_atomics = 1;
+      Opts.cl_khr_local_int32_extended_atomics = 1;
+    }
+    if (GPU >= GK_SOUTHERN_ISLANDS) {
+      Opts.cl_khr_fp16 = 1;
+      Opts.cl_khr_int64_base_atomics = 1;
+      Opts.cl_khr_int64_extended_atomics = 1;
+      Opts.cl_khr_3d_image_writes = 1;
+    }
   }
 };
 
@@ -4864,6 +4883,8 @@ public:
       case llvm::Triple::Android:
       case llvm::Triple::GNUEABI:
       case llvm::Triple::GNUEABIHF:
+      case llvm::Triple::MuslEABI:
+      case llvm::Triple::MuslEABIHF:
         setABI("aapcs-linux");
         break;
       case llvm::Triple::EABIHF:
@@ -5710,6 +5731,7 @@ public:
                         .Case("cortex-a73", true)
                         .Case("cyclone", true)
                         .Case("kryo", true)
+                        .Case("vulcan", true)
                         .Default(false);
     return CPUKnown;
   }
@@ -5982,7 +6004,7 @@ class AArch64leTargetInfo : public AArch64TargetInfo {
     if (getTriple().isOSBinFormatMachO())
       resetDataLayout("e-m:o-i64:64-i128:128-n32:64-S128");
     else
-      resetDataLayout("e-m:e-i64:64-i128:128-n32:64-S128");
+      resetDataLayout("e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128");
   }
 
 public:
@@ -6000,7 +6022,7 @@ public:
 class AArch64beTargetInfo : public AArch64TargetInfo {
   void setDataLayout() override {
     assert(!getTriple().isOSBinFormatMachO());
-    resetDataLayout("E-m:e-i64:64-i128:128-n32:64-S128");
+    resetDataLayout("E-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128");
   }
 
 public:
@@ -6580,6 +6602,7 @@ public:
       PtrDiffType = SignedLong;
       break;
     }
+    MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 64;
   }
 
   void getTargetDefines(const LangOptions &Opts,
