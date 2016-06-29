@@ -114,15 +114,17 @@ std::string Action::getOffloadingKindPrefix() const {
   return Res;
 }
 
-std::string
-Action::getOffloadingFileNamePrefix(StringRef NormalizedTriple) const {
-  // A file prefix is only generated for device actions and consists of the
-  // offload kind and triple.
-  if (!OffloadingDeviceKind)
+/// \brief Return a string that can be used as prefix in order to generate
+/// unique files for each offloading kind.
+std::string Action::getOffloadingFileNamePrefix(OffloadKind Kind,
+                                                StringRef NormalizedTriple,
+                                                bool CreatePrefixForHost) {
+  // Don't generate prefix for host actions unless required.
+  if (!CreatePrefixForHost && (Kind == OFK_None || Kind == OFK_Host))
     return "";
 
   std::string Res("-");
-  Res += getOffloadingKindPrefix();
+  Res += getOffloadKindName(Kind);
   Res += "-";
   Res += NormalizedTriple;
   return Res;

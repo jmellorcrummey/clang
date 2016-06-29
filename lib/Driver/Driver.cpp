@@ -2878,24 +2878,32 @@ public:
 };
 }
 
-InputInfo Driver::BuildJobsForAction(
-    Compilation &C, const Action *A, const ToolChain *TC, const char *BoundArch,
-    bool AtTopLevel, bool MultipleArchs, const char *LinkingOutput,
-    std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults,
-    bool BuildForOffloadDevice) const {
-  // The bound arch is not necessarily represented in the toolchain's triple --
-  // for example, armv7 and armv7s both map to the same triple -- so we need
-  // both in our map. Also, we need to add the offloading device kind, as the
-  // same tool chain can be used for host and device for some programming
-  // models, e.g. OpenMP.
+/// \brief Return a string that uniquely identifies the result of a job.
+/// The bound arch is not necessarily represented in the toolchain's triple --
+/// for example, armv7 and armv7s both map to the same triple -- so we need
+/// both in our map. Also, we need to add the offloading device kind, as the
+/// same tool chain can be used for host and device for some programming
+/// models, e.g. OpenMP.
+static std::string GetTriplePlusArchString(const ToolChain *TC,
+                                           const char *BoundArch,
+                                           Action::OffloadKind OffloadKind) {
   std::string TriplePlusArch = TC->getTriple().normalize();
   if (BoundArch) {
     TriplePlusArch += "-";
     TriplePlusArch += BoundArch;
     TriplePlusArch += "-";
-    TriplePlusArch += A->getOffloadingKindPrefix();
+    TriplePlusArch += Action::getOffloadKindName(OffloadKind);
   }
-  std::pair<const Action *, std::string> ActionTC = {A, TriplePlusArch};
+  return TriplePlusArch;
+}
+
+InputInfo Driver::BuildJobsForAction(
+    Compilation &C, const Action *A, const ToolChain *TC, const char *BoundArch,
+    bool AtTopLevel, bool MultipleArchs, const char *LinkingOutput,
+    std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults,
+    bool BuildForOffloadDevice) const {
+  std::pair<const Action *, std::string> ActionTC = {
+      A, GetTriplePlusArchString(TC, BoundArch, A->getOffloadingDeviceKind())};
   auto CachedResult = CachedResults.find(ActionTC);
   if (CachedResult != CachedResults.end()) {
     return CachedResult->second;
@@ -3052,13 +3060,60 @@ InputInfo Driver::BuildJobsForActionNoCache(
 
   // Determine the place to write output to, if any.
   InputInfo Result;
-  if (JA->getType() == types::TY_Nothing)
+  InputInfoList UnbundlingResults;
+  if (auto *UA = dyn_cast<OffloadUnbundlingJobAction>(JA)) {
+    // If we have an unbundling job, we need to create results for all the
+    // outputs. We also update the results cache so that other actions using
+    // this unbundling action can get the right results.
+    for (auto &UI : UA->getDependingActionsInfo()) {
+      assert(UI.DependingOffloadKind != Action::OFK_None &&
+             "Unbundling with no offloading??");
+
+      // Unbundling actions are never at the top level. When we generate the
+      // offloading prefix, we also do that for the host file because the
+      // unbundling action does not change the type of the output which can
+      // cause a overwrite.
+      std::string OffloadingPrefix = Action::getOffloadingFileNamePrefix(
+          UI.DependingOffloadKind,
+          UI.DependingToolChain->getTriple().normalize(),
+          /*CreatePrefixForHost=*/true);
+      auto CurI = InputInfo(
+          UA, GetNamedOutputPath(C, *UA, BaseInput, UI.DependingBoundArch,
+                                 /*AtTopLevel=*/false, MultipleArchs,
+                                 OffloadingPrefix),
+          BaseInput);
+      // Save the unbundling result.
+      UnbundlingResults.push_back(CurI);
+
+      // Get the unique string identifier for this dependence and cache the
+      // result.
+      CachedResults[{A, GetTriplePlusArchString(
+                            UI.DependingToolChain, UI.DependingBoundArch,
+                            UI.DependingOffloadKind)}] = CurI;
+    }
+
+    // Now that we have all the results generated, select the one that should be
+    // return for the current depending action.
+    std::pair<const Action *, std::string> ActionTC = {
+        A,
+        GetTriplePlusArchString(TC, BoundArch, A->getOffloadingDeviceKind())};
+    assert(CachedResults.find(ActionTC) != CachedResults.end() &&
+           "Result does not exist??");
+    Result = CachedResults[ActionTC];
+  } else if (JA->getType() == types::TY_Nothing)
     Result = InputInfo(A, BaseInput);
-  else
+  else {
+    // We only have to generate a prefix for the host if this is not a top-level
+    // action.
+    std::string OffloadingPrefix = Action::getOffloadingFileNamePrefix(
+        A->getOffloadingDeviceKind(), TC->getTriple().normalize(),
+        /*CreatePrefixForHost=*/!!A->getOffloadingHostActiveKinds() &&
+            !AtTopLevel);
     Result = InputInfo(A, GetNamedOutputPath(C, *JA, BaseInput, BoundArch,
                                              AtTopLevel, MultipleArchs,
-                                             TC->getTriple().normalize()),
+                                             OffloadingPrefix),
                        BaseInput);
+  }
 
   if (CCCPrintBindings && !CCGenDiagnostics) {
     llvm::errs() << "# \"" << T->getToolChain().getTripleString() << '"'
@@ -3068,12 +3123,28 @@ InputInfo Driver::BuildJobsForActionNoCache(
       if (i + 1 != e)
         llvm::errs() << ", ";
     }
-    llvm::errs() << "], output: " << Result.getAsString() << "\n";
+    if (UnbundlingResults.empty())
+      llvm::errs() << "], output: " << Result.getAsString() << "\n";
+    else {
+      llvm::errs() << "], outputs: [";
+      for (unsigned i = 0, e = UnbundlingResults.size(); i != e; ++i) {
+        llvm::errs() << UnbundlingResults[i].getAsString();
+        if (i + 1 != e)
+          llvm::errs() << ", ";
+      }
+      llvm::errs() << "] \n";
+    }
   } else {
-    T->ConstructJob(
-        C, *JA, Result, InputInfos,
-        C.getArgsForToolChain(TC, BoundArch, JA->getOffloadingDeviceKind()),
-        LinkingOutput);
+    if (UnbundlingResults.empty())
+      T->ConstructJob(
+          C, *JA, Result, InputInfos,
+          C.getArgsForToolChain(TC, BoundArch, JA->getOffloadingDeviceKind()),
+          LinkingOutput);
+    else
+      T->ConstructJob(
+          C, *JA, UnbundlingResults, InputInfos,
+          C.getArgsForToolChain(TC, BoundArch, JA->getOffloadingDeviceKind()),
+          LinkingOutput);
   }
   return Result;
 }
@@ -3120,7 +3191,7 @@ const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
                                        const char *BaseInput,
                                        const char *BoundArch, bool AtTopLevel,
                                        bool MultipleArchs,
-                                       StringRef NormalizedTriple) const {
+                                       StringRef OffloadingPrefix) const {
   llvm::PrettyStackTraceString CrashInfo("Computing output path");
   // Output to a user requested destination?
   if (AtTopLevel && !isa<DsymutilJobAction>(JA) && !isa<VerifyJobAction>(JA)) {
@@ -3206,7 +3277,7 @@ const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
           MakeCLOutputFilename(C.getArgs(), "", BaseName, types::TY_Image);
     } else {
       SmallString<128> Output(getDefaultImageName());
-      Output += JA.getOffloadingFileNamePrefix(NormalizedTriple);
+      Output += OffloadingPrefix;
       if (MultipleArchs && BoundArch) {
         Output += "-";
         Output.append(BoundArch);
@@ -3223,7 +3294,7 @@ const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
     if (!types::appendSuffixForType(JA.getType()))
       End = BaseName.rfind('.');
     SmallString<128> Suffixed(BaseName.substr(0, End));
-    Suffixed += JA.getOffloadingFileNamePrefix(NormalizedTriple);
+    Suffixed += OffloadingPrefix;
     if (MultipleArchs && BoundArch) {
       Suffixed += "-";
       Suffixed.append(BoundArch);
