@@ -2800,8 +2800,7 @@ InputInfo Driver::BuildJobsForAction(
     bool BuildForOffloadDevice) const {
   // The bound arch is not necessarily represented in the toolchain's triple --
   // for example, armv7 and armv7s both map to the same triple -- so we need
-  // both in our map. Also, we need to add the offloading device kind, as the
-  // same tool chain can be used for host and device.
+  // both in our map.
   std::string TriplePlusArch = TC->getTriple().normalize();
   if (BoundArch) {
     TriplePlusArch += "-";
