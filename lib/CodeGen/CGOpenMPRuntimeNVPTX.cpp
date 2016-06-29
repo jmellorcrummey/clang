@@ -1128,7 +1128,7 @@ void CGOpenMPRuntimeNVPTX::createOffloadEntry(llvm::Constant *ID,
 
 namespace {
 CGOpenMPRuntimeNVPTX::ExecutionMode
-getExecutionMode(OpenMPDirectiveKind DirectiveKind) {
+getExecutionMode(CodeGenModule &CGM, OpenMPDirectiveKind DirectiveKind) {
   switch (DirectiveKind) {
   case OMPD_target:
   case OMPD_target_teams:
@@ -1136,7 +1136,9 @@ getExecutionMode(OpenMPDirectiveKind DirectiveKind) {
   case OMPD_target_parallel:
   case OMPD_target_parallel_for:
   case OMPD_target_teams_distribute_parallel_for:
-    return CGOpenMPRuntimeNVPTX::ExecutionMode::SPMD;
+    return CGM.getLangOpts().OpenMPNoSPMD
+               ? CGOpenMPRuntimeNVPTX::ExecutionMode::GENERIC
+               : CGOpenMPRuntimeNVPTX::ExecutionMode::SPMD;
   default:
     llvm_unreachable(
         "Unknown programming model for OpenMP directive on NVPTX target.");
@@ -1327,7 +1329,8 @@ void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
   assert(!ParentName.empty() && "Invalid target region parent name!");
 
   OpenMPDirectiveKind DirectiveKind = D.getDirectiveKind();
-  CGOpenMPRuntimeNVPTX::ExecutionMode mode = getExecutionMode(DirectiveKind);
+  CGOpenMPRuntimeNVPTX::ExecutionMode mode =
+      getExecutionMode(CGM, DirectiveKind);
   switch (mode) {
   case CGOpenMPRuntimeNVPTX::ExecutionMode::GENERIC:
     emitGenericKernel(D, ParentName, OutlinedFn, OutlinedFnID, IsOffloadEntry,
