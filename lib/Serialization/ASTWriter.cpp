@@ -1104,6 +1104,7 @@ void ASTWriter::WriteBlockInfoBlock() {
   RECORD(DECL_CXX_RECORD);
   RECORD(DECL_CXX_METHOD);
   RECORD(DECL_CXX_CONSTRUCTOR);
+  RECORD(DECL_CXX_INHERITED_CONSTRUCTOR);
   RECORD(DECL_CXX_DESTRUCTOR);
   RECORD(DECL_CXX_CONVERSION);
   RECORD(DECL_ACCESS_SPEC);
@@ -5653,10 +5654,6 @@ void ASTWriter::CompletedTagDefinition(const TagDecl *D) {
 static bool isImportedDeclContext(ASTReader *Chain, const Decl *D) {
   if (D->isFromASTFile())
     return true;
-
-  // If we've not loaded any modules, this can't be imported.
-  if (!Chain || !Chain->getModuleManager().size())
-    return false;
 
   // The predefined __va_list_tag struct is imported if we imported any decls.
   // FIXME: This is a gross hack.
