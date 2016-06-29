@@ -43,6 +43,7 @@ Compilation::~Compilation() {
 
   // Free redirections of stdout/stderr.
   if (Redirects) {
+    delete Redirects[0];
     delete Redirects[1];
     delete Redirects[2];
     delete [] Redirects;
@@ -211,4 +212,8 @@ void Compilation::initCompilationForDiagnostics() {
 
 StringRef Compilation::getSysRoot() const {
   return getDriver().SysRoot;
+}
+
+void Compilation::Redirect(const StringRef** Redirects) {
+  this->Redirects = Redirects;
 }
