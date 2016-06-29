@@ -135,6 +135,19 @@ public:
                     const char *LinkingOutput) const override;
 };
 
+/// \brief Offload bundler tool.
+class LLVM_LIBRARY_VISIBILITY OffloadBundler : public Tool {
+public:
+  OffloadBundler(const ToolChain &TC)
+      : Tool("offload bundler", "clang-offload-bundler", TC) {}
+
+  bool hasIntegratedCPP() const override { return false; }
+  void ConstructJob(Compilation &C, const JobAction &JA,
+                    const InputInfo &Output, const InputInfoList &Inputs,
+                    const llvm::opt::ArgList &TCArgs,
+                    const char *LinkingOutput) const override;
+};
+
 /// \brief Base class for all GNU tools that provide the same behavior when
 /// it comes to response files support
 class LLVM_LIBRARY_VISIBILITY GnuTool : public Tool {

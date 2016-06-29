@@ -238,6 +238,12 @@ Tool *ToolChain::getLink() const {
   return Link.get();
 }
 
+Tool *ToolChain::getOffloadBundler() const {
+  if (!OffloadBundler)
+    OffloadBundler.reset(new tools::OffloadBundler(*this));
+  return OffloadBundler.get();
+}
+
 Tool *ToolChain::getTool(Action::ActionClass AC) const {
   switch (AC) {
   case Action::AssembleJobClass:
@@ -265,8 +271,7 @@ Tool *ToolChain::getTool(Action::ActionClass AC) const {
 
   case Action::OffloadBundlingJobClass:
   case Action::OffloadUnbundlingJobClass:
-    // FIXME: Add a tool for the bundling actions.
-    return nullptr;
+    return getOffloadBundler();
   }
 
   llvm_unreachable("Invalid tool kind.");

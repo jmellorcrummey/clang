@@ -128,6 +128,22 @@ Action::getOffloadingFileNamePrefix(StringRef NormalizedTriple) const {
   return Res;
 }
 
+/// \brief Return a string with the offload kind name. If that is not defined,
+/// we assume 'host'.
+std::string Action::getOffloadKindName(OffloadKind Kind) {
+  switch (Kind) {
+  case OFK_None:
+  case OFK_Host:
+    return "host";
+  case OFK_Cuda:
+    return "cuda";
+  case OFK_OpenMP:
+    return "openmp";
+
+    // TODO: Add other programming models here.
+  }
+}
+
 void InputAction::anchor() {}
 
 InputAction::InputAction(const Arg &_Input, types::ID _Type)
