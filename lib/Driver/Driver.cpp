@@ -280,7 +280,7 @@ DerivedArgList *Driver::TranslateInputArgs(const InputArgList &Args) const {
   }
 
   // Enforce -static if -miamcu is present.
-  if (Args.hasArg(options::OPT_miamcu))
+  if (Args.hasFlag(options::OPT_miamcu, options::OPT_mno_iamcu, false))
     DAL->AddFlagArg(0, Opts->getOption(options::OPT_static));
 
 // Add a default value of -mlinker-version=, if one was given and the user
@@ -375,7 +375,7 @@ static llvm::Triple computeTargetTriple(const Driver &D,
   }
 
   // Handle -miamcu flag.
-  if (Args.hasArg(options::OPT_miamcu)) {
+  if (Args.hasFlag(options::OPT_miamcu, options::OPT_mno_iamcu, false)) {
     if (Target.get32BitArchVariant().getArch() != llvm::Triple::x86)
       D.Diag(diag::err_drv_unsupported_opt_for_target) << "-miamcu"
                                                        << Target.str();
