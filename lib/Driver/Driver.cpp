@@ -1390,9 +1390,9 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
 namespace {
 /// \brief Provides a convenient interface for different programming models to
 /// generate the required device actions.
-class OffloadingActionBuilder {
+class OffloadingActionBuilder final {
   /// \brief Flag used to trace errors in the builder.
-  bool IsValid;
+  bool IsValid = false;
 
   /// \brief The compilation that is using this builder.
   Compilation &C;
@@ -1434,7 +1434,7 @@ class OffloadingActionBuilder {
     const Driver::InputList &Inputs;
 
     /// \brief The associated offload kind.
-    Action::OffloadKind AssociatedOffloadKind;
+    Action::OffloadKind AssociatedOffloadKind = Action::OFK_None;
 
   public:
     DeviceActionBuilder(Compilation &C, DerivedArgList &Args,
@@ -1483,7 +1483,7 @@ class OffloadingActionBuilder {
 
   /// \brief CUDA action builder. It injects device code in the host backend
   /// action.
-  class CudaActionBuilder : public DeviceActionBuilder {
+  class CudaActionBuilder final : public DeviceActionBuilder {
     /// \brief Flags to signal if the user requested host-only or device-only
     /// compilation.
     bool CompileHostOnly = false;
@@ -2330,10 +2330,10 @@ void Driver::BuildJobs(Compilation &C) const {
     }
   }
 }
-// Collapse an offloading action looking for a job of the given type. The input
-// action is changed to the input of the collapsed sequence. If we effectively
-// had a collapse return the corresponding offloading action, otherwise return
-// null.
+/// Collapse an offloading action looking for a job of the given type. The input
+/// action is changed to the input of the collapsed sequence. If we effectively
+/// had a collapse return the corresponding offloading action, otherwise return
+/// null.
 template <typename T>
 static OffloadAction *collapseOffloadingAction(Action *&CurAction) {
   if (!CurAction)

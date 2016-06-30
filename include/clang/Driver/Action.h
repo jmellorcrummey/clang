@@ -201,12 +201,12 @@ public:
 /// \brief An offload action combines host or/and device actions according to
 /// the programming model implementation needs and propagates the offloading
 /// kind to its dependences.
-class OffloadAction : public Action {
+class OffloadAction final : public Action {
   virtual void anchor();
 public:
   /// \brief Type used to communicate device actions. It associates bound
   /// architecture, toolchain, and offload kind to each action.
-  class DeviceDependences {
+  class DeviceDependences final {
   public:
     typedef SmallVector<const ToolChain *, 3> ToolChainList;
     typedef SmallVector<const char *, 3> BoundArchList;
@@ -244,15 +244,15 @@ public:
 
   /// \brief Type used to communicate host actions. It associates bound
   /// architecture, toolchain, and offload kinds to the host action.
-  class HostDependence {
+  class HostDependence final {
     /// \brief The dependence action.
     Action &HostAction;
     /// \brief The offloading toolchain that should be used with the action.
     const ToolChain &HostToolChain;
     /// \brief The architectures that should be used with this action.
-    const char *HostBoundArch;
+    const char *HostBoundArch = nullptr;
     /// \brief The offload kind of each dependence.
-    unsigned HostOffloadKinds;
+    unsigned HostOffloadKinds = 0u;
 
   public:
     HostDependence(Action &A, const ToolChain &TC, const char *BoundArch,
@@ -274,7 +274,7 @@ public:
 
 private:
   /// \brief The host offloading toolchain that should be used with the action.
-  const ToolChain *HostTC;
+  const ToolChain *HostTC = nullptr;
 
   /// \brief The tool chains associated with the list of actions.
   DeviceDependences::ToolChainList DevToolChains;
