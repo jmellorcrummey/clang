@@ -141,7 +141,7 @@ static void getDarwinDefines(MacroBuilder &Builder, const LangOptions &Opts,
   unsigned Maj, Min, Rev;
   if (Triple.isMacOSX()) {
     Triple.getMacOSXVersion(Maj, Min, Rev);
-    PlatformName = "macosx";
+    PlatformName = "macos";
   } else {
     Triple.getOSVersion(Maj, Min, Rev);
     PlatformName = llvm::Triple::getOSTypeName(Triple.getOS());
@@ -5731,6 +5731,7 @@ public:
                         .Case("cortex-a73", true)
                         .Case("cyclone", true)
                         .Case("kryo", true)
+                        .Case("vulcan", true)
                         .Default(false);
     return CPUKnown;
   }
