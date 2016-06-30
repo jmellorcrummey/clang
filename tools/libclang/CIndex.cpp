@@ -2269,6 +2269,12 @@ void OMPClauseEnqueue::VisitOMPToClause(const OMPToClause *C) {
 void OMPClauseEnqueue::VisitOMPFromClause(const OMPFromClause *C) {
   VisitOMPClauseList(C);
 }
+void OMPClauseEnqueue::VisitOMPUseDevicePtrClause(const OMPUseDevicePtrClause *C) {
+  VisitOMPClauseList(C);
+  for (const auto *E : C->private_copies()) {
+    Visitor->AddStmt(E);
+  }
+}
 }
 
 void EnqueueVisitor::EnqueueChildren(const OMPClause *S) {

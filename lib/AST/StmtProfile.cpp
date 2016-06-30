@@ -531,6 +531,14 @@ void OMPClauseProfiler::VisitOMPToClause(const OMPToClause *C) {
 void OMPClauseProfiler::VisitOMPFromClause(const OMPFromClause *C) {
   VisitOMPClauseList(C);
 }
+void OMPClauseProfiler::VisitOMPUseDevicePtrClause(
+    const OMPUseDevicePtrClause *C) {
+  VisitOMPClauseList(C);
+  for (auto *E : C->private_copies()) {
+    if (E)
+      Profiler->VisitStmt(E);
+  }
+}
 }
 
 void
