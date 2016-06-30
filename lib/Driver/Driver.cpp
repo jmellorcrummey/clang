@@ -144,7 +144,7 @@ InputArgList Driver::ParseArgStrings(ArrayRef<const char *> ArgStrings) {
     // Warn about -mcpu= without an argument.
     if ((A->getOption().matches(options::OPT_mcpu_EQ) &&
          A->containsValue("")) ||
-        (A->getOption().matches(options::OPT_fomptargets_EQ) &&
+        (A->getOption().matches(options::OPT_fopenmp_targets_EQ) &&
          !A->getNumValues())) {
       Diag(clang::diag::warn_drv_empty_joined_argument) << A->getAsString(Args);
     }
@@ -212,7 +212,7 @@ static bool RequiresOpenMPOffloading(ArgList &Args) {
       OpenMPRuntimeName = A->getValue();
 
     if (OpenMPRuntimeName == "libomp" || OpenMPRuntimeName == "libiomp5") {
-      auto *A = Args.getLastArg(options::OPT_fomptargets_EQ);
+      auto *A = Args.getLastArg(options::OPT_fopenmp_targets_EQ);
       return A != nullptr && A->getNumValues();
     }
   }
@@ -836,7 +836,7 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   OrderedOffloadingToolchains.clear();
 
   if (DeviceOffloadingKind == ToolChain::OK_OpenMP_Device) {
-    Arg *Tgts = UArgs->getLastArg(options::OPT_fomptargets_EQ);
+    Arg *Tgts = UArgs->getLastArg(options::OPT_fopenmp_targets_EQ);
     assert(Tgts && Tgts->getNumValues() &&
            "OpenMP offloading has to have targets specified.");
 

@@ -233,7 +233,7 @@ static void AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
   // the last inputs - one for each offloading device - as they are going to be
   // embedded in the fat binary by a custom linker script.
   if (TC.getOffloadingKind() == ToolChain::OK_OpenMP_Host) {
-    Arg *Tgts = Args.getLastArg(options::OPT_fomptargets_EQ);
+    Arg *Tgts = Args.getLastArg(options::OPT_fopenmp_targets_EQ);
     assert(Tgts && Tgts->getNumValues() &&
            "OpenMP offloading has to have targets specified.");
     NumberOfInputs -= Tgts->getNumValues();
@@ -281,7 +281,7 @@ static void AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
 /// \brief Add OpenMP linker script arguments at the end of the argument list
 /// so that the fat binary is built by embedding each of the device images into
 /// the host. The device images are the last inputs, one for each device and
-/// come in the same order the triples are passed through the fomptargets
+/// come in the same order the triples are passed through the fopenmp_targets
 /// option.
 /// The linker script also defines a few symbols required by the code generation
 /// so that the images can be easily retrieved at runtime by the offloading
@@ -299,7 +299,7 @@ static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
   // end of the input list. So we do a reverse scanning.
   SmallVector<std::pair<llvm::Triple, const char *>, 4> Targets;
 
-  Arg *Tgts = Args.getLastArg(options::OPT_fomptargets_EQ);
+  Arg *Tgts = Args.getLastArg(options::OPT_fopenmp_targets_EQ);
   assert(Tgts && Tgts->getNumValues() &&
          "OpenMP offloading has to have targets specified.");
 
@@ -6055,24 +6055,24 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back(I->getFilename());
     }
 
-  // OpenMP offloading device jobs take the argument -fomp-host-ir-file-path
+  // OpenMP offloading device jobs take the argument -fopenmp-host-ir-file-path
   // to specify the result of the compile phase on the host, so the meaningful
   // device declarations can be identified. Also, -fopenmp-is-device is passed
   // along to tell the frontend that it is generating code for a device, so that
   // only the relevant declarations are emitted.
   if (IsOpenMPDeviceCompileJob) {
     CmdArgs.push_back("-fopenmp-is-device");
-    CmdArgs.push_back("-fomp-host-ir-file-path");
+    CmdArgs.push_back("-fopenmp-host-ir-file-path");
     CmdArgs.push_back(Args.MakeArgString(Inputs.back().getFilename()));
   }
 
   // For all the host OpenMP offloading compile jobs we need to pass the targets
-  // information using -fomptargets= option.
+  // information using -fopenmp-targets= option.
   if (isa<CompileJobAction>(JA) &&
       getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Host) {
-    SmallString<128> TargetInfo("-fomptargets=");
+    SmallString<128> TargetInfo("-fopenmp-targets=");
 
-    Arg *Tgts = Args.getLastArg(options::OPT_fomptargets_EQ);
+    Arg *Tgts = Args.getLastArg(options::OPT_fopenmp_targets_EQ);
     assert(Tgts && Tgts->getNumValues() &&
            "OpenMP offloading has to have targets specified.");
     for (unsigned i = 0; i < Tgts->getNumValues(); ++i) {
@@ -6691,7 +6691,7 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
 
   // The (un)bundling command looks like this:
   // clang-offload-bundler -type=bc
-  //   -fomptargets=host-triple,device-triple1,device-triple2
+  //   -targets=host-triple,device-triple1,device-triple2
   //   -inputs=input_file
   //   -outputs=unbundle_file_host,unbundle_file_tgt1,unbundle_file_tgt2"
   //   (-unbundle)
@@ -6707,13 +6707,14 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
   CmdArgs.push_back(TCArgs.MakeArgString(
       Twine("-type=") + types::getTypeTempSuffix(BundledFile.getType())));
 
-  // Get the triples. The order is the same that comes in fomptargets option.
+  // Get the triples. The order is the same that comes in fopenmp-targets
+  // option.
   {
     SmallString<128> Triples;
     Triples += "-targets=offload-host-";
     Triples += getToolChain().getTripleString();
 
-    Arg *TargetsArg = TCArgs.getLastArg(options::OPT_fomptargets_EQ);
+    Arg *TargetsArg = TCArgs.getLastArg(options::OPT_fopenmp_targets_EQ);
     for (auto *A : TargetsArg->getValues()) {
       // We have to use the string that exactly matches the triple here.
       llvm::Triple T(A);

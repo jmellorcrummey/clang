@@ -1,8 +1,8 @@
 // REQUIRES: x86-registered-target
 // REQUIRES: nvptx-registered-target
 
-// RUN: %clang_cc1 -verify -fopenmp -x c -triple powerpc64le-unknown-unknown -fomptargets=nvptx64-nvidia-cuda -emit-llvm-bc %s -o %t-ppc-host.bc
-// RUN: %clang_cc1 -verify -fopenmp -x c -triple nvptx64-nvidia-cuda -fomptargets=nvptx64-nvidia-cuda -emit-llvm %s -fopenmp-is-device -fomp-host-ir-file-path %t-ppc-host.bc -o - | FileCheck %s
+// RUN: %clang_cc1 -verify -fopenmp -x c -triple powerpc64le-unknown-unknown -fopenmp-targets=nvptx64-nvidia-cuda -emit-llvm-bc %s -o %t-ppc-host.bc
+// RUN: %clang_cc1 -verify -fopenmp -x c -triple nvptx64-nvidia-cuda -fopenmp-targets=nvptx64-nvidia-cuda -emit-llvm %s -fopenmp-is-device -fopenmp-host-ir-file-path %t-ppc-host.bc -o - | FileCheck %s
 
 #include <stdarg.h>
 
