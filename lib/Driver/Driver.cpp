@@ -1408,7 +1408,7 @@ static Action *buildCudaActions(Compilation &C, DerivedArgList &Args,
       PartialCompilationArg->getOption().matches(options::OPT_cuda_device_only);
 
   if (CompileHostOnly) {
-      OffloadAction::HostDependence HDep(
+    OffloadAction::HostDependence HDep(
         *HostAction, *C.getSingleOffloadToolChain<Action::OFK_Host>(),
         /*BoundArch=*/nullptr, Action::OFK_Cuda);
     return C.MakeAction<OffloadAction>(HDep);
@@ -1939,10 +1939,10 @@ void Driver::BuildJobs(Compilation &C) const {
     }
   }
 }
-// Collapse an offloading action looking for a job of the given type. The input
-// action is changed to the input of the collapsed sequence. If we effectively
-// had a collapse return the corresponding offloading action, otherwise return
-// null.
+/// Collapse an offloading action looking for a job of the given type. The input
+/// action is changed to the input of the collapsed sequence. If we effectively
+/// had a collapse return the corresponding offloading action, otherwise return
+/// null.
 template <typename T>
 static OffloadAction *collapseOffloadingAction(Action *&CurAction) {
   if (!CurAction)

@@ -139,7 +139,7 @@ OffloadAction::OffloadAction(const HostDependence &HDep)
 };
 
 OffloadAction::OffloadAction(const DeviceDependences &DDeps, types::ID Ty)
-    : Action(OffloadClass, DDeps.getActions(), Ty), HostTC(nullptr),
+    : Action(OffloadClass, DDeps.getActions(), Ty),
       DevToolChains(DDeps.getToolChains()) {
   auto &OKinds = DDeps.getOffloadKinds();
   auto &BArchs = DDeps.getBoundArchs();
@@ -248,8 +248,7 @@ void OffloadAction::DeviceDependences::add(Action &A, const ToolChain &TC,
 OffloadAction::HostDependence::HostDependence(Action &A, const ToolChain &TC,
                                               const char *BoundArch,
                                               const DeviceDependences &DDeps)
-    : HostAction(A), HostToolChain(TC), HostBoundArch(BoundArch),
-      HostOffloadKinds(0u) {
+    : HostAction(A), HostToolChain(TC), HostBoundArch(BoundArch) {
   for (auto K : DDeps.getOffloadKinds())
     HostOffloadKinds |= K;
 }

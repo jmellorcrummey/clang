@@ -288,8 +288,8 @@ static bool forwardToGCC(const Option &O) {
          !O.hasFlag(options::DriverOption) && !O.hasFlag(options::LinkerInput);
 }
 
-/// \brief Add the C++ include args of other offloading toolchains. If this is a
-/// host job, the device toolchains are added. If this is a device job, the host
+/// Add the C++ include args of other offloading toolchains. If this is a host
+/// job, the device toolchains are added. If this is a device job, the host
 /// toolchains will be added.
 static void addExtraOffloadCXXStdlibIncludeArgs(Compilation &C,
                                                 const JobAction &JA,
@@ -306,8 +306,7 @@ static void addExtraOffloadCXXStdlibIncludeArgs(Compilation &C,
   // TODO: Add support for other programming models here.
 }
 
-/// \brief Add the include args that are specific of each offloading programming
-/// model.
+/// Add the include args that are specific of each offloading programming model.
 static void addExtraOffloadSpecificIncludeArgs(Compilation &C,
                                                const JobAction &JA,
                                                const ArgList &Args,
