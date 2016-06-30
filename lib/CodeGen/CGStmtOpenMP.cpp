@@ -1851,16 +1851,26 @@ void CodeGenFunction::EmitOMPOuterLoop(bool DynamicOrOrdered, bool IsMonotonic,
                                  LB, UB, ST);
     if (S.getDirectiveKind() == OMPD_distribute_parallel_for &&
         CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX()) {
-      // de-normalize loop
+      // De-normalize loop.
+      QualType IteratorTy = IVExpr->getType();
+
+      // Get the values of the current upper and power bounds.
+      llvm::Value *LBVal = EmitLoadOfScalar(LB, /*Volatile=*/false, IteratorTy,
+                                            SourceLocation());
+      llvm::Value *UBVal = EmitLoadOfScalar(UB, /*Volatile=*/false, IteratorTy,
+                                            SourceLocation());
+
+      // Get the values of the previous lower bound and make sure it is casted
+      // to the same type as the loop iterator variable.
       auto PrevLB = EmitLValue(S.getPrevLowerBoundVariable());
-      Builder.CreateStore(
-          Builder.CreateAdd(Builder.CreateLoad(LB),
-                            Builder.CreateLoad(PrevLB.getAddress())),
-          LB);
-      Builder.CreateStore(
-          Builder.CreateAdd(Builder.CreateLoad(UB),
-                            Builder.CreateLoad(PrevLB.getAddress())),
-          UB);
+      llvm::Value *PrevLBVal =
+          EmitLoadOfLValue(PrevLB, SourceLocation()).getScalarVal();
+      PrevLBVal = Builder.CreateIntCast(PrevLBVal, Builder.getIntNTy(IVSize),
+                                        /*IsSigned=*/false);
+      EmitStoreOfScalar(Builder.CreateAdd(LBVal, PrevLBVal), LB,
+                        /*Volatile=*/false, IteratorTy);
+      EmitStoreOfScalar(Builder.CreateAdd(UBVal, PrevLBVal), UB,
+                        /*Volatile=*/false, IteratorTy);
     }
   }
 
@@ -2005,21 +2015,30 @@ void CodeGenFunction::EmitOMPForOuterLoop(
   // kmpc_dispatch_fini();
 
   const Expr *IVExpr = S.getIterationVariable();
-  const unsigned IVSize = getContext().getTypeSize(IVExpr->getType());
+  QualType IteratorTy = IVExpr->getType();
+  const unsigned IVSize = getContext().getTypeSize(IteratorTy);
   const bool IVSigned = IVExpr->getType()->hasSignedIntegerRepresentation();
   if (DynamicOrOrdered) {
     llvm::Value *LBVal = nullptr;
     llvm::Value *UBVal = nullptr;
+    QualType IteratorTy = S.getIterationVariable()->getType();
     if (S.getDirectiveKind() == OMPD_distribute_parallel_for) {
       if (CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX()) {
         // normalize loop
         auto PrevLB = EmitLValue(S.getPrevLowerBoundVariable());
+        llvm::Value *PrevLBVal =
+            EmitLoadOfLValue(PrevLB, SourceLocation()).getScalarVal();
+        PrevLBVal = Builder.CreateIntCast(PrevLBVal, Builder.getIntNTy(IVSize),
+                                          /*isSigned=*/false);
         LBVal = Builder.getIntN(IVSize, 0);
-        UBVal = Builder.CreateSub(Builder.CreateLoad(UB),
-                                  Builder.CreateLoad(PrevLB.getAddress()));
+        UBVal = EmitLoadOfScalar(UB, /*Volatile=*/false, IteratorTy,
+                                 SourceLocation());
+        UBVal = Builder.CreateSub(UBVal, PrevLBVal);
       } else {
-        LBVal = Builder.CreateLoad(LB);
-        UBVal = Builder.CreateLoad(UB);
+        LBVal = EmitLoadOfScalar(LB, /*Volatile=*/false, IteratorTy,
+                                 SourceLocation());
+        UBVal = EmitLoadOfScalar(UB, /*Volatile=*/false, IteratorTy,
+                                 SourceLocation());
       }
     } else {
       LBVal = Builder.getIntN(IVSize, 0);
@@ -2145,10 +2164,15 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
       // chunk lower and upper bounds rather than the whole loop iteration
       // space. Therefore we copy the bounds of the previous schedule into the
       // the current ones.
+      const unsigned IVSize = getContext().getTypeSize(IVExpr->getType());
       LValue PrevLB = EmitLValue(S.getPrevLowerBoundVariable());
       LValue PrevUB = EmitLValue(S.getPrevUpperBoundVariable());
       auto PrevLBVal = EmitLoadOfScalar(PrevLB, SourceLocation());
+      PrevLBVal = Builder.CreateIntCast(PrevLBVal, Builder.getIntNTy(IVSize),
+                                        /*isSigned=*/false);
       auto PrevUBVal = EmitLoadOfScalar(PrevUB, SourceLocation());
+      PrevUBVal = Builder.CreateIntCast(PrevUBVal, Builder.getIntNTy(IVSize),
+                                        /*isSigned=*/false);
       EmitStoreOfScalar(PrevLBVal, LB);
       EmitStoreOfScalar(PrevUBVal, UB);
     }
@@ -3577,8 +3601,8 @@ static void emitCommonOMPTargetDirective(CodeGenFunction &CGF,
         CGM.getMangledName(GlobalDecl(cast<FunctionDecl>(CGF.CurFuncDecl)));
 
   // Emit target region as a standalone region.
-  CGM.getOpenMPRuntime().emitTargetOutlinedFunction(
-      S, ParentName, Fn, FnID, IsOffloadEntry, CodeGen);
+  CGM.getOpenMPRuntime().emitTargetOutlinedFunction(S, ParentName, Fn, FnID,
+                                                    IsOffloadEntry, CodeGen);
   OMPLexicalScope Scope(CGF, S);
   llvm::SmallVector<llvm::Value *, 16> CapturedVars;
   CGF.GenerateOpenMPCapturedVars(CS, CapturedVars);

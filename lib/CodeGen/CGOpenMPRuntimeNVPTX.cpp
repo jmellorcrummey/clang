@@ -1500,9 +1500,9 @@ static void DoOnSharedLoopBounds(
     const OMPExecutableDirective &D,
     const llvm::function_ref<void(const VarDecl *, const VarDecl *)> &Exec) {
   // Is this a loop directive?
-  //if (auto *LDir = dyn_cast<OMPLoopDirective>(&D)) {
+  // if (auto *LDir = dyn_cast<OMPLoopDirective>(&D)) {
   if (isOpenMPLoopBoundSharingDirective(D.getDirectiveKind())) {
-    auto *LDir =  dyn_cast<OMPLoopDirective>(&D);
+    auto *LDir = dyn_cast<OMPLoopDirective>(&D);
     // Do the bounds of the associated loop need to be shared? This check is the
     // same as checking the existence of an expression that refers to a previous
     // (enclosing) loop.
@@ -2394,7 +2394,9 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
       // Bounds are passed by value, so we need to load the data.
       auto LV = CGF.MakeNaturalAlignAddrLValue(Arg, L->getType());
       Arg = CGF.EmitLoadOfScalar(LV, SourceLocation());
-      Args.push_back(Arg);
+      auto ArgCast =
+          CGF.Builder.CreateIntCast(Arg, CGF.SizeTy, /* isSigned = */ false);
+      Args.push_back(ArgCast);
       ++Idx;
     }
   });
