@@ -25,6 +25,7 @@
 #include "clang/AST/NSAPI.h"
 #include "clang/AST/PrettyPrinter.h"
 #include "clang/AST/TypeLoc.h"
+#include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/Basic/ExpressionTraits.h"
 #include "clang/Basic/LangOptions.h"
 #include "clang/Basic/Module.h"
@@ -7994,8 +7995,10 @@ public:
   void checkDeclIsAllowedInOpenMPTarget(Expr *E, Decl *D);
   /// Return true inside OpenMP target region.
   bool isInOpenMPDeclareTargetContext() const {
-    return IsInOpenMPDeclareTargetContext;
+	  return IsInOpenMPDeclareTargetContext;
   }
+  /// Check and mark recursively declarations are implicitly used inside OpenMP target region.
+  void checkDeclImplicitlyUsedOpenMPTargetContext(Decl *D);
 
   /// \brief Initialization of captured region for OpenMP region.
   void ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope);
@@ -9221,6 +9224,20 @@ public:
                                                 unsigned ByteNo) const;
 
 private:
+
+    // Visit actual function body and its associated nested functions bodies.
+    // Mark automatically functions declarations with OMPDeclareTargetDeclAttr
+    // when -fopenmp-implicit-declare-target is enable.
+	class CheckFunctionCalls: public RecursiveASTVisitor<CheckFunctionCalls> {
+		Sema &SemaRef;
+	public:
+		CheckFunctionCalls(Sema &SemaReference) : SemaRef(SemaReference) { };
+
+		bool TraverseLambdaCapture(LambdaExpr *LE, const LambdaCapture *C);
+
+		bool VisitCallExpr(CallExpr *Call);
+	};
+
   void CheckArrayAccess(const Expr *BaseExpr, const Expr *IndexExpr,
                         const ArraySubscriptExpr *ASE=nullptr,
                         bool AllowOnePastEnd=true, bool IndexNegated=false);

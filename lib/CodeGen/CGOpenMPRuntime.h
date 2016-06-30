@@ -606,6 +606,13 @@ public:
   virtual ~CGOpenMPRuntime() {}
   virtual void clear();
 
+  /// This contains all the decls which doesn't specified
+  /// in declare target region / which are deferred for device code emission.
+  /// If a decl is used in target region
+  /// implicitly without specifying under declare target, deferred decl is emitted
+  /// during Codegen::Release for device codegen.
+  llvm::DenseMap<StringRef,GlobalDecl> TrackedDecls;
+
   /// \brief Emits captured variables for the outlined function for the
   /// specified OpenMP parallel directive \a D.
   virtual void
@@ -1148,6 +1155,11 @@ public:
   /// if it was emitted succesfully.
   /// \param GD Global to scan.
   virtual bool emitTargetGlobal(GlobalDecl GD);
+
+  /// \brief Check whether the function definition in \a GD as necessary
+  /// to emit in device.
+  /// \param GD Global declaration whose definition is being emitted.
+  virtual bool MustBeEmittedForDevice(GlobalDecl GD);
 
   /// \brief Register the function definition \a GD as meaningful for the
   /// target.

@@ -1952,6 +1952,9 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
       Opts.OpenMP && !Args.hasArg(options::OPT_fnoopenmp_use_tls);
   Opts.OpenMPIsDevice =
       Opts.OpenMP && Args.hasArg(options::OPT_fopenmp_is_device);
+  Opts.OpenMPImplicitDeclareTarget =
+      Opts.OpenMP && Args.hasArg(options::OPT_fopenmp_implicit_declare_target);
+      
 
   // Provide diagnostic when a given target is not expected to be an OpenMP
   // device or host.

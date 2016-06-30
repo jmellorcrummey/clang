@@ -184,6 +184,7 @@ LANGOPT(HalfArgsAndReturns, 1, 0, "half args and returns")
 LANGOPT(CUDA              , 1, 0, "CUDA")
 LANGOPT(OpenMP            , 1, 0, "OpenMP support")
 LANGOPT(OpenMPUseTLS      , 1, 0, "Use TLS for threadprivates or runtime calls")
+LANGOPT(OpenMPImplicitDeclareTarget      , 1, 0, "Enable implicit declare target extension - marks automatically declarations with declare target attribute")
 LANGOPT(OpenMPIsDevice    , 1, 0, "Generate code only for OpenMP target device")
 
 LANGOPT(CUDAIsDevice      , 1, 0, "compiling for CUDA device")

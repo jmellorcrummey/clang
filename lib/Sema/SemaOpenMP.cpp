@@ -6863,6 +6863,14 @@ StmtResult Sema::ActOnOpenMPTargetDirective(ArrayRef<OMPClause *> Clauses,
 
   getCurFunction()->setHasBranchProtectedScope();
 
+  if(getLangOpts().OpenMPImplicitDeclareTarget){
+	  // Structured block of target region is visited to catch function call.
+	  // Revealed function calls are marked with OMPDeclareTargetDeclAttr attribute,
+	  // in case -fopenmp-implicit-declare-target extension is enabled.
+	  CheckFunctionCalls FunctionCallChecker(*this);
+	  FunctionCallChecker.TraverseDecl(CS->getCapturedDecl());
+  }
+
   return OMPTargetDirective::Create(Context, StartLoc, EndLoc, Clauses, AStmt);
 }
 
@@ -11530,11 +11538,12 @@ static void checkDeclInTargetContext(SourceLocation SL, SourceRange SR,
     // target region (it can be e.g. a lambda) that is legal and we do not need
     // to do anything else.
     if (LD == D) {
-      Attr *A = OMPDeclareTargetDeclAttr::CreateImplicit(
-          SemaRef.Context, OMPDeclareTargetDeclAttr::MT_To);
-      D->addAttr(A);
-      if (ASTMutationListener *ML = SemaRef.Context.getASTMutationListener())
-        ML->DeclarationMarkedOpenMPDeclareTarget(D, A);
+      // Here, unless these declarations are not specified inside of declare target
+      // they are not valid OpenMP 4.5, we thus give warning.
+      // In case -fopenmp-implicit-declare-target these declarations are automatically
+      // declared for target construct.
+      if(!SemaRef.getLangOpts().OpenMPImplicitDeclareTarget)
+    	  SemaRef.Diag(LD->getLocation(), diag::warn_omp_not_in_target_context );
       return;
     }
   }
@@ -11635,3 +11644,56 @@ void Sema::checkDeclIsAllowedInOpenMPTarget(Expr *E, Decl *D) {
   }
   checkDeclInTargetContext(E->getExprLoc(), E->getSourceRange(), *this, D);
 }
+
+/// Return true inside OpenMP target region.
+void Sema::checkDeclImplicitlyUsedOpenMPTargetContext(Decl *D) {
+
+  if(!getLangOpts().OpenMPImplicitDeclareTarget)
+	  return;
+
+  if (!D || D->isInvalidDecl())
+	return;
+
+  if (FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
+	if(FD->hasBody()){
+      for (auto RI : FD->redecls()){
+	    if (RI->hasAttr<OMPDeclareTargetDeclAttr>()){
+	      Attr *A = OMPDeclareTargetDeclAttr::CreateImplicit(
+	      Context, OMPDeclareTargetDeclAttr::MT_To);
+	      D->addAttr(A);
+
+	      CheckFunctionCalls FunctionCallChecker(*this);
+	      FunctionCallChecker.TraverseDecl(FD);
+	      return;
+	    }
+	  }
+    }
+  }
+  return;
+}
+
+bool Sema::CheckFunctionCalls::TraverseLambdaCapture(LambdaExpr *LE, const LambdaCapture *C) {
+	if(CXXRecordDecl *Class = LE->getLambdaClass())
+		if(!Class->hasAttr<OMPDeclareTargetDeclAttr>()) {
+			Attr *A = OMPDeclareTargetDeclAttr::CreateImplicit(
+				SemaRef.Context, OMPDeclareTargetDeclAttr::MT_To);
+			Class->addAttr(A);
+		}
+
+	TraverseStmt(LE->getBody());
+	return true;
+}
+
+bool Sema::CheckFunctionCalls::VisitCallExpr(CallExpr *Call) {
+	if (FunctionDecl *Callee = Call->getDirectCallee())
+	{
+		if(!Callee->hasAttr<OMPDeclareTargetDeclAttr>()) {
+			Attr *A = OMPDeclareTargetDeclAttr::CreateImplicit(
+					SemaRef.Context, OMPDeclareTargetDeclAttr::MT_To);
+			Callee->addAttr(A);
+			TraverseDecl(Callee);
+		}
+	}
+	return true;
+}
+
