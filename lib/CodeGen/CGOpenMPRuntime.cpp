@@ -2612,16 +2612,12 @@ void CGOpenMPRuntime::emitForDispatchInit(CodeGenFunction &CGF,
   // If the Chunk was not specified in the clause - use default value 1.
   if (Chunk == nullptr)
     Chunk = CGF.Builder.getIntN(IVSize, 1);
-  // adjust bitsize of UB variable which may have chnaged due to transformations
-  // involving prevLB and prevUB fields
-  auto castUB = CGF.Builder.CreateIntCast(UB, CGF.Builder.getIntNTy(IVSize), IVSigned);
-
   llvm::Value *Args[] = {
       emitUpdateLocation(CGF, Loc), getThreadID(CGF, Loc),
       CGF.Builder.getInt32(addMonoNonMonoModifier(
           Schedule, ScheduleKind.M1, ScheduleKind.M2)), // Schedule type
       LB,                                               // Lower
-      castUB,                                           // Upper
+      UB,                                               // Upper
       CGF.Builder.getIntN(IVSize, 1),                   // Stride
       Chunk                                             // Chunk
   };

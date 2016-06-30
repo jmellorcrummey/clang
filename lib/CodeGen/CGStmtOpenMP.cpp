@@ -1852,18 +1852,15 @@ void CodeGenFunction::EmitOMPOuterLoop(bool DynamicOrOrdered, bool IsMonotonic,
     if (S.getDirectiveKind() == OMPD_distribute_parallel_for &&
         CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX()) {
       // de-normalize loop
-      // carlo
       auto PrevLB = EmitLValue(S.getPrevLowerBoundVariable());
-      auto LBCast = Builder.CreateBitCast(LB, PrevLB.getAddress().getType());
-      auto UBCast = Builder.CreateBitCast(UB, PrevLB.getAddress().getType());
       Builder.CreateStore(
-          Builder.CreateAdd(Builder.CreateLoad(LBCast),
+          Builder.CreateAdd(Builder.CreateLoad(LB),
                             Builder.CreateLoad(PrevLB.getAddress())),
-                            LBCast);
+          LB);
       Builder.CreateStore(
-          Builder.CreateAdd(Builder.CreateLoad(UBCast),
+          Builder.CreateAdd(Builder.CreateLoad(UB),
                             Builder.CreateLoad(PrevLB.getAddress())),
-                            UBCast);
+          UB);
     }
   }
 
@@ -2018,11 +2015,7 @@ void CodeGenFunction::EmitOMPForOuterLoop(
         // normalize loop
         auto PrevLB = EmitLValue(S.getPrevLowerBoundVariable());
         LBVal = Builder.getIntN(IVSize, 0);
-        //auto LBCast = Builder.CreateBitCast(LB.getAddress(), PrevLBVal->getType()->getPointerTo());
-        auto UBCast = Builder.CreateBitCast(UB, PrevLB.getAddress().getType());
-            //PrevLB.getType().getTypePtr());
-
-        UBVal = Builder.CreateSub(Builder.CreateLoad(UBCast),
+        UBVal = Builder.CreateSub(Builder.CreateLoad(UB),
                                   Builder.CreateLoad(PrevLB.getAddress()));
       } else {
         LBVal = Builder.CreateLoad(LB);
@@ -2156,12 +2149,8 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
       LValue PrevUB = EmitLValue(S.getPrevUpperBoundVariable());
       auto PrevLBVal = EmitLoadOfScalar(PrevLB, SourceLocation());
       auto PrevUBVal = EmitLoadOfScalar(PrevUB, SourceLocation());
-      // carlo
-      //Builder.
-      auto LBCast = Builder.CreateBitCast(LB.getAddress(), PrevLBVal->getType()->getPointerTo());
-      auto UBCast = Builder.CreateBitCast(UB.getAddress(), PrevUBVal->getType()->getPointerTo());
-      EmitStoreOfScalar(PrevLBVal, LBCast, /*volatile = */ false, PrevLB.getType());
-      EmitStoreOfScalar(PrevUBVal, UBCast, /*volatile = */ false, PrevUB.getType());
+      EmitStoreOfScalar(PrevLBVal, LB);
+      EmitStoreOfScalar(PrevUBVal, UB);
     }
 
     // Emit 'then' code.
