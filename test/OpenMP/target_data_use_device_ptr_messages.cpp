@@ -36,13 +36,13 @@ struct SA {
 #pragma omp target data map(i) use_device_ptr(e) // expected-error{{}}
     {}
 #pragma omp target data map(i) use_device_ptr(g) // expected-error{{}}
-    {}  
+    {}
 #pragma omp target data map(i) use_device_ptr(k,i,j) // expected-error2 {{item used in 'use_device_pointer' clause is not a pointer}}
     {}
 #pragma omp target data map(i) use_device_ptr(d) // expected-error{{}}
     {}
 #pragma omp target data map(i) use_device_ptr(da) // expected-error{{}}
-    {}  
+    {}
   return;
  }
 };
@@ -152,13 +152,13 @@ T tmain(T argc) {
 #pragma omp target data map(i) use_device_ptr(e) // expected-error{{}}
   {}
 #pragma omp target data map(i) use_device_ptr(g) // expected-error{{}}
-  {}  
+  {}
 #pragma omp target data map(i) use_device_ptr(k,i,j) // expected-error2 {{item used in 'use_device_pointer' clause is not a pointer}}
   {}
 #pragma omp target data map(i) use_device_ptr(d) // expected-error{{}}
   {}
 #pragma omp target data map(i) use_device_ptr(da) // expected-error{{}}
-  {}  
+  {}
   return 0;
 }
 
@@ -195,13 +195,12 @@ int main(int argc, char **argv) {
 #pragma omp target data map(i) use_device_ptr(e) // expected-error{{}}
   {}
 #pragma omp target data map(i) use_device_ptr(g) // expected-error{{}}
-  {}  
+  {}
 #pragma omp target data map(i) use_device_ptr(k,i,j) // expected-error2 {{item used in 'use_device_pointer' clause is not a pointer}}
   {}
 #pragma omp target data map(i) use_device_ptr(d) // expected-error{{}}
   {}
 #pragma omp target data map(i) use_device_ptr(da) // expected-error{{}}
-  {}  
+  {}
   return tmain<int, 3>(argc); // expected-note {{in instantiation of function template specialization 'tmain<int, 3>' requested here}}
 }
-
