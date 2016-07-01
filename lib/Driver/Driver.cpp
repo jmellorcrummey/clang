@@ -1790,14 +1790,13 @@ class OffloadingActionBuilder final {
     }
   };
 
-  /// \brief OpenMP action builder. The host bitcode is passed to the device
-  /// frontend and all the device linked images are passed to the host link
-  /// phase.
-  class OpenMPActionBuilder : public DeviceActionBuilder {
-    /// \brief The OpenMP actions for the current input.
+  /// OpenMP action builder. The host bitcode is passed to the device frontend
+  /// and all the device linked images are passed to the host link phase.
+  class OpenMPActionBuilder final : public DeviceActionBuilder {
+    /// The OpenMP actions for the current input.
     ActionList OpenMPDeviceActions;
 
-    /// \brief The linker inputs obtained for each toolchain.
+    /// The linker inputs obtained for each toolchain.
     SmallVector<ActionList, 8> DeviceLinkerInputs;
 
   public:
