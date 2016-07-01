@@ -1892,9 +1892,9 @@ public:
       return HostAction;
     }
 
-    /// Create the offload action with all dependences. When an offload action
-    /// is created the kinds are propagated to the host action, so we don't have
-    /// to do that explicitely here.
+    // Create the offload action with all dependences. When an offload action
+    // is created the kinds are propagated to the host action, so we don't have
+    // to do that explicitely here.
     OffloadAction::HostDependence HDep(
         *HostAction, *C.getSingleOffloadToolChain<Action::OFK_Host>(),
         /*BoundArch*/ nullptr, ActiveOffloadKinds);
