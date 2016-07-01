@@ -422,6 +422,32 @@ void Driver::setLTOMode(const llvm::opt::ArgList &Args) {
   }
 }
 
+/// Compute the desired OpenMP runtime from the flags provided.
+Driver::OpenMPRuntimeKind Driver::getOpenMPRuntime(const ArgList &Args) const {
+  StringRef RuntimeName(CLANG_DEFAULT_OPENMP_RUNTIME);
+
+  const Arg *A = Args.getLastArg(options::OPT_fopenmp_EQ);
+  if (A)
+    RuntimeName = A->getValue();
+
+  auto RT = llvm::StringSwitch<OpenMPRuntimeKind>(RuntimeName)
+                .Case("libomp", OMPRT_OMP)
+                .Case("libgomp", OMPRT_GOMP)
+                .Case("libiomp5", OMPRT_IOMP5)
+                .Default(OMPRT_Unknown);
+
+  if (RT == OMPRT_Unknown) {
+    if (A)
+      Diag(diag::err_drv_unsupported_option_argument)
+          << A->getOption().getName() << A->getValue();
+    else
+      // FIXME: We could use a nicer diagnostic here.
+      Diag(diag::err_drv_unsupported_opt) << "-fopenmp";
+  }
+
+  return RT;
+}
+
 void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
                                               InputList &Inputs) {
 
@@ -453,22 +479,16 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
       // We expect that -fopenmp-targets is always used in conjunction with the
       // option -fopenmp specifying a valid runtime with offloading support,
       // i.e. libomp or libiomp.
-      bool HasCompatibleOpenMP = C.getInputArgs().hasFlag(
+      bool HasValidOpenMPRuntime = C.getInputArgs().hasFlag(
           options::OPT_fopenmp, options::OPT_fopenmp_EQ,
           options::OPT_fno_openmp, false);
-      if (HasCompatibleOpenMP) {
-        StringRef RuntimeName(CLANG_DEFAULT_OPENMP_RUNTIME);
-        const Arg *A = C.getInputArgs().getLastArg(options::OPT_fopenmp_EQ);
-        if (A)
-          RuntimeName = A->getValue();
-        HasCompatibleOpenMP = llvm::StringSwitch<bool>(RuntimeName)
-                                  .Case("libomp", true)
-                                  .Case("libgomp", false)
-                                  .Case("libiomp5", true)
-                                  .Default(false);
+      if (HasValidOpenMPRuntime) {
+        OpenMPRuntimeKind OpenMPKind = getOpenMPRuntime(C.getInputArgs());
+        HasValidOpenMPRuntime =
+            OpenMPKind == OMPRT_OMP || OpenMPKind == OMPRT_IOMP5;
       }
 
-      if (HasCompatibleOpenMP) {
+      if (HasValidOpenMPRuntime) {
         llvm::StringMap<const char *> FoundNormalizedTriples;
         for (const char *Val : OpenMPTargets->getValues()) {
           llvm::Triple TT(Val);
@@ -1447,23 +1467,22 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
 }
 
 namespace {
-/// \brief Provides a convenient interface for different programming models to
-/// generate the required device actions.
-class OffloadingActionBuilder {
-  /// \brief Flag used to trace errors in the builder.
-  bool IsValid;
+/// Provides a convenient interface for different programming models to generate
+/// the required device actions.
+class OffloadingActionBuilder final {
+  /// Flag used to trace errors in the builder.
+  bool IsValid = false;
 
-  /// \brief The compilation that is using this builder.
+  /// The compilation that is using this builder.
   Compilation &C;
 
-  /// \brief The derived arguments associated with this builder.
+  /// The derived arguments associated with this builder.
   DerivedArgList &Args;
 
-  /// \brief Map between an input argument and the offload kinds used to process
-  /// it.
+  /// Map between an input argument and the offload kinds used to process it.
   std::map<const Arg *, unsigned> InputArgToOffloadKindMap;
 
-  /// \brief Builder interface. It doesn't build anything or keep any state.
+  /// Builder interface. It doesn't build anything or keep any state.
   class DeviceActionBuilder {
   public:
     typedef llvm::SmallVector<phases::ID, phases::MaxNumberOfPhases> PhasesTy;
@@ -1479,21 +1498,21 @@ class OffloadingActionBuilder {
     };
 
   protected:
-    /// \brief Compilation associated with this builder.
+    /// Compilation associated with this builder.
     Compilation &C;
 
-    /// \brief Tool chains associated with this builder. The same programming
+    /// Tool chains associated with this builder. The same programming
     /// model may have associated one or more tool chains.
     SmallVector<const ToolChain *, 2> ToolChains;
 
-    /// \brief The derived arguments associated with this builder.
+    /// The derived arguments associated with this builder.
     DerivedArgList &Args;
 
-    /// \brief The inputs associated with this builder.
+    /// The inputs associated with this builder.
     const Driver::InputList &Inputs;
 
-    /// \brief The associated offload kind.
-    Action::OffloadKind AssociatedOffloadKind;
+    /// The associated offload kind.
+    Action::OffloadKind AssociatedOffloadKind = Action::OFK_None;
 
   public:
     DeviceActionBuilder(Compilation &C, DerivedArgList &Args,
@@ -1503,38 +1522,38 @@ class OffloadingActionBuilder {
           AssociatedOffloadKind(AssociatedOffloadKind) {}
     virtual ~DeviceActionBuilder() {}
 
-    // \brief Fill up the array \a DA with all the device dependences that
-    // should be added to the provided host action \a HostAction. By default it
-    // is inactive.
+    /// Fill up the array \a DA with all the device dependences that should be
+    /// added to the provided host action \a HostAction. By default it is
+    /// inactive.
     virtual ActionBuilderReturnCode
     getDeviceDepences(OffloadAction::DeviceDependences &DA, phases::ID CurPhase,
                       phases::ID FinalPhase, PhasesTy &Phases) {
       return ABRT_Inactive;
     }
 
-    // \brief Update the state to include the provided host action \a HostAction
-    // as a dependency of the current device action. By default it is inactive.
+    /// Update the state to include the provided host action \a HostAction as a
+    /// dependency of the current device action. By default it is inactive.
     virtual ActionBuilderReturnCode addDeviceDepences(Action *HostAction) {
       return ABRT_Inactive;
     }
 
-    // \brief Append top level actions generated by the builder. Return true if
-    // errors were found.
+    /// Append top level actions generated by the builder. Return true if errors
+    /// were found.
     virtual void appendTopLevelActions(ActionList &AL) {}
 
-    // \brief Append linker actions generated by the builder. Return true if
-    // errors were found.
+    /// Append linker actions generated by the builder. Return true if errors
+    /// were found.
     virtual void appendLinkDependences(OffloadAction::DeviceDependences &DA) {}
 
-    // \brief Initialize the builder. Return true if any initialization errors
-    // are found.
+    /// Initialize the builder. Return true if any initialization errors are
+    /// found.
     virtual bool initialize() { return false; }
 
-    // \brief Return true if this builder is valid. We have a valid builder if
-    // we have associated device tool chains.
+    /// Return true if this builder is valid. We have a valid builder if we have
+    /// associated device tool chains.
     bool isValid() { return !ToolChains.empty(); }
 
-    // \brief Return the associated offload kind.
+    /// Return the associated offload kind.
     Action::OffloadKind getAssociatedOffloadKind() {
       return AssociatedOffloadKind;
     }
@@ -1542,23 +1561,22 @@ class OffloadingActionBuilder {
 
   /// \brief CUDA action builder. It injects device code in the host backend
   /// action.
-  class CudaActionBuilder : public DeviceActionBuilder {
-    /// \brief Flags to signal if the user requested host-only or device-only
+  class CudaActionBuilder final : public DeviceActionBuilder {
+    /// Flags to signal if the user requested host-only or device-only
     /// compilation.
     bool CompileHostOnly = false;
     bool CompileDeviceOnly = false;
 
-    /// \brief List of GPU architectures to use in this compilation.
+    /// List of GPU architectures to use in this compilation.
     SmallVector<const char *, 4> GpuArchList;
 
-    /// \brief The CUDA actions for the current input.
+    /// The CUDA actions for the current input.
     ActionList CudaDeviceActions;
 
-    /// \brief The CUDA fat binary if it was generated for the current input.
+    /// The CUDA fat binary if it was generated for the current input.
     Action *CudaFatBinary = nullptr;
 
-    /// \brief Flag that is set to true if this builder acted on the current
-    /// input.
+    /// Flag that is set to true if this builder acted on the current input.
     bool IsActive = false;
 
   public:
@@ -1772,14 +1790,13 @@ class OffloadingActionBuilder {
     }
   };
 
-  /// \brief OpenMP action builder. The host bitcode is passed to the device
-  /// frontend and all the device linked images are passed to the host link
-  /// phase.
-  class OpenMPActionBuilder : public DeviceActionBuilder {
-    /// \brief The OpenMP actions for the current input.
+  /// OpenMP action builder. The host bitcode is passed to the device frontend
+  /// and all the device linked images are passed to the host link phase.
+  class OpenMPActionBuilder final : public DeviceActionBuilder {
+    /// The OpenMP actions for the current input.
     ActionList OpenMPDeviceActions;
 
-    /// \brief The linker inputs obtained for each toolchain.
+    /// The linker inputs obtained for each toolchain.
     SmallVector<ActionList, 8> DeviceLinkerInputs;
 
   public:
@@ -1885,7 +1902,7 @@ class OffloadingActionBuilder {
   /// TODO: Add the implementation for other specialized builders here.
   ///
 
-  /// \brief Specialized builders being used by this offloading action builder.
+  /// Specialized builders being used by this offloading action builder.
   SmallVector<DeviceActionBuilder *, 4> SpecializedBuilders;
 
 public:
@@ -1916,10 +1933,10 @@ public:
       delete SB;
   }
 
-  /// \brief Generate an action that adds device dependences (if any) to a host
-  /// action. If no device dependence actions exist, just return the host
-  /// action \a HostAction. If an error is found or if no builder requires the
-  /// host action to be generated, return nullptr.
+  /// Generate an action that adds device dependences (if any) to a host action.
+  /// If no device dependence actions exist, just return the host action \a
+  /// HostAction. If an error is found or if no builder requires the host action
+  /// to be generated, return nullptr.
   Action *
   addDeviceDependencesToHostAction(Action *HostAction, const Arg *InputArg,
                                    phases::ID CurPhase, phases::ID FinalPhase,
@@ -1975,9 +1992,9 @@ public:
     return C.MakeAction<OffloadAction>(HDep, DDeps);
   }
 
-  /// \brief Generate an action that adds a host dependence to a device action.
-  /// The results will be kept in this action builder. Return true if an error
-  /// was found.
+  /// Generate an action that adds a host dependence to a device action. The
+  /// results will be kept in this action builder. Return true if an error was
+  /// found.
   bool addHostDependenceToDeviceActions(Action *HostAction,
                                         const Arg *InputArg) {
     if (!IsValid)
@@ -2007,7 +2024,7 @@ public:
     return false;
   }
 
-  /// \brief Add the offloading top level actions to the provided action list.
+  /// Add the offloading top level actions to the provided action list.
   bool appendTopLevelActions(ActionList &AL, Action *HostAction,
                              const Arg *InputArg) {
     auto NumActions = AL.size();
@@ -2038,10 +2055,10 @@ public:
     return false;
   }
 
-  /// \brief Processes the host linker action. This currently consists of
-  /// replacing it with an offload action if there are device link objects and
-  /// propagate to the host action all the offload kinds used in the current
-  /// compilation. The resulting action is returned.
+  /// Processes the host linker action. This currently consists of replacing it
+  /// with an offload action if there are device link objects and propagate to
+  /// the host action all the offload kinds used in the current compilation. The
+  /// resulting action is returned.
   Action *processHostLinkAction(Action *HostAction) {
     // Add all the dependences from the device linking actions.
     OffloadAction::DeviceDependences DDeps;
@@ -2067,9 +2084,9 @@ public:
       return HostAction;
     }
 
-    // Create the offload action with all dependences. When an offload action is
-    // created the kinds are propagated to the host action, so we don't have to
-    // do that explicitely here.
+    // Create the offload action with all dependences. When an offload action
+    // is created the kinds are propagated to the host action, so we don't have
+    // to do that explicitly here.
     OffloadAction::HostDependence HDep(
         *HostAction, *C.getSingleOffloadToolChain<Action::OFK_Host>(),
         /*BoundArch*/ nullptr, ActiveOffloadKinds);
@@ -2505,29 +2522,27 @@ void Driver::BuildJobs(Compilation &C) const {
 }
 
 namespace {
-/// \brief Utility class to control the collapse of dependent actions and select
-/// the tools accordingly.
+/// Utility class to control the collapse of dependent actions and select the
+/// tools accordingly.
 class ToolSelector final {
-  /// \brief The tool chain this selector refers to.
+  /// The tool chain this selector refers to.
   const ToolChain &TC;
 
-  /// \brief The compilation this selector refers to.
+  /// The compilation this selector refers to.
   const Compilation &C;
 
-  /// \brief The base action this selector refers to.
+  /// The base action this selector refers to.
   const JobAction *BaseAction;
 
-  /// \brief Set to true if the current toolchain refers to host actions.
+  /// Set to true if the current toolchain refers to host actions.
   bool IsHostSelector;
 
-  /// \brief Set to true if save-temps and embed-bitcode functionalities are
-  /// active.
+  /// Set to true if save-temps and embed-bitcode functionalities are active.
   bool SaveTemps;
   bool EmbedBitcode;
 
-  /// \brief Get dependence action or null if that does not exist. If \a
-  /// CanBeCollapsed is false, that action must be legal to collapse or null
-  /// will be returned.
+  /// Get dependence action or null if that does not exist. If \a CanBeCollapsed
+  /// is false, that action must be legal to collapse or null will be returned.
   const JobAction *getDependenceAction(const ActionList &Inputs,
                                        ActionList &SavedOffloadAction,
                                        bool CanBeCollapsed = true) {
@@ -2569,7 +2584,7 @@ class ToolSelector final {
     return dyn_cast<JobAction>(CurAction);
   }
 
-  /// \brief Return true if an assemble action can be collapsed.
+  /// Return true if an assemble action can be collapsed.
   bool canCollapseAssembleAction() {
     return TC.useIntegratedAs() && !SaveTemps &&
            !C.getArgs().hasArg(options::OPT_via_file_asm) &&
@@ -2577,25 +2592,25 @@ class ToolSelector final {
            !C.getArgs().hasArg(options::OPT__SLASH_Fa);
   }
 
-  /// \brief Return true if a preprocessor action can be collapsed.
+  /// Return true if a preprocessor action can be collapsed.
   bool canCollapsePreprocessorAction() {
     return !C.getArgs().hasArg(options::OPT_no_integrated_cpp) &&
            !C.getArgs().hasArg(options::OPT_traditional_cpp) && !SaveTemps &&
            !C.getArgs().hasArg(options::OPT_rewrite_objc);
   }
 
-  /// \brief Struct that relates an action with the offload actions that would
-  /// be collapsed with it.
+  /// Struct that relates an action with the offload actions that would be
+  /// collapsed with it.
   struct JobActionInfoTy {
-    // \brief The action this info refers to.
+    /// The action this info refers to.
     const JobAction *JA;
-    // \brief The offload actions we need to take care off if this action is
-    // collapsed.
+    /// The offload actions we need to take care off if this action is
+    /// collapsed.
     ActionList SavedOffloadAction;
   };
 
-  /// \brief Append collapsed offload actions from the give nnumber of elements
-  /// in the action info array.
+  /// Append collapsed offload actions from the give nnumber of elements in the
+  /// action info array.
   void appendCollapsedOffloadAction(ActionList &CollapsedOffloadAction,
                                     ArrayRef<JobActionInfoTy> &ActionInfo,
                                     unsigned ElementNum) {
@@ -2605,11 +2620,11 @@ class ToolSelector final {
                                     ActionInfo[I].SavedOffloadAction.end());
   }
 
-  /// \brief Functions that attempt to perform the combining. They detect if
-  /// that is legal, and if so they update the inputs \a Inputs and the offload
-  /// action that were collapsed in \a CollapsedOffloadAction. A tool that deals
-  /// with the combined action is returned. If the combining is not legal or if
-  /// the tool does not exist, null is returned.
+  /// Functions that attempt to perform the combining. They detect if that is
+  /// legal, and if so they update the inputs \a Inputs and the offload action
+  /// that were collapsed in \a CollapsedOffloadAction. A tool that deals with
+  /// the combined action is returned. If the combining is not legal or if the
+  /// tool does not exist, null is returned.
   /// Currently three kinds of collapsing are supported:
   ///  - Assemble + Backend + Compile;
   ///  - Assemble + Backend ;
@@ -2705,7 +2720,7 @@ class ToolSelector final {
     return T;
   }
 
-  /// \brief Updates the inputs if the obtained tool supports combining with
+  /// Updates the inputs if the obtained tool supports combining with
   /// preprocessor action, and the current input is indeed a preprocessor
   /// action. If combining results in the collapse of offloading actions, those
   /// are appended to \a CollapsedOffloadAction.
@@ -2736,9 +2751,9 @@ public:
     IsHostSelector = BaseAction->getOffloadingDeviceKind() == Action::OFK_None;
   }
 
-  /// \brief Check if a chain of action can be combined and return the tool that
-  /// can handle the combination of actions. The pointer to the current inputs
-  /// \a Inputs and the list of offload actions \a CollapsedOffloadActions
+  /// Check if a chain of action can be combined and return the tool that can
+  /// handle the combination of actions. The pointer to the current inputs \a
+  /// Inputs and the list of offload actions \a CollapsedOffloadActions
   /// connected to collapsed actions are updated accordingly. The latter enables
   /// the caller of the selector to process them afterwards instead of just
   /// dropping them. If no suitable tool is found, null will be returned.
