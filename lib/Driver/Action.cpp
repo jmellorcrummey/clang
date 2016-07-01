@@ -115,9 +115,9 @@ std::string Action::getOffloadingKindPrefix() const {
   return Res;
 }
 
-/// \brief Return a string that can be used as prefix in order to generate
-/// unique files for each offloading kind.
-std::string Action::getOffloadingFileNamePrefix(OffloadKind Kind,
+/// Return a string that can be used as prefix in order to generate unique files
+/// for each offloading kind.
+std::string Action::GetOffloadingFileNamePrefix(OffloadKind Kind,
                                                 StringRef NormalizedTriple,
                                                 bool CreatePrefixForHost) {
   // Don't generate prefix for host actions unless required.
@@ -125,7 +125,7 @@ std::string Action::getOffloadingFileNamePrefix(OffloadKind Kind,
     return "";
 
   std::string Res("-");
-  Res += getOffloadKindName(Kind);
+  Res += GetOffloadKindName(Kind);
   Res += "-";
   Res += NormalizedTriple;
   return Res;
@@ -133,7 +133,7 @@ std::string Action::getOffloadingFileNamePrefix(OffloadKind Kind,
 
 /// Return a string with the offload kind name. If that is not defined, we
 /// assume 'host'.
-llvm::StringRef Action::getOffloadKindName(OffloadKind Kind) {
+llvm::StringRef Action::GetOffloadKindName(OffloadKind Kind) {
   switch (Kind) {
   case OFK_None:
   case OFK_Host:

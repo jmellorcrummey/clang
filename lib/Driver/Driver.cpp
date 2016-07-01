@@ -2891,12 +2891,11 @@ public:
 };
 }
 
-/// \brief Return a string that uniquely identifies the result of a job.
-/// The bound arch is not necessarily represented in the toolchain's triple --
-/// for example, armv7 and armv7s both map to the same triple -- so we need
-/// both in our map. Also, we need to add the offloading device kind, as the
-/// same tool chain can be used for host and device for some programming
-/// models, e.g. OpenMP.
+/// Return a string that uniquely identifies the result of a job. The bound arch
+/// is not necessarily represented in the toolchain's triple -- for example,
+/// armv7 and armv7s both map to the same triple -- so we need both in our map.
+/// Also, we need to add the offloading device kind, as the same tool chain can
+/// be used for host and device for some programming models, e.g. OpenMP.
 static std::string GetTriplePlusArchString(const ToolChain *TC,
                                            const char *BoundArch,
                                            Action::OffloadKind OffloadKind) {
@@ -2905,7 +2904,7 @@ static std::string GetTriplePlusArchString(const ToolChain *TC,
     TriplePlusArch += "-";
     TriplePlusArch += BoundArch;
     TriplePlusArch += "-";
-    TriplePlusArch += Action::getOffloadKindName(OffloadKind);
+    TriplePlusArch += Action::GetOffloadKindName(OffloadKind);
   }
   return TriplePlusArch;
 }
@@ -3086,7 +3085,7 @@ InputInfo Driver::BuildJobsForActionNoCache(
       // offloading prefix, we also do that for the host file because the
       // unbundling action does not change the type of the output which can
       // cause a overwrite.
-      std::string OffloadingPrefix = Action::getOffloadingFileNamePrefix(
+      std::string OffloadingPrefix = Action::GetOffloadingFileNamePrefix(
           UI.DependingOffloadKind,
           UI.DependingToolChain->getTriple().normalize(),
           /*CreatePrefixForHost=*/true);
@@ -3118,7 +3117,7 @@ InputInfo Driver::BuildJobsForActionNoCache(
   else {
     // We only have to generate a prefix for the host if this is not a top-level
     // action.
-    std::string OffloadingPrefix = Action::getOffloadingFileNamePrefix(
+    std::string OffloadingPrefix = Action::GetOffloadingFileNamePrefix(
         A->getOffloadingDeviceKind(), TC->getTriple().normalize(),
         /*CreatePrefixForHost=*/!!A->getOffloadingHostActiveKinds() &&
             !AtTopLevel);
