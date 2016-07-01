@@ -37,9 +37,9 @@ Compilation::~Compilation() {
   delete Args;
 
   // Free any derived arg lists.
-  for (auto it = TCArgs.begin(), ie = TCArgs.end(); it != ie; ++it)
-    if (it->second != TranslatedArgs)
-      delete it->second;
+  for (auto &Arg : TCArgs)
+    if (Arg.second != TranslatedArgs)
+      delete Arg.second;
 
   // Free redirections of stdout/stderr.
   if (Redirects) {
