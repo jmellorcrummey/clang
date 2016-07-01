@@ -2471,11 +2471,9 @@ void ASTStmtReader::VisitOMPLoopDirective(OMPLoopDirective *D) {
     D->setEnsureUpperBound(Reader.ReadSubExpr());
     D->setNextLowerBound(Reader.ReadSubExpr());
     D->setNextUpperBound(Reader.ReadSubExpr());
+    D->setPrevLowerBoundVariable(Reader.ReadSubExpr());
+    D->setPrevUpperBoundVariable(Reader.ReadSubExpr());
     D->setNumIterations(Reader.ReadSubExpr());
-  }
-  if (isOpenMPLoopBoundSharingDirective(D->getDirectiveKind())) {
-      D->setPrevLowerBoundVariable(Reader.ReadSubExpr());
-      D->setPrevUpperBoundVariable(Reader.ReadSubExpr());
   }
   SmallVector<Expr *, 4> Sub;
   unsigned CollapsedNum = D->getCollapsedNumber();
@@ -2730,6 +2728,8 @@ void ASTStmtReader::VisitOMPTeamsDistributeParallelForDirective(
 void ASTStmtReader::VisitOMPTargetTeamsDistributeParallelForDirective(
     OMPTargetTeamsDistributeParallelForDirective *D) {
   VisitOMPLoopDirective(D);
+  D->setDistInc(Reader.ReadSubExpr());
+  D->setPrevEnsureUpperBound(Reader.ReadSubExpr());
 }
 
 //===----------------------------------------------------------------------===//

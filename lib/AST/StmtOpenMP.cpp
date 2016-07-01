@@ -1215,7 +1215,7 @@ OMPTargetTeamsDistributeParallelForDirective *
 OMPTargetTeamsDistributeParallelForDirective::Create(
     const ASTContext &C, SourceLocation StartLoc, SourceLocation EndLoc,
     unsigned CollapsedNum, ArrayRef<OMPClause *> Clauses, Stmt *AssociatedStmt,
-    const HelperExprs &Exprs) {
+    const HelperExprs &Exprs, Expr *DistIncExpr, Expr *PrevEUB) {
   unsigned Size =
       llvm::alignTo(sizeof(OMPTargetTeamsDistributeParallelForDirective),
                     llvm::alignOf<OMPClause *>());
@@ -1238,6 +1238,7 @@ OMPTargetTeamsDistributeParallelForDirective::Create(
   Dir->setLaneInit(Exprs.LaneInit);
   Dir->setNumLanes(Exprs.NumLanes);
   Dir->setInc(Exprs.Inc);
+  Dir->setDistInc(DistIncExpr);
   Dir->setIsLastIterVariable(Exprs.IL);
   Dir->setLowerBoundVariable(Exprs.LB);
   Dir->setUpperBoundVariable(Exprs.UB);
@@ -1245,6 +1246,7 @@ OMPTargetTeamsDistributeParallelForDirective::Create(
   Dir->setPrevUpperBoundVariable(Exprs.PrevUB);
   Dir->setStrideVariable(Exprs.ST);
   Dir->setEnsureUpperBound(Exprs.EUB);
+  Dir->setPrevEnsureUpperBound(PrevEUB);
   Dir->setNextLowerBound(Exprs.NLB);
   Dir->setNextUpperBound(Exprs.NUB);
   Dir->setNumIterations(Exprs.NumIterations);

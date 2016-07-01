@@ -1773,8 +1773,7 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
     break;
   }
   case OMPD_target_parallel:
-  case OMPD_target_parallel_for:
-  case OMPD_target_teams_distribute_parallel_for: {
+  case OMPD_target_parallel_for: {
     QualType KmpInt32Ty = Context.getIntTypeForBitwidth(32, 1);
     QualType KmpInt32PtrTy =
         Context.getPointerType(KmpInt32Ty).withConst().withRestrict();
@@ -1852,11 +1851,11 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
                              Params);
     break;
   }
+  case OMPD_target_teams_distribute_parallel_for:
   case OMPD_distribute_parallel_for: {
     QualType KmpInt32Ty = Context.getIntTypeForBitwidth(32, 1);
     QualType KmpInt32PtrTy =
         Context.getPointerType(KmpInt32Ty).withConst().withRestrict();
-    // QualType KmpUIntTy = Context.getIntTypeForBitwidth(64, 0);
     Sema::CapturedParamNameType Params[] = {
         std::make_pair(".global_tid.", KmpInt32PtrTy),
         std::make_pair(".bound_tid.", KmpInt32PtrTy),
@@ -5392,7 +5391,8 @@ CheckOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
     // 'simd' we need to be able to access the bounds of the schedule of the
     // enclosing region. E.g. in 'distribute parallel for' the bounds obtained
     // by scheduling 'distribute' have to be passed to the schedule of 'for.
-    if (DKind == OMPD_distribute_parallel_for) {
+    if (DKind == OMPD_distribute_parallel_for ||
+        DKind == OMPD_target_teams_distribute_parallel_for) {
       auto *CD = cast<CapturedStmt>(AStmt)->getCapturedDecl();
 
       // We expect to have at least 2 more parameters than the 'parallel'
@@ -7478,9 +7478,33 @@ StmtResult Sema::ActOnOpenMPTargetTeamsDistributeParallelForDirective(
   assert((CurContext->isDependentContext() || B.builtAll()) &&
          "omp for loop exprs were not built");
 
+  // Create increment expression for distribute loop when combined in a same
+  // directive with for as IV = IV + ST
+  SourceLocation DistIncLoc;
+  ExprResult DistInc, PrevEUB;
+  if (B.builtAll()) {
+    DistInc = BuildBinOp(CurScope, DistIncLoc, BO_Add, B.IterationVarRef, B.ST);
+    assert(DistInc.isUsable() && "distribute inc expr was not built");
+    DistInc = BuildBinOp(CurScope, DistIncLoc, BO_Assign, B.IterationVarRef,
+                         DistInc.get());
+    DistInc = ActOnFinishFullExpr(DistInc.get());
+    assert(DistInc.isUsable() && "distribute inc expr was not built");
+
+    // Build expression: UB = min(UB, prevUB) for #for in composite
+    SourceLocation DistEUBLoc;
+    ExprResult IsUBGreater =
+        BuildBinOp(CurScope, DistEUBLoc, BO_GT, B.UB, B.PrevUB);
+    ExprResult CondOp = ActOnConditionalOp(DistEUBLoc, DistEUBLoc,
+                                           IsUBGreater.get(), B.PrevUB, B.UB);
+    PrevEUB = BuildBinOp(CurScope, DistIncLoc, BO_Assign, B.UB, CondOp.get());
+    PrevEUB = ActOnFinishFullExpr(PrevEUB.get());
+  }
+
   getCurFunction()->setHasBranchProtectedScope();
   return OMPTargetTeamsDistributeParallelForDirective::Create(
-      Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
+      Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B,
+      DistInc.isUsable() ? DistInc.get() : nullptr,
+      PrevEUB.isUsable() ? PrevEUB.get() : nullptr);
 }
 
 OMPClause *Sema::ActOnOpenMPSingleExprClause(OpenMPClauseKind Kind, Expr *Expr,

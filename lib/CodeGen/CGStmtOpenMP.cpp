@@ -1295,14 +1295,12 @@ static void emitCommonOMPParallelDirective(CodeGenFunction &CGF,
   // lower and upper bounds with the pragma 'for' chunking mechanism. Also, the
   // lexical scope was already initiated if parallel is not the first component
   // of a combined directive.
-  if (S.getDirectiveKind() == OMPD_distribute_parallel_for) {
-    const OMPDistributeParallelForDirective &DPFDir =
-        cast<OMPDistributeParallelForDirective>(S);
-    LValue LB =
-        CGF.EmitLValue(cast<DeclRefExpr>(DPFDir.getLowerBoundVariable()));
+  if (S.getDirectiveKind() == OMPD_distribute_parallel_for ||
+      S.getDirectiveKind() == OMPD_target_teams_distribute_parallel_for) {
+    const OMPLoopDirective &Dir = cast<OMPLoopDirective>(S);
+    LValue LB = CGF.EmitLValue(cast<DeclRefExpr>(Dir.getLowerBoundVariable()));
     CapturedVars.push_back(CGF.Builder.CreateLoad(LB.getAddress()));
-    LValue UB =
-        CGF.EmitLValue(cast<DeclRefExpr>(DPFDir.getUpperBoundVariable()));
+    LValue UB = CGF.EmitLValue(cast<DeclRefExpr>(Dir.getUpperBoundVariable()));
     CapturedVars.push_back(CGF.Builder.CreateLoad(UB.getAddress()));
   }
   CGF.GenerateOpenMPCapturedVars(*CS, CapturedVars, CaptureLevel);
@@ -1836,11 +1834,17 @@ void CodeGenFunction::EmitOMPOuterLoop(bool DynamicOrOrdered, bool IsMonotonic,
     // the #for part: use the
     // distribute UB instead, as it is not incremented and guaranteed to be
     // less than GlobalUB
-    Expr *EUB = (S.getDirectiveKind() == OMPD_distribute_parallel_for &&
-                 IsDistribute == false)
-                    ? dyn_cast<OMPDistributeParallelForDirective>(&S)
-                          ->getPrevEnsureUpperBound()
-                    : S.getEnsureUpperBound();
+    Expr *EUB =
+        (S.getDirectiveKind() == OMPD_distribute_parallel_for &&
+         IsDistribute == false)
+            ? dyn_cast<OMPDistributeParallelForDirective>(&S)
+                  ->getPrevEnsureUpperBound()
+            : (S.getDirectiveKind() ==
+                   OMPD_target_teams_distribute_parallel_for &&
+               IsDistribute == false)
+                  ? dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S)
+                        ->getPrevEnsureUpperBound()
+                  : S.getEnsureUpperBound();
     EmitIgnoredExpr(EUB); // S.getEnsureUpperBound());
     // IV = LB
     EmitIgnoredExpr(S.getInit());
@@ -1849,7 +1853,8 @@ void CodeGenFunction::EmitOMPOuterLoop(bool DynamicOrOrdered, bool IsMonotonic,
   } else {
     BoolCondVal = RT.emitForNext(*this, S.getLocStart(), IVSize, IVSigned, IL,
                                  LB, UB, ST);
-    if (S.getDirectiveKind() == OMPD_distribute_parallel_for &&
+    if ((S.getDirectiveKind() == OMPD_distribute_parallel_for ||
+         S.getDirectiveKind() == OMPD_target_teams_distribute_parallel_for) &&
         CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX()) {
       // de-normalize loop
       auto PrevLB = EmitLValue(S.getPrevLowerBoundVariable());
@@ -2010,7 +2015,8 @@ void CodeGenFunction::EmitOMPForOuterLoop(
   if (DynamicOrOrdered) {
     llvm::Value *LBVal = nullptr;
     llvm::Value *UBVal = nullptr;
-    if (S.getDirectiveKind() == OMPD_distribute_parallel_for) {
+    if (S.getDirectiveKind() == OMPD_distribute_parallel_for ||
+        S.getDirectiveKind() == OMPD_target_teams_distribute_parallel_for) {
       if (CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX()) {
         // normalize loop
         auto PrevLB = EmitLValue(S.getPrevLowerBoundVariable());
@@ -2140,7 +2146,8 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
     LValue IL =
         EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getIsLastIterVariable()));
 
-    if (S.getDirectiveKind() == OMPD_distribute_parallel_for) {
+    if (S.getDirectiveKind() == OMPD_distribute_parallel_for ||
+        S.getDirectiveKind() == OMPD_target_teams_distribute_parallel_for) {
       // When composing distribute with for we need to use the pragma distribute
       // chunk lower and upper bounds rather than the whole loop iteration
       // space. Therefore we copy the bounds of the previous schedule into the
@@ -2231,10 +2238,16 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
 
         // UB = min(UB, GlobalUB); for all cases except
         // UB = min(UB, PrevUB); for 'for' in composite #distribute parallel for
-        Expr *EUB = (S.getDirectiveKind() == OMPD_distribute_parallel_for)
-                        ? dyn_cast<OMPDistributeParallelForDirective>(&S)
-                              ->getPrevEnsureUpperBound()
-                        : S.getEnsureUpperBound();
+        Expr *EUB =
+            S.getDirectiveKind() == OMPD_distribute_parallel_for
+                ? dyn_cast<OMPDistributeParallelForDirective>(&S)
+                      ->getPrevEnsureUpperBound()
+                : S.getDirectiveKind() ==
+                          OMPD_target_teams_distribute_parallel_for
+                      ? dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(
+                            &S)
+                            ->getPrevEnsureUpperBound()
+                      : S.getEnsureUpperBound();
         EmitIgnoredExpr(EUB); // S.getEnsureUpperBound());
         // IV = LB;
         EmitIgnoredExpr(S.getInit());
@@ -2953,14 +2966,20 @@ void CodeGenFunction::EmitOMPDistributeLoop(
         EmitOMPInnerLoop(
             S, LoopScope.requiresCleanups(), S.getCond(),
             S.getDirectiveKind() == OMPD_distribute_parallel_for
-                ? (cast<OMPDistributeParallelForDirective>(S)).getDistInc()
-                : S.getInc(),
+                ? cast<OMPDistributeParallelForDirective>(S).getDistInc()
+                : S.getDirectiveKind() ==
+                          OMPD_target_teams_distribute_parallel_for
+                      ? cast<OMPTargetTeamsDistributeParallelForDirective>(S)
+                            .getDistInc()
+                      : S.getInc(),
             [&S, &LoopExit,
              &CodeGenDistributeLoopContent](CodeGenFunction &CGF) {
               if (S.getDirectiveKind() == OMPD_distribute) {
                 CGF.EmitOMPLoopBody(S, LoopExit);
                 CGF.EmitStopPoint(&S);
-              } else if (S.getDirectiveKind() == OMPD_distribute_parallel_for) {
+              } else if (S.getDirectiveKind() == OMPD_distribute_parallel_for ||
+                         S.getDirectiveKind() ==
+                             OMPD_target_teams_distribute_parallel_for) {
                 CodeGenDistributeLoopContent(CGF);
               }
             },
@@ -3057,11 +3076,6 @@ void CodeGenFunction::EmitOMPTargetTeamsDirective(
 void CodeGenFunction::EmitOMPTeamsDistributeParallelForDirective(
     const OMPTeamsDistributeParallelForDirective &S) {
   // TODO: codegen for teams distribute parallel for
-}
-
-void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForDirective(
-    const OMPTargetTeamsDistributeParallelForDirective &S) {
-  // TODO: codegen for target teams distribute parallel for
 }
 
 static llvm::Value *convertToScalarValue(CodeGenFunction &CGF, RValue Val,
@@ -3524,6 +3538,32 @@ void CodeGenFunction::EmitOMPAtomicDirective(const OMPAtomicDirective &S) {
   CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_atomic, CodeGen);
 }
 
+static void emitCommonOMPTeamsDirective(CodeGenFunction &CGF,
+                                        const OMPExecutableDirective &S,
+                                        OpenMPDirectiveKind InnermostKind,
+                                        const RegionCodeGenTy &CodeGen) {
+  auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
+  auto OutlinedFn =
+      CGF.CGM.getOpenMPRuntime().emitParallelOrTeamsOutlinedFunction(
+          S, *CS->getCapturedDecl()->param_begin(), InnermostKind, CodeGen);
+
+  const OMPNumTeamsClause *NT = S.getSingleClause<OMPNumTeamsClause>();
+  const OMPThreadLimitClause *TL = S.getSingleClause<OMPThreadLimitClause>();
+  if (NT || TL) {
+    Expr *NumTeams = (NT) ? NT->getNumTeams() : nullptr;
+    Expr *ThreadLimit = (TL) ? TL->getThreadLimit() : nullptr;
+
+    CGF.CGM.getOpenMPRuntime().emitNumTeamsClause(CGF, NumTeams, ThreadLimit,
+                                                  S.getLocStart());
+  }
+
+  OMPLexicalScope Scope(CGF, S);
+  llvm::SmallVector<llvm::Value *, 16> CapturedVars;
+  CGF.GenerateOpenMPCapturedVars(*CS, CapturedVars);
+  CGF.CGM.getOpenMPRuntime().emitTeamsCall(CGF, S, S.getLocStart(), OutlinedFn,
+                                           CapturedVars);
+}
+
 static void emitCommonOMPTargetDirective(CodeGenFunction &CGF,
                                          const OMPExecutableDirective &S,
                                          OpenMPDirectiveKind InnermostKind,
@@ -3693,30 +3733,50 @@ void CodeGenFunction::EmitOMPTargetParallelForDirective(
   emitCommonOMPTargetDirective(*this, S, OMPD_target_parallel_for, CodeGen);
 }
 
-static void emitCommonOMPTeamsDirective(CodeGenFunction &CGF,
-                                        const OMPExecutableDirective &S,
-                                        OpenMPDirectiveKind InnermostKind,
-                                        const RegionCodeGenTy &CodeGen) {
-  auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
-  auto OutlinedFn = CGF.CGM.getOpenMPRuntime().
-      emitParallelOrTeamsOutlinedFunction(S,
-          *CS->getCapturedDecl()->param_begin(), InnermostKind, CodeGen);
+void TargetTeamsDistributeParallelForCodegen(
+    CodeGenModule &CGM, CodeGenFunction &CGF, PrePostActionTy &Action,
+    const OMPTargetTeamsDistributeParallelForDirective &S) {
+  Action.Enter(CGF);
+  auto &&CodeGen = [&CGM, &S](CodeGenFunction &CGF, PrePostActionTy &) {
+    auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+      auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+        auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+          CGF.EmitOMPWorksharingLoop(S);
+        };
+        emitCommonOMPParallelDirective(CGF, S, OMPD_for, CodeGen);
+      };
+      CGF.EmitOMPDistributeLoop(S, CodeGen);
+    };
+    OMPLexicalScope Scope(CGF, S, /*AsInlined=*/true);
+    CGM.getOpenMPRuntime().emitInlinedDirective(CGF, OMPD_distribute, CodeGen,
+                                                false);
+  };
+  emitCommonOMPTeamsDirective(CGF, S, OMPD_target_teams_distribute_parallel_for,
+                              CodeGen);
+}
 
-  const OMPNumTeamsClause *NT = S.getSingleClause<OMPNumTeamsClause>();
-  const OMPThreadLimitClause *TL = S.getSingleClause<OMPThreadLimitClause>();
-  if (NT || TL) {
-    Expr *NumTeams = (NT) ? NT->getNumTeams() : nullptr;
-    Expr *ThreadLimit = (TL) ? TL->getThreadLimit() : nullptr;
+void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForDeviceFunction(
+    CodeGenModule &CGM, StringRef ParentName,
+    const OMPTargetTeamsDistributeParallelForDirective &S) {
+  // Emit SPMD target parallel for region as a standalone region.
+  auto &&CodeGen = [&S, &CGM](CodeGenFunction &CGF, PrePostActionTy &Action) {
+    TargetTeamsDistributeParallelForCodegen(CGM, CGF, Action, S);
+  };
+  llvm::Function *Fn;
+  llvm::Constant *Addr;
+  // Emit target region as a standalone region.
+  CGM.getOpenMPRuntime().emitTargetOutlinedFunction(
+      S, ParentName, Fn, Addr, /*IsOffloadEntry=*/true, CodeGen);
+  assert(Fn && Addr && "Target device function emission failed.");
+}
 
-    CGF.CGM.getOpenMPRuntime().emitNumTeamsClause(CGF, NumTeams, ThreadLimit,
-                                                  S.getLocStart());
-  }
-
-  OMPLexicalScope Scope(CGF, S);
-  llvm::SmallVector<llvm::Value *, 16> CapturedVars;
-  CGF.GenerateOpenMPCapturedVars(*CS, CapturedVars);
-  CGF.CGM.getOpenMPRuntime().emitTeamsCall(CGF, S, S.getLocStart(), OutlinedFn,
-                                           CapturedVars);
+void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForDirective(
+    const OMPTargetTeamsDistributeParallelForDirective &S) {
+  auto &&CodeGen = [&S, this](CodeGenFunction &CGF, PrePostActionTy &Action) {
+    TargetTeamsDistributeParallelForCodegen(CGM, CGF, Action, S);
+  };
+  emitCommonOMPTargetDirective(
+      *this, S, OMPD_target_teams_distribute_parallel_for, CodeGen);
 }
 
 void CodeGenFunction::EmitOMPTeamsDirective(const OMPTeamsDirective &S) {

@@ -2172,11 +2172,9 @@ void ASTStmtWriter::VisitOMPLoopDirective(OMPLoopDirective *D) {
     Record.AddStmt(D->getEnsureUpperBound());
     Record.AddStmt(D->getNextLowerBound());
     Record.AddStmt(D->getNextUpperBound());
+    Record.AddStmt(D->getPrevLowerBoundVariable());
+    Record.AddStmt(D->getPrevUpperBoundVariable());
     Record.AddStmt(D->getNumIterations());
-  }
-  if (isOpenMPLoopBoundSharingDirective(D->getDirectiveKind())) {
-      Record.AddStmt(D->getPrevLowerBoundVariable());
-      Record.AddStmt(D->getPrevUpperBoundVariable());
   }
   for (auto I : D->counters()) {
     Record.AddStmt(I);
@@ -2447,6 +2445,8 @@ void ASTStmtWriter::VisitOMPTeamsDistributeParallelForDirective(
 void ASTStmtWriter::VisitOMPTargetTeamsDistributeParallelForDirective(
     OMPTargetTeamsDistributeParallelForDirective *D) {
   VisitOMPLoopDirective(D);
+  Record.AddStmt(D->getDistInc());
+  Record.AddStmt(D->getPrevEnsureUpperBound());
   Code = serialization::STMT_OMP_TARGET_TEAMS_DISTRIBUTE_PARALLEL_FOR_DIRECTIVE;
 }
 

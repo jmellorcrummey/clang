@@ -2418,6 +2418,10 @@ public:
   static void EmitOMPTargetParallelForDeviceFunction(
       CodeGenModule &CGM, StringRef ParentName,
       const OMPTargetParallelForDirective &S);
+  /// Emit device code for the target teams distribute parallel for directive.
+  static void EmitOMPTargetTeamsDistributeParallelForDeviceFunction(
+      CodeGenModule &CGM, StringRef ParentName,
+      const OMPTargetTeamsDistributeParallelForDirective &S);
 
   /// \brief Emit inner loop of the worksharing/simd construct.
   ///

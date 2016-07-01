@@ -705,5 +705,6 @@ bool clang::isOpenMPTaskingDirective(OpenMPDirectiveKind Kind) {
 }
 
 bool clang::isOpenMPLoopBoundSharingDirective(OpenMPDirectiveKind Kind) {
-	return Kind == OMPD_distribute_parallel_for;
+  return Kind == OMPD_distribute_parallel_for ||
+         Kind == OMPD_target_teams_distribute_parallel_for;
 }

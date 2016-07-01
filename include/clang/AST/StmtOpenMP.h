@@ -595,6 +595,8 @@ public:
       UB = nullptr;
       ST = nullptr;
       EUB = nullptr;
+      PrevLB = nullptr;
+      PrevUB = nullptr;
       NLB = nullptr;
       NUB = nullptr;
       NumIterations = nullptr;
@@ -3058,6 +3060,14 @@ public:
 class OMPTargetTeamsDistributeParallelForDirective : public OMPLoopDirective {
   friend class ASTStmtReader;
 
+  /// \brief Loop iteration variable init for distribute loop only when combined
+  /// with for directive in same construct.
+  Expr *DistIncExpr;
+
+  // \brief
+  /// \brief EnsureUpperBound for #for-- expression LB = PrevUB;
+  Expr *PrevEUBExpr;
+
   /// \brief Build directive with the given start and end location.
   ///
   /// \param StartLoc Starting location of the directive kind.
@@ -3100,7 +3110,8 @@ public:
   static OMPTargetTeamsDistributeParallelForDirective *
   Create(const ASTContext &C, SourceLocation StartLoc, SourceLocation EndLoc,
          unsigned CollapsedNum, ArrayRef<OMPClause *> Clauses,
-         Stmt *AssociatedStmt, const HelperExprs &Exprs);
+         Stmt *AssociatedStmt, const HelperExprs &Exprs, Expr *DistInc,
+         Expr *PrevEUB);
 
   /// \brief Creates an empty directive with the place
   /// for \a NumClauses clauses.
@@ -3112,6 +3123,11 @@ public:
   static OMPTargetTeamsDistributeParallelForDirective *
   CreateEmpty(const ASTContext &C, unsigned NumClauses, unsigned CollapsedNum,
               EmptyShell);
+
+  void setDistInc(Expr *DistInc) { DistIncExpr = DistInc; }
+  void setPrevEnsureUpperBound(Expr *PrevEUB) { PrevEUBExpr = PrevEUB; }
+  Expr *getDistInc() const { return DistIncExpr; }
+  Expr *getPrevEnsureUpperBound() const { return PrevEUBExpr; }
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() ==
