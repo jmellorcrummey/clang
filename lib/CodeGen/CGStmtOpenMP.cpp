@@ -1299,9 +1299,15 @@ static void emitCommonOMPParallelDirective(CodeGenFunction &CGF,
       S.getDirectiveKind() == OMPD_target_teams_distribute_parallel_for) {
     const OMPLoopDirective &Dir = cast<OMPLoopDirective>(S);
     LValue LB = CGF.EmitLValue(cast<DeclRefExpr>(Dir.getLowerBoundVariable()));
-    CapturedVars.push_back(CGF.Builder.CreateLoad(LB.getAddress()));
+    auto LBCast =
+        CGF.Builder.CreateIntCast(CGF.Builder.CreateLoad(LB.getAddress()),
+                                  CGF.SizeTy, /*isSigned=*/false);
+    CapturedVars.push_back(LBCast);
     LValue UB = CGF.EmitLValue(cast<DeclRefExpr>(Dir.getUpperBoundVariable()));
-    CapturedVars.push_back(CGF.Builder.CreateLoad(UB.getAddress()));
+    auto UBCast =
+        CGF.Builder.CreateIntCast(CGF.Builder.CreateLoad(UB.getAddress()),
+                                  CGF.SizeTy, /*isSigned=*/false);
+    CapturedVars.push_back(UBCast);
   }
   CGF.GenerateOpenMPCapturedVars(*CS, CapturedVars, CaptureLevel);
   CGF.CGM.getOpenMPRuntime().emitParallelCall(CGF, S.getLocStart(), OutlinedFn,
