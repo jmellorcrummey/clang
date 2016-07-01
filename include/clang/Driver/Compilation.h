@@ -116,14 +116,14 @@ public:
     return OrderedOffloadingToolchains.equal_range(Kind);
   }
 
-  /// \brief Return true if an offloading tool chain of a given kind exists.
+  /// Return true if an offloading tool chain of a given kind exists.
   template <Action::OffloadKind Kind> bool hasOffloadToolChain() const {
     return OrderedOffloadingToolchains.find(Kind) !=
            OrderedOffloadingToolchains.end();
   }
 
-  /// \brief Return an offload toolchain of the provided kind. Only one is
-  /// expected to exist.
+  /// Return an offload toolchain of the provided kind. Only one is expected to
+  /// exist.
   template <Action::OffloadKind Kind>
   const ToolChain *getSingleOffloadToolChain() const {
     auto TCs = getOffloadToolChains<Kind>();
