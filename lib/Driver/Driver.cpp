@@ -479,8 +479,16 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
       // We expect that -fopenmp-targets is always used in conjunction with the
       // option -fopenmp specifying a valid runtime with offloading support,
       // i.e. libomp or libiomp.
-      OpenMPRuntimeKind OpenMPKind = getOpenMPRuntime(C.getInputArgs());
-      if (OpenMPKind == OMPRT_OMP || OpenMPKind == OMPRT_IOMP5) {
+      bool HasValidOpenMPRuntime = C.getInputArgs().hasFlag(
+          options::OPT_fopenmp, options::OPT_fopenmp_EQ,
+          options::OPT_fno_openmp, false);
+      if (HasValidOpenMPRuntime) {
+        OpenMPRuntimeKind OpenMPKind = getOpenMPRuntime(C.getInputArgs());
+        HasValidOpenMPRuntime =
+            OpenMPKind == OMPRT_OMP || OpenMPKind == OMPRT_IOMP5;
+      }
+
+      if (HasValidOpenMPRuntime) {
         llvm::StringMap<const char *> FoundNormalizedTriples;
         for (const char *Val : OpenMPTargets->getValues()) {
           llvm::Triple TT(Val);
