@@ -422,6 +422,32 @@ void Driver::setLTOMode(const llvm::opt::ArgList &Args) {
   }
 }
 
+/// Compute the desired OpenMP runtime from the flags provided.
+Driver::OpenMPRuntimeKind Driver::getOpenMPRuntime(const ArgList &Args) const {
+  StringRef RuntimeName(CLANG_DEFAULT_OPENMP_RUNTIME);
+
+  const Arg *A = Args.getLastArg(options::OPT_fopenmp_EQ);
+  if (A)
+    RuntimeName = A->getValue();
+
+  auto RT = llvm::StringSwitch<OpenMPRuntimeKind>(RuntimeName)
+                .Case("libomp", OMPRT_OMP)
+                .Case("libgomp", OMPRT_GOMP)
+                .Case("libiomp5", OMPRT_IOMP5)
+                .Default(OMPRT_Unknown);
+
+  if (RT == OMPRT_Unknown) {
+    if (A)
+      Diag(diag::err_drv_unsupported_option_argument)
+          << A->getOption().getName() << A->getValue();
+    else
+      // FIXME: We could use a nicer diagnostic here.
+      Diag(diag::err_drv_unsupported_opt) << "-fopenmp";
+  }
+
+  return RT;
+}
+
 void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
                                               InputList &Inputs) {
 
@@ -453,22 +479,8 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
       // We expect that -fopenmp-targets is always used in conjunction with the
       // option -fopenmp specifying a valid runtime with offloading support,
       // i.e. libomp or libiomp.
-      bool HasCompatibleOpenMP = C.getInputArgs().hasFlag(
-          options::OPT_fopenmp, options::OPT_fopenmp_EQ,
-          options::OPT_fno_openmp, false);
-      if (HasCompatibleOpenMP) {
-        StringRef RuntimeName(CLANG_DEFAULT_OPENMP_RUNTIME);
-        const Arg *A = C.getInputArgs().getLastArg(options::OPT_fopenmp_EQ);
-        if (A)
-          RuntimeName = A->getValue();
-        HasCompatibleOpenMP = llvm::StringSwitch<bool>(RuntimeName)
-                                  .Case("libomp", true)
-                                  .Case("libgomp", false)
-                                  .Case("libiomp5", true)
-                                  .Default(false);
-      }
-
-      if (HasCompatibleOpenMP) {
+      OpenMPRuntimeKind OpenMPKind = getOpenMPRuntime(C.getInputArgs());
+      if (OpenMPKind == OMPRT_OMP || OpenMPKind == OMPRT_IOMP5) {
         llvm::StringMap<const char *> FoundNormalizedTriples;
         for (const char *Val : OpenMPTargets->getValues()) {
           llvm::Triple TT(Val);
