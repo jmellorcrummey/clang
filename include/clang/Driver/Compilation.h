@@ -70,10 +70,10 @@ class Compilation {
 
   /// Cache of translated arguments for a particular tool chain, bound
   /// architecture, and device offload kind.
-  struct TCArgsKey {
-    const ToolChain *TC;
-    const char *BoundArch;
-    Action::OffloadKind DeviceOffloadKind;
+  struct TCArgsKey final {
+    const ToolChain *TC = nullptr;
+    const char *BoundArch = nullptr;
+    Action::OffloadKind DeviceOffloadKind = Action::OFK_None;
     bool operator<(const TCArgsKey &K) const {
       if (TC < K.TC)
         return true;
@@ -84,6 +84,9 @@ class Compilation {
         return true;
       return false;
     }
+    TCArgsKey(const ToolChain *TC, const char *BoundArch,
+              Action::OffloadKind DeviceOffloadKind)
+        : TC(TC), BoundArch(BoundArch), DeviceOffloadKind(DeviceOffloadKind) {}
   };
   std::map<TCArgsKey, llvm::opt::DerivedArgList *> TCArgs;
 
