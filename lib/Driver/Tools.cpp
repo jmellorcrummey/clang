@@ -275,10 +275,10 @@ static void AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
     addDirectoryList(Args, CmdArgs, "-L", "LIBRARY_PATH");
 }
 
-/// \brief Add OpenMP linker script arguments at the end of the argument list
-/// so that the fat binary is built by embedding each of the device images into
-/// the host. The linker script also defines a few symbols required by the
-/// code generation so that the images can be easily retrieved at runtime by the
+/// Add OpenMP linker script arguments at the end of the argument list so that
+/// the fat binary is built by embedding each of the device images into the
+/// host. The linker script also defines a few symbols required by the code
+/// generation so that the images can be easily retrieved at runtime by the
 /// offloading library. This should be used only in tool chains that support
 /// linker scripts.
 static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
