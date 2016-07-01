@@ -144,7 +144,7 @@ InputArgList Driver::ParseArgStrings(ArrayRef<const char *> ArgStrings) {
     // Warn about -mcpu= without an argument.
     if ((A->getOption().matches(options::OPT_mcpu_EQ) &&
          A->containsValue("")) ||
-        (A->getOption().matches(options::OPT_fomptargets_EQ) &&
+        (A->getOption().matches(options::OPT_fopenmp_targets_EQ) &&
          !A->getNumValues())) {
       Diag(clang::diag::warn_drv_empty_joined_argument) << A->getAsString(Args);
     }
@@ -212,7 +212,7 @@ static bool RequiresOpenMPOffloading(ArgList &Args) {
       OpenMPRuntimeName = A->getValue();
 
     if (OpenMPRuntimeName == "libomp" || OpenMPRuntimeName == "libiomp5") {
-      auto *A = Args.getLastArg(options::OPT_fomptargets_EQ);
+      auto *A = Args.getLastArg(options::OPT_fopenmp_targets_EQ);
       return A != nullptr && A->getNumValues();
     }
   }
@@ -536,7 +536,7 @@ DerivedArgList *Driver::TranslateInputArgs(const InputArgList &Args) const {
   }
 
   // Enforce -static if -miamcu is present.
-  if (Args.hasArg(options::OPT_miamcu))
+  if (Args.hasFlag(options::OPT_miamcu, options::OPT_mno_iamcu, false))
     DAL->AddFlagArg(0, Opts->getOption(options::OPT_static));
 
 // Add a default value of -mlinker-version=, if one was given and the user
@@ -631,7 +631,7 @@ static llvm::Triple computeTargetTriple(const Driver &D,
   }
 
   // Handle -miamcu flag.
-  if (Args.hasArg(options::OPT_miamcu)) {
+  if (Args.hasFlag(options::OPT_miamcu, options::OPT_mno_iamcu, false)) {
     if (Target.get32BitArchVariant().getArch() != llvm::Triple::x86)
       D.Diag(diag::err_drv_unsupported_opt_for_target) << "-miamcu"
                                                        << Target.str();
@@ -836,7 +836,7 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   OrderedOffloadingToolchains.clear();
 
   if (DeviceOffloadingKind == ToolChain::OK_OpenMP_Device) {
-    Arg *Tgts = UArgs->getLastArg(options::OPT_fomptargets_EQ);
+    Arg *Tgts = UArgs->getLastArg(options::OPT_fopenmp_targets_EQ);
     assert(Tgts && Tgts->getNumValues() &&
            "OpenMP offloading has to have targets specified.");
 

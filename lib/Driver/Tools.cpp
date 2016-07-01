@@ -233,7 +233,7 @@ static void AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
   // the last inputs - one for each offloading device - as they are going to be
   // embedded in the fat binary by a custom linker script.
   if (TC.getOffloadingKind() == ToolChain::OK_OpenMP_Host) {
-    Arg *Tgts = Args.getLastArg(options::OPT_fomptargets_EQ);
+    Arg *Tgts = Args.getLastArg(options::OPT_fopenmp_targets_EQ);
     assert(Tgts && Tgts->getNumValues() &&
            "OpenMP offloading has to have targets specified.");
     NumberOfInputs -= Tgts->getNumValues();
@@ -281,7 +281,7 @@ static void AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
 /// \brief Add OpenMP linker script arguments at the end of the argument list
 /// so that the fat binary is built by embedding each of the device images into
 /// the host. The device images are the last inputs, one for each device and
-/// come in the same order the triples are passed through the fomptargets
+/// come in the same order the triples are passed through the fopenmp_targets
 /// option.
 /// The linker script also defines a few symbols required by the code generation
 /// so that the images can be easily retrieved at runtime by the offloading
@@ -299,7 +299,7 @@ static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
   // end of the input list. So we do a reverse scanning.
   SmallVector<std::pair<llvm::Triple, const char *>, 4> Targets;
 
-  Arg *Tgts = Args.getLastArg(options::OPT_fomptargets_EQ);
+  Arg *Tgts = Args.getLastArg(options::OPT_fopenmp_targets_EQ);
   assert(Tgts && Tgts->getNumValues() &&
          "OpenMP offloading has to have targets specified.");
 
@@ -607,6 +607,13 @@ void Clang::AddPreprocessingOptions(Compilation &C, const JobAction &JA,
                                                        << A->getAsString(Args);
         }
       }
+    } else if (A->getOption().matches(options::OPT_isystem_after)) {
+      // Handling of paths which must come late.  These entries are handled by
+      // the toolchain itself after the resource dir is inserted in the right
+      // search order.
+      // Do not claim the argument so that the use of the argument does not
+      // silently go unnoticed on toolchains which do not honour the option.
+      continue;
     }
 
     // Not translated, render as usual.
@@ -901,10 +908,12 @@ arm::FloatABI arm::getARMFloatABI(const ToolChain &TC, const ArgList &Args) {
     default:
       switch (Triple.getEnvironment()) {
       case llvm::Triple::GNUEABIHF:
+      case llvm::Triple::MuslEABIHF:
       case llvm::Triple::EABIHF:
         ABI = FloatABI::Hard;
         break;
       case llvm::Triple::GNUEABI:
+      case llvm::Triple::MuslEABI:
       case llvm::Triple::EABI:
         // EABI is always AAPCS, and if it was not marked 'hard', it's softfp
         ABI = FloatABI::SoftFP;
@@ -1150,6 +1159,8 @@ void Clang::AddARMTargetArgs(const llvm::Triple &Triple, const ArgList &Args,
     case llvm::Triple::Android:
     case llvm::Triple::GNUEABI:
     case llvm::Triple::GNUEABIHF:
+    case llvm::Triple::MuslEABI:
+    case llvm::Triple::MuslEABIHF:
       ABIName = "aapcs-linux";
       break;
     case llvm::Triple::EABIHF:
@@ -2341,7 +2352,7 @@ void Clang::AddX86TargetArgs(const ArgList &Args,
   }
 
   // Set flags to support MCU ABI.
-  if (Args.hasArg(options::OPT_miamcu)) {
+  if (Args.hasFlag(options::OPT_miamcu, options::OPT_mno_iamcu, false)) {
     CmdArgs.push_back("-mfloat-abi");
     CmdArgs.push_back("soft");
     CmdArgs.push_back("-mstack-alignment=4");
@@ -2444,7 +2455,7 @@ static bool DecodeAArch64Mcpu(const Driver &D, StringRef Mcpu, StringRef &CPU,
   CPU = Split.first;
   if (CPU == "cortex-a53" || CPU == "cortex-a57" ||
       CPU == "cortex-a72" || CPU == "cortex-a35" || CPU == "exynos-m1" ||
-      CPU == "kryo"       || CPU == "cortex-a73") {
+      CPU == "kryo"       || CPU == "cortex-a73" || CPU == "vulcan") {
     Features.push_back("+neon");
     Features.push_back("+crc");
     Features.push_back("+crypto");
@@ -2935,7 +2946,7 @@ static void CollectArgsForIntegratedAssembler(Compilation &C,
   // options.
   bool CompressDebugSections = false;
 
-  bool UseRelaxRelocations = false;
+  bool UseRelaxRelocations = ENABLE_X86_RELAX_RELOCATIONS;
   const char *MipsTargetFeature = nullptr;
   for (const Arg *A :
        Args.filtered(options::OPT_Wa_COMMA, options::OPT_Xassembler)) {
@@ -4118,10 +4129,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (PICLevel > 0) {
     CmdArgs.push_back("-pic-level");
     CmdArgs.push_back(PICLevel == 1 ? "1" : "2");
-    if (IsPIE) {
-      CmdArgs.push_back("-pie-level");
-      CmdArgs.push_back(PICLevel == 1 ? "1" : "2");
-    }
+    if (IsPIE)
+      CmdArgs.push_back("-pic-is-pie");
   }
 
   if (Arg *A = Args.getLastArg(options::OPT_meabi)) {
@@ -5211,6 +5220,40 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-arm-restrict-it");
   }
 
+  // Forward -cl options to -cc1
+  if (Args.getLastArg(options::OPT_cl_opt_disable)) {
+    CmdArgs.push_back("-cl-opt-disable");
+  }
+  if (Args.getLastArg(options::OPT_cl_strict_aliasing)) {
+    CmdArgs.push_back("-cl-strict-aliasing");
+  }
+  if (Args.getLastArg(options::OPT_cl_single_precision_constant)) {
+    CmdArgs.push_back("-cl-single-precision-constant");
+  }
+  if (Args.getLastArg(options::OPT_cl_finite_math_only)) {
+    CmdArgs.push_back("-cl-finite-math-only");
+  }
+  if (Args.getLastArg(options::OPT_cl_kernel_arg_info)) {
+    CmdArgs.push_back("-cl-kernel-arg-info");
+  }
+  if (Args.getLastArg(options::OPT_cl_unsafe_math_optimizations)) {
+    CmdArgs.push_back("-cl-unsafe-math-optimizations");
+  }
+  if (Args.getLastArg(options::OPT_cl_fast_relaxed_math)) {
+    CmdArgs.push_back("-cl-fast-relaxed-math");
+  }
+  if (Args.getLastArg(options::OPT_cl_mad_enable)) {
+    CmdArgs.push_back("-cl-mad-enable");
+  }
+  if (Arg *A = Args.getLastArg(options::OPT_cl_std_EQ)) {
+    std::string CLStdStr = "-cl-std=";
+    CLStdStr += A->getValue();
+    CmdArgs.push_back(Args.MakeArgString(CLStdStr));
+  }
+  if (Args.getLastArg(options::OPT_cl_denorms_are_zero)) {
+    CmdArgs.push_back("-cl-denorms-are-zero");
+  }
+
   // Forward -f options with positive and negative forms; we translate
   // these by hand.
   if (Arg *A = Args.getLastArg(options::OPT_fprofile_sample_use_EQ)) {
@@ -5462,10 +5505,25 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   bool IsMSVC2015Compatible = MSVT.getMajor() >= 19;
   if (ImplyVCPPCXXVer) {
-    if (IsMSVC2015Compatible)
-      CmdArgs.push_back("-std=c++14");
-    else
-      CmdArgs.push_back("-std=c++11");
+    StringRef LanguageStandard;
+    if (const Arg *StdArg = Args.getLastArg(options::OPT__SLASH_std)) {
+      LanguageStandard = llvm::StringSwitch<StringRef>(StdArg->getValue())
+                             .Case("c++14", "-std=c++14")
+                             .Case("c++latest", "-std=c++1z")
+                             .Default("");
+      if (LanguageStandard.empty())
+        D.Diag(clang::diag::warn_drv_unused_argument)
+            << StdArg->getAsString(Args);
+    }
+
+    if (LanguageStandard.empty()) {
+      if (IsMSVC2015Compatible)
+        LanguageStandard = "-std=c++14";
+      else
+        LanguageStandard = "-std=c++11";
+    }
+
+    CmdArgs.push_back(LanguageStandard.data());
   }
 
   // -fno-borland-extensions is default.
@@ -5507,6 +5565,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-fno-inline");
 
   if (Arg* InlineArg = Args.getLastArg(options::OPT_finline_functions,
+                                       options::OPT_finline_hint_functions,
                                        options::OPT_fno_inline_functions))
     InlineArg->render(Args, CmdArgs);
 
@@ -5996,14 +6055,14 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back(I->getFilename());
     }
 
-  // OpenMP offloading device jobs take the argument -fomp-host-ir-file-path
+  // OpenMP offloading device jobs take the argument -fopenmp-host-ir-file-path
   // to specify the result of the compile phase on the host, so the meaningful
   // device declarations can be identified. Also, -fopenmp-is-device is passed
   // along to tell the frontend that it is generating code for a device, so that
   // only the relevant declarations are emitted.
   if (IsOpenMPDeviceCompileJob) {
     CmdArgs.push_back("-fopenmp-is-device");
-    CmdArgs.push_back("-fomp-host-ir-file-path");
+    CmdArgs.push_back("-fopenmp-host-ir-file-path");
     CmdArgs.push_back(Args.MakeArgString(Inputs.back().getFilename()));
   }
 
@@ -6013,12 +6072,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   // For all the host OpenMP offloading compile jobs we need to pass the targets
-  // information using -fomptargets= option.
+  // information using -fopenmp-targets= option.
   if (isa<CompileJobAction>(JA) &&
       getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Host) {
-    SmallString<128> TargetInfo("-fomptargets=");
+    SmallString<128> TargetInfo("-fopenmp-targets=");
 
-    Arg *Tgts = Args.getLastArg(options::OPT_fomptargets_EQ);
+    Arg *Tgts = Args.getLastArg(options::OPT_fopenmp_targets_EQ);
     assert(Tgts && Tgts->getNumValues() &&
            "OpenMP offloading has to have targets specified.");
     for (unsigned i = 0; i < Tgts->getNumValues(); ++i) {
@@ -6637,7 +6696,7 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
 
   // The (un)bundling command looks like this:
   // clang-offload-bundler -type=bc
-  //   -fomptargets=host-triple,device-triple1,device-triple2
+  //   -targets=host-triple,device-triple1,device-triple2
   //   -inputs=input_file
   //   -outputs=unbundle_file_host,unbundle_file_tgt1,unbundle_file_tgt2"
   //   (-unbundle)
@@ -6653,13 +6712,14 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
   CmdArgs.push_back(TCArgs.MakeArgString(
       Twine("-type=") + types::getTypeTempSuffix(BundledFile.getType())));
 
-  // Get the triples. The order is the same that comes in fomptargets option.
+  // Get the triples. The order is the same that comes in fopenmp-targets
+  // option.
   {
     SmallString<128> Triples;
     Triples += "-targets=offload-host-";
     Triples += getToolChain().getTripleString();
 
-    Arg *TargetsArg = TCArgs.getLastArg(options::OPT_fomptargets_EQ);
+    Arg *TargetsArg = TCArgs.getLastArg(options::OPT_fopenmp_targets_EQ);
     for (auto *A : TargetsArg->getValues()) {
       // We have to use the string that exactly matches the triple here.
       llvm::Triple T(A);

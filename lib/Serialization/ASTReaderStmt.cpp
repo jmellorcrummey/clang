@@ -184,6 +184,7 @@ void ASTStmtReader::VisitAttributedStmt(AttributedStmt *S) {
 
 void ASTStmtReader::VisitIfStmt(IfStmt *S) {
   VisitStmt(S);
+  S->setConstexpr(Record[Idx++]);
   S->setConditionVariable(Reader.getContext(),
                           ReadDeclAs<VarDecl>(Record, Idx));
   S->setCond(Reader.ReadSubExpr());
@@ -1249,6 +1250,14 @@ void ASTStmtReader::VisitCXXConstructExpr(CXXConstructExpr *E) {
   E->ParenOrBraceRange = ReadSourceRange(Record, Idx);
 }
 
+void ASTStmtReader::VisitCXXInheritedCtorInitExpr(CXXInheritedCtorInitExpr *E) {
+  VisitExpr(E);
+  E->Constructor = ReadDeclAs<CXXConstructorDecl>(Record, Idx);
+  E->Loc = ReadSourceLocation(Record, Idx);
+  E->ConstructsVirtualBase = Record[Idx++];
+  E->InheritedFromVirtualBase = Record[Idx++];
+}
+
 void ASTStmtReader::VisitCXXTemporaryObjectExpr(CXXTemporaryObjectExpr *E) {
   VisitCXXConstructExpr(E);
   E->Type = GetTypeSourceInfo(Record, Idx);
@@ -1448,6 +1457,7 @@ void ASTStmtReader::VisitExprWithCleanups(ExprWithCleanups *E) {
     E->getTrailingObjects<BlockDecl *>()[i] =
         ReadDeclAs<BlockDecl>(Record, Idx);
 
+  E->ExprWithCleanupsBits.CleanupsHaveSideEffects = Record[Idx++];
   E->SubExpr = Reader.ReadSubExpr();
 }
 
@@ -1912,6 +1922,9 @@ OMPClause *OMPClauseReader::readClause() {
                                    NumComponents);
     break;
   }
+  case OMPC_use_device_ptr:
+    C = OMPUseDevicePtrClause::CreateEmpty(Context, Record[Idx++]);
+    break;
   }
   Visit(C);
   C->setLocStart(Reader->ReadSourceLocation(Record, Idx));
@@ -2431,6 +2444,20 @@ void OMPClauseReader::VisitOMPFromClause(OMPFromClause *C) {
   C->setComponents(Components, ListSizes);
 }
 
+void OMPClauseReader::VisitOMPUseDevicePtrClause(OMPUseDevicePtrClause *C) {
+  C->setLParenLoc(Reader->ReadSourceLocation(Record, Idx));
+  unsigned NumVars = C->varlist_size();
+  SmallVector<Expr *, 16> Vars;
+  Vars.reserve(NumVars);
+  for (unsigned i = 0; i != NumVars; ++i)
+    Vars.push_back(Reader->Reader.ReadSubExpr());
+  C->setVarRefs(Vars);
+  Vars.clear();
+  for (unsigned i = 0; i != NumVars; ++i)
+    Vars.push_back(Reader->Reader.ReadSubExpr());
+  C->setPrivateCopies(Vars);
+}
+
 //===----------------------------------------------------------------------===//
 // OpenMP Directives.
 //===----------------------------------------------------------------------===//
@@ -2707,7 +2734,6 @@ void ASTStmtReader::VisitOMPTargetUpdateDirective(OMPTargetUpdateDirective *D) {
   ++Idx;
   VisitOMPExecutableDirective(D);
 }
-
 void ASTStmtReader::VisitOMPDistributeParallelForDirective(
     OMPDistributeParallelForDirective *D) {
   VisitOMPLoopDirective(D);
@@ -3446,6 +3472,10 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
 
     case EXPR_CXX_CONSTRUCT:
       S = new (Context) CXXConstructExpr(Empty);
+      break;
+
+    case EXPR_CXX_INHERITED_CTOR_INIT:
+      S = new (Context) CXXInheritedCtorInitExpr(Empty);
       break;
 
     case EXPR_CXX_TEMPORARY_OBJECT:

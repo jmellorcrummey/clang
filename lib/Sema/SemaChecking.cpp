@@ -1389,7 +1389,6 @@ bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
   case X86::BI__builtin_ia32_extractf32x4_mask:
   case X86::BI__builtin_ia32_extracti32x4_mask:
   case X86::BI__builtin_ia32_vpermilpd_mask:
-  case X86::BI__builtin_ia32_vpermilps_mask:
   case X86::BI__builtin_ia32_extractf64x2_512_mask:
   case X86::BI__builtin_ia32_extracti64x2_512_mask:
     i = 1; l = 0; u = 3;
@@ -1461,7 +1460,6 @@ bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
   case X86::BI__builtin_ia32_roundps256:
   case X86::BI__builtin_ia32_roundpd256:
   case X86::BI__builtin_ia32_vpermilpd256_mask:
-  case X86::BI__builtin_ia32_vpermilps256_mask:
     i = 1; l = 0; u = 15;
     break;
   case X86::BI__builtin_ia32_roundss:
@@ -1541,7 +1539,6 @@ bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
   case X86::BI__builtin_ia32_psrlwi128_mask:
   case X86::BI__builtin_ia32_psrlwi256_mask:
   case X86::BI__builtin_ia32_vpermilpd512_mask:
-  case X86::BI__builtin_ia32_vpermilps512_mask:
   case X86::BI__builtin_ia32_psradi128_mask:
   case X86::BI__builtin_ia32_psradi256_mask:
   case X86::BI__builtin_ia32_psradi512_mask:
@@ -1566,6 +1563,9 @@ bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
   case X86::BI__builtin_ia32_fpclasspd512_mask:
   case X86::BI__builtin_ia32_fpclasssd_mask:
   case X86::BI__builtin_ia32_fpclassss_mask:
+  case X86::BI__builtin_ia32_vpermilps_mask:
+  case X86::BI__builtin_ia32_vpermilps256_mask:
+  case X86::BI__builtin_ia32_vpermilps512_mask:
     i = 1; l = 0; u = 255;
     break;
   case X86::BI__builtin_ia32_palignr:
@@ -2961,11 +2961,11 @@ bool Sema::SemaBuiltinVAStartImpl(CallExpr *TheCall) {
       // Get the last formal in the current function.
       const ParmVarDecl *LastArg;
       if (CurBlock)
-        LastArg = *(CurBlock->TheDecl->param_end()-1);
+        LastArg = CurBlock->TheDecl->parameters().back();
       else if (FunctionDecl *FD = getCurFunctionDecl())
-        LastArg = *(FD->param_end()-1);
+        LastArg = FD->parameters().back();
       else
-        LastArg = *(getCurMethodDecl()->param_end()-1);
+        LastArg = getCurMethodDecl()->parameters().back();
       SecondArgIsLastNamedArgument = PV == LastArg;
 
       Type = PV->getType();
@@ -8499,7 +8499,7 @@ void Sema::DiagnoseAlwaysNonNullPointer(Expr *E,
       }
 
       if (const auto *FD = dyn_cast<FunctionDecl>(PV->getDeclContext())) {
-        auto ParamIter = std::find(FD->param_begin(), FD->param_end(), PV);
+        auto ParamIter = llvm::find(FD->parameters(), PV);
         assert(ParamIter != FD->param_end());
         unsigned ParamNo = std::distance(FD->param_begin(), ParamIter);
 
@@ -8770,12 +8770,11 @@ class SequenceChecker : public EvaluatedExprVisitor<SequenceChecker> {
       Self.ModAsSideEffect = &ModAsSideEffect;
     }
     ~SequencedSubexpression() {
-      for (auto MI = ModAsSideEffect.rbegin(), ME = ModAsSideEffect.rend();
-           MI != ME; ++MI) {
-        UsageInfo &U = Self.UsageMap[MI->first];
+      for (auto &M : llvm::reverse(ModAsSideEffect)) {
+        UsageInfo &U = Self.UsageMap[M.first];
         auto &SideEffectUsage = U.Uses[UK_ModAsSideEffect];
-        Self.addUsage(U, MI->first, SideEffectUsage.Use, UK_ModAsValue);
-        SideEffectUsage = MI->second;
+        Self.addUsage(U, M.first, SideEffectUsage.Use, UK_ModAsValue);
+        SideEffectUsage = M.second;
       }
       Self.ModAsSideEffect = OldModAsSideEffect;
     }
@@ -9187,13 +9186,10 @@ static void diagnoseArrayStarInParamType(Sema &S, QualType PType,
 /// takes care of any checks that cannot be performed on the
 /// declaration itself, e.g., that the types of each of the function
 /// parameters are complete.
-bool Sema::CheckParmsForFunctionDef(ParmVarDecl *const *P,
-                                    ParmVarDecl *const *PEnd,
+bool Sema::CheckParmsForFunctionDef(ArrayRef<ParmVarDecl *> Parameters,
                                     bool CheckParameterNames) {
   bool HasInvalidParm = false;
-  for (; P != PEnd; ++P) {
-    ParmVarDecl *Param = *P;
-    
+  for (ParmVarDecl *Param : Parameters) {
     // C99 6.7.5.3p4: the parameters in a parameter type list in a
     // function declarator that is part of a function definition of
     // that function shall not have incomplete type.

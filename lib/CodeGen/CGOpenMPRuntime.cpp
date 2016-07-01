@@ -11,9 +11,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "CGOpenMPRuntime.h"
 #include "CGCXXABI.h"
 #include "CGCleanup.h"
-#include "CGOpenMPRuntime.h"
 #include "CodeGenFunction.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclTemplate.h"
@@ -2612,12 +2612,17 @@ void CGOpenMPRuntime::emitForDispatchInit(CodeGenFunction &CGF,
   // If the Chunk was not specified in the clause - use default value 1.
   if (Chunk == nullptr)
     Chunk = CGF.Builder.getIntN(IVSize, 1);
+  // Adjust bitsize of UB variable which may have changed due to transformations
+  // involving prevLB and prevUB fields.
+  auto castUB =
+      CGF.Builder.CreateIntCast(UB, CGF.Builder.getIntNTy(IVSize), IVSigned);
+
   llvm::Value *Args[] = {
       emitUpdateLocation(CGF, Loc), getThreadID(CGF, Loc),
       CGF.Builder.getInt32(addMonoNonMonoModifier(
           Schedule, ScheduleKind.M1, ScheduleKind.M2)), // Schedule type
       LB,                                               // Lower
-      UB,                                               // Upper
+      castUB,                                           // Upper
       CGF.Builder.getIntN(IVSize, 1),                   // Stride
       Chunk                                             // Chunk
   };
@@ -6846,7 +6851,7 @@ void CGOpenMPRuntime::emitDeclareSimdFunction(const FunctionDecl *FD,
   if (isa<CXXMethodDecl>(FD))
     ParamPositions.insert({FD, 0});
   unsigned ParamPos = ParamPositions.size();
-  for (auto *P : FD->params()) {
+  for (auto *P : FD->parameters()) {
     ParamPositions.insert({P->getCanonicalDecl(), ParamPos});
     ++ParamPos;
   }
