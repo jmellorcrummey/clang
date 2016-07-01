@@ -507,6 +507,12 @@ public:
     const char *DependingBoundArch = nullptr;
     /// \brief The offload kind of the depending action.
     const OffloadKind DependingOffloadKind = OFK_None;
+    DependingActionInfoTy(const ToolChain *DependingToolChain,
+                          const char *DependingBoundArch,
+                          const OffloadKind DependingOffloadKind)
+        : DependingToolChain(DependingToolChain),
+          DependingBoundArch(DependingBoundArch),
+          DependingOffloadKind(DependingOffloadKind){};
   };
 
 private:

@@ -9,6 +9,7 @@
 
 #include "clang/Driver/Action.h"
 #include "clang/Driver/ToolChain.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Regex.h"
@@ -130,7 +131,7 @@ Action::getOffloadingFileNamePrefix(StringRef NormalizedTriple) const {
 
 /// Return a string with the offload kind name. If that is not defined, we
 /// assume 'host'.
-StringRef Action::getOffloadKindName(OffloadKind Kind) {
+llvm::StringRef Action::getOffloadKindName(OffloadKind Kind) {
   switch (Kind) {
   case OFK_None:
   case OFK_Host:
