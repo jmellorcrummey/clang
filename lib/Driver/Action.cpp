@@ -9,6 +9,7 @@
 
 #include "clang/Driver/Action.h"
 #include "clang/Driver/ToolChain.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Regex.h"
@@ -130,9 +131,9 @@ std::string Action::getOffloadingFileNamePrefix(OffloadKind Kind,
   return Res;
 }
 
-/// \brief Return a string with the offload kind name. If that is not defined,
-/// we assume 'host'.
-std::string Action::getOffloadKindName(OffloadKind Kind) {
+/// Return a string with the offload kind name. If that is not defined, we
+/// assume 'host'.
+llvm::StringRef Action::getOffloadKindName(OffloadKind Kind) {
   switch (Kind) {
   case OFK_None:
   case OFK_Host:
@@ -168,7 +169,7 @@ OffloadAction::OffloadAction(const HostDependence &HDep)
 };
 
 OffloadAction::OffloadAction(const DeviceDependences &DDeps, types::ID Ty)
-    : Action(OffloadClass, DDeps.getActions(), Ty), HostTC(nullptr),
+    : Action(OffloadClass, DDeps.getActions(), Ty),
       DevToolChains(DDeps.getToolChains()) {
   auto &OKinds = DDeps.getOffloadKinds();
   auto &BArchs = DDeps.getBoundArchs();
@@ -277,8 +278,7 @@ void OffloadAction::DeviceDependences::add(Action &A, const ToolChain &TC,
 OffloadAction::HostDependence::HostDependence(Action &A, const ToolChain &TC,
                                               const char *BoundArch,
                                               const DeviceDependences &DDeps)
-    : HostAction(A), HostToolChain(TC), HostBoundArch(BoundArch),
-      HostOffloadKinds(0u) {
+    : HostAction(A), HostToolChain(TC), HostBoundArch(BoundArch) {
   for (auto K : DDeps.getOffloadKinds())
     HostOffloadKinds |= K;
 }

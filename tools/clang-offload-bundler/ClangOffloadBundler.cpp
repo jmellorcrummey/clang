@@ -72,13 +72,13 @@ static cl::opt<bool>
              cl::desc("Unbundle bundled file into several output files.\n"),
              cl::init(false), cl::cat(ClangOffloadBundlerCategory));
 
-/// \brief Magic string that marks the existence of offloading data.
+/// Magic string that marks the existence of offloading data.
 #define OFFLOAD_BUNDLER_MAGIC_STR "__CLANG_OFFLOAD_BUNDLE__"
 
-/// \brief Path to the current binary.
+/// Path to the current binary.
 static std::string BundlerExecutable;
 
-/// \brief Obtain the offload kind and real machine triple out of the target
+/// Obtain the offload kind and real machine triple out of the target
 /// information specified by the user.
 static void getOffloadKindAndTriple(StringRef Target, StringRef &OffloadKind,
                                     StringRef &Triple) {
@@ -99,62 +99,62 @@ static bool hasHostKind(StringRef Target) {
   return OffloadKind == "host";
 }
 
-/// \brief Generic file handler interface.
+/// Generic file handler interface.
 class FileHandler {
 public:
-  /// \brief Update the file handler with information from the header of the
-  /// bundled file
+  /// Update the file handler with information from the header of the bundled
+  /// file
   virtual void ReadHeader(MemoryBuffer &Input) = 0;
-  /// \brief Read the marker of the next bundled to be read in the file. The
-  /// triple of the target associated with that bundled is returned. An empty
-  /// string is returned if there are no more bundles to be read.
+  /// Read the marker of the next bundled to be read in the file. The triple of
+  /// the target associated with that bundled is returned. An empty string is
+  /// returned if there are no more bundles to be read.
   virtual StringRef ReadBundleStart(MemoryBuffer &Input) = 0;
-  /// \brief Read the marker that closes the current bundle.
+  /// Read the marker that closes the current bundle.
   virtual void ReadBundleEnd(MemoryBuffer &Input) = 0;
-  /// \brief Read the current bundle and write the result into the stream \a OS.
+  /// Read the current bundle and write the result into the stream \a OS.
   virtual void ReadBundle(raw_fd_ostream &OS, MemoryBuffer &Input) = 0;
 
-  /// \brief Write the header of the bundled file to \a OS based on the
-  /// information gathered from \a Inputs.
+  /// Write the header of the bundled file to \a OS based on the information
+  /// gathered from \a Inputs.
   virtual void WriteHeader(raw_fd_ostream &OS,
                            ArrayRef<std::unique_ptr<MemoryBuffer>> Inputs) = 0;
-  /// \brief Write the marker that initiates a bundle for the triple \a
-  /// TargetTriple to \a OS.
+  /// Write the marker that initiates a bundle for the triple \a TargetTriple to
+  /// \a OS.
   virtual void WriteBundleStart(raw_fd_ostream &OS, StringRef TargetTriple) = 0;
-  /// \brief Write the marker that closes a bundle for the triple \a
-  /// TargetTriple to \a OS.
-  virtual void WriteBundleEnd(raw_fd_ostream &OS, StringRef TargetTriple) = 0;
-  /// \brief Write the bundle from \a Input into \a OS.
+  /// Write the marker that closes a bundle for the triple \a TargetTriple to \a
+  /// OS. Return true if any error was found.
+  virtual bool WriteBundleEnd(raw_fd_ostream &OS, StringRef TargetTriple) = 0;
+  /// Write the bundle from \a Input into \a OS.
   virtual void WriteBundle(raw_fd_ostream &OS, MemoryBuffer &Input) = 0;
 
   FileHandler() {}
   virtual ~FileHandler() {}
 };
 
-// Handler for binary files. The bundled file will have the following format
-// (all integers are stored in little-endian format):
-//
-// "OFFLOAD_BUNDLER_MAGIC_STR" (ASCII encoding of the string)
-//
-// NumberOfOffloadBundles (8-byte integer)
-//
-// OffsetOfBundle1 (8-byte integer)
-// SizeOfBundle1 (8-byte integer)
-// NumberOfBytesInTripleOfBundle1 (8-byte integer)
-// TripleOfBundle1 (byte length defined before)
-//
-// ...
-//
-// OffsetOfBundleN (8-byte integer)
-// SizeOfBundleN (8-byte integer)
-// NumberOfBytesInTripleOfBundleN (8-byte integer)
-// TripleOfBundleN (byte length defined before)
-//
-// Bundle1
-// ...
-// BundleN
+/// Handler for binary files. The bundled file will have the following format
+/// (all integers are stored in little-endian format):
+///
+/// "OFFLOAD_BUNDLER_MAGIC_STR" (ASCII encoding of the string)
+///
+/// NumberOfOffloadBundles (8-byte integer)
+///
+/// OffsetOfBundle1 (8-byte integer)
+/// SizeOfBundle1 (8-byte integer)
+/// NumberOfBytesInTripleOfBundle1 (8-byte integer)
+/// TripleOfBundle1 (byte length defined before)
+///
+/// ...
+///
+/// OffsetOfBundleN (8-byte integer)
+/// SizeOfBundleN (8-byte integer)
+/// NumberOfBytesInTripleOfBundleN (8-byte integer)
+/// TripleOfBundleN (byte length defined before)
+///
+/// Bundle1
+/// ...
+/// BundleN
 
-/// \brief Read 8-byte integers to/from a buffer in little-endian format.
+/// Read 8-byte integers to/from a buffer in little-endian format.
 static uint64_t Read8byteIntegerFromBuffer(StringRef Buffer, size_t pos) {
   uint64_t Res = 0;
   const char *Data = Buffer.data();
@@ -167,8 +167,7 @@ static uint64_t Read8byteIntegerFromBuffer(StringRef Buffer, size_t pos) {
   return Res;
 }
 
-/// \brief Write and write 8-byte integers to/from a buffer in little-endian
-/// format.
+/// Write and write 8-byte integers to/from a buffer in little-endian format.
 static void Write8byteIntegerToBuffer(raw_fd_ostream &OS, uint64_t Val) {
 
   for (unsigned i = 0; i < 8; ++i) {
@@ -179,13 +178,13 @@ static void Write8byteIntegerToBuffer(raw_fd_ostream &OS, uint64_t Val) {
 }
 
 class BinaryFileHandler final : public FileHandler {
-  /// \brief Information about the bundles extracted from the header.
-  struct BundleInfo {
-    /// \brief Size of the bundle.
-    uint64_t Size;
-    /// \brief Offset at which the bundle starts in the bundled file.
-    uint64_t Offset;
-    BundleInfo() : Size(0), Offset(0) {}
+  /// Information about the bundles extracted from the header.
+  struct BundleInfo final {
+    /// Size of the bundle.
+    uint64_t Size = 0u;
+    /// Offset at which the bundle starts in the bundled file.
+    uint64_t Offset = 0u;
+    BundleInfo() {}
     BundleInfo(uint64_t Size, uint64_t Offset) : Size(Size), Offset(Offset) {}
   };
   /// Map between a triple and the corresponding bundle information.
@@ -269,7 +268,6 @@ public:
   void ReadBundleEnd(MemoryBuffer &Input) {
     assert(CurBundleInfo != BundlesInfo.end() && "Invalid reader info!");
     ++CurBundleInfo;
-    return;
   }
   void ReadBundle(raw_fd_ostream &OS, MemoryBuffer &Input) {
     assert(CurBundleInfo != BundlesInfo.end() && "Invalid reader info!");
@@ -310,39 +308,41 @@ public:
       OS << T;
     }
   }
-  void WriteBundleStart(raw_fd_ostream &OS, StringRef TargetTriple) { return; }
-  void WriteBundleEnd(raw_fd_ostream &OS, StringRef TargetTriple) { return; }
+  void WriteBundleStart(raw_fd_ostream &OS, StringRef TargetTriple) {}
+  bool WriteBundleEnd(raw_fd_ostream &OS, StringRef TargetTriple) {
+    return false;
+  }
   void WriteBundle(raw_fd_ostream &OS, MemoryBuffer &Input) {
     OS.write(Input.getBufferStart(), Input.getBufferSize());
-    return;
   }
 
   BinaryFileHandler() : FileHandler() {}
   ~BinaryFileHandler() {}
 };
 
-// Handler for object files. The bundles are organized by sections with a
-// designated name.
-//
-// In order to bundle we create an IR file with the content of each section and
-// use incremental linking to produce the resulting object. We also add section
-// with a single byte to state the name of the component the main object file
-// (the one we are bundling into) refers to.
-//
-// To unbundle, we use just copy the contents of the designated section. If the
-// requested bundle refer to the main object file, we just copy it with no
-// changes.
-class ObjectFileHandler : public FileHandler {
+/// Handler for object files. The bundles are organized by sections with a
+/// designated name.
+///
+/// In order to bundle we create an IR file with the content of each section and
+/// use incremental linking to produce the resulting object. We also add section
+/// with a single byte to state the name of the component the main object file
+/// (the one we are bundling into) refers to.
+///
+/// To unbundle, we use just copy the contents of the designated section. If the
+/// requested bundle refer to the main object file, we just copy it with no
+/// changes.
+class ObjectFileHandler final : public FileHandler {
 
-  /// \brief The object file we are currently dealing with.
+  /// The object file we are currently dealing with.
   ObjectFile &Obj;
 
-  /// \brief Return the input file contents.
+  /// Return the input file contents.
   StringRef getInputFileContents() const { return Obj.getData(); }
 
-  /// \brief Return true if the provided section is an offload section and
-  /// return the triple by reference.
-  bool isOffloadSection(SectionRef CurSection, StringRef &OffloadTriple) {
+  /// Return true if the provided section is an offload section and return the
+  /// triple by reference.
+  static bool isOffloadSection(SectionRef CurSection,
+                               StringRef &OffloadTriple) {
     StringRef SectionName;
     CurSection.getName(SectionName);
 
@@ -358,27 +358,27 @@ class ObjectFileHandler : public FileHandler {
     return true;
   }
 
-  /// \brief Total number of inputs.
+  /// Total number of inputs.
   unsigned NumberOfInputs = 0;
 
-  /// \brief Total number of processed inputs, i.e, inputs that were already
+  /// Total number of processed inputs, i.e, inputs that were already
   /// read from the buffers.
   unsigned NumberOfProcessedInputs = 0;
 
-  /// \brief LLVM context used to to create the auxiliar modules.
+  /// LLVM context used to to create the auxiliar modules.
   LLVMContext VMContext;
 
-  /// \brief LLVM module used to create an object with all the bundle
+  /// LLVM module used to create an object with all the bundle
   /// components.
   std::unique_ptr<Module> AuxModule;
 
-  /// \brief The current triple we are working with.
+  /// The current triple we are working with.
   StringRef CurrentTriple;
 
-  /// \brief The name of the main input file.
+  /// The name of the main input file.
   StringRef MainInputFileName;
 
-  /// \brief Iterator of the current and next section.
+  /// Iterator of the current and next section.
   section_iterator CurrentSection;
   section_iterator NextSection;
 
@@ -435,26 +435,30 @@ public:
     // will create.
     CurrentTriple = TargetTriple;
   }
-  void WriteBundleEnd(raw_fd_ostream &OS, StringRef TargetTriple) {
+  bool WriteBundleEnd(raw_fd_ostream &OS, StringRef TargetTriple) {
     assert(NumberOfProcessedInputs <= NumberOfInputs &&
            "Processing more inputs that actually exist!");
 
     // If this is not the last output, we don't have to do anything.
     if (NumberOfProcessedInputs != NumberOfInputs)
-      return;
+      return false;
 
     // Create the bitcode file name to write the resulting code to.
     SmallString<128> BitcodeFileName;
     if (sys::fs::createTemporaryFile("clang-offload-bundler", "bc",
-                                     BitcodeFileName))
-      llvm_unreachable("Error trying to create temporary file!");
+                                     BitcodeFileName)) {
+      llvm::errs() << "error: unable to create temporary file.\n";
+      return true;
+    }
 
     // Write the bitcode to the temporary file.
     {
       std::error_code EC;
       raw_fd_ostream BitcodeFile(BitcodeFileName, EC, sys::fs::F_None);
-      if (EC)
-        llvm_unreachable("Error trying to open temporary file!");
+      if (EC) {
+        llvm::errs() << "error: unable to open temporary file.\n";
+        return true;
+      }
       WriteBitcodeToFile(AuxModule.get(), BitcodeFile);
     }
 
@@ -465,7 +469,9 @@ public:
     if (ClangBinary.getError()) {
       // Remove bitcode file.
       sys::fs::remove(BitcodeFileName);
-      llvm_unreachable("Can't find clang in path!");
+
+      llvm::errs() << "error: unable to find 'clang' in path.\n";
+      return true;
     }
 
     // Do the incremental linking. We write to the output file directly. So, we
@@ -486,11 +492,14 @@ public:
     if (sys::ExecuteAndWait(ClangBinary.get(), ClangArgs)) {
       // Remove bitcode file.
       sys::fs::remove(BitcodeFileName);
-      llvm_unreachable("Bundle incremental link failed!");
+
+      llvm::errs() << "error: incremental linking by external tool failed.\n";
+      return true;
     }
 
     // Remove bitcode file.
     sys::fs::remove(BitcodeFileName);
+    return false;
   }
   void WriteBundle(raw_fd_ostream &OS, MemoryBuffer &Input) {
     Module *M = AuxModule.get();
@@ -526,27 +535,27 @@ public:
   ~ObjectFileHandler() {}
 };
 
-// Handler for text files. The bundled file will have the following format.
-//
-// "Comment OFFLOAD_BUNDLER_MAGIC_STR__START__ triple"
-// Bundle 1
-// "Comment OFFLOAD_BUNDLER_MAGIC_STR__END__ triple"
-// ...
-// "Comment OFFLOAD_BUNDLER_MAGIC_STR__START__ triple"
-// Bundle N
-// "Comment OFFLOAD_BUNDLER_MAGIC_STR__END__ triple"
+/// Handler for text files. The bundled file will have the following format.
+///
+/// "Comment OFFLOAD_BUNDLER_MAGIC_STR__START__ triple"
+/// Bundle 1
+/// "Comment OFFLOAD_BUNDLER_MAGIC_STR__END__ triple"
+/// ...
+/// "Comment OFFLOAD_BUNDLER_MAGIC_STR__START__ triple"
+/// Bundle N
+/// "Comment OFFLOAD_BUNDLER_MAGIC_STR__END__ triple"
 class TextFileHandler final : public FileHandler {
-  /// \brief String that begins a line comment.
+  /// String that begins a line comment.
   StringRef Comment;
 
-  /// \brief String that initiates a bundle.
+  /// String that initiates a bundle.
   std::string BundleStartString;
 
-  /// \brief String that closes a bundle.
+  /// String that closes a bundle.
   std::string BundleEndString;
 
-  /// \brief Number of chars read from input.
-  size_t ReadChars;
+  /// Number of chars read from input.
+  size_t ReadChars = 0u;
 
 protected:
   void ReadHeader(MemoryBuffer &Input) {}
@@ -583,8 +592,6 @@ protected:
 
     // Next time we read after the new line.
     ++ReadChars;
-
-    return;
   }
   void ReadBundle(raw_fd_ostream &OS, MemoryBuffer &Input) {
     StringRef FC = Input.getBuffer();
@@ -601,16 +608,13 @@ protected:
                    ArrayRef<std::unique_ptr<MemoryBuffer>> Inputs) {}
   void WriteBundleStart(raw_fd_ostream &OS, StringRef TargetTriple) {
     OS << BundleStartString << TargetTriple << "\n";
-    return;
   }
-  void WriteBundleEnd(raw_fd_ostream &OS, StringRef TargetTriple) {
+  bool WriteBundleEnd(raw_fd_ostream &OS, StringRef TargetTriple) {
     OS << BundleEndString << TargetTriple << "\n";
-    return;
+    return false;
   }
   void WriteBundle(raw_fd_ostream &OS, MemoryBuffer &Input) {
-    ;
     OS << Input.getBuffer();
-    return;
   }
 
 public:
@@ -623,7 +627,7 @@ public:
   }
 };
 
-/// \brief Return an appropriate object file handler. We use the specific object
+/// Return an appropriate object file handler. We use the specific object
 /// handler if we know how to deal with that format, otherwise we use a default
 /// binary file handler.
 static FileHandler *CreateObjectFileHandler(MemoryBuffer &FirstInput) {
@@ -645,7 +649,7 @@ static FileHandler *CreateObjectFileHandler(MemoryBuffer &FirstInput) {
   return new ObjectFileHandler(*Obj);
 }
 
-/// \brief Return an appropriate handler given the input files and options.
+/// Return an appropriate handler given the input files and options.
 static FileHandler *CreateFileHandler(MemoryBuffer &FirstInput) {
   if (FilesType == "i")
     return new TextFileHandler(/*Comment=*/"//");
@@ -668,7 +672,7 @@ static FileHandler *CreateFileHandler(MemoryBuffer &FirstInput) {
   return nullptr;
 }
 
-/// \brief Bundle the files. Return true if an error was found.
+/// Bundle the files. Return true if an error was found.
 static bool BundleFiles() {
   std::error_code EC;
 
@@ -686,7 +690,7 @@ static bool BundleFiles() {
       InputFileNames.size());
 
   unsigned Idx = 0;
-  for (auto I : InputFileNames) {
+  for (auto &I : InputFileNames) {
     ErrorOr<std::unique_ptr<MemoryBuffer>> CodeOrErr =
         MemoryBuffer::getFileOrSTDIN(I);
     if (std::error_code EC = CodeOrErr.getError()) {
@@ -708,13 +712,15 @@ static bool BundleFiles() {
   // Write header.
   FH.get()->WriteHeader(OutputFile, InputBuffers);
 
-  // Write all bundles along with the start/end markers.
+  // Write all bundles along with the start/end markers. If an error was found
+  // writing the end of the bundle component, abort the bundle writing.
   auto Input = InputBuffers.begin();
-  for (auto Triple = TargetNames.begin(); Triple < TargetNames.end();
-       ++Triple, ++Input) {
-    FH.get()->WriteBundleStart(OutputFile, *Triple);
+  for (auto &Triple : TargetNames) {
+    FH.get()->WriteBundleStart(OutputFile, Triple);
     FH.get()->WriteBundle(OutputFile, *Input->get());
-    FH.get()->WriteBundleEnd(OutputFile, *Triple);
+    if (FH.get()->WriteBundleEnd(OutputFile, Triple))
+      return true;
+    ++Input;
   }
   return false;
 }
@@ -746,9 +752,10 @@ static bool UnbundleFiles() {
   // Create a work list that consist of the map triple/output file.
   StringMap<StringRef> Worklist;
   auto Output = OutputFileNames.begin();
-  for (auto Triple = TargetNames.begin(); Triple < TargetNames.end();
-       ++Triple, ++Output)
-    Worklist[*Triple] = *Output;
+  for (auto &Triple : TargetNames) {
+    Worklist[Triple] = *Output;
+    ++Output;
+  }
 
   // Read all the bundles that are in the work list. If we find no bundles we
   // assume the file is meant for the host target.
@@ -915,10 +922,5 @@ int main(int argc, const char **argv) {
   BundlerExecutable =
       llvm::sys::fs::getMainExecutable(argv[0], &BundlerExecutable);
 
-  if (Unbundle)
-    return UnbundleFiles();
-  else
-    return BundleFiles();
-
-  return 0;
+  return Unbundle ? UnbundleFiles() : BundleFiles();
 }
