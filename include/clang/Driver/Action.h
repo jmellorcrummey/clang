@@ -492,22 +492,24 @@ public:
   }
 };
 
-class OffloadUnbundlingJobAction : public JobAction {
+class OffloadUnbundlingJobAction final : public JobAction {
   void anchor() override;
 
 public:
-  /// Type that provides information about the actions that depend on this unbundling action.
-  struct DependingActionInfoTy {
+  /// Type that provides information about the actions that depend on this
+  /// unbundling action.
+  struct DependingActionInfoTy final {
     /// \brief The tool chain of the depending action.
-    const ToolChain *DependingToolChain;
+    const ToolChain *DependingToolChain = nullptr;
     /// \brief The bound architecture of the depending action.
-    const char *DependingBoundArch;
+    const char *DependingBoundArch = nullptr;
     /// \brief The offload kind of the depending action.
-    const OffloadKind DependingOffloadKind;
+    const OffloadKind DependingOffloadKind = OFK_None;
   };
 
 private:
-  /// Constainer that kepps information about each dependence of this unbundling action.
+  /// Constainer that kepps information about each dependence of this unbundling
+  /// action.
   SmallVector<DependingActionInfoTy, 6> DependingActionInfo;
 
 public:
