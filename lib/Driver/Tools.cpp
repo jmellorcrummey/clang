@@ -6007,9 +6007,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(Args.MakeArgString(Inputs.back().getFilename()));
   }
 
-  if (Args.hasFlag(options::OPT_fnoopenmp_spmd, options::OPT_fopenmp_spmd,
+  if (Args.hasFlag(options::OPT_fopenmp_nvptx_nospmd, options::OPT_fopenmp_nvptx_spmd,
                    /*Default=*/false)) {
-    CmdArgs.push_back("-fnoopenmp-spmd");
+    CmdArgs.push_back("-fopenmp-nvptx-nospmd");
   }
 
   // For all the host OpenMP offloading compile jobs we need to pass the targets
