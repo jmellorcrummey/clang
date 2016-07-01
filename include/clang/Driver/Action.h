@@ -91,7 +91,10 @@ private:
 
   ActionList Inputs;
 
-  /// Flag that is set to true if this action can be collapsed with others actions that depend on it. This is true by default and set to false when the action is used by two different tool chains, which is enabled by the offloading support implementation.
+  /// Flag that is set to true if this action can be collapsed with others
+  /// actions that depend on it. This is true by default and set to false when
+  /// the action is used by two different tool chains, which is enabled by the
+  /// offloading support implementation.
   bool CanBeCollapsedWithDependingAction = true;
 
 protected:
