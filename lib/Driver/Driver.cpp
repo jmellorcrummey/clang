@@ -1894,7 +1894,7 @@ public:
 
     // Create the offload action with all dependences. When an offload action
     // is created the kinds are propagated to the host action, so we don't have
-    // to do that explicitely here.
+    // to do that explicitly here.
     OffloadAction::HostDependence HDep(
         *HostAction, *C.getSingleOffloadToolChain<Action::OFK_Host>(),
         /*BoundArch*/ nullptr, ActiveOffloadKinds);
@@ -2330,29 +2330,27 @@ void Driver::BuildJobs(Compilation &C) const {
 }
 
 namespace {
-/// \brief Utility class to control the collapse of dependent actions and select
-/// the tools accordingly.
+/// Utility class to control the collapse of dependent actions and select the
+/// tools accordingly.
 class ToolSelector final {
-  /// \brief The tool chain this selector refers to.
+  /// The tool chain this selector refers to.
   const ToolChain &TC;
 
-  /// \brief The compilation this selector refers to.
+  /// The compilation this selector refers to.
   const Compilation &C;
 
-  /// \brief The base action this selector refers to.
+  /// The base action this selector refers to.
   const JobAction *BaseAction;
 
-  /// \brief Set to true if the current toolchain refers to host actions.
+  /// Set to true if the current toolchain refers to host actions.
   bool IsHostSelector;
 
-  /// \brief Set to true if save-temps and embed-bitcode functionalities are
-  /// active.
+  /// Set to true if save-temps and embed-bitcode functionalities are active.
   bool SaveTemps;
   bool EmbedBitcode;
 
-  /// \brief Get dependence action or null if that does not exist. If \a
-  /// CanBeCollapsed is false, that action must be legal to collapse or null
-  /// will be returned.
+  /// Get dependence action or null if that does not exist. If \a CanBeCollapsed
+  /// is false, that action must be legal to collapse or null will be returned.
   const JobAction *getDependenceAction(const ActionList &Inputs,
                                        ActionList &SavedOffloadAction,
                                        bool CanBeCollapsed = true) {
@@ -2394,7 +2392,7 @@ class ToolSelector final {
     return dyn_cast<JobAction>(CurAction);
   }
 
-  /// \brief Return true if an assemble action can be collapsed.
+  /// Return true if an assemble action can be collapsed.
   bool canCollapseAssembleAction() {
     return TC.useIntegratedAs() && !SaveTemps &&
            !C.getArgs().hasArg(options::OPT_via_file_asm) &&
@@ -2402,25 +2400,25 @@ class ToolSelector final {
            !C.getArgs().hasArg(options::OPT__SLASH_Fa);
   }
 
-  /// \brief Return true if a preprocessor action can be collapsed.
+  /// Return true if a preprocessor action can be collapsed.
   bool canCollapsePreprocessorAction() {
     return !C.getArgs().hasArg(options::OPT_no_integrated_cpp) &&
            !C.getArgs().hasArg(options::OPT_traditional_cpp) && !SaveTemps &&
            !C.getArgs().hasArg(options::OPT_rewrite_objc);
   }
 
-  /// \brief Struct that relates an action with the offload actions that would
-  /// be collapsed with it.
+  /// Struct that relates an action with the offload actions that would be
+  /// collapsed with it.
   struct JobActionInfoTy {
-    // \brief The action this info refers to.
+    /// The action this info refers to.
     const JobAction *JA;
-    // \brief The offload actions we need to take care off if this action is
-    // collapsed.
+    /// The offload actions we need to take care off if this action is
+    /// collapsed.
     ActionList SavedOffloadAction;
   };
 
-  /// \brief Append collapsed offload actions from the give nnumber of elements
-  /// in the action info array.
+  /// Append collapsed offload actions from the give nnumber of elements in the
+  /// action info array.
   void appendCollapsedOffloadAction(ActionList &CollapsedOffloadAction,
                                     ArrayRef<JobActionInfoTy> &ActionInfo,
                                     unsigned ElementNum) {
@@ -2430,11 +2428,11 @@ class ToolSelector final {
                                     ActionInfo[I].SavedOffloadAction.end());
   }
 
-  /// \brief Functions that attempt to perform the combining. They detect if
-  /// that is legal, and if so they update the inputs \a Inputs and the offload
-  /// action that were collapsed in \a CollapsedOffloadAction. A tool that deals
-  /// with the combined action is returned. If the combining is not legal or if
-  /// the tool does not exist, null is returned.
+  /// Functions that attempt to perform the combining. They detect if that is
+  /// legal, and if so they update the inputs \a Inputs and the offload action
+  /// that were collapsed in \a CollapsedOffloadAction. A tool that deals with
+  /// the combined action is returned. If the combining is not legal or if the
+  /// tool does not exist, null is returned.
   /// Currently three kinds of collapsing are supported:
   ///  - Assemble + Backend + Compile;
   ///  - Assemble + Backend ;
@@ -2530,7 +2528,7 @@ class ToolSelector final {
     return T;
   }
 
-  /// \brief Updates the inputs if the obtained tool supports combining with
+  /// Updates the inputs if the obtained tool supports combining with
   /// preprocessor action, and the current input is indeed a preprocessor
   /// action. If combining results in the collapse of offloading actions, those
   /// are appended to \a CollapsedOffloadAction.
@@ -2561,9 +2559,9 @@ public:
     IsHostSelector = BaseAction->getOffloadingDeviceKind() == Action::OFK_None;
   }
 
-  /// \brief Check if a chain of action can be combined and return the tool that
-  /// can handle the combination of actions. The pointer to the current inputs
-  /// \a Inputs and the list of offload actions \a CollapsedOffloadActions
+  /// Check if a chain of action can be combined and return the tool that can
+  /// handle the combination of actions. The pointer to the current inputs \a
+  /// Inputs and the list of offload actions \a CollapsedOffloadActions
   /// connected to collapsed actions are updated accordingly. The latter enables
   /// the caller of the selector to process them afterwards instead of just
   /// dropping them. If no suitable tool is found, null will be returned.
