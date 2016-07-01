@@ -293,15 +293,14 @@ static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
 
   // Create temporary linker script. Keep it if save-temps is enabled.
   const char *LKS;
-  StringRef Name = llvm::sys::path::filename(Output.getFilename());
-  StringRef Prefix = Name.rsplit('.').first;
+  SmallString<256> Name = llvm::sys::path::filename(Output.getFilename());
   if (C.getDriver().isSaveTempsEnabled()) {
-    SmallString<256> ResName(Prefix);
-    ResName += ".lk";
-    LKS = C.getArgs().MakeArgString(ResName.c_str());
+    llvm::sys::path::replace_extension(Name, "lk");
+    LKS = C.getArgs().MakeArgString(Name.c_str());
   } else {
-    SmallString<256> ResName(C.getDriver().GetTemporaryPath(Prefix, "lk"));
-    LKS = C.addTempFile(C.getArgs().MakeArgString(ResName.c_str()));
+    llvm::sys::path::replace_extension(Name, "");
+    Name = C.getDriver().GetTemporaryPath(Name, "lk");
+    LKS = C.addTempFile(C.getArgs().MakeArgString(Name.c_str()));
   }
 
   // Open script file in order to write contents.
