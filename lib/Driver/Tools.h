@@ -135,8 +135,8 @@ public:
                     const char *LinkingOutput) const override;
 };
 
-/// \brief Offload bundler tool.
-class LLVM_LIBRARY_VISIBILITY OffloadBundler : public Tool {
+/// Offload bundler tool.
+class LLVM_LIBRARY_VISIBILITY OffloadBundler final : public Tool {
 public:
   OffloadBundler(const ToolChain &TC)
       : Tool("offload bundler", "clang-offload-bundler", TC) {}

@@ -128,9 +128,9 @@ Action::getOffloadingFileNamePrefix(StringRef NormalizedTriple) const {
   return Res;
 }
 
-/// \brief Return a string with the offload kind name. If that is not defined,
-/// we assume 'host'.
-std::string Action::getOffloadKindName(OffloadKind Kind) {
+/// Return a string with the offload kind name. If that is not defined, we
+/// assume 'host'.
+StringRef Action::getOffloadKindName(OffloadKind Kind) {
   switch (Kind) {
   case OFK_None:
   case OFK_Host:

@@ -158,8 +158,8 @@ public:
   /// Return a string that can be used as prefix in order to generate unique
   /// files for each offloading kind.
   std::string getOffloadingFileNamePrefix(StringRef NormalizedTriple) const;
-  /// \brief Return a string containing a offload kind name.
-  static std::string getOffloadKindName(OffloadKind Kind);
+  /// Return a string containing a offload kind name.
+  static StringRef getOffloadKindName(OffloadKind Kind);
 
   /// Set the device offload info of this action and propagate it to its
   /// dependences.
