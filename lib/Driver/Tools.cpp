@@ -288,8 +288,8 @@ static bool forwardToGCC(const Option &O) {
          !O.hasFlag(options::DriverOption) && !O.hasFlag(options::LinkerInput);
 }
 
-/// \brief Add the C++ include args of other offloading toolchains. If this is a
-/// host job, the device toolchains are added. If this is a device job, the host
+/// Add the C++ include args of other offloading toolchains. If this is a host
+/// job, the device toolchains are added. If this is a device job, the host
 /// toolchains will be added.
 static void addExtraOffloadCXXStdlibIncludeArgs(Compilation &C,
                                                 const JobAction &JA,
@@ -306,8 +306,7 @@ static void addExtraOffloadCXXStdlibIncludeArgs(Compilation &C,
   // TODO: Add support for other programming models here.
 }
 
-/// \brief Add the include args that are specific of each offloading programming
-/// model.
+/// Add the include args that are specific of each offloading programming model.
 static void addExtraOffloadSpecificIncludeArgs(Compilation &C,
                                                const JobAction &JA,
                                                const ArgList &Args,
@@ -3000,72 +2999,23 @@ static void addClangRT(const ToolChain &TC, const ArgList &Args,
   CmdArgs.push_back(TC.getCompilerRTArgString(Args, "builtins"));
 }
 
-namespace {
-enum OpenMPRuntimeKind {
-  /// An unknown OpenMP runtime. We can't generate effective OpenMP code
-  /// without knowing what runtime to target.
-  OMPRT_Unknown,
-
-  /// The LLVM OpenMP runtime. When completed and integrated, this will become
-  /// the default for Clang.
-  OMPRT_OMP,
-
-  /// The GNU OpenMP runtime. Clang doesn't support generating OpenMP code for
-  /// this runtime but can swallow the pragmas, and find and link against the
-  /// runtime library itself.
-  OMPRT_GOMP,
-
-  /// The legacy name for the LLVM OpenMP runtime from when it was the Intel
-  /// OpenMP runtime. We support this mode for users with existing dependencies
-  /// on this runtime library name.
-  OMPRT_IOMP5
-};
-}
-
-/// Compute the desired OpenMP runtime from the flag provided.
-static OpenMPRuntimeKind getOpenMPRuntime(const ToolChain &TC,
-                                          const ArgList &Args) {
-  StringRef RuntimeName(CLANG_DEFAULT_OPENMP_RUNTIME);
-
-  const Arg *A = Args.getLastArg(options::OPT_fopenmp_EQ);
-  if (A)
-    RuntimeName = A->getValue();
-
-  auto RT = llvm::StringSwitch<OpenMPRuntimeKind>(RuntimeName)
-                .Case("libomp", OMPRT_OMP)
-                .Case("libgomp", OMPRT_GOMP)
-                .Case("libiomp5", OMPRT_IOMP5)
-                .Default(OMPRT_Unknown);
-
-  if (RT == OMPRT_Unknown) {
-    if (A)
-      TC.getDriver().Diag(diag::err_drv_unsupported_option_argument)
-          << A->getOption().getName() << A->getValue();
-    else
-      // FIXME: We could use a nicer diagnostic here.
-      TC.getDriver().Diag(diag::err_drv_unsupported_opt) << "-fopenmp";
-  }
-
-  return RT;
-}
-
 static void addOpenMPRuntime(ArgStringList &CmdArgs, const ToolChain &TC,
                               const ArgList &Args) {
   if (!Args.hasFlag(options::OPT_fopenmp, options::OPT_fopenmp_EQ,
                     options::OPT_fno_openmp, false))
     return;
 
-  switch (getOpenMPRuntime(TC, Args)) {
-  case OMPRT_OMP:
+  switch (TC.getDriver().getOpenMPRuntime(Args)) {
+  case Driver::OMPRT_OMP:
     CmdArgs.push_back("-lomp");
     break;
-  case OMPRT_GOMP:
+  case Driver::OMPRT_GOMP:
     CmdArgs.push_back("-lgomp");
     break;
-  case OMPRT_IOMP5:
+  case Driver::OMPRT_IOMP5:
     CmdArgs.push_back("-liomp5");
     break;
-  case OMPRT_Unknown:
+  case Driver::OMPRT_Unknown:
     // Already diagnosed.
     break;
   }
@@ -4962,9 +4912,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // Forward flags for OpenMP
   if (Args.hasFlag(options::OPT_fopenmp, options::OPT_fopenmp_EQ,
                    options::OPT_fno_openmp, false)) {
-    switch (getOpenMPRuntime(getToolChain(), Args)) {
-    case OMPRT_OMP:
-    case OMPRT_IOMP5:
+    switch (getToolChain().getDriver().getOpenMPRuntime(Args)) {
+    case Driver::OMPRT_OMP:
+    case Driver::OMPRT_IOMP5:
       // Clang can generate useful OpenMP code for these two runtime libraries.
       CmdArgs.push_back("-fopenmp");
 
@@ -5136,6 +5086,40 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     // Windows on ARM expects restricted IT blocks
     CmdArgs.push_back("-backend-option");
     CmdArgs.push_back("-arm-restrict-it");
+  }
+
+  // Forward -cl options to -cc1
+  if (Args.getLastArg(options::OPT_cl_opt_disable)) {
+    CmdArgs.push_back("-cl-opt-disable");
+  }
+  if (Args.getLastArg(options::OPT_cl_strict_aliasing)) {
+    CmdArgs.push_back("-cl-strict-aliasing");
+  }
+  if (Args.getLastArg(options::OPT_cl_single_precision_constant)) {
+    CmdArgs.push_back("-cl-single-precision-constant");
+  }
+  if (Args.getLastArg(options::OPT_cl_finite_math_only)) {
+    CmdArgs.push_back("-cl-finite-math-only");
+  }
+  if (Args.getLastArg(options::OPT_cl_kernel_arg_info)) {
+    CmdArgs.push_back("-cl-kernel-arg-info");
+  }
+  if (Args.getLastArg(options::OPT_cl_unsafe_math_optimizations)) {
+    CmdArgs.push_back("-cl-unsafe-math-optimizations");
+  }
+  if (Args.getLastArg(options::OPT_cl_fast_relaxed_math)) {
+    CmdArgs.push_back("-cl-fast-relaxed-math");
+  }
+  if (Args.getLastArg(options::OPT_cl_mad_enable)) {
+    CmdArgs.push_back("-cl-mad-enable");
+  }
+  if (Arg *A = Args.getLastArg(options::OPT_cl_std_EQ)) {
+    std::string CLStdStr = "-cl-std=";
+    CLStdStr += A->getValue();
+    CmdArgs.push_back(Args.MakeArgString(CLStdStr));
+  }
+  if (Args.getLastArg(options::OPT_cl_denorms_are_zero)) {
+    CmdArgs.push_back("-cl-denorms-are-zero");
   }
 
   // Forward -f options with positive and negative forms; we translate
@@ -9407,21 +9391,21 @@ void gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
         WantPthread = true;
 
         // Also link the particular OpenMP runtimes.
-        switch (getOpenMPRuntime(ToolChain, Args)) {
-        case OMPRT_OMP:
+        switch (ToolChain.getDriver().getOpenMPRuntime(Args)) {
+        case Driver::OMPRT_OMP:
           CmdArgs.push_back("-lomp");
           break;
-        case OMPRT_GOMP:
+        case Driver::OMPRT_GOMP:
           CmdArgs.push_back("-lgomp");
 
           // FIXME: Exclude this for platforms with libgomp that don't require
           // librt. Most modern Linux platforms require it, but some may not.
           CmdArgs.push_back("-lrt");
           break;
-        case OMPRT_IOMP5:
+        case Driver::OMPRT_IOMP5:
           CmdArgs.push_back("-liomp5");
           break;
-        case OMPRT_Unknown:
+        case Driver::OMPRT_Unknown:
           // Already diagnosed.
           break;
         }
@@ -9985,16 +9969,16 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-nodefaultlib:vcompd.lib");
     CmdArgs.push_back(Args.MakeArgString(std::string("-libpath:") +
                                          TC.getDriver().Dir + "/../lib"));
-    switch (getOpenMPRuntime(getToolChain(), Args)) {
-    case OMPRT_OMP:
+    switch (TC.getDriver().getOpenMPRuntime(Args)) {
+    case Driver::OMPRT_OMP:
       CmdArgs.push_back("-defaultlib:libomp.lib");
       break;
-    case OMPRT_IOMP5:
+    case Driver::OMPRT_IOMP5:
       CmdArgs.push_back("-defaultlib:libiomp5md.lib");
       break;
-    case OMPRT_GOMP:
+    case Driver::OMPRT_GOMP:
       break;
-    case OMPRT_Unknown:
+    case Driver::OMPRT_Unknown:
       // Already diagnosed.
       break;
     }
