@@ -171,12 +171,12 @@ static void Write8byteIntegerToBuffer(raw_fd_ostream &OS, uint64_t Val) {
 
 class BinaryFileHandler final : public FileHandler {
   /// \brief Information about the bundles extracted from the header.
-  struct BundleInfo {
+  struct BundleInfo final {
     /// \brief Size of the bundle.
-    uint64_t Size;
+    uint64_t Size = 0u;
     /// \brief Offset at which the bundle starts in the bundled file.
-    uint64_t Offset;
-    BundleInfo() : Size(0), Offset(0) {}
+    uint64_t Offset = 0u;
+    BundleInfo() {}
     BundleInfo(uint64_t Size, uint64_t Offset) : Size(Size), Offset(Offset) {}
   };
   /// Map between a triple and the corresponding bundle information.
@@ -260,7 +260,6 @@ public:
   void ReadBundleEnd(MemoryBuffer &Input) {
     assert(CurBundleInfo != BundlesInfo.end() && "Invalid reader info!");
     ++CurBundleInfo;
-    return;
   }
   void ReadBundle(raw_fd_ostream &OS, MemoryBuffer &Input) {
     assert(CurBundleInfo != BundlesInfo.end() && "Invalid reader info!");
@@ -301,11 +300,10 @@ public:
       OS << T;
     }
   }
-  void WriteBundleStart(raw_fd_ostream &OS, StringRef TargetTriple) { return; }
-  void WriteBundleEnd(raw_fd_ostream &OS, StringRef TargetTriple) { return; }
+  void WriteBundleStart(raw_fd_ostream &OS, StringRef TargetTriple) {}
+  void WriteBundleEnd(raw_fd_ostream &OS, StringRef TargetTriple) {}
   void WriteBundle(raw_fd_ostream &OS, MemoryBuffer &Input) {
     OS.write(Input.getBufferStart(), Input.getBufferSize());
-    return;
   }
 
   BinaryFileHandler() : FileHandler() {}
@@ -332,7 +330,7 @@ class TextFileHandler final : public FileHandler {
   std::string BundleEndString;
 
   /// \brief Number of chars read from input.
-  size_t ReadChars;
+  size_t ReadChars = 0u;
 
 protected:
   void ReadHeader(MemoryBuffer &Input) {}
@@ -369,8 +367,6 @@ protected:
 
     // Next time we read after the new line.
     ++ReadChars;
-
-    return;
   }
   void ReadBundle(raw_fd_ostream &OS, MemoryBuffer &Input) {
     StringRef FC = Input.getBuffer();
@@ -387,16 +383,12 @@ protected:
                    ArrayRef<std::unique_ptr<MemoryBuffer>> Inputs) {}
   void WriteBundleStart(raw_fd_ostream &OS, StringRef TargetTriple) {
     OS << BundleStartString << TargetTriple << "\n";
-    return;
   }
   void WriteBundleEnd(raw_fd_ostream &OS, StringRef TargetTriple) {
     OS << BundleEndString << TargetTriple << "\n";
-    return;
   }
   void WriteBundle(raw_fd_ostream &OS, MemoryBuffer &Input) {
-    ;
     OS << Input.getBuffer();
-    return;
   }
 
 public:
@@ -450,7 +442,7 @@ static bool BundleFiles() {
       InputFileNames.size());
 
   unsigned Idx = 0;
-  for (auto I : InputFileNames) {
+  for (auto &I : InputFileNames) {
     ErrorOr<std::unique_ptr<MemoryBuffer>> CodeOrErr =
         MemoryBuffer::getFileOrSTDIN(I);
     if (std::error_code EC = CodeOrErr.getError()) {
@@ -474,11 +466,11 @@ static bool BundleFiles() {
 
   // Write all bundles along with the start/end markers.
   auto Input = InputBuffers.begin();
-  for (auto Triple = TargetNames.begin(); Triple < TargetNames.end();
-       ++Triple, ++Input) {
-    FH.get()->WriteBundleStart(OutputFile, *Triple);
+  for (auto &Triple : TargetNames) {
+    FH.get()->WriteBundleStart(OutputFile, Triple);
     FH.get()->WriteBundle(OutputFile, *Input->get());
-    FH.get()->WriteBundleEnd(OutputFile, *Triple);
+    FH.get()->WriteBundleEnd(OutputFile, Triple);
+    ++Input;
   }
   return false;
 }
@@ -510,9 +502,10 @@ static bool UnbundleFiles() {
   // Create a work list that consist of the map triple/output file.
   StringMap<StringRef> Worklist;
   auto Output = OutputFileNames.begin();
-  for (auto Triple = TargetNames.begin(); Triple < TargetNames.end();
-       ++Triple, ++Output)
-    Worklist[*Triple] = *Output;
+  for (auto &Triple : TargetNames) {
+    Worklist[Triple] = *Output;
+    ++Output;
+  }
 
   // Read all the bundles that are in the work list. If we find no bundles we
   // assume the file is meant for the host target.
@@ -674,10 +667,5 @@ int main(int argc, const char **argv) {
   if (Error)
     return 1;
 
-  if (Unbundle)
-    return UnbundleFiles();
-  else
-    return BundleFiles();
-
-  return 0;
+  return Unbundle ? UnbundleFiles() : BundleFiles();
 }
