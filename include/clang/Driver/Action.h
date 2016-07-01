@@ -491,7 +491,6 @@ public:
   }
 };
 
-
 } // end namespace driver
 } // end namespace clang
 

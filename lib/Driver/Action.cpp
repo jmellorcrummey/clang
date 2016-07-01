@@ -345,4 +345,3 @@ void OffloadBundlingJobAction::anchor() {}
 
 OffloadBundlingJobAction::OffloadBundlingJobAction(ActionList &Inputs)
     : JobAction(OffloadBundlingJobClass, Inputs, Inputs.front()->getType()) {}
-

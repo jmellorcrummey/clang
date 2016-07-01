@@ -2068,7 +2068,9 @@ public:
     return false;
   }
 
-  /// Add the offloading top level actions to the provided action list. This function can replace the host action by a bundling action if the programming models allow it.
+  /// Add the offloading top level actions to the provided action list. This
+  /// function can replace the host action by a bundling action if the
+  /// programming models allow it.
   bool appendTopLevelActions(ActionList &AL, Action *HostAction,
                              const Arg *InputArg) {
     // Get the device actions to be appended.
