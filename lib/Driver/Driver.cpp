@@ -2472,7 +2472,7 @@ class ToolSelector final {
   }
 
   /// Return true if an assemble action can be collapsed.
-  bool canCollapseAssembleAction() {
+  bool canCollapseAssembleAction() const {
     return TC.useIntegratedAs() && !SaveTemps &&
            !C.getArgs().hasArg(options::OPT_via_file_asm) &&
            !C.getArgs().hasArg(options::OPT__SLASH_FA) &&
@@ -2480,7 +2480,7 @@ class ToolSelector final {
   }
 
   /// Return true if a preprocessor action can be collapsed.
-  bool canCollapsePreprocessorAction() {
+  bool canCollapsePreprocessorAction() const {
     return !C.getArgs().hasArg(options::OPT_no_integrated_cpp) &&
            !C.getArgs().hasArg(options::OPT_traditional_cpp) && !SaveTemps &&
            !C.getArgs().hasArg(options::OPT_rewrite_objc);
@@ -2488,9 +2488,9 @@ class ToolSelector final {
 
   /// Struct that relates an action with the offload actions that would be
   /// collapsed with it.
-  struct JobActionInfoTy {
+  struct JobActionInfoTy final {
     /// The action this info refers to.
-    const JobAction *JA;
+    const JobAction *JA = nullptr;
     /// The offload actions we need to take care off if this action is
     /// collapsed.
     ActionList SavedOffloadAction;
@@ -2498,9 +2498,10 @@ class ToolSelector final {
 
   /// Append collapsed offload actions from the give nnumber of elements in the
   /// action info array.
-  void appendCollapsedOffloadAction(ActionList &CollapsedOffloadAction,
-                                    ArrayRef<JobActionInfoTy> &ActionInfo,
-                                    unsigned ElementNum) {
+  static void
+  AppendCollapsedOffloadAction(ActionList &CollapsedOffloadAction,
+                               ArrayRef<JobActionInfoTy> &ActionInfo,
+                               unsigned ElementNum) {
     assert(ElementNum <= ActionInfo.size() && "Invalid number of elements.");
     for (unsigned I = 0; I < ElementNum; ++I)
       CollapsedOffloadAction.append(ActionInfo[I].SavedOffloadAction.begin(),
@@ -2545,7 +2546,7 @@ class ToolSelector final {
       return nullptr;
 
     Inputs = &CJ->getInputs();
-    appendCollapsedOffloadAction(CollapsedOffloadAction, ActionInfo,
+    AppendCollapsedOffloadAction(CollapsedOffloadAction, ActionInfo,
                                  /*NumElements=*/3);
     return T;
   }
@@ -2579,7 +2580,7 @@ class ToolSelector final {
       return nullptr;
 
     Inputs = &BJ->getInputs();
-    appendCollapsedOffloadAction(CollapsedOffloadAction, ActionInfo,
+    AppendCollapsedOffloadAction(CollapsedOffloadAction, ActionInfo,
                                  /*NumElements=*/2);
     return T;
   }
@@ -2602,7 +2603,7 @@ class ToolSelector final {
       return nullptr;
 
     Inputs = &CJ->getInputs();
-    appendCollapsedOffloadAction(CollapsedOffloadAction, ActionInfo,
+    AppendCollapsedOffloadAction(CollapsedOffloadAction, ActionInfo,
                                  /*NumElements=*/2);
     return T;
   }
