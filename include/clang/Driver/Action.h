@@ -159,7 +159,7 @@ public:
   /// files for each offloading kind.
   std::string getOffloadingFileNamePrefix(StringRef NormalizedTriple) const;
   /// Return a string containing a offload kind name.
-  static StringRef getOffloadKindName(OffloadKind Kind);
+  static StringRef GetOffloadKindName(OffloadKind Kind);
 
   /// Set the device offload info of this action and propagate it to its
   /// dependences.

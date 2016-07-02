@@ -6708,7 +6708,7 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
         CurTC = TC;
       });
     }
-    Triples += Action::getOffloadKindName(CurKind);
+    Triples += Action::GetOffloadKindName(CurKind);
     Triples += '-';
     Triples += CurTC->getTriple().normalize();
   }

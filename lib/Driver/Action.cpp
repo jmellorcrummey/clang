@@ -131,7 +131,7 @@ Action::getOffloadingFileNamePrefix(StringRef NormalizedTriple) const {
 
 /// Return a string with the offload kind name. If that is not defined, we
 /// assume 'host'.
-llvm::StringRef Action::getOffloadKindName(OffloadKind Kind) {
+llvm::StringRef Action::GetOffloadKindName(OffloadKind Kind) {
   switch (Kind) {
   case OFK_None:
   case OFK_Host:
