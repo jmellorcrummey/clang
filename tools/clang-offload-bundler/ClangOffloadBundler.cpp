@@ -341,7 +341,7 @@ class ObjectFileHandler final : public FileHandler {
 
   /// Return true if the provided section is an offload section and return the
   /// triple by reference.
-  static bool isOffloadSection(SectionRef CurSection,
+  static bool IsOffloadSection(SectionRef CurSection,
                                StringRef &OffloadTriple) {
     StringRef SectionName;
     CurSection.getName(SectionName);
@@ -393,7 +393,7 @@ public:
       StringRef OffloadTriple;
       // Check if the current section name starts with the reserved prefix. If
       // so, return the triple.
-      if (isOffloadSection(*CurrentSection, OffloadTriple))
+      if (IsOffloadSection(*CurrentSection, OffloadTriple))
         return OffloadTriple;
     }
     return StringRef();
