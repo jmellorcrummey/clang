@@ -1587,7 +1587,7 @@ public:
 llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
     const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
     OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen,
-    unsigned CaptureLevel) {
+    unsigned CaptureLevel, unsigned ImplicitParamStop) {
   assert(ThreadIDVar->getType()->isPointerType() &&
          "thread id variable must be of type kmp_int32 *");
 
@@ -1597,7 +1597,8 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
   } else if (IsSPMDExecutionMode()) {
     // Simplified code generation if in SPMD mode.
     return CGOpenMPRuntime::emitParallelOrTeamsOutlinedFunction(
-        D, ThreadIDVar, InnermostKind, CodeGen, CaptureLevel);
+        D, ThreadIDVar, InnermostKind, CodeGen, CaptureLevel,
+        ImplicitParamStop);
   } else {
     const CapturedStmt *CS = cast<CapturedStmt>(D.getAssociatedStmt());
     CodeGenFunction CGF(CGM, true);
@@ -2905,17 +2906,9 @@ void CGOpenMPRuntimeNVPTX::emitTeamsCall(CodeGenFunction &CGF,
         CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
                              /*Name*/ ".zero.addr");
     CGF.InitTempAlloca(ZeroAddr, CGF.Builder.getInt32(/*C*/ 0));
-    Address ZeroBAddr =
-        CGF.CreateTempAlloca(CGF.SizeTy, CharUnits::fromQuantity(8),
-                             /*Name*/ ".zerob.addr");
-    CGF.InitTempAlloca(ZeroBAddr, CGF.Builder.getInt64(/*C*/ 0));
-    auto BCast = CGF.Builder.CreateIntCast(CGF.Builder.CreateLoad(ZeroBAddr),
-                                           CGF.SizeTy, /*isSigned=*/false);
     llvm::SmallVector<llvm::Value *, 16> OutlinedFnArgs;
     OutlinedFnArgs.push_back(ThreadIDAddr.getPointer());
     OutlinedFnArgs.push_back(ZeroAddr.getPointer());
-    OutlinedFnArgs.push_back(BCast);
-    OutlinedFnArgs.push_back(BCast);
     OutlinedFnArgs.append(CapturedVars.begin(), CapturedVars.end());
     CGF.EmitCallOrInvoke(OutlinedFn, OutlinedFnArgs);
   } else {

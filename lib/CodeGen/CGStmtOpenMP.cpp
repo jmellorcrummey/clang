@@ -270,8 +270,8 @@ static Address castValueFromUintptr(CodeGenFunction &CGF, QualType DstType,
 }
 
 llvm::Function *CodeGenFunction::GenerateOpenMPCapturedStmtFunction(
-    const CapturedStmt &S, bool UseCapturedArgumentsOnly,
-    unsigned CaptureLevel) {
+    const CapturedStmt &S, bool UseCapturedArgumentsOnly, unsigned CaptureLevel,
+    unsigned ImplicitParamStop) {
   assert(
       CapturedStmtInfo &&
       "CapturedStmtInfo should be set when generating the captured function");
@@ -282,9 +282,11 @@ llvm::Function *CodeGenFunction::GenerateOpenMPCapturedStmtFunction(
   // Build the argument list.
   ASTContext &Ctx = CGM.getContext();
   FunctionArgList Args;
+  if (ImplicitParamStop == 0)
+    ImplicitParamStop = CD->getContextParamPosition();
   if (!UseCapturedArgumentsOnly)
     Args.append(CD->param_begin(),
-                std::next(CD->param_begin(), CD->getContextParamPosition()));
+                std::next(CD->param_begin(), ImplicitParamStop));
   auto I = S.captures().begin();
   for (auto *FD : RD->fields()) {
     QualType ArgType = FD->getType();
@@ -347,7 +349,7 @@ llvm::Function *CodeGenFunction::GenerateOpenMPCapturedStmtFunction(
   // Generate the function.
   StartFunction(CD, Ctx.VoidTy, F, FuncInfo, Args, CD->getLocation(),
                 CD->getBody()->getLocStart());
-  unsigned Cnt = UseCapturedArgumentsOnly ? 0 : CD->getContextParamPosition();
+  unsigned Cnt = UseCapturedArgumentsOnly ? 0 : ImplicitParamStop;
   I = S.captures().begin();
   for (auto *FD : RD->fields()) {
     if (I->capturesVariable() || I->capturesVariableByCopy()) {
@@ -3604,11 +3606,14 @@ void CodeGenFunction::EmitOMPAtomicDirective(const OMPAtomicDirective &S) {
 static void emitCommonOMPTeamsDirective(CodeGenFunction &CGF,
                                         const OMPExecutableDirective &S,
                                         OpenMPDirectiveKind InnermostKind,
-                                        const RegionCodeGenTy &CodeGen) {
+                                        const RegionCodeGenTy &CodeGen,
+                                        unsigned CaptureLevel = 1,
+                                        unsigned ImplicitParamStop = 0) {
   auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
   auto OutlinedFn =
       CGF.CGM.getOpenMPRuntime().emitParallelOrTeamsOutlinedFunction(
-          S, *CS->getCapturedDecl()->param_begin(), InnermostKind, CodeGen);
+          S, *CS->getCapturedDecl()->param_begin(), InnermostKind, CodeGen,
+          CaptureLevel, ImplicitParamStop);
 
   const OMPNumTeamsClause *NT = S.getSingleClause<OMPNumTeamsClause>();
   const OMPThreadLimitClause *TL = S.getSingleClause<OMPThreadLimitClause>();
@@ -3622,7 +3627,7 @@ static void emitCommonOMPTeamsDirective(CodeGenFunction &CGF,
 
   OMPTeamsScope Scope(CGF, S);
   llvm::SmallVector<llvm::Value *, 16> CapturedVars;
-  CGF.GenerateOpenMPCapturedVars(*CS, CapturedVars);
+  CGF.GenerateOpenMPCapturedVars(*CS, CapturedVars, CaptureLevel);
   CGF.CGM.getOpenMPRuntime().emitTeamsCall(CGF, S, S.getLocStart(), OutlinedFn,
                                            CapturedVars);
 }
@@ -3815,7 +3820,8 @@ static void TargetTeamsDistributeParallelForCodegen(
                                                 false);
   };
   emitCommonOMPTeamsDirective(CGF, S, OMPD_target_teams_distribute_parallel_for,
-                              CodeGen);
+                              CodeGen, /*CaptureLevel=*/1,
+                              /*ImplicitParamStop=*/2);
 }
 
 void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForDeviceFunction(

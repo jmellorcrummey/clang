@@ -2322,10 +2322,9 @@ public:
   llvm::Function *EmitCapturedStmt(const CapturedStmt &S, CapturedRegionKind K);
   llvm::Function *GenerateCapturedStmtFunction(const CapturedStmt &S);
   Address GenerateCapturedStmtArgument(const CapturedStmt &S);
-  llvm::Function *
-  GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S,
-                                     bool UseCapturedArgumentsOnly = false,
-                                     unsigned CaptureLevel = 1);
+  llvm::Function *GenerateOpenMPCapturedStmtFunction(
+      const CapturedStmt &S, bool UseCapturedArgumentsOnly = false,
+      unsigned CaptureLevel = 1, unsigned ImplicitParamStop = 0);
   void GenerateOpenMPCapturedVars(const CapturedStmt &S,
                                   SmallVectorImpl<llvm::Value *> &CapturedVars,
                                   unsigned CaptureLevel = 1);
