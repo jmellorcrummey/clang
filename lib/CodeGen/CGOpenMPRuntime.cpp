@@ -5298,6 +5298,22 @@ emitThreadLimitClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
               : NumThreadsExpr;
     }
 
+    // If we are executing a serialized parallel in a target region, clamp the
+    // thread limit expression to 1.
+    if (isOpenMPParallelDirective(D.getDirectiveKind())) {
+      for (const auto *C : D.getClausesOfKind<OMPIfClause>()) {
+        if (C->getNameModifier() == OMPD_parallel) {
+          const Expr *IfCond = C->getCondition();
+          ThreadLimitExpr =
+              ThreadLimitExpr
+                  ? Bld.CreateSelect(CGF.EvaluateExprAsBool(IfCond),
+                                     ThreadLimitExpr, Bld.getInt32(1))
+                  : Bld.getInt32(1);
+          break;
+        }
+      }
+    }
+
     // The default value is 0.
     return ThreadLimitExpr ? ThreadLimitExpr : Bld.getInt32(0);
   }
