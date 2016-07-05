@@ -929,6 +929,13 @@ Sema::CheckClassTemplate(Scope *S, unsigned TagSpec, TagUseKind TUK,
   if (Previous.begin() != Previous.end())
     PrevDecl = (*Previous.begin())->getUnderlyingDecl();
 
+  if (PrevDecl && PrevDecl->isTemplateParameter()) {
+    // Maybe we will complain about the shadowed template parameter.
+    DiagnoseTemplateParameterShadow(NameLoc, PrevDecl);
+    // Just pretend that we didn't see the previous declaration.
+    PrevDecl = nullptr;
+  }
+
   // If there is a previous declaration with the same name, check
   // whether this is a valid redeclaration.
   ClassTemplateDecl *PrevClassTemplate
@@ -1054,12 +1061,7 @@ Sema::CheckClassTemplate(Scope *S, unsigned TagSpec, TagUseKind TUK,
         // definition, as part of error recovery?
         return true;
       }
-    }    
-  } else if (PrevDecl && PrevDecl->isTemplateParameter()) {
-    // Maybe we will complain about the shadowed template parameter.
-    DiagnoseTemplateParameterShadow(NameLoc, PrevDecl);
-    // Just pretend that we didn't see the previous declaration.
-    PrevDecl = nullptr;
+    }
   } else if (PrevDecl) {
     // C++ [temp]p5:
     //   A class template shall not have the same name as any other
@@ -6987,11 +6989,19 @@ bool Sema::CheckFunctionTemplateSpecialization(
   // Mark the prior declaration as an explicit specialization, so that later
   // clients know that this is an explicit specialization.
   if (!isFriend) {
-    // Explicit specializations do not inherit '=delete' from their primary
-    // function template.
-    if (Specialization->isDeleted()) {
-      assert(!SpecInfo->isExplicitSpecialization());
-      assert(Specialization->getCanonicalDecl() == Specialization);
+    // Since explicit specializations do not inherit '=delete' from their
+    // primary function template - check if the 'specialization' that was
+    // implicitly generated (during template argument deduction for partial
+    // ordering) from the most specialized of all the function templates that
+    // 'FD' could have been specializing, has a 'deleted' definition.  If so,
+    // first check that it was implicitly generated during template argument
+    // deduction by making sure it wasn't referenced, and then reset the deleted
+    // flag to not-deleted, so that we can inherit that information from 'FD'.
+    if (Specialization->isDeleted() && !SpecInfo->isExplicitSpecialization() &&
+        !Specialization->getCanonicalDecl()->isReferenced()) {
+      assert(
+          Specialization->getCanonicalDecl() == Specialization &&
+          "This must be the only existing declaration of this specialization");
       Specialization->setDeletedAsWritten(false);
     }
     SpecInfo->setTemplateSpecializationKind(TSK_ExplicitSpecialization);

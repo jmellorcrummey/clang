@@ -159,6 +159,10 @@ public:
   ///
   virtual llvm::Value *getNumLanes(CodeGenFunction &CGF, SourceLocation Loc);
 
+  // \brief Sanitize identifiers for NVPTX backend.
+  //
+  virtual std::string sanitizeIdentifier(const llvm::Twine &Name);
+
 private:
   /// \brief Default const ident_t object used for initialization of all other
   /// ident_t objects.
@@ -613,12 +617,6 @@ public:
   virtual ~CGOpenMPRuntime() {}
   virtual void clear();
 
-  /// \brief Emits captured variables for the outlined function for the
-  /// specified OpenMP parallel directive \a D.
-  virtual void
-  emitCapturedVars(CodeGenFunction &CGF, const OMPExecutableDirective &S,
-                   llvm::SmallVector<llvm::Value *, 16> &CapturedVars);
-
   /// \brief Registers the context of a parallel region with the runtime
   /// codegen implementation.
   virtual void registerParallelContext(CodeGenFunction &CGF,
@@ -640,7 +638,8 @@ public:
   /// \param CodeGen Code generation sequence for the \a D directive.
   virtual llvm::Value *emitParallelOrTeamsOutlinedFunction(
       const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
-      OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen);
+      OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen,
+      unsigned CaptureLevel = 1);
 
   /// \brief Emits outlined function for the specified OpenMP simd directive
   /// \a D. This outlined function has type void(*)(kmp_int32 *LaneID,
@@ -799,7 +798,7 @@ public:
   /// \param Chunk size.
   ///
   virtual bool generateCoalescedSchedule(OpenMPScheduleClauseKind ScheduleKind,
-                                         bool ChunkSizeOne, bool ordered) const;
+                                         bool ChunkSizeOne, bool Ordered) const;
 
   /// \brief Check if the specified \a ScheduleKind is dynamic.
   /// This kind of worksharing directive is emitted without outer loop.
@@ -810,7 +809,7 @@ public:
   virtual void emitForDispatchInit(CodeGenFunction &CGF, SourceLocation Loc,
                                    const OpenMPScheduleTy &ScheduleKind,
                                    unsigned IVSize, bool IVSigned, bool Ordered,
-                                   llvm::Value *UB,
+                                   llvm::Value *LB, llvm::Value *UB,
                                    llvm::Value *Chunk = nullptr);
 
   /// \brief Call the appropriate runtime routine to initialize it before start
@@ -1235,7 +1234,7 @@ public:
   virtual void emitDoacrossOrdered(CodeGenFunction &CGF,
                                    const OMPDependClause *C);
 
-  /// Return true if the current openMP implementation supports RTTI. The return
+  /// Return true if the current OpenMP implementation supports RTTI. The return
   /// default value is 'true'.
   virtual bool requiresRTTIDescriptor() { return true; }
 };

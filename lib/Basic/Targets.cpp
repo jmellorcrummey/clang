@@ -141,7 +141,7 @@ static void getDarwinDefines(MacroBuilder &Builder, const LangOptions &Opts,
   unsigned Maj, Min, Rev;
   if (Triple.isMacOSX()) {
     Triple.getMacOSXVersion(Maj, Min, Rev);
-    PlatformName = "macosx";
+    PlatformName = "macos";
   } else {
     Triple.getOSVersion(Maj, Min, Rev);
     PlatformName = llvm::Triple::getOSTypeName(Triple.getOS());
@@ -734,6 +734,13 @@ protected:
 
       if (Opts.CPlusPlus11 && Opts.isCompatibleWithMSVC(LangOptions::MSVC2015))
         Builder.defineMacro("_HAS_CHAR16_T_LANGUAGE_SUPPORT", Twine(1));
+
+      if (Opts.isCompatibleWithMSVC(LangOptions::MSVC2015)) {
+        if (Opts.CPlusPlus1z)
+          Builder.defineMacro("_MSVC_LANG", "201403L");
+        else if (Opts.CPlusPlus14)
+          Builder.defineMacro("_MSVC_LANG", "201402L");
+      }
     }
 
     if (Opts.MicrosoftExt) {
@@ -1862,6 +1869,19 @@ public:
 
     return GPU != GK_NONE;
   }
+  void setSupportedOpenCLOpts() override {
+    auto &Opts = getSupportedOpenCLOpts();
+    Opts.cl_clang_storage_class_specifiers = 1;
+    Opts.cl_khr_gl_sharing = 1;
+    Opts.cl_khr_icd = 1;
+
+    Opts.cl_khr_fp64 = 1;
+    Opts.cl_khr_byte_addressable_store = 1;
+    Opts.cl_khr_global_int32_base_atomics = 1;
+    Opts.cl_khr_global_int32_extended_atomics = 1;
+    Opts.cl_khr_local_int32_base_atomics = 1;
+    Opts.cl_khr_local_int32_extended_atomics = 1;
+  }
 };
 
 const Builtin::Info NVPTXTargetInfo::BuiltinInfo[] = {
@@ -2029,6 +2049,8 @@ public:
       Builder.defineMacro("__HAS_FMAF__");
     if (hasLDEXPF)
       Builder.defineMacro("__HAS_LDEXPF__");
+    if (hasFP64)
+      Builder.defineMacro("__HAS_FP64__");
   }
 
   BuiltinVaListKind getBuiltinVaListKind() const override {
@@ -2094,29 +2116,36 @@ public:
     return GPU != GK_NONE;
   }
 
-   void setSupportedOpenCLOpts() override {
-     auto &Opts = getSupportedOpenCLOpts();
-     Opts.cl_clang_storage_class_specifiers = 1;
-     Opts.cl_khr_gl_sharing = 1;
-     Opts.cl_khr_gl_event = 1;
-     Opts.cl_khr_d3d10_sharing = 1;
-     Opts.cl_khr_subgroups = 1;
+  void setSupportedOpenCLOpts() override {
+    auto &Opts = getSupportedOpenCLOpts();
+    Opts.cl_clang_storage_class_specifiers = 1;
+    Opts.cl_khr_icd = 1;
 
-     if (hasFP64)
-       Opts.cl_khr_fp64 = 1;
-     if (GPU >= GK_NORTHERN_ISLANDS) {
-       Opts.cl_khr_byte_addressable_store = 1;
-       Opts.cl_khr_global_int32_base_atomics = 1;
-       Opts.cl_khr_global_int32_extended_atomics = 1;
-       Opts.cl_khr_local_int32_base_atomics = 1;
-       Opts.cl_khr_local_int32_extended_atomics = 1;
-     }
-     if (GPU >= GK_SOUTHERN_ISLANDS)
-       Opts.cl_khr_fp16 = 1;
-       Opts.cl_khr_int64_base_atomics = 1;
-       Opts.cl_khr_int64_extended_atomics = 1;
-       Opts.cl_khr_3d_image_writes = 1;
-       Opts.cl_khr_gl_msaa_sharing = 1;
+    if (hasFP64)
+      Opts.cl_khr_fp64 = 1;
+    if (GPU >= GK_EVERGREEN) {
+      Opts.cl_khr_byte_addressable_store = 1;
+      Opts.cl_khr_global_int32_base_atomics = 1;
+      Opts.cl_khr_global_int32_extended_atomics = 1;
+      Opts.cl_khr_local_int32_base_atomics = 1;
+      Opts.cl_khr_local_int32_extended_atomics = 1;
+    }
+    if (GPU >= GK_SOUTHERN_ISLANDS) {
+      Opts.cl_khr_fp16 = 1;
+      Opts.cl_khr_int64_base_atomics = 1;
+      Opts.cl_khr_int64_extended_atomics = 1;
+      Opts.cl_khr_3d_image_writes = 1;
+    }
+  }
+
+  CallingConvCheckResult checkCallingConvention(CallingConv CC) const override {
+    switch (CC) {
+      default:
+        return CCCR_Warning;
+      case CC_C:
+      case CC_OpenCLKernel:
+        return CCCR_OK;
+    }
   }
 };
 
@@ -4864,6 +4893,8 @@ public:
       case llvm::Triple::Android:
       case llvm::Triple::GNUEABI:
       case llvm::Triple::GNUEABIHF:
+      case llvm::Triple::MuslEABI:
+      case llvm::Triple::MuslEABIHF:
         setABI("aapcs-linux");
         break;
       case llvm::Triple::EABIHF:
@@ -5710,6 +5741,7 @@ public:
                         .Case("cortex-a73", true)
                         .Case("cyclone", true)
                         .Case("kryo", true)
+                        .Case("vulcan", true)
                         .Default(false);
     return CPUKnown;
   }
@@ -5982,7 +6014,7 @@ class AArch64leTargetInfo : public AArch64TargetInfo {
     if (getTriple().isOSBinFormatMachO())
       resetDataLayout("e-m:o-i64:64-i128:128-n32:64-S128");
     else
-      resetDataLayout("e-m:e-i64:64-i128:128-n32:64-S128");
+      resetDataLayout("e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128");
   }
 
 public:
@@ -6000,7 +6032,7 @@ public:
 class AArch64beTargetInfo : public AArch64TargetInfo {
   void setDataLayout() override {
     assert(!getTriple().isOSBinFormatMachO());
-    resetDataLayout("E-m:e-i64:64-i128:128-n32:64-S128");
+    resetDataLayout("E-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128");
   }
 
 public:
@@ -6395,6 +6427,10 @@ public:
              .Default(false);
   }
 
+  bool hasSjLjLowering() const override {
+    return true;
+  }
+
   ArrayRef<Builtin::Info> getTargetBuiltins() const override {
     // FIXME: Implement!
     return None;
@@ -6576,6 +6612,7 @@ public:
       PtrDiffType = SignedLong;
       break;
     }
+    MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 64;
   }
 
   void getTargetDefines(const LangOptions &Opts,
@@ -7112,34 +7149,38 @@ public:
     return IsNan2008;
   }
 
+  bool processorSupportsGPR64() const {
+    return llvm::StringSwitch<bool>(CPU)
+        .Case("mips3", true)
+        .Case("mips4", true)
+        .Case("mips5", true)
+        .Case("mips64", true)
+        .Case("mips64r2", true)
+        .Case("mips64r3", true)
+        .Case("mips64r5", true)
+        .Case("mips64r6", true)
+        .Case("octeon", true)
+        .Default(false);
+    return false;
+  }
+
   StringRef getABI() const override { return ABI; }
   bool setABI(const std::string &Name) override {
-    // FIXME: The Arch component on the triple actually has no bearing on
-    //        whether the ABI is valid or not. It's features of the CPU that
-    //        matters and the size of the GPR's in particular.
-    //        However, we can't allow O32 on 64-bit processors just yet because
-    //        the backend still checks the Arch component instead of the ABI in
-    //        a few places.
-    if (getTriple().getArch() == llvm::Triple::mips ||
-        getTriple().getArch() == llvm::Triple::mipsel) {
-      if (Name == "o32") {
-        setO32ABITypes();
-        ABI = Name;
-        return true;
-      }
+    if (Name == "o32") {
+      setO32ABITypes();
+      ABI = Name;
+      return true;
     }
-    if (getTriple().getArch() == llvm::Triple::mips64 ||
-        getTriple().getArch() == llvm::Triple::mips64el) {
-      if (Name == "n32") {
-        setN32ABITypes();
-        ABI = Name;
-        return true;
-      }
-      if (Name == "n64") {
-        setN64ABITypes();
-        ABI = Name;
-        return true;
-      }
+
+    if (Name == "n32") {
+      setN32ABITypes();
+      ABI = Name;
+      return true;
+    }
+    if (Name == "n64") {
+      setN64ABITypes();
+      ABI = Name;
+      return true;
     }
     return false;
   }
@@ -7189,26 +7230,25 @@ public:
   }
 
   bool setCPU(const std::string &Name) override {
-    bool GPR64Required = ABI == "n32" || ABI == "n64";
     CPU = Name;
     return llvm::StringSwitch<bool>(Name)
-        .Case("mips1", !GPR64Required)
-        .Case("mips2", !GPR64Required)
+        .Case("mips1", true)
+        .Case("mips2", true)
         .Case("mips3", true)
         .Case("mips4", true)
         .Case("mips5", true)
-        .Case("mips32", !GPR64Required)
-        .Case("mips32r2", !GPR64Required)
-        .Case("mips32r3", !GPR64Required)
-        .Case("mips32r5", !GPR64Required)
-        .Case("mips32r6", !GPR64Required)
+        .Case("mips32", true)
+        .Case("mips32r2", true)
+        .Case("mips32r3", true)
+        .Case("mips32r5", true)
+        .Case("mips32r6", true)
         .Case("mips64", true)
         .Case("mips64r2", true)
         .Case("mips64r3", true)
         .Case("mips64r5", true)
         .Case("mips64r6", true)
         .Case("octeon", true)
-        .Case("p5600", !GPR64Required)
+        .Case("p5600", true)
         .Default(false);
   }
   const std::string& getCPU() const { return CPU; }
@@ -7537,6 +7577,45 @@ public:
   bool hasInt128Type() const override {
     return ABI == "n32" || ABI == "n64";
   }
+
+  bool validateTarget(DiagnosticsEngine &Diags) const override {
+    // FIXME: It's valid to use O32 on a 64-bit CPU but the backend can't handle
+    //        this yet. It's better to fail here than on the backend assertion.
+    if (processorSupportsGPR64() && ABI == "o32") {
+      Diags.Report(diag::err_target_unsupported_abi) << ABI << CPU;
+      return false;
+    }
+
+    // 64-bit ABI's require 64-bit CPU's.
+    if (!processorSupportsGPR64() && (ABI == "n32" || ABI == "n64")) {
+      Diags.Report(diag::err_target_unsupported_abi) << ABI << CPU;
+      return false;
+    }
+
+    // FIXME: It's valid to use O32 on a mips64/mips64el triple but the backend
+    //        can't handle this yet. It's better to fail here than on the
+    //        backend assertion.
+    if ((getTriple().getArch() == llvm::Triple::mips64 ||
+         getTriple().getArch() == llvm::Triple::mips64el) &&
+        ABI == "o32") {
+      Diags.Report(diag::err_target_unsupported_abi_for_triple)
+          << ABI << getTriple().str();
+      return false;
+    }
+
+    // FIXME: It's valid to use N32/N64 on a mips/mipsel triple but the backend
+    //        can't handle this yet. It's better to fail here than on the
+    //        backend assertion.
+    if ((getTriple().getArch() == llvm::Triple::mips ||
+         getTriple().getArch() == llvm::Triple::mipsel) &&
+        (ABI == "n32" || ABI == "n64")) {
+      Diags.Report(diag::err_target_unsupported_abi_for_triple)
+          << ABI << getTriple().str();
+      return false;
+    }
+
+    return true;
+  }
 };
 
 const Builtin::Info MipsTargetInfo::BuiltinInfo[] = {
@@ -7858,8 +7937,8 @@ public:
   }
 
   CallingConvCheckResult checkCallingConvention(CallingConv CC) const override {
-    return (CC == CC_SpirFunction || CC == CC_SpirKernel) ? CCCR_OK
-                                                          : CCCR_Warning;
+    return (CC == CC_SpirFunction || CC == CC_OpenCLKernel) ? CCCR_OK
+                                                            : CCCR_Warning;
   }
 
   CallingConv getDefaultCallingConv(CallingConvMethodType MT) const override {
@@ -8472,6 +8551,9 @@ TargetInfo::CreateTargetInfo(DiagnosticsEngine &Diags,
     return nullptr;
 
   Target->setSupportedOpenCLOpts();
+
+  if (!Target->validateTarget(Diags))
+    return nullptr;
 
   return Target.release();
 }

@@ -194,7 +194,7 @@ public:
 /// In this example directive '#pragma omp parallel' has simple 'if' clause with
 /// condition 'a > 5' and directive name modifier 'parallel'.
 ///
-class OMPIfClause : public OMPClause {
+class OMPIfClause : public OMPClause, public OMPClauseWithPreInit {
   friend class OMPClauseReader;
   /// \brief Location of '('.
   SourceLocation LParenLoc;
@@ -225,26 +225,29 @@ public:
   ///
   /// \param NameModifier [OpenMP 4.1] Directive name modifier of clause.
   /// \param Cond Condition of the clause.
+  /// \param HelperCond Helper condition for combined directives.
   /// \param StartLoc Starting location of the clause.
   /// \param LParenLoc Location of '('.
   /// \param NameModifierLoc Location of directive name modifier.
   /// \param ColonLoc [OpenMP 4.1] Location of ':'.
   /// \param EndLoc Ending location of the clause.
   ///
-  OMPIfClause(OpenMPDirectiveKind NameModifier, Expr *Cond,
+  OMPIfClause(OpenMPDirectiveKind NameModifier, Expr *Cond, Stmt *HelperCond,
               SourceLocation StartLoc, SourceLocation LParenLoc,
               SourceLocation NameModifierLoc, SourceLocation ColonLoc,
               SourceLocation EndLoc)
-      : OMPClause(OMPC_if, StartLoc, EndLoc), LParenLoc(LParenLoc),
-        Condition(Cond), ColonLoc(ColonLoc), NameModifier(NameModifier),
-        NameModifierLoc(NameModifierLoc) {}
+      : OMPClause(OMPC_if, StartLoc, EndLoc), OMPClauseWithPreInit(this),
+        LParenLoc(LParenLoc), Condition(Cond), ColonLoc(ColonLoc),
+        NameModifier(NameModifier), NameModifierLoc(NameModifierLoc) {
+    setPreInitStmt(HelperCond);
+  }
 
   /// \brief Build an empty clause.
   ///
   OMPIfClause()
-      : OMPClause(OMPC_if, SourceLocation(), SourceLocation()), LParenLoc(),
-        Condition(nullptr), ColonLoc(), NameModifier(OMPD_unknown),
-        NameModifierLoc() {}
+      : OMPClause(OMPC_if, SourceLocation(), SourceLocation()),
+        OMPClauseWithPreInit(this), LParenLoc(), Condition(nullptr), ColonLoc(),
+        NameModifier(OMPD_unknown), NameModifierLoc() {}
 
   /// \brief Sets the location of '('.
   void setLParenLoc(SourceLocation Loc) { LParenLoc = Loc; }
@@ -331,7 +334,7 @@ public:
 /// In this example directive '#pragma omp parallel' has simple 'num_threads'
 /// clause with number of threads '6'.
 ///
-class OMPNumThreadsClause : public OMPClause {
+class OMPNumThreadsClause : public OMPClause, public OMPClauseWithPreInit {
   friend class OMPClauseReader;
   /// \brief Location of '('.
   SourceLocation LParenLoc;
@@ -346,20 +349,26 @@ public:
   /// \brief Build 'num_threads' clause with condition \a NumThreads.
   ///
   /// \param NumThreads Number of threads for the construct.
+  /// \param HelperNumThreads Helper number of threads for combined directives.
   /// \param StartLoc Starting location of the clause.
   /// \param LParenLoc Location of '('.
   /// \param EndLoc Ending location of the clause.
   ///
-  OMPNumThreadsClause(Expr *NumThreads, SourceLocation StartLoc,
-                      SourceLocation LParenLoc, SourceLocation EndLoc)
-      : OMPClause(OMPC_num_threads, StartLoc, EndLoc), LParenLoc(LParenLoc),
-        NumThreads(NumThreads) {}
+  OMPNumThreadsClause(Expr *NumThreads, Stmt *HelperNumThreads,
+                      SourceLocation StartLoc, SourceLocation LParenLoc,
+                      SourceLocation EndLoc)
+      : OMPClause(OMPC_num_threads, StartLoc, EndLoc),
+        OMPClauseWithPreInit(this), LParenLoc(LParenLoc),
+        NumThreads(NumThreads) {
+    setPreInitStmt(HelperNumThreads);
+  }
 
   /// \brief Build an empty clause.
   ///
   OMPNumThreadsClause()
       : OMPClause(OMPC_num_threads, SourceLocation(), SourceLocation()),
-        LParenLoc(SourceLocation()), NumThreads(nullptr) {}
+        OMPClauseWithPreInit(this), LParenLoc(SourceLocation()),
+        NumThreads(nullptr) {}
 
   /// \brief Sets the location of '('.
   void setLParenLoc(SourceLocation Loc) { LParenLoc = Loc; }
@@ -4215,6 +4224,103 @@ public:
   child_range children() {
     return child_range(reinterpret_cast<Stmt **>(varlist_begin()),
                        reinterpret_cast<Stmt **>(varlist_end()));
+  }
+};
+
+/// \brief This represents clause 'use_device_ptr' in the '#pragma omp ...'
+/// directives.
+///
+/// \code
+/// #pragma omp target data use_device_ptr(a,b)
+/// \endcode
+/// In this example directive '#pragma omp target data' has clause
+/// 'use_device_ptr' with the variables 'a' and 'b'.
+///
+
+class OMPUseDevicePtrClause final
+    : public OMPVarListClause<OMPUseDevicePtrClause>,
+      private llvm::TrailingObjects<OMPUseDevicePtrClause, Expr *> {
+  friend TrailingObjects;
+  friend OMPVarListClause;
+  friend class OMPClauseReader;
+  /// \brief Build clause with number of variables \a N.
+  ///
+  /// \param StartLoc Starting location of the clause.
+  /// \param LParenLoc Location of '('.
+  /// \param EndLoc Ending location of the clause.
+  /// \param N Number of the variables in the clause.
+  ///
+  OMPUseDevicePtrClause(SourceLocation StartLoc, SourceLocation LParenLoc,
+                        SourceLocation EndLoc, unsigned N)
+      : OMPVarListClause<OMPUseDevicePtrClause>(OMPC_use_device_ptr, StartLoc,
+                                                LParenLoc, EndLoc, N) {}
+
+  /// \brief Build an empty clause.
+  ///
+  /// \param N Number of variables.
+  ///
+  explicit OMPUseDevicePtrClause(unsigned N)
+      : OMPVarListClause<OMPUseDevicePtrClause>(
+            OMPC_use_device_ptr, SourceLocation(), SourceLocation(),
+            SourceLocation(), N) {}
+
+  /// \brief Sets the list of references to private copies with initializers for
+  /// new private variables.
+  /// \param VL List of references.
+  void setPrivateCopies(ArrayRef<Expr *> VL);
+
+  /// \brief Gets the list of references to private copies with initializers for
+  /// new private variables.
+  MutableArrayRef<Expr *> getPrivateCopies() {
+    return MutableArrayRef<Expr *>(varlist_end(), varlist_size());
+  }
+  ArrayRef<const Expr *> getPrivateCopies() const {
+    return llvm::makeArrayRef(varlist_end(), varlist_size());
+  }
+
+public:
+  /// \brief Creates clause with a list of variables \a VL.
+  ///
+  /// \param C AST context.
+  /// \param StartLoc Starting location of the clause.
+  /// \param LParenLoc Location of '('.
+  /// \param EndLoc Ending location of the clause.
+  /// \param VL List of references to the variables.
+  /// \param PrivateVL List of references to private copies with initializers.
+  ///
+  static OMPUseDevicePtrClause *
+  Create(const ASTContext &C, SourceLocation StartLoc, SourceLocation LParenLoc,
+         SourceLocation EndLoc, ArrayRef<Expr *> VL,
+         ArrayRef<Expr *> PrivateVL);
+  /// \brief Creates an empty clause with the place for \a N variables.
+  ///
+  /// \param C AST context.
+  /// \param N The number of variables.
+  ///
+  static OMPUseDevicePtrClause *CreateEmpty(const ASTContext &C, unsigned N);
+
+  typedef MutableArrayRef<Expr *>::iterator private_copies_iterator;
+  typedef ArrayRef<const Expr *>::iterator private_copies_const_iterator;
+  typedef llvm::iterator_range<private_copies_iterator> private_copies_range;
+  typedef llvm::iterator_range<private_copies_const_iterator>
+      private_copies_const_range;
+
+  private_copies_range private_copies() {
+    return private_copies_range(getPrivateCopies().begin(),
+                                getPrivateCopies().end());
+  }
+  private_copies_const_range private_copies() const {
+    return private_copies_const_range(getPrivateCopies().begin(),
+                                      getPrivateCopies().end());
+  }
+
+  child_range children() {
+    return child_range(reinterpret_cast<Stmt **>(varlist_begin()),
+                       reinterpret_cast<Stmt **>(varlist_end()));
+  }
+
+  static bool classof(const OMPClause *T) {
+    return T->getClauseKind() == OMPC_use_device_ptr;
   }
 };
 } // end namespace clang

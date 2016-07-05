@@ -90,13 +90,21 @@ OMPDeclareReductionDecl::getPrevDeclInScope() const {
 void OMPCapturedExprDecl::anchor() {}
 
 OMPCapturedExprDecl *OMPCapturedExprDecl::Create(ASTContext &C, DeclContext *DC,
-                                                 IdentifierInfo *Id,
-                                                 QualType T) {
-  return new (C, DC) OMPCapturedExprDecl(C, DC, Id, T);
+                                                 IdentifierInfo *Id, QualType T,
+                                                 unsigned CaptureLevel) {
+  return new (C, DC) OMPCapturedExprDecl(C, DC, Id, T, CaptureLevel);
 }
 
-OMPCapturedExprDecl *OMPCapturedExprDecl::CreateDeserialized(ASTContext &C,
-                                                             unsigned ID) {
-  return new (C, ID) OMPCapturedExprDecl(C, nullptr, nullptr, QualType());
+OMPCapturedExprDecl *
+OMPCapturedExprDecl::CreateDeserialized(ASTContext &C, unsigned ID,
+                                        unsigned CaptureLevel) {
+  return new (C, ID)
+      OMPCapturedExprDecl(C, nullptr, nullptr, QualType(), CaptureLevel);
 }
 
+unsigned OMPCapturedExprDecl::getCaptureLevel() const { return CaptureLevel; }
+
+void OMPCapturedExprDecl::setCaptureLevel(unsigned CaptureLevel) {
+  assert(CaptureLevel >= 1 && "Invalid capture level for omp expression");
+  this->CaptureLevel = CaptureLevel;
+}

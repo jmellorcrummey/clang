@@ -164,6 +164,7 @@ unsigned clang::getOpenMPSimpleClauseType(OpenMPClauseKind Kind,
   case OMPC_uniform:
   case OMPC_to:
   case OMPC_from:
+  case OMPC_use_device_ptr:
     break;
   }
   llvm_unreachable("Invalid OpenMP simple clause kind");
@@ -301,6 +302,7 @@ const char *clang::getOpenMPSimpleClauseTypeName(OpenMPClauseKind Kind,
   case OMPC_uniform:
   case OMPC_to:
   case OMPC_from:
+  case OMPC_use_device_ptr:
     break;
   }
   llvm_unreachable("Invalid OpenMP simple clause kind");
@@ -687,7 +689,8 @@ bool clang::isOpenMPSimdDirective(OpenMPDirectiveKind DKind) {
 }
 
 bool clang::isOpenMPDistributeDirective(OpenMPDirectiveKind Kind) {
-  return Kind == OMPD_distribute; // TODO add next directives.
+  return Kind == OMPD_distribute ||
+         Kind == OMPD_distribute_parallel_for; // TODO add next directives.
 }
 
 bool clang::isOpenMPPrivate(OpenMPClauseKind Kind) {
@@ -702,4 +705,9 @@ bool clang::isOpenMPThreadPrivate(OpenMPClauseKind Kind) {
 
 bool clang::isOpenMPTaskingDirective(OpenMPDirectiveKind Kind) {
   return Kind == OMPD_task || isOpenMPTaskLoopDirective(Kind);
+}
+
+bool clang::isOpenMPLoopBoundSharingDirective(OpenMPDirectiveKind Kind) {
+  return Kind == OMPD_distribute_parallel_for ||
+         Kind == OMPD_target_teams_distribute_parallel_for;
 }
