@@ -823,6 +823,8 @@ public:
       llvm::opt::ArgStringList &CC1Args) const override;
   void AddCudaIncludeArgs(const llvm::opt::ArgList &DriverArgs,
                           llvm::opt::ArgStringList &CC1Args) const override;
+  void AddIAMCUIncludeArgs(const llvm::opt::ArgList &DriverArgs,
+                           llvm::opt::ArgStringList &CC1Args) const override;
   bool isPIEDefault() const override;
   SanitizerMask getSupportedSanitizers() const override;
   void addProfileRTLibs(const llvm::opt::ArgList &Args,
@@ -950,6 +952,7 @@ protected:
 public:
   AMDGPUToolChain(const Driver &D, const llvm::Triple &Triple,
             const llvm::opt::ArgList &Args);
+  unsigned GetDefaultDwarfVersion() const override { return 2; }
   bool IsIntegratedAssemblerDefault() const override { return true; }
 };
 

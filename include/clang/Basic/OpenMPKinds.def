@@ -72,6 +72,9 @@
 #ifndef OPENMP_TARGET_PARALLEL_FOR_CLAUSE
 #  define OPENMP_TARGET_PARALLEL_FOR_CLAUSE(Name)
 #endif
+#ifndef OPENMP_TARGET_UPDATE_CLAUSE
+#  define OPENMP_TARGET_UPDATE_CLAUSE(Name)
+#endif
 #ifndef OPENMP_TEAMS_CLAUSE
 #  define OPENMP_TEAMS_CLAUSE(Name)
 #endif
@@ -163,6 +166,7 @@ OPENMP_DIRECTIVE_EXT(target_enter_data, "target enter data")
 OPENMP_DIRECTIVE_EXT(target_exit_data, "target exit data")
 OPENMP_DIRECTIVE_EXT(target_parallel, "target parallel")
 OPENMP_DIRECTIVE_EXT(target_parallel_for, "target parallel for")
+OPENMP_DIRECTIVE_EXT(target_update, "target update")
 OPENMP_DIRECTIVE_EXT(parallel_for, "parallel for")
 OPENMP_DIRECTIVE_EXT(parallel_for_simd, "parallel for simd")
 OPENMP_DIRECTIVE_EXT(parallel_sections, "parallel sections")
@@ -224,6 +228,9 @@ OPENMP_CLAUSE(num_tasks, OMPNumTasksClause)
 OPENMP_CLAUSE(hint, OMPHintClause)
 OPENMP_CLAUSE(dist_schedule, OMPDistScheduleClause)
 OPENMP_CLAUSE(defaultmap, OMPDefaultmapClause)
+OPENMP_CLAUSE(to, OMPToClause)
+OPENMP_CLAUSE(from, OMPFromClause)
+OPENMP_CLAUSE(use_device_ptr, OMPUseDevicePtrClause)
 
 // Clauses allowed for OpenMP directive 'parallel'.
 OPENMP_PARALLEL_CLAUSE(if)
@@ -408,6 +415,7 @@ OPENMP_TARGET_CLAUSE(firstprivate)
 OPENMP_TARGET_DATA_CLAUSE(if)
 OPENMP_TARGET_DATA_CLAUSE(device)
 OPENMP_TARGET_DATA_CLAUSE(map)
+OPENMP_TARGET_DATA_CLAUSE(use_device_ptr)
 
 // Clauses allowed for OpenMP directive 'target enter data'.
 OPENMP_TARGET_ENTER_DATA_CLAUSE(if)
@@ -459,6 +467,15 @@ OPENMP_TARGET_PARALLEL_FOR_CLAUSE(collapse)
 OPENMP_TARGET_PARALLEL_FOR_CLAUSE(schedule)
 OPENMP_TARGET_PARALLEL_FOR_CLAUSE(ordered)
 OPENMP_TARGET_PARALLEL_FOR_CLAUSE(linear)
+
+// Clauses allowed for OpenMP directive 'target update'.
+// TODO More clauses for 'target update' directive.
+OPENMP_TARGET_UPDATE_CLAUSE(if)
+OPENMP_TARGET_UPDATE_CLAUSE(device)
+OPENMP_TARGET_UPDATE_CLAUSE(to)
+OPENMP_TARGET_UPDATE_CLAUSE(from)
+OPENMP_TARGET_UPDATE_CLAUSE(nowait)
+OPENMP_TARGET_UPDATE_CLAUSE(depend)
 
 // Clauses allowed for OpenMP directive 'teams'.
 // TODO More clauses for 'teams' directive.
@@ -642,6 +659,7 @@ OPENMP_TARGET_TEAMS_DISTRIBUTE_PARALLEL_FOR_CLAUSE(schedule)
 #undef OPENMP_DIST_SCHEDULE_KIND
 #undef OPENMP_DEFAULTMAP_KIND
 #undef OPENMP_DEFAULTMAP_MODIFIER
+#undef OPENMP_TARGET_UPDATE_CLAUSE
 #undef OPENMP_DISTRIBUTE_PARALLEL_FOR_CLAUSE
 #undef OPENMP_TARGET_TEAMS_CLAUSE
 #undef OPENMP_TEAMS_DISTRIBUTE_PARALLEL_FOR_CLAUSE

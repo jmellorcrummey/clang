@@ -41,6 +41,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include <map>
 #include <memory>
+#include <utility>
 
 using namespace clang::driver;
 using namespace clang;
@@ -49,9 +50,9 @@ using namespace llvm::opt;
 Driver::Driver(StringRef ClangExecutable, StringRef DefaultTargetTriple,
                DiagnosticsEngine &Diags,
                IntrusiveRefCntPtr<vfs::FileSystem> VFS)
-    : Opts(createDriverOptTable()), Diags(Diags), VFS(VFS), Mode(GCCMode),
-      SaveTemps(SaveTempsNone), BitcodeEmbed(EmbedNone), LTOMode(LTOK_None),
-      ClangExecutable(ClangExecutable),
+    : Opts(createDriverOptTable()), Diags(Diags), VFS(std::move(VFS)),
+      Mode(GCCMode), SaveTemps(SaveTempsNone), BitcodeEmbed(EmbedNone),
+      LTOMode(LTOK_None), ClangExecutable(ClangExecutable),
       SysRoot(DEFAULT_SYSROOT), UseStdLib(true),
       DefaultTargetTriple(DefaultTargetTriple),
       DriverTitle("clang LLVM compiler"), CCPrintOptionsFilename(nullptr),
@@ -143,7 +144,7 @@ InputArgList Driver::ParseArgStrings(ArrayRef<const char *> ArgStrings) {
     // Warn about -mcpu= without an argument.
     if ((A->getOption().matches(options::OPT_mcpu_EQ) &&
          A->containsValue("")) ||
-        (A->getOption().matches(options::OPT_fomptargets_EQ) &&
+        (A->getOption().matches(options::OPT_fopenmp_targets_EQ) &&
          !A->getNumValues())) {
       Diag(clang::diag::warn_drv_empty_joined_argument) << A->getAsString(Args);
     }
@@ -211,7 +212,7 @@ static bool RequiresOpenMPOffloading(ArgList &Args) {
       OpenMPRuntimeName = A->getValue();
 
     if (OpenMPRuntimeName == "libomp" || OpenMPRuntimeName == "libiomp5") {
-      auto *A = Args.getLastArg(options::OPT_fomptargets_EQ);
+      auto *A = Args.getLastArg(options::OPT_fopenmp_targets_EQ);
       return A != nullptr && A->getNumValues();
     }
   }
@@ -535,7 +536,7 @@ DerivedArgList *Driver::TranslateInputArgs(const InputArgList &Args) const {
   }
 
   // Enforce -static if -miamcu is present.
-  if (Args.hasArg(options::OPT_miamcu))
+  if (Args.hasFlag(options::OPT_miamcu, options::OPT_mno_iamcu, false))
     DAL->AddFlagArg(0, Opts->getOption(options::OPT_static));
 
 // Add a default value of -mlinker-version=, if one was given and the user
@@ -630,7 +631,7 @@ static llvm::Triple computeTargetTriple(const Driver &D,
   }
 
   // Handle -miamcu flag.
-  if (Args.hasArg(options::OPT_miamcu)) {
+  if (Args.hasFlag(options::OPT_miamcu, options::OPT_mno_iamcu, false)) {
     if (Target.get32BitArchVariant().getArch() != llvm::Triple::x86)
       D.Diag(diag::err_drv_unsupported_opt_for_target) << "-miamcu"
                                                        << Target.str();
@@ -675,6 +676,31 @@ void Driver::setLTOMode(const llvm::opt::ArgList &Args) {
     Diag(diag::err_drv_unsupported_option_argument) << A->getOption().getName()
                                                     << A->getValue();
   }
+}
+
+void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
+                                              InputList &Inputs) {
+
+  //
+  // CUDA
+  //
+  // We need to generate a CUDA toolchain if any of the inputs has a CUDA type.
+  if (llvm::any_of(Inputs, [](std::pair<types::ID, const llvm::opt::Arg *> &I) {
+        return types::isCuda(I.first);
+      })) {
+    const ToolChain &TC = getToolChain(
+        C.getInputArgs(),
+        llvm::Triple(C.getOffloadingHostToolChain()->getTriple().isArch64Bit()
+                         ? "nvptx64-nvidia-cuda"
+                         : "nvptx-nvidia-cuda"));
+    C.addOffloadDeviceToolChain(&TC, Action::OFK_Cuda);
+  }
+
+  //
+  // TODO: Add support for other offloading programming models here.
+  //
+
+  return;
 }
 
 Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
@@ -802,7 +828,7 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   // Owned by the host.
   const ToolChain &TC = getToolChain(
       *UArgs, computeTargetTriple(*this, DefaultTargetTriple, *UArgs),
-                   HostOffloadingKind);
+      HostOffloadingKind);
 
   // Get the toolchains for the offloading targets if any. We need to read the
   // offloading toolchains only if we have a compatible runtime library, and
@@ -810,7 +836,7 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   OrderedOffloadingToolchains.clear();
 
   if (DeviceOffloadingKind == ToolChain::OK_OpenMP_Device) {
-    Arg *Tgts = UArgs->getLastArg(options::OPT_fomptargets_EQ);
+    Arg *Tgts = UArgs->getLastArg(options::OPT_fopenmp_targets_EQ);
     assert(Tgts && Tgts->getNumValues() &&
            "OpenMP offloading has to have targets specified.");
 
@@ -839,18 +865,8 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   InputList Inputs;
   BuildInputs(C->getDefaultToolChain(), *TranslatedArgs, Inputs);
 
-  // Initialize the CUDA device TC only if we have any CUDA Inputs.  This is
-  // necessary so that we don't break compilations that pass flags that are
-  // incompatible with the NVPTX TC (e.g. -mthread-model single).
-  if (llvm::any_of(Inputs, [](const std::pair<types::ID, const Arg *> &I) {
-        return I.first == types::TY_CUDA || I.first == types::TY_PP_CUDA ||
-               I.first == types::TY_CUDA_DEVICE;
-      })) {
-    C->setCudaDeviceToolChain(
-        &getToolChain(C->getArgs(), llvm::Triple(TC.getTriple().isArch64Bit()
-                                                     ? "nvptx64-nvidia-cuda"
-                                                     : "nvptx-nvidia-cuda")));
-  }
+  // Populate the tool chains for the offloading devices, if any.
+  CreateOffloadingDeviceToolChains(*C, Inputs);
 
   // Construct the list of abstract actions to perform for this compilation. On
   // MachO targets this uses the driver-driver and universal actions.
@@ -1680,7 +1696,7 @@ static Action *buildCudaActions(Compilation &C, DerivedArgList &Args,
     CudaDeviceInputs.push_back(std::make_pair(types::TY_CUDA_DEVICE, InputArg));
 
   // Build actions for all device inputs.
-  assert(C.getCudaDeviceToolChain() &&
+  assert(C.getSingleOffloadToolChain<Action::OFK_Cuda>() &&
          "Missing toolchain for device-side compilation.");
   ActionList CudaDeviceActions;
   C.getDriver().BuildActions(C, Args, CudaDeviceInputs, CudaDeviceActions);
@@ -2392,7 +2408,7 @@ InputInfo Driver::BuildJobsForActionNoCache(
     // Initial processing of CudaDeviceAction carries host params.
     // Call BuildJobsForAction() again, now with correct device parameters.
     InputInfo II = BuildJobsForAction(
-        C, *CDA->input_begin(), C.getCudaDeviceToolChain(),
+        C, *CDA->input_begin(), C.getSingleOffloadToolChain<Action::OFK_Cuda>(),
         CDA->getGpuArchName(), CDA->isAtTopLevel(), /*MultipleArchs=*/true,
         LinkingOutput, CachedResults, OffloadingHostResults);
     // Currently II's Action is *CDA->input_begin().  Set it to CDA instead, so
@@ -2830,6 +2846,7 @@ Driver::getToolChain(const ArgList &Args, const llvm::Triple &Target,
       TC = new toolchains::Minix(*this, Target, Args);
       break;
     case llvm::Triple::Linux:
+    case llvm::Triple::ELFIAMCU:
       if (Target.getArch() == llvm::Triple::hexagon)
         TC = new toolchains::HexagonToolChain(*this, Target, Args);
       else if ((Target.getVendor() == llvm::Triple::MipsTechnologies) &&

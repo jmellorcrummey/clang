@@ -482,7 +482,7 @@ static void PrintVersion() {
 }
 
 int main(int argc, const char **argv) {
-  llvm::sys::PrintStackTraceOnErrorSignal();
+  llvm::sys::PrintStackTraceOnErrorSignal(argv[0]);
 
   cl::HideUnrelatedOptions(ClangOffloadBundlerCategory);
   cl::SetVersionPrinter(PrintVersion);

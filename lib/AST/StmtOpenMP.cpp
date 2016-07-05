@@ -153,6 +153,9 @@ OMPForDirective::Create(const ASTContext &C, SourceLocation StartLoc,
   Dir->setEnsureUpperBound(Exprs.EUB);
   Dir->setNextLowerBound(Exprs.NLB);
   Dir->setNextUpperBound(Exprs.NUB);
+  Dir->setNumIterations(Exprs.NumIterations);
+  Dir->setPrevLowerBoundVariable(Exprs.PrevLB);
+  Dir->setPrevUpperBoundVariable(Exprs.PrevUB);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -205,6 +208,9 @@ OMPForSimdDirective::Create(const ASTContext &C, SourceLocation StartLoc,
   Dir->setEnsureUpperBound(Exprs.EUB);
   Dir->setNextLowerBound(Exprs.NLB);
   Dir->setNextUpperBound(Exprs.NUB);
+  Dir->setNumIterations(Exprs.NumIterations);
+  Dir->setPrevLowerBoundVariable(Exprs.PrevLB);
+  Dir->setPrevUpperBoundVariable(Exprs.PrevUB);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -373,6 +379,9 @@ OMPParallelForDirective *OMPParallelForDirective::Create(
   Dir->setEnsureUpperBound(Exprs.EUB);
   Dir->setNextLowerBound(Exprs.NLB);
   Dir->setNextUpperBound(Exprs.NUB);
+  Dir->setNumIterations(Exprs.NumIterations);
+  Dir->setPrevLowerBoundVariable(Exprs.PrevLB);
+  Dir->setPrevUpperBoundVariable(Exprs.PrevUB);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -423,6 +432,9 @@ OMPParallelForSimdDirective *OMPParallelForSimdDirective::Create(
   Dir->setEnsureUpperBound(Exprs.EUB);
   Dir->setNextLowerBound(Exprs.NLB);
   Dir->setNextUpperBound(Exprs.NUB);
+  Dir->setNumIterations(Exprs.NumIterations);
+  Dir->setPrevLowerBoundVariable(Exprs.PrevLB);
+  Dir->setPrevUpperBoundVariable(Exprs.PrevUB);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -762,6 +774,9 @@ OMPTargetParallelForDirective *OMPTargetParallelForDirective::Create(
   Dir->setEnsureUpperBound(Exprs.EUB);
   Dir->setNextLowerBound(Exprs.NLB);
   Dir->setNextUpperBound(Exprs.NUB);
+  Dir->setNumIterations(Exprs.NumIterations);
+  Dir->setPrevLowerBoundVariable(Exprs.PrevLB);
+  Dir->setPrevUpperBoundVariable(Exprs.PrevUB);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -904,6 +919,9 @@ OMPTaskLoopDirective *OMPTaskLoopDirective::Create(
   Dir->setEnsureUpperBound(Exprs.EUB);
   Dir->setNextLowerBound(Exprs.NLB);
   Dir->setNextUpperBound(Exprs.NUB);
+  Dir->setNumIterations(Exprs.NumIterations);
+  Dir->setPrevLowerBoundVariable(Exprs.PrevLB);
+  Dir->setPrevUpperBoundVariable(Exprs.PrevUB);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -954,6 +972,9 @@ OMPTaskLoopSimdDirective *OMPTaskLoopSimdDirective::Create(
   Dir->setEnsureUpperBound(Exprs.EUB);
   Dir->setNextLowerBound(Exprs.NLB);
   Dir->setNextUpperBound(Exprs.NUB);
+  Dir->setNumIterations(Exprs.NumIterations);
+  Dir->setPrevLowerBoundVariable(Exprs.PrevLB);
+  Dir->setPrevUpperBoundVariable(Exprs.PrevUB);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -1003,6 +1024,9 @@ OMPDistributeDirective *OMPDistributeDirective::Create(
   Dir->setEnsureUpperBound(Exprs.EUB);
   Dir->setNextLowerBound(Exprs.NLB);
   Dir->setNextUpperBound(Exprs.NUB);
+  Dir->setNumIterations(Exprs.NumIterations);
+  Dir->setPrevLowerBoundVariable(Exprs.PrevLB);
+  Dir->setPrevUpperBoundVariable(Exprs.PrevUB);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -1023,10 +1047,33 @@ OMPDistributeDirective::CreateEmpty(const ASTContext &C, unsigned NumClauses,
   return new (Mem) OMPDistributeDirective(CollapsedNum, NumClauses);
 }
 
+OMPTargetUpdateDirective *
+OMPTargetUpdateDirective::Create(const ASTContext &C, SourceLocation StartLoc,
+                                 SourceLocation EndLoc,
+                                 ArrayRef<OMPClause *> Clauses) {
+  unsigned Size = llvm::alignTo(sizeof(OMPTargetUpdateDirective),
+                                llvm::alignOf<OMPClause *>());
+  void *Mem = C.Allocate(Size + sizeof(OMPClause *) * Clauses.size());
+  OMPTargetUpdateDirective *Dir =
+      new (Mem) OMPTargetUpdateDirective(StartLoc, EndLoc, Clauses.size());
+  Dir->setClauses(Clauses);
+  return Dir;
+}
+
+OMPTargetUpdateDirective *
+OMPTargetUpdateDirective::CreateEmpty(const ASTContext &C, unsigned NumClauses,
+                                      EmptyShell) {
+  unsigned Size = llvm::alignTo(sizeof(OMPTargetUpdateDirective),
+                                llvm::alignOf<OMPClause *>());
+  void *Mem = C.Allocate(Size + sizeof(OMPClause *) * NumClauses);
+  return new (Mem) OMPTargetUpdateDirective(NumClauses);
+}
+
 OMPDistributeParallelForDirective *OMPDistributeParallelForDirective::Create(
     const ASTContext &C, SourceLocation StartLoc, SourceLocation EndLoc,
-    unsigned CollapsedNum, ArrayRef<OMPClause *> Clauses, Stmt *AssociatedStmt,
-    const HelperExprs &Exprs) {
+    unsigned CollapsedNum, ArrayRef<OMPClause *> Clauses,
+    Stmt *AssociatedStmt, const HelperExprs &Exprs, Expr *DistInc,
+    Expr *PrevEUB) {
   unsigned Size = llvm::alignTo(sizeof(OMPDistributeParallelForDirective),
                                 llvm::alignOf<OMPClause *>());
   void *Mem = C.Allocate(
@@ -1044,6 +1091,7 @@ OMPDistributeParallelForDirective *OMPDistributeParallelForDirective::Create(
   Dir->setPreCond(Exprs.PreCond);
   Dir->setCond(Exprs.Cond);
   Dir->setInit(Exprs.Init);
+  Dir->setDistInc(DistInc);
   Dir->setLaneInit(Exprs.LaneInit);
   Dir->setNumLanes(Exprs.NumLanes);
   Dir->setInc(Exprs.Inc);
@@ -1052,8 +1100,12 @@ OMPDistributeParallelForDirective *OMPDistributeParallelForDirective::Create(
   Dir->setUpperBoundVariable(Exprs.UB);
   Dir->setStrideVariable(Exprs.ST);
   Dir->setEnsureUpperBound(Exprs.EUB);
+  Dir->setPrevEnsureUpperBound(PrevEUB);
   Dir->setNextLowerBound(Exprs.NLB);
   Dir->setNextUpperBound(Exprs.NUB);
+  Dir->setNumIterations(Exprs.NumIterations);
+  Dir->setPrevLowerBoundVariable(Exprs.PrevLB);
+  Dir->setPrevUpperBoundVariable(Exprs.PrevUB);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -1129,10 +1181,13 @@ OMPTeamsDistributeParallelForDirective::Create(
   Dir->setIsLastIterVariable(Exprs.IL);
   Dir->setLowerBoundVariable(Exprs.LB);
   Dir->setUpperBoundVariable(Exprs.UB);
+  Dir->setPrevLowerBoundVariable(Exprs.PrevLB);
+  Dir->setPrevUpperBoundVariable(Exprs.PrevUB);
   Dir->setStrideVariable(Exprs.ST);
   Dir->setEnsureUpperBound(Exprs.EUB);
   Dir->setNextLowerBound(Exprs.NLB);
   Dir->setNextUpperBound(Exprs.NUB);
+  Dir->setNumIterations(Exprs.NumIterations);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -1161,7 +1216,7 @@ OMPTargetTeamsDistributeParallelForDirective *
 OMPTargetTeamsDistributeParallelForDirective::Create(
     const ASTContext &C, SourceLocation StartLoc, SourceLocation EndLoc,
     unsigned CollapsedNum, ArrayRef<OMPClause *> Clauses, Stmt *AssociatedStmt,
-    const HelperExprs &Exprs) {
+    const HelperExprs &Exprs, Expr *DistIncExpr, Expr *PrevEUB) {
   unsigned Size =
       llvm::alignTo(sizeof(OMPTargetTeamsDistributeParallelForDirective),
                     llvm::alignOf<OMPClause *>());
@@ -1184,13 +1239,18 @@ OMPTargetTeamsDistributeParallelForDirective::Create(
   Dir->setLaneInit(Exprs.LaneInit);
   Dir->setNumLanes(Exprs.NumLanes);
   Dir->setInc(Exprs.Inc);
+  Dir->setDistInc(DistIncExpr);
   Dir->setIsLastIterVariable(Exprs.IL);
   Dir->setLowerBoundVariable(Exprs.LB);
   Dir->setUpperBoundVariable(Exprs.UB);
+  Dir->setPrevLowerBoundVariable(Exprs.PrevLB);
+  Dir->setPrevUpperBoundVariable(Exprs.PrevUB);
   Dir->setStrideVariable(Exprs.ST);
   Dir->setEnsureUpperBound(Exprs.EUB);
+  Dir->setPrevEnsureUpperBound(PrevEUB);
   Dir->setNextLowerBound(Exprs.NLB);
   Dir->setNextUpperBound(Exprs.NUB);
+  Dir->setNumIterations(Exprs.NumIterations);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
