@@ -834,17 +834,6 @@ void CGOpenMPRuntimeNVPTX::emitSPMDEntryHeader(
   // Current thread's identifier.
   llvm::Value *ThreadID = getNVPTXThreadID(CGF);
 
-  // If we are executing a serialized target-parallel region, clamp the thread
-  // limit expression to 1.
-  for (const auto *C : D.getClausesOfKind<OMPIfClause>()) {
-    if (C->getNameModifier() == OMPD_parallel) {
-      const Expr *IfCond = C->getCondition();
-      ThreadLimit = Bld.CreateSelect(CGF.EvaluateExprAsBool(IfCond),
-                                     ThreadLimit, Bld.getInt32(1));
-      break;
-    }
-  }
-
   // The runtime starts cuda threads as follows:
   //   - the last warp is reserved for the master warp but is not used in SPMD
   //     mode.
@@ -2909,18 +2898,40 @@ void CGOpenMPRuntimeNVPTX::emitTeamsCall(CodeGenFunction &CGF,
                                          SourceLocation Loc,
                                          llvm::Value *OutlinedFn,
                                          ArrayRef<llvm::Value *> CapturedVars) {
+  if (IsSPMDExecutionMode()) {
+    // OutlinedFn(&GTid, &zero, CapturedStruct);
+    auto ThreadIDAddr = emitThreadIDAddress(CGF, Loc);
+    Address ZeroAddr =
+        CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
+                             /*Name*/ ".zero.addr");
+    CGF.InitTempAlloca(ZeroAddr, CGF.Builder.getInt32(/*C*/ 0));
+    Address ZeroBAddr =
+        CGF.CreateTempAlloca(CGF.SizeTy, CharUnits::fromQuantity(8),
+                             /*Name*/ ".zerob.addr");
+    CGF.InitTempAlloca(ZeroBAddr, CGF.Builder.getInt64(/*C*/ 0));
+    auto BCast = CGF.Builder.CreateIntCast(CGF.Builder.CreateLoad(ZeroBAddr),
+                                           CGF.SizeTy, /*isSigned=*/false);
+    llvm::SmallVector<llvm::Value *, 16> OutlinedFnArgs;
+    OutlinedFnArgs.push_back(ThreadIDAddr.getPointer());
+    OutlinedFnArgs.push_back(ZeroAddr.getPointer());
+    OutlinedFnArgs.push_back(BCast);
+    OutlinedFnArgs.push_back(BCast);
+    OutlinedFnArgs.append(CapturedVars.begin(), CapturedVars.end());
+    CGF.EmitCallOrInvoke(OutlinedFn, OutlinedFnArgs);
+  } else {
+    // just emit the statements in the teams region inlined
+    auto &&CodeGen = [&D](CodeGenFunction &CGF, PrePostActionTy &) {
+      CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
+      (void)CGF.EmitOMPFirstprivateClause(D, PrivateScope);
+      CGF.EmitOMPPrivateClause(D, PrivateScope);
+      (void)PrivateScope.Privatize();
 
-  // just emit the statements in the teams region inlined
-  auto &&CodeGen = [&D](CodeGenFunction &CGF, PrePostActionTy &) {
-    CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
-    (void)CGF.EmitOMPFirstprivateClause(D, PrivateScope);
-    CGF.EmitOMPPrivateClause(D, PrivateScope);
-    (void)PrivateScope.Privatize();
+      CGF.EmitStmt(
+          cast<CapturedStmt>(D.getAssociatedStmt())->getCapturedStmt());
+    };
 
-    CGF.EmitStmt(cast<CapturedStmt>(D.getAssociatedStmt())->getCapturedStmt());
-  };
-
-  emitInlinedDirective(CGF, OMPD_teams, CodeGen);
+    emitInlinedDirective(CGF, OMPD_teams, CodeGen);
+  }
 }
 
 llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {

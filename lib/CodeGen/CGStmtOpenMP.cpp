@@ -133,6 +133,38 @@ public:
   }
 };
 
+/// Lexical scope for OpenMP teams construct, that handles correct codegen
+/// for captured expressions.
+class OMPTeamsScope final : public CodeGenFunction::LexicalScope {
+  void emitPreInitStmt(CodeGenFunction &CGF, const OMPExecutableDirective &S) {
+    OpenMPDirectiveKind Kind = S.getDirectiveKind();
+    if (!isOpenMPTargetExecutionDirective(Kind) &&
+        isOpenMPTeamsDirective(Kind)) {
+      for (const auto *C : S.clauses()) {
+        if (auto *CPI = OMPClauseWithPreInit::get(C)) {
+          if (auto *PreInit = cast_or_null<DeclStmt>(CPI->getPreInitStmt())) {
+            for (const auto *I : PreInit->decls()) {
+              if (!I->hasAttr<OMPCaptureNoInitAttr>())
+                CGF.EmitVarDecl(cast<VarDecl>(*I));
+              else {
+                CodeGenFunction::AutoVarEmission Emission =
+                    CGF.EmitAutoVarAlloca(cast<VarDecl>(*I));
+                CGF.EmitAutoVarCleanups(Emission);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+public:
+  OMPTeamsScope(CodeGenFunction &CGF, const OMPExecutableDirective &S)
+      : CodeGenFunction::LexicalScope(CGF, S.getSourceRange()) {
+    emitPreInitStmt(CGF, S);
+  }
+};
+
 } // namespace
 
 llvm::Value *CodeGenFunction::getTypeSize(QualType Ty) {
@@ -3588,7 +3620,7 @@ static void emitCommonOMPTeamsDirective(CodeGenFunction &CGF,
                                                   S.getLocStart());
   }
 
-  OMPLexicalScope Scope(CGF, S);
+  OMPTeamsScope Scope(CGF, S);
   llvm::SmallVector<llvm::Value *, 16> CapturedVars;
   CGF.GenerateOpenMPCapturedVars(*CS, CapturedVars);
   CGF.CGM.getOpenMPRuntime().emitTeamsCall(CGF, S, S.getLocStart(), OutlinedFn,
@@ -3689,8 +3721,8 @@ void CodeGenFunction::EmitOMPTargetDirective(const OMPTargetDirective &S) {
   emitCommonOMPTargetDirective(*this, S, OMPD_target, CodeGen);
 }
 
-void TargetParallelCodegen(CodeGenFunction &CGF, PrePostActionTy &Action,
-                           const OMPTargetParallelDirective &S) {
+static void TargetParallelCodegen(CodeGenFunction &CGF, PrePostActionTy &Action,
+                                  const OMPTargetParallelDirective &S) {
   Action.Enter(CGF);
   auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
     CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
@@ -3729,8 +3761,9 @@ void CodeGenFunction::EmitOMPTargetParallelDirective(
   emitCommonOMPTargetDirective(*this, S, OMPD_target_parallel, CodeGen);
 }
 
-void TargetParallelForCodegen(CodeGenFunction &CGF, PrePostActionTy &Action,
-                              const OMPTargetParallelForDirective &S) {
+static void TargetParallelForCodegen(CodeGenFunction &CGF,
+                                     PrePostActionTy &Action,
+                                     const OMPTargetParallelForDirective &S) {
   Action.Enter(CGF);
   // Emit directive as a combined directive that consists of two implicit
   // directives: 'parallel' with 'for' directive.
@@ -3764,7 +3797,7 @@ void CodeGenFunction::EmitOMPTargetParallelForDirective(
   emitCommonOMPTargetDirective(*this, S, OMPD_target_parallel_for, CodeGen);
 }
 
-void TargetTeamsDistributeParallelForCodegen(
+static void TargetTeamsDistributeParallelForCodegen(
     CodeGenModule &CGM, CodeGenFunction &CGF, PrePostActionTy &Action,
     const OMPTargetTeamsDistributeParallelForDirective &S) {
   Action.Enter(CGF);
@@ -3778,7 +3811,6 @@ void TargetTeamsDistributeParallelForCodegen(
       };
       CGF.EmitOMPDistributeLoop(S, CodeGen);
     };
-    OMPLexicalScope Scope(CGF, S, /*AsInlined=*/true);
     CGM.getOpenMPRuntime().emitInlinedDirective(CGF, OMPD_distribute, CodeGen,
                                                 false);
   };
