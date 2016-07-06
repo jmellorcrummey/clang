@@ -2289,7 +2289,7 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
         //   LB = LB + ST;
         //   UB = UB + ST;
         // }
-        if (!Chunk) // Force use of chunk=1
+        if (!Chunk)
           Chunk = Builder.getIntN(IVSize, 1);
         if (isOpenMPSimdDirective(S.getDirectiveKind()))
           EmitOMPSimdInit(S, /*IsMonotonic=*/true);
@@ -2303,21 +2303,37 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
         auto LoopExit =
             getJumpDestInCurrentScope(createBasicBlock("omp.loop.exit"));
 
+        // Start the loop with a block that tests the condition.
+        auto CondBlock = createBasicBlock("omp.dispatch.cond");
+        EmitBlock(CondBlock);
+
+        // UB = min(UB, GlobalUB); for all cases except
+        // UB = min(UB, PrevUB); for 'for' in composite #distribute parallel for
+        Expr *EUB = S.getDirectiveKind() == OMPD_distribute_parallel_for ||
+                            S.getDirectiveKind() ==
+                                OMPD_target_teams_distribute_parallel_for
+                        ? S.getPrevEnsureUpperBound()
+                        : S.getEnsureUpperBound();
+        EmitIgnoredExpr(EUB); // S.getEnsureUpperBound());
         // IV = LB;
         EmitIgnoredExpr(S.getInit());
-        EmitOMPInnerLoop(S, LoopScope.requiresCleanups(),
-                         S.getCond() /* IV < GlobalUB */,
-                         S.getInc() /* Unused */,
-                         [&S, LoopExit](CodeGenFunction &CGF) {
-                           CGF.EmitOMPLoopBody(S, LoopExit);
-                           CGF.EmitStopPoint(&S);
-                         },
-                         [&S](CodeGenFunction &CGF) {
-                           // LB = LB + Stride
-                           CGF.EmitIgnoredExpr(S.getNextLowerBound());
-                           // IV = LB;
-                           CGF.EmitIgnoredExpr(S.getInit());
-                         });
+        // IV < UB;
+        llvm::Value *BoolCondVal = EvaluateExprAsBool(S.getCond());
+
+        auto LoopBody = createBasicBlock("omp.dispatch.body");
+        Builder.CreateCondBr(BoolCondVal, LoopBody, LoopExit.getBlock());
+        EmitBlock(LoopBody);
+
+        EmitOMPLoopBody(S, LoopExit);
+        EmitStopPoint(&S);
+
+        auto ContinueBlock = createBasicBlock("omp.dispatch.inc");
+        EmitBlock(ContinueBlock);
+        // Emit "LB = LB + Stride", "UB = UB + Stride".
+        EmitIgnoredExpr(S.getNextLowerBound());
+        EmitIgnoredExpr(S.getNextUpperBound());
+        EmitBranch(CondBlock);
+
         EmitBlock(LoopExit.getBlock());
         // Tell the runtime we are done.
         RT.emitForStaticFinish(*this, S.getLocStart());
