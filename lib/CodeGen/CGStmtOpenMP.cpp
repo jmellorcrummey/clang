@@ -1884,7 +1884,12 @@ void CodeGenFunction::EmitOMPOuterLoop(bool DynamicOrOrdered, bool IsMonotonic,
     // IV = LB
     EmitIgnoredExpr(S.getInit());
     // IV < UB
-    BoolCondVal = EvaluateExprAsBool(S.getCond());
+    BoolCondVal = EvaluateExprAsBool(
+        ((S.getDirectiveKind() == OMPD_distribute_parallel_for ||
+          S.getDirectiveKind() == OMPD_target_teams_distribute_parallel_for) &&
+         IsDistribute)
+            ? S.getDistCond()
+            : S.getCond());
   } else {
     BoolCondVal = RT.emitForNext(*this, S.getLocStart(), IVSize, IVSigned, IL,
                                  LB, UB, ST);
@@ -1945,7 +1950,14 @@ void CodeGenFunction::EmitOMPOuterLoop(bool DynamicOrOrdered, bool IsMonotonic,
     EmitOMPSimdInit(S, IsMonotonic);
 
   SourceLocation Loc = S.getLocStart();
-  EmitOMPInnerLoop(S, LoopScope.requiresCleanups(), S.getCond(), S.getInc(),
+  EmitOMPInnerLoop(S, LoopScope.requiresCleanups(),
+                   ((S.getDirectiveKind() == OMPD_distribute_parallel_for ||
+                     S.getDirectiveKind() ==
+                         OMPD_target_teams_distribute_parallel_for) &&
+                    IsDistribute)
+                       ? S.getDistCond()
+                       : S.getCond(),
+                   S.getInc(),
                    [&S, LoopExit](CodeGenFunction &CGF) {
                      CGF.EmitOMPLoopBody(S, LoopExit);
                      CGF.EmitStopPoint(&S);
@@ -3018,7 +3030,12 @@ void CodeGenFunction::EmitOMPDistributeLoop(
         EmitIgnoredExpr(S.getInit());
         // while (idx <= UB) { BODY; ++idx; }
         EmitOMPInnerLoop(
-            S, LoopScope.requiresCleanups(), S.getCond(),
+            S, LoopScope.requiresCleanups(),
+            S.getDirectiveKind() == OMPD_distribute_parallel_for ||
+                    S.getDirectiveKind() ==
+                        OMPD_target_teams_distribute_parallel_for
+                ? S.getDistCond()
+                : S.getCond(),
             S.getDirectiveKind() == OMPD_distribute_parallel_for ||
                     S.getDirectiveKind() ==
                         OMPD_target_teams_distribute_parallel_for

@@ -5510,8 +5510,7 @@ CheckOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
   SourceLocation DistIncLoc;
   ExprResult DistCond, DistInc, PrevEUB;
   if (isOpenMPLoopBoundSharingDirective(DKind)) {
-    DistCond = SemaRef.BuildBinOp(CurScope, CondLoc, BO_LT, IV.get(),
-                                  NumIterations.get());
+    DistCond = SemaRef.BuildBinOp(CurScope, CondLoc, BO_LE, IV.get(), UB.get());
     assert(DistCond.isUsable() && "distribute cond expr was not built");
 
     DistInc =
