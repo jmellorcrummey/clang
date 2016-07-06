@@ -332,9 +332,12 @@ class OMPLoopDirective : public OMPExecutableDirective {
     NumIterationsOffset = 18,
     PrevLowerBoundVariableOffset = 19,
     PrevUpperBoundVariableOffset = 20,
+    DistCondOffset = 21,
+    DistIncOffset = 22,
+    PrevEnsureUpperBoundOffset = 23,
     // Offset to the end (and start of the following counters/updates/finals
     // arrays) for worksharing loop directives.
-    WorksharingEnd = 21,
+    WorksharingEnd = 24,
   };
 
   /// \brief Get the counters storage.
@@ -509,6 +512,27 @@ protected:
            "expected worksharing loop directive");
     *std::next(child_begin(), PrevUpperBoundVariableOffset) = PrevUB;
   }
+  void setDistCond(Expr *Cond) {
+    assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
+            isOpenMPTaskLoopDirective(getDirectiveKind()) ||
+            isOpenMPDistributeDirective(getDirectiveKind())) &&
+           "expected worksharing loop directive");
+    *std::next(child_begin(), DistCondOffset) = Cond;
+  }
+  void setDistInc(Expr *Inc) {
+    assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
+            isOpenMPTaskLoopDirective(getDirectiveKind()) ||
+            isOpenMPDistributeDirective(getDirectiveKind())) &&
+           "expected worksharing loop directive");
+    *std::next(child_begin(), DistIncOffset) = Inc;
+  }
+  void setPrevEnsureUpperBound(Expr *PrevEUB) {
+    assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
+            isOpenMPTaskLoopDirective(getDirectiveKind()) ||
+            isOpenMPDistributeDirective(getDirectiveKind())) &&
+           "expected worksharing loop directive");
+    *std::next(child_begin(), PrevEnsureUpperBoundOffset) = PrevEUB;
+  }
   void setCounters(ArrayRef<Expr *> A);
   void setPrivateCounters(ArrayRef<Expr *> A);
   void setInits(ArrayRef<Expr *> A);
@@ -559,6 +583,13 @@ public:
     /// \brief PreviousUpperBound - local variable passed to runtime in the
     /// enclosing schedule or null if that does not apply.
     Expr *PrevUB;
+    /// \brief Dist Loop condition.
+    Expr *DistCond;
+    /// \brief Dist Loop increment.
+    Expr *DistInc;
+    /// \brief PreviousEnsureUpperBound -- expression LB = min(LB,
+    /// NumIterations).
+    Expr *PrevEUB;
     /// \brief Counters Loop counters.
     SmallVector<Expr *, 4> Counters;
     /// \brief PrivateCounters Loop counters.
@@ -604,6 +635,9 @@ public:
       NumIterations = nullptr;
       PrevLB = nullptr;
       PrevUB = nullptr;
+      DistCond = nullptr;
+      DistInc = nullptr;
+      PrevEUB = nullptr;
       Counters.resize(Size);
       PrivateCounters.resize(Size);
       Inits.resize(Size);
@@ -742,6 +776,30 @@ public:
            "expected worksharing loop directive");
     return const_cast<Expr *>(reinterpret_cast<const Expr *>(
         *std::next(child_begin(), PrevUpperBoundVariableOffset)));
+  }
+  Expr *getDistCond() const {
+    assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
+            isOpenMPTaskLoopDirective(getDirectiveKind()) ||
+            isOpenMPDistributeDirective(getDirectiveKind())) &&
+           "expected worksharing loop directive");
+    return const_cast<Expr *>(reinterpret_cast<const Expr *>(
+        *std::next(child_begin(), DistCondOffset)));
+  }
+  Expr *getDistInc() const {
+    assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
+            isOpenMPTaskLoopDirective(getDirectiveKind()) ||
+            isOpenMPDistributeDirective(getDirectiveKind())) &&
+           "expected worksharing loop directive");
+    return const_cast<Expr *>(reinterpret_cast<const Expr *>(
+        *std::next(child_begin(), DistIncOffset)));
+  }
+  Expr *getPrevEnsureUpperBound() const {
+    assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
+            isOpenMPTaskLoopDirective(getDirectiveKind()) ||
+            isOpenMPDistributeDirective(getDirectiveKind())) &&
+           "expected worksharing loop directive");
+    return const_cast<Expr *>(reinterpret_cast<const Expr *>(
+        *std::next(child_begin(), PrevEnsureUpperBoundOffset)));
   }
   const Stmt *getBody() const {
     // This relies on the loop form is already checked by Sema.
@@ -2890,8 +2948,7 @@ public:
   static OMPDistributeParallelForDirective *
   Create(const ASTContext &C, SourceLocation StartLoc, SourceLocation EndLoc,
          unsigned CollapsedNum, ArrayRef<OMPClause *> Clauses,
-         Stmt *AssociatedStmt, const HelperExprs &Exprs, Expr *DistInc,
-         Expr *PrevEUB);
+         Stmt *AssociatedStmt, const HelperExprs &Exprs);
 
   /// \brief Creates an empty directive with the place
   /// for \a NumClauses clauses.
@@ -2908,20 +2965,6 @@ public:
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == OMPDistributeParallelForDirectiveClass;
   }
-
-  Expr *getDistInc() const { return DistIncExpr; }
-  Expr *getPrevEnsureUpperBound() const { return PrevEUBExpr; }
-
-protected:
-  void setDistInc(Expr *DistInc) { DistIncExpr = DistInc; }
-  void setPrevEnsureUpperBound(Expr *PrevEUB) { PrevEUBExpr = PrevEUB; }
-
-  /// \brief Loop iteration variable init for distribute loop only when combined
-  /// with for directive in same construct.
-  Expr *DistIncExpr;
-
-  /// \brief EnsureUpperBound for #for-- expression LB = PrevUB;
-  Expr *PrevEUBExpr;
 };
 
 /// \brief This represents '#pragma omp target teams' directive.
@@ -3064,14 +3107,6 @@ public:
 class OMPTargetTeamsDistributeParallelForDirective : public OMPLoopDirective {
   friend class ASTStmtReader;
 
-  /// \brief Loop iteration variable init for distribute loop only when combined
-  /// with for directive in same construct.
-  Expr *DistIncExpr;
-
-  // \brief
-  /// \brief EnsureUpperBound for #for-- expression LB = PrevUB;
-  Expr *PrevEUBExpr;
-
   /// \brief Build directive with the given start and end location.
   ///
   /// \param StartLoc Starting location of the directive kind.
@@ -3114,8 +3149,7 @@ public:
   static OMPTargetTeamsDistributeParallelForDirective *
   Create(const ASTContext &C, SourceLocation StartLoc, SourceLocation EndLoc,
          unsigned CollapsedNum, ArrayRef<OMPClause *> Clauses,
-         Stmt *AssociatedStmt, const HelperExprs &Exprs, Expr *DistInc,
-         Expr *PrevEUB);
+         Stmt *AssociatedStmt, const HelperExprs &Exprs);
 
   /// \brief Creates an empty directive with the place
   /// for \a NumClauses clauses.
@@ -3127,11 +3161,6 @@ public:
   static OMPTargetTeamsDistributeParallelForDirective *
   CreateEmpty(const ASTContext &C, unsigned NumClauses, unsigned CollapsedNum,
               EmptyShell);
-
-  void setDistInc(Expr *DistInc) { DistIncExpr = DistInc; }
-  void setPrevEnsureUpperBound(Expr *PrevEUB) { PrevEUBExpr = PrevEUB; }
-  Expr *getDistInc() const { return DistIncExpr; }
-  Expr *getPrevEnsureUpperBound() const { return PrevEUBExpr; }
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() ==

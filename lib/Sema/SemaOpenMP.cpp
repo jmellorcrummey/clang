@@ -5505,6 +5505,34 @@ CheckOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
       return 0;
   }
 
+  // Create increment expression for distribute loop when combined in a same
+  // directive with for as IV = IV + ST
+  SourceLocation DistIncLoc;
+  ExprResult DistCond, DistInc, PrevEUB;
+  if (isOpenMPLoopBoundSharingDirective(DKind)) {
+    DistCond = SemaRef.BuildBinOp(CurScope, CondLoc, BO_LT, IV.get(),
+                                  NumIterations.get());
+    assert(DistCond.isUsable() && "distribute cond expr was not built");
+
+    DistInc =
+        SemaRef.BuildBinOp(CurScope, DistIncLoc, BO_Add, IV.get(), ST.get());
+    assert(DistInc.isUsable() && "distribute inc expr was not built");
+    DistInc = SemaRef.BuildBinOp(CurScope, DistIncLoc, BO_Assign, IV.get(),
+                                 DistInc.get());
+    DistInc = SemaRef.ActOnFinishFullExpr(DistInc.get());
+    assert(DistInc.isUsable() && "distribute inc expr was not built");
+
+    // Build expression: UB = min(UB, prevUB) for #for in composite
+    SourceLocation DistEUBLoc;
+    ExprResult IsUBGreater =
+        SemaRef.BuildBinOp(CurScope, DistEUBLoc, BO_GT, UB.get(), PrevUB.get());
+    ExprResult CondOp = SemaRef.ActOnConditionalOp(
+        DistEUBLoc, DistEUBLoc, IsUBGreater.get(), PrevUB.get(), UB.get());
+    PrevEUB = SemaRef.BuildBinOp(CurScope, DistIncLoc, BO_Assign, UB.get(),
+                                 CondOp.get());
+    PrevEUB = SemaRef.ActOnFinishFullExpr(PrevEUB.get());
+  }
+
   // Build updates and final values of the loop counters.
   bool HasErrors = false;
   Built.Counters.resize(NestedLoopCount);
@@ -5625,6 +5653,9 @@ CheckOpenMPLoop(OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
   Built.NUB = NextUB.get();
   Built.PrevLB = PrevLB.get();
   Built.PrevUB = PrevUB.get();
+  Built.DistCond = DistCond.get();
+  Built.DistInc = DistInc.get();
+  Built.PrevEUB = PrevEUB.get();
 
   Expr *CounterVal = SemaRef.DefaultLvalueConversion(IV.get()).get();
   // Fill data for doacross depend clauses.
@@ -7378,32 +7409,9 @@ StmtResult Sema::ActOnOpenMPDistributeParallelForDirective(
   assert((CurContext->isDependentContext() || B.builtAll()) &&
          "omp for loop exprs were not built");
 
-  // Create increment expression for distribute loop when combined in a same
-  // directive with for as IV = IV + ST
-  SourceLocation DistIncLoc;
-  ExprResult DistInc, PrevEUB;
-  if (B.builtAll()) {
-    DistInc = BuildBinOp(CurScope, DistIncLoc, BO_Add, B.IterationVarRef, B.ST);
-    assert(DistInc.isUsable() && "distribute inc expr was not built");
-    DistInc = BuildBinOp(CurScope, DistIncLoc, BO_Assign, B.IterationVarRef,
-                         DistInc.get());
-    DistInc = ActOnFinishFullExpr(DistInc.get());
-    assert(DistInc.isUsable() && "distribute inc expr was not built");
-
-    // Build expression: UB = min(UB, prevUB) for #for in composite
-    SourceLocation DistEUBLoc;
-    ExprResult IsUBGreater =
-        BuildBinOp(CurScope, DistEUBLoc, BO_GT, B.UB, B.PrevUB);
-    ExprResult CondOp = ActOnConditionalOp(DistEUBLoc, DistEUBLoc,
-                                           IsUBGreater.get(), B.PrevUB, B.UB);
-    PrevEUB = BuildBinOp(CurScope, DistIncLoc, BO_Assign, B.UB, CondOp.get());
-    PrevEUB = ActOnFinishFullExpr(PrevEUB.get());
-  }
   getCurFunction()->setHasBranchProtectedScope();
   return OMPDistributeParallelForDirective::Create(
-      Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B,
-      DistInc.isUsable() ? DistInc.get() : nullptr,
-      PrevEUB.isUsable() ? PrevEUB.get() : nullptr);
+      Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
 }
 
 StmtResult Sema::ActOnOpenMPTargetTeamsDirective(ArrayRef<OMPClause *> Clauses,
@@ -7488,33 +7496,9 @@ StmtResult Sema::ActOnOpenMPTargetTeamsDistributeParallelForDirective(
   assert((CurContext->isDependentContext() || B.builtAll()) &&
          "omp for loop exprs were not built");
 
-  // Create increment expression for distribute loop when combined in a same
-  // directive with for as IV = IV + ST
-  SourceLocation DistIncLoc;
-  ExprResult DistInc, PrevEUB;
-  if (B.builtAll()) {
-    DistInc = BuildBinOp(CurScope, DistIncLoc, BO_Add, B.IterationVarRef, B.ST);
-    assert(DistInc.isUsable() && "distribute inc expr was not built");
-    DistInc = BuildBinOp(CurScope, DistIncLoc, BO_Assign, B.IterationVarRef,
-                         DistInc.get());
-    DistInc = ActOnFinishFullExpr(DistInc.get());
-    assert(DistInc.isUsable() && "distribute inc expr was not built");
-
-    // Build expression: UB = min(UB, prevUB) for #for in composite
-    SourceLocation DistEUBLoc;
-    ExprResult IsUBGreater =
-        BuildBinOp(CurScope, DistEUBLoc, BO_GT, B.UB, B.PrevUB);
-    ExprResult CondOp = ActOnConditionalOp(DistEUBLoc, DistEUBLoc,
-                                           IsUBGreater.get(), B.PrevUB, B.UB);
-    PrevEUB = BuildBinOp(CurScope, DistIncLoc, BO_Assign, B.UB, CondOp.get());
-    PrevEUB = ActOnFinishFullExpr(PrevEUB.get());
-  }
-
   getCurFunction()->setHasBranchProtectedScope();
   return OMPTargetTeamsDistributeParallelForDirective::Create(
-      Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B,
-      DistInc.isUsable() ? DistInc.get() : nullptr,
-      PrevEUB.isUsable() ? PrevEUB.get() : nullptr);
+      Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
 }
 
 OMPClause *Sema::ActOnOpenMPSingleExprClause(OpenMPClauseKind Kind, Expr *Expr,

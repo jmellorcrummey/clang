@@ -2500,6 +2500,9 @@ void ASTStmtReader::VisitOMPLoopDirective(OMPLoopDirective *D) {
     D->setNextUpperBound(Reader.ReadSubExpr());
     D->setPrevLowerBoundVariable(Reader.ReadSubExpr());
     D->setPrevUpperBoundVariable(Reader.ReadSubExpr());
+    D->setDistCond(Reader.ReadSubExpr());
+    D->setDistInc(Reader.ReadSubExpr());
+    D->setPrevEnsureUpperBound(Reader.ReadSubExpr());
     D->setNumIterations(Reader.ReadSubExpr());
   }
   SmallVector<Expr *, 4> Sub;
@@ -2754,8 +2757,6 @@ void ASTStmtReader::VisitOMPTeamsDistributeParallelForDirective(
 void ASTStmtReader::VisitOMPTargetTeamsDistributeParallelForDirective(
     OMPTargetTeamsDistributeParallelForDirective *D) {
   VisitOMPLoopDirective(D);
-  D->setDistInc(Reader.ReadSubExpr());
-  D->setPrevEnsureUpperBound(Reader.ReadSubExpr());
 }
 
 //===----------------------------------------------------------------------===//

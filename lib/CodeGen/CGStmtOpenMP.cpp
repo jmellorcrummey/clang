@@ -1875,16 +1875,11 @@ void CodeGenFunction::EmitOMPOuterLoop(bool DynamicOrOrdered, bool IsMonotonic,
     // distribute UB instead, as it is not incremented and guaranteed to be
     // less than GlobalUB
     Expr *EUB =
-        (S.getDirectiveKind() == OMPD_distribute_parallel_for &&
+        ((S.getDirectiveKind() == OMPD_distribute_parallel_for ||
+          S.getDirectiveKind() == OMPD_target_teams_distribute_parallel_for) &&
          IsDistribute == false)
-            ? dyn_cast<OMPDistributeParallelForDirective>(&S)
-                  ->getPrevEnsureUpperBound()
-            : (S.getDirectiveKind() ==
-                   OMPD_target_teams_distribute_parallel_for &&
-               IsDistribute == false)
-                  ? dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(&S)
-                        ->getPrevEnsureUpperBound()
-                  : S.getEnsureUpperBound();
+            ? S.getPrevEnsureUpperBound()
+            : S.getEnsureUpperBound();
     EmitIgnoredExpr(EUB); // S.getEnsureUpperBound());
     // IV = LB
     EmitIgnoredExpr(S.getInit());
@@ -2302,16 +2297,11 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
 
         // UB = min(UB, GlobalUB); for all cases except
         // UB = min(UB, PrevUB); for 'for' in composite #distribute parallel for
-        Expr *EUB =
-            S.getDirectiveKind() == OMPD_distribute_parallel_for
-                ? dyn_cast<OMPDistributeParallelForDirective>(&S)
-                      ->getPrevEnsureUpperBound()
-                : S.getDirectiveKind() ==
-                          OMPD_target_teams_distribute_parallel_for
-                      ? dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(
-                            &S)
-                            ->getPrevEnsureUpperBound()
-                      : S.getEnsureUpperBound();
+        Expr *EUB = S.getDirectiveKind() == OMPD_distribute_parallel_for ||
+                            S.getDirectiveKind() ==
+                                OMPD_target_teams_distribute_parallel_for
+                        ? S.getPrevEnsureUpperBound()
+                        : S.getEnsureUpperBound();
         EmitIgnoredExpr(EUB); // S.getEnsureUpperBound());
         // IV = LB;
         EmitIgnoredExpr(S.getInit());
@@ -3029,13 +3019,11 @@ void CodeGenFunction::EmitOMPDistributeLoop(
         // while (idx <= UB) { BODY; ++idx; }
         EmitOMPInnerLoop(
             S, LoopScope.requiresCleanups(), S.getCond(),
-            S.getDirectiveKind() == OMPD_distribute_parallel_for
-                ? cast<OMPDistributeParallelForDirective>(S).getDistInc()
-                : S.getDirectiveKind() ==
-                          OMPD_target_teams_distribute_parallel_for
-                      ? cast<OMPTargetTeamsDistributeParallelForDirective>(S)
-                            .getDistInc()
-                      : S.getInc(),
+            S.getDirectiveKind() == OMPD_distribute_parallel_for ||
+                    S.getDirectiveKind() ==
+                        OMPD_target_teams_distribute_parallel_for
+                ? S.getDistInc()
+                : S.getInc(),
             [&S, &LoopExit,
              &CodeGenDistributeLoopContent](CodeGenFunction &CGF) {
               if (S.getDirectiveKind() == OMPD_distribute) {
