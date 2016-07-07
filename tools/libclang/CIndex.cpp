@@ -2117,6 +2117,7 @@ void OMPClauseEnqueue::VisitOMPDeviceClause(const OMPDeviceClause *C) {
 }
 
 void OMPClauseEnqueue::VisitOMPNumTeamsClause(const OMPNumTeamsClause *C) {
+  VisitOMPClauseWithPreInit(C);
   Visitor->AddStmt(C->getNumTeams());
 }
 
