@@ -1686,7 +1686,7 @@ bool CGOpenMPRuntimeNVPTX::InL1Plus() {
   return !IsOrphaned && ParallelNestingLevel >= 1;
 }
 
-bool CGOpenMPRuntimeNVPTX::IsSPMDExecutionMode() {
+bool CGOpenMPRuntimeNVPTX::IsSPMDExecutionMode() const {
   return CurrMode == CGOpenMPRuntimeNVPTX::ExecutionMode::SPMD;
 }
 
@@ -2871,6 +2871,22 @@ bool CGOpenMPRuntimeNVPTX::generateCoalescedSchedule(
   return !Ordered && (ScheduleKind == OMPC_SCHEDULE_unknown ||
                       ScheduleKind == OMPC_SCHEDULE_auto ||
                       (ScheduleKind == OMPC_SCHEDULE_static && ChunkSizeOne));
+}
+
+//
+// Generate optimized code resembling dist_schedule(static, num_threads) and
+// schedule(static, 1) whenever the standard gives us freedom.  This allows
+// maximum coalescing on the NVPTX target and minimum loop overhead.
+//
+// Only possible in SPMD mode.
+//
+bool CGOpenMPRuntimeNVPTX::generateCoalescedSchedule(
+    OpenMPDistScheduleClauseKind DistScheduleKind,
+    OpenMPScheduleClauseKind ScheduleKind, bool DistChunked, bool ChunkSizeOne,
+    bool Ordered) const {
+  return IsSPMDExecutionMode() &&
+         DistScheduleKind == OMPC_DIST_SCHEDULE_unknown &&
+         generateCoalescedSchedule(ScheduleKind, ChunkSizeOne, Ordered);
 }
 
 bool CGOpenMPRuntimeNVPTX::requiresBarrier(const OMPLoopDirective &S) const {

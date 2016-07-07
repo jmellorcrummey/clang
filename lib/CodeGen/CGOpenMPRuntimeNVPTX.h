@@ -471,7 +471,7 @@ private:
 
   // \brief Test if we are codegen'ing a target construct in generic or spmd
   // mode.
-  bool IsSPMDExecutionMode();
+  bool IsSPMDExecutionMode() const;
 
 public:
   explicit CGOpenMPRuntimeNVPTX(CodeGenModule &CGM);
@@ -506,10 +506,25 @@ public:
   /// \brief Check if we should generate code as if \a ScheduleKind is static
   /// with a chunk size of 1.
   /// \param ScheduleKind Schedule Kind specified in the 'schedule' clause.
-  /// \param Chunk size.
+  /// \param ChunkSizeOne True if schedule chunk is one.
+  /// \param Ordered true if loop is ordered, false otherwise.
   ///
   bool generateCoalescedSchedule(OpenMPScheduleClauseKind ScheduleKind,
                                  bool ChunkSizeOne,
+                                 bool Ordered) const override;
+
+  /// \brief Check if we should generate code as if \a DistScheduleKind is
+  /// static non-chunked and \a ScheduleKind is static with a chunk size of 1.
+  /// \param DistScheduleKind Schedule Kind specified in the 'dist_schedule'
+  /// clause.
+  /// \param ScheduleKind Schedule Kind specified in the 'schedule' clause.
+  /// \param Chunked True if distribute chunk is specified in the clause.
+  /// \param ChunkSizeOne True if schedule chunk is one.
+  /// \param Ordered true if loop is ordered, false otherwise.
+  ///
+  bool generateCoalescedSchedule(OpenMPDistScheduleClauseKind DistScheduleKind,
+                                 OpenMPScheduleClauseKind ScheduleKind,
+                                 bool DistChunked, bool ChunkSizeOne,
                                  bool Ordered) const override;
 
   /// \brief Check if we must always generate a barrier at the end of a
