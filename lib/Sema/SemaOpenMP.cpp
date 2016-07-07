@@ -5513,7 +5513,11 @@ static unsigned CheckOpenMPLoop(
   SourceLocation DistIncLoc;
   ExprResult DistCond, DistInc, PrevEUB;
   if (isOpenMPLoopBoundSharingDirective(DKind)) {
-    DistCond = SemaRef.BuildBinOp(CurScope, CondLoc, BO_LE, IV.get(), UB.get());
+    DistCond =
+        CoalescedSchedule && DKind == OMPD_target_teams_distribute_parallel_for
+            ? SemaRef.BuildBinOp(CurScope, CondLoc, BO_LT, IV.get(),
+                                 NumIterations.get())
+            : SemaRef.BuildBinOp(CurScope, CondLoc, BO_LE, IV.get(), UB.get());
     assert(DistCond.isUsable() && "distribute cond expr was not built");
 
     DistInc =

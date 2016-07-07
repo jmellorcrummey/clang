@@ -2969,34 +2969,106 @@ void CodeGenFunction::EmitOMPDistributeLoop(
       (void)LoopScope.Privatize();
 
       // Detect the distribute schedule kind and chunk.
-      llvm::Value *Chunk = nullptr;
-      OpenMPDistScheduleClauseKind ScheduleKind = OMPC_DIST_SCHEDULE_unknown;
+      llvm::Value *DistChunk = nullptr;
+      OpenMPDistScheduleClauseKind DistScheduleKind =
+          OMPC_DIST_SCHEDULE_unknown;
       if (auto *C = S.getSingleClause<OMPDistScheduleClause>()) {
-        ScheduleKind = C->getDistScheduleKind();
+        DistScheduleKind = C->getDistScheduleKind();
         if (const auto *Ch = C->getChunkSize()) {
-          Chunk = EmitScalarExpr(Ch);
-          Chunk = EmitScalarConversion(Chunk, Ch->getType(),
-          S.getIterationVariable()->getType(),
-          S.getLocStart());
+          DistChunk = EmitScalarExpr(Ch);
+          DistChunk = EmitScalarConversion(DistChunk, Ch->getType(),
+                                           S.getIterationVariable()->getType(),
+                                           S.getLocStart());
         }
       }
       const unsigned IVSize = getContext().getTypeSize(IVExpr->getType());
       const bool IVSigned = IVExpr->getType()->hasSignedIntegerRepresentation();
 
-      // OpenMP [2.10.8, distribute Construct, Description]
-      // If dist_schedule is specified, kind must be static. If specified,
-      // iterations are divided into chunks of size chunk_size, chunks are
-      // assigned to the teams of the league in a round-robin fashion in the
-      // order of the team number. When no chunk_size is specified, the
-      // iteration space is divided into chunks that are approximately equal
-      // in size, and at most one chunk is distributed to each team of the
-      // league. The size of the chunks is unspecified in this case.
-      if (RT.isStaticNonchunked(ScheduleKind,
-                                /* Chunked */ Chunk != nullptr)) {
-        RT.emitDistributeStaticInit(*this, S.getLocStart(), ScheduleKind,
-                             IVSize, IVSigned, /* Ordered = */ false,
-                             IL.getAddress(), LB.getAddress(),
-                             UB.getAddress(), ST.getAddress());
+      // Detect the loop schedule kind and chunk.
+      llvm::Value *Chunk = nullptr;
+      bool ChunkSizeOne = false;
+      OpenMPScheduleClauseKind ScheduleKind = OMPC_SCHEDULE_unknown;
+      OpenMPScheduleClauseModifier M1 = OMPC_SCHEDULE_MODIFIER_unknown;
+      OpenMPScheduleClauseModifier M2 = OMPC_SCHEDULE_MODIFIER_unknown;
+      if (auto *C = S.getSingleClause<OMPScheduleClause>()) {
+        ScheduleKind = C->getScheduleKind();
+        M1 = C->getFirstScheduleModifier();
+        M2 = C->getSecondScheduleModifier();
+        if (const auto *Ch = C->getChunkSize()) {
+          llvm::APSInt Result;
+          if (ConstantFoldsToSimpleInteger(Ch, Result)) {
+            ChunkSizeOne = Result == 1;
+          }
+          Chunk = EmitScalarExpr(Ch);
+          Chunk = EmitScalarConversion(Chunk, Ch->getType(),
+                                       S.getIterationVariable()->getType(),
+                                       S.getLocStart());
+        }
+      }
+      const bool Ordered = S.getSingleClause<OMPOrderedClause>() != nullptr;
+
+      if (RT.generateCoalescedSchedule(DistScheduleKind, ScheduleKind,
+                                       /* Chunked */ DistChunk != nullptr,
+                                       ChunkSizeOne, Ordered)) {
+        // For NVPTX and other GPU targets high performance is often achieved
+        // if adjacent threads access memory in a coalesced manner.  This is
+        // true for loops that access memory with stride one if a static
+        // schedule with chunk size of 1 is used.  We generate such code
+        // whenever the OpenMP standard gives us freedom to do so.
+        //
+        // This case is called if there is no dist_schedule clause, and there is
+        // no
+        // schedule clause, with a schedule(auto), or with a schedule(static,1).
+        //
+        // Codegen is optimized for this case.  Since chunk size is 1 we do not
+        // need to generate the inner loop, i.e., the chunk iterator can be
+        // removed.
+        // while(UB = min(UB, GlobalUB), idx = LB, idx < UB) {
+        //   BODY;
+        //   LB = LB + ST;
+        //   UB = UB + ST;
+        // }
+        if (!Chunk) // Force use of chunk = 1.
+          Chunk = Builder.getIntN(IVSize, 1);
+        RT.emitDistributeStaticInit(*this, S.getLocStart(), DistScheduleKind,
+                                    IVSize, IVSigned, /* Ordered = */ false,
+                                    IL.getAddress(), LB.getAddress(),
+                                    UB.getAddress(), ST.getAddress(), Chunk,
+                                    /*Coalesced=*/true);
+        auto LoopExit =
+            getJumpDestInCurrentScope(createBasicBlock("omp.loop.exit"));
+        // IV = LB
+        EmitIgnoredExpr(S.getInit());
+        EmitOMPInnerLoop(S, LoopScope.requiresCleanups(),
+                         S.getDistCond() /* IV < GlobalUB */,
+                         S.getInc() /* Unused */,
+                         [&S, &LoopExit](CodeGenFunction &CGF) {
+                           CGF.EmitOMPLoopBody(S, LoopExit);
+                           CGF.EmitStopPoint(&S);
+                         },
+                         [&S](CodeGenFunction &CGF) {
+                           // LB = LB + Stride
+                           CGF.EmitIgnoredExpr(S.getNextLowerBound());
+                           // IV = LB;
+                           CGF.EmitIgnoredExpr(S.getInit());
+                         });
+        EmitBlock(LoopExit.getBlock());
+        // Tell the runtime we are done.
+        RT.emitForStaticFinish(*this, S.getLocStart());
+      } else if (RT.isStaticNonchunked(DistScheduleKind,
+                                       /* Chunked */ DistChunk != nullptr)) {
+        // OpenMP [2.10.8, distribute Construct, Description]
+        // If dist_schedule is specified, kind must be static. If specified,
+        // iterations are divided into chunks of size chunk_size, chunks are
+        // assigned to the teams of the league in a round-robin fashion in the
+        // order of the team number. When no chunk_size is specified, the
+        // iteration space is divided into chunks that are approximately equal
+        // in size, and at most one chunk is distributed to each team of the
+        // league. The size of the chunks is unspecified in this case.
+        RT.emitDistributeStaticInit(*this, S.getLocStart(), DistScheduleKind,
+                                    IVSize, IVSigned, /* Ordered = */ false,
+                                    IL.getAddress(), LB.getAddress(),
+                                    UB.getAddress(), ST.getAddress());
         auto LoopExit =
             getJumpDestInCurrentScope(createBasicBlock("omp.loop.exit"));
         // UB = min(UB, GlobalUB);
@@ -3028,9 +3100,9 @@ void CodeGenFunction::EmitOMPDistributeLoop(
       } else {
         // Emit the outer loop, which requests its work chunk [LB..UB] from
         // runtime and runs the inner loop to process it.
-        EmitOMPDistributeOuterLoop(ScheduleKind, S, LoopScope,
-                            LB.getAddress(), UB.getAddress(), ST.getAddress(),
-                            IL.getAddress(), Chunk);
+        EmitOMPDistributeOuterLoop(DistScheduleKind, S, LoopScope,
+                                   LB.getAddress(), UB.getAddress(),
+                                   ST.getAddress(), IL.getAddress(), DistChunk);
       }
     }
 
