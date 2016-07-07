@@ -11643,7 +11643,8 @@ OMPClause *Sema::ActOnOpenMPNumTeamsClause(Expr *NumTeams,
     return nullptr;
 
   OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
-  if (isOpenMPTargetExecutionDirective(DKind)) {
+  if (isOpenMPTargetExecutionDirective(DKind) &&
+        !CurContext->isDependentContext()) {
     llvm::MapVector<Expr *, DeclRefExpr *> Captures;
     ValExpr = tryBuildCapture(*this, ValExpr, Captures).get();
     HelperValStmt = buildPreInits(Context, Captures);
