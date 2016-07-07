@@ -844,6 +844,8 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Stmt::OMPTaskLoopSimdDirectiveClass:
     case Stmt::OMPDistributeDirectiveClass:
     case Stmt::OMPDistributeParallelForDirectiveClass:
+    case Stmt::OMPDistributeParallelForSimdDirectiveClass:
+    case Stmt::OMPDistributeSimdDirectiveClass:
     case Stmt::OMPTargetTeamsDirectiveClass:
     case Stmt::OMPTeamsDistributeParallelForDirectiveClass:
     case Stmt::OMPTargetTeamsDistributeParallelForDirectiveClass:
