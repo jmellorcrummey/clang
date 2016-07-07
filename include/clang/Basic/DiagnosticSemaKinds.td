@@ -2128,6 +2128,10 @@ def err_integer_sequence_negative_length : Error<
 def err_integer_sequence_integral_element_type : Error<
   "integer sequences must have integral element type">;
 
+// __type_pack_element
+def err_type_pack_element_out_of_bounds : Error<
+  "a parameter pack may not be accessed at an out of bounds index">;
+
 // Objective-C++
 def err_objc_decls_may_only_appear_in_global_scope : Error<
   "Objective-C declarations may only appear in global scope">;
@@ -7904,8 +7908,6 @@ def err_opencl_type_can_only_be_used_as_function_parameter : Error <
 def warn_opencl_attr_deprecated_ignored : Warning <
   "%0 attribute is deprecated and ignored in OpenCL version %1">,
   InGroup<IgnoredAttributes>;
-def err_opencl_builtin_requires_version : Error<
-  "%0 requires OpenCL version %1%select{| or above}2">;
 
 // OpenCL v2.0 s6.13.6 -- Builtin Pipe Functions
 def err_opencl_builtin_pipe_first_arg : Error<
@@ -7942,6 +7944,20 @@ def err_opencl_builtin_to_addr_arg_num : Error<
   "invalid number of arguments to function: %0">;
 def err_opencl_builtin_to_addr_invalid_arg : Error<
   "invalid argument %0 to function: %1, expecting a generic pointer argument">;
+
+// OpenCL v2.0 s6.13.17 Enqueue kernel restrictions.
+def err_opencl_enqueue_kernel_incorrect_args : Error<
+  "illegal call to enqueue_kernel, incorrect argument types">;
+def err_opencl_enqueue_kernel_expected_type : Error<
+  "illegal call to enqueue_kernel, expected %0 argument type">;
+def err_opencl_enqueue_kernel_local_size_args : Error<
+  "mismatch in number of block parameters and local size arguments passed">;
+def err_opencl_enqueue_kernel_invalid_local_size_type : Error<
+  "local memory sizes need to be specified as uint">;
+def err_opencl_enqueue_kernel_blocks_non_local_void_args : Error<
+  "blocks used in device side enqueue are expected to have parameters of type 'local void*'">;
+def err_opencl_enqueue_kernel_blocks_no_args : Error<
+  "blocks in this form of device side enqueue call are expected to have have no parameters">;
 } // end of sema category
 
 let CategoryName = "OpenMP Issue" in {
@@ -8316,6 +8332,9 @@ def err_omp_at_least_one_motion_clause_required : Error<
   "expected at least one 'to' clause or 'from' clause specified to '#pragma omp target update'">;
 def  err_omp_usedeviceptr_not_a_pointer : Error<
   "item used in 'use_device_pointer' clause is not a pointer">;
+def warn_omp_nesting_simd : Warning<
+  "OpenMP only allows an ordered construct with the simd clause nested in a simd construct">,
+  InGroup<SourceUsesOpenMP>;
 } // end of OpenMP category
 
 let CategoryName = "Related Result Type Issue" in {

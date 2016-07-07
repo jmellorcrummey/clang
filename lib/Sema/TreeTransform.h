@@ -4834,6 +4834,14 @@ bool TreeTransform<Derived>::TransformFunctionTypeParams(
           if (NewType.isNull())
             return true;
 
+          if (NewType->containsUnexpandedParameterPack()) {
+            NewType =
+                getSema().getASTContext().getPackExpansionType(NewType, None);
+
+            if (NewType.isNull())
+              return true;
+          }
+
           if (ParamInfos)
             PInfos.set(OutParamTypes.size(), ParamInfos[i]);
           OutParamTypes.push_back(NewType);
@@ -7555,6 +7563,29 @@ StmtResult TreeTransform<Derived>::TransformOMPDistributeParallelForDirective(
   DeclarationNameInfo DirName;
   getDerived().getSema().StartOpenMPDSABlock(
       OMPD_distribute_parallel_for, DirName, nullptr, D->getLocStart());
+  StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
+  getDerived().getSema().EndOpenMPDSABlock(Res.get());
+  return Res;
+}
+
+template <typename Derived>
+StmtResult
+TreeTransform<Derived>::TransformOMPDistributeParallelForSimdDirective(
+    OMPDistributeParallelForSimdDirective *D) {
+  DeclarationNameInfo DirName;
+  getDerived().getSema().StartOpenMPDSABlock(
+      OMPD_distribute_parallel_for_simd, DirName, nullptr, D->getLocStart());
+  StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
+  getDerived().getSema().EndOpenMPDSABlock(Res.get());
+  return Res;
+}
+
+template <typename Derived>
+StmtResult TreeTransform<Derived>::TransformOMPDistributeSimdDirective(
+    OMPDistributeSimdDirective *D) {
+  DeclarationNameInfo DirName;
+  getDerived().getSema().StartOpenMPDSABlock(OMPD_distribute_simd, DirName,
+                                             nullptr, D->getLocStart());
   StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
   getDerived().getSema().EndOpenMPDSABlock(Res.get());
   return Res;

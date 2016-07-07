@@ -2518,6 +2518,12 @@ DEF_TRAVERSE_STMT(OMPDistributeDirective,
 DEF_TRAVERSE_STMT(OMPDistributeParallelForDirective,
                   { TRY_TO(TraverseOMPExecutableDirective(S)); })
 
+DEF_TRAVERSE_STMT(OMPDistributeParallelForSimdDirective,
+                  { TRY_TO(TraverseOMPExecutableDirective(S)); })
+
+DEF_TRAVERSE_STMT(OMPDistributeSimdDirective,
+                  { TRY_TO(TraverseOMPExecutableDirective(S)); })
+
 DEF_TRAVERSE_STMT(OMPTargetTeamsDirective,
                   { TRY_TO(TraverseOMPExecutableDirective(S)); })
 
