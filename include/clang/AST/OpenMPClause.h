@@ -3523,7 +3523,7 @@ public:
 /// In this example directive '#pragma omp teams' has clause 'thread_limit'
 /// with single expression 'n'.
 ///
-class OMPThreadLimitClause : public OMPClause {
+class OMPThreadLimitClause : public OMPClause, public OMPClauseWithPreInit {
   friend class OMPClauseReader;
   /// \brief Location of '('.
   SourceLocation LParenLoc;
@@ -3543,16 +3543,19 @@ public:
   /// \param LParenLoc Location of '('.
   /// \param EndLoc Ending location of the clause.
   ///
-  OMPThreadLimitClause(Expr *E, SourceLocation StartLoc,
+  OMPThreadLimitClause(Expr *E, Stmt *HelperE, SourceLocation StartLoc,
                        SourceLocation LParenLoc, SourceLocation EndLoc)
-      : OMPClause(OMPC_thread_limit, StartLoc, EndLoc), LParenLoc(LParenLoc),
-        ThreadLimit(E) {}
+      : OMPClause(OMPC_thread_limit, StartLoc, EndLoc),
+        OMPClauseWithPreInit(this), LParenLoc(LParenLoc), ThreadLimit(E) {
+    setPreInitStmt(HelperE);
+  }
 
   /// \brief Build an empty clause.
   ///
   OMPThreadLimitClause()
       : OMPClause(OMPC_thread_limit, SourceLocation(), SourceLocation()),
-        LParenLoc(SourceLocation()), ThreadLimit(nullptr) {}
+        OMPClauseWithPreInit(this), LParenLoc(SourceLocation()),
+        ThreadLimit(nullptr) {}
   /// \brief Sets the location of '('.
   void setLParenLoc(SourceLocation Loc) { LParenLoc = Loc; }
   /// \brief Returns the location of '('.
