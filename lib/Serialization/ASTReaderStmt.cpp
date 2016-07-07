@@ -2307,11 +2307,13 @@ void OMPClauseReader::VisitOMPMapClause(OMPMapClause *C) {
 }
 
 void OMPClauseReader::VisitOMPNumTeamsClause(OMPNumTeamsClause *C) {
+  VisitOMPClauseWithPreInit(C);
   C->setNumTeams(Reader->Reader.ReadSubExpr());
   C->setLParenLoc(Reader->ReadSourceLocation(Record, Idx));
 }
 
 void OMPClauseReader::VisitOMPThreadLimitClause(OMPThreadLimitClause *C) {
+  VisitOMPClauseWithPreInit(C);
   C->setThreadLimit(Reader->Reader.ReadSubExpr());
   C->setLParenLoc(Reader->ReadSourceLocation(Record, Idx));
 }

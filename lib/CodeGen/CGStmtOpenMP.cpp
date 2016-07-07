@@ -1329,8 +1329,7 @@ static void emitCommonOMPParallelDirective(CodeGenFunction &CGF,
   // lower and upper bounds with the pragma 'for' chunking mechanism. Also, the
   // lexical scope was already initiated if parallel is not the first component
   // of a combined directive.
-  if (S.getDirectiveKind() == OMPD_distribute_parallel_for ||
-      S.getDirectiveKind() == OMPD_target_teams_distribute_parallel_for) {
+  if (isOpenMPLoopBoundSharingDirective(S.getDirectiveKind())) {
     const OMPLoopDirective &Dir = cast<OMPLoopDirective>(S);
     LValue LB = CGF.EmitLValue(cast<DeclRefExpr>(Dir.getLowerBoundVariable()));
     auto LBCast =
@@ -1874,27 +1873,23 @@ void CodeGenFunction::EmitOMPOuterLoop(bool DynamicOrOrdered, bool IsMonotonic,
     // the #for part: use the
     // distribute UB instead, as it is not incremented and guaranteed to be
     // less than GlobalUB
-    Expr *EUB =
-        ((S.getDirectiveKind() == OMPD_distribute_parallel_for ||
-          S.getDirectiveKind() == OMPD_target_teams_distribute_parallel_for) &&
-         IsDistribute == false)
-            ? S.getPrevEnsureUpperBound()
-            : S.getEnsureUpperBound();
+    Expr *EUB = (isOpenMPLoopBoundSharingDirective(S.getDirectiveKind()) &&
+                 !IsDistribute)
+                    ? S.getPrevEnsureUpperBound()
+                    : S.getEnsureUpperBound();
     EmitIgnoredExpr(EUB); // S.getEnsureUpperBound());
     // IV = LB
     EmitIgnoredExpr(S.getInit());
     // IV < UB
     BoolCondVal = EvaluateExprAsBool(
-        ((S.getDirectiveKind() == OMPD_distribute_parallel_for ||
-          S.getDirectiveKind() == OMPD_target_teams_distribute_parallel_for) &&
+        (isOpenMPLoopBoundSharingDirective(S.getDirectiveKind()) &&
          IsDistribute)
             ? S.getDistCond()
             : S.getCond());
   } else {
     BoolCondVal = RT.emitForNext(*this, S.getLocStart(), IVSize, IVSigned, IL,
                                  LB, UB, ST);
-    if ((S.getDirectiveKind() == OMPD_distribute_parallel_for ||
-         S.getDirectiveKind() == OMPD_target_teams_distribute_parallel_for) &&
+    if (isOpenMPLoopBoundSharingDirective(S.getDirectiveKind()) &&
         CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX()) {
       // De-normalize loop.
       QualType IteratorTy = IVExpr->getType();
@@ -1951,9 +1946,7 @@ void CodeGenFunction::EmitOMPOuterLoop(bool DynamicOrOrdered, bool IsMonotonic,
 
   SourceLocation Loc = S.getLocStart();
   EmitOMPInnerLoop(S, LoopScope.requiresCleanups(),
-                   ((S.getDirectiveKind() == OMPD_distribute_parallel_for ||
-                     S.getDirectiveKind() ==
-                         OMPD_target_teams_distribute_parallel_for) &&
+                   (isOpenMPLoopBoundSharingDirective(S.getDirectiveKind()) &&
                     IsDistribute)
                        ? S.getDistCond()
                        : S.getCond(),
@@ -2074,8 +2067,7 @@ void CodeGenFunction::EmitOMPForOuterLoop(
     llvm::Value *LBVal = nullptr;
     llvm::Value *UBVal = nullptr;
     QualType IteratorTy = S.getIterationVariable()->getType();
-    if (S.getDirectiveKind() == OMPD_distribute_parallel_for ||
-        S.getDirectiveKind() == OMPD_target_teams_distribute_parallel_for) {
+    if (isOpenMPLoopBoundSharingDirective(S.getDirectiveKind())) {
       if (CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX()) {
         // normalize loop
         auto PrevLB = EmitLValue(S.getPrevLowerBoundVariable());
@@ -2236,8 +2228,7 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
     LValue IL =
         EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getIsLastIterVariable()));
 
-    if (S.getDirectiveKind() == OMPD_distribute_parallel_for ||
-        S.getDirectiveKind() == OMPD_target_teams_distribute_parallel_for) {
+    if (isOpenMPLoopBoundSharingDirective(S.getDirectiveKind())) {
       // When composing distribute with for we need to use the pragma distribute
       // chunk lower and upper bounds rather than the whole loop iteration
       // space. Therefore we copy the bounds of the previous schedule into the
@@ -3037,30 +3028,24 @@ void CodeGenFunction::EmitOMPDistributeLoop(
         // IV = LB;
         EmitIgnoredExpr(S.getInit());
         // while (idx <= UB) { BODY; ++idx; }
-        EmitOMPInnerLoop(
-            S, LoopScope.requiresCleanups(),
-            S.getDirectiveKind() == OMPD_distribute_parallel_for ||
-                    S.getDirectiveKind() ==
-                        OMPD_target_teams_distribute_parallel_for
-                ? S.getDistCond()
-                : S.getCond(),
-            S.getDirectiveKind() == OMPD_distribute_parallel_for ||
-                    S.getDirectiveKind() ==
-                        OMPD_target_teams_distribute_parallel_for
-                ? S.getDistInc()
-                : S.getInc(),
-            [&S, &LoopExit,
-             &CodeGenDistributeLoopContent](CodeGenFunction &CGF) {
-              if (S.getDirectiveKind() == OMPD_distribute) {
-                CGF.EmitOMPLoopBody(S, LoopExit);
-                CGF.EmitStopPoint(&S);
-              } else if (S.getDirectiveKind() == OMPD_distribute_parallel_for ||
-                         S.getDirectiveKind() ==
-                             OMPD_target_teams_distribute_parallel_for) {
-                CodeGenDistributeLoopContent(CGF);
-              }
-            },
-            [](CodeGenFunction &) {});
+        EmitOMPInnerLoop(S, LoopScope.requiresCleanups(),
+                         isOpenMPLoopBoundSharingDirective(S.getDirectiveKind())
+                             ? S.getDistCond()
+                             : S.getCond(),
+                         isOpenMPLoopBoundSharingDirective(S.getDirectiveKind())
+                             ? S.getDistInc()
+                             : S.getInc(),
+                         [&S, &LoopExit,
+                          &CodeGenDistributeLoopContent](CodeGenFunction &CGF) {
+                           if (S.getDirectiveKind() == OMPD_distribute) {
+                             CGF.EmitOMPLoopBody(S, LoopExit);
+                             CGF.EmitStopPoint(&S);
+                           } else if (isOpenMPLoopBoundSharingDirective(
+                                          S.getDirectiveKind())) {
+                             CodeGenDistributeLoopContent(CGF);
+                           }
+                         },
+                         [](CodeGenFunction &) {});
         EmitBlock(LoopExit.getBlock());
         // Tell the runtime we are done.
         RT.emitForStaticFinish(*this, S.getLocStart());
