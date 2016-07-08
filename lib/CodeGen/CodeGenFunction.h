@@ -3087,10 +3087,10 @@ public:
 
   /// EmitCXXGlobalVarDeclInit - Create the initializer for a C++
   /// variable with global storage. If \a EmitInitOnly or \a EmitDtorOnly are
-  /// set to true, only the call to the initializer or destructor is emitted, respectively.
+  /// set to true, only the call to the initializer or destructor is emitted,
+  /// respectively.
   void EmitCXXGlobalVarDeclInit(const VarDecl &D, llvm::Constant *DeclPtr,
-                                bool PerformInit,
-                                bool EmitInitOnly,
+                                bool PerformInit, bool EmitInitOnly,
                                 bool EmitDtorOnly);
 
   llvm::Constant *createAtExitStub(const VarDecl &VD, llvm::Constant *Dtor,
@@ -3107,8 +3107,7 @@ public:
   /// once, e.g. with a static local variable or a static data member
   /// of a class template.
   void EmitCXXGuardedInit(const VarDecl &D, llvm::GlobalVariable *DeclPtr,
-                          bool PerformInit,
-                          bool EmitInitOnly = false,
+                          bool PerformInit, bool EmitInitOnly = false,
                           bool EmitDtorOnly = false);
 
   /// GenerateCXXGlobalInitFunc - Generates code for initializing global
@@ -3123,8 +3122,7 @@ public:
                                   const std::vector<std::pair<llvm::WeakVH,
                                   llvm::Constant*> > &DtorsAndObjects);
 
-  void GenerateCXXGlobalVarDeclInitFunc(llvm::Function *Fn,
-                                        const VarDecl *D,
+  void GenerateCXXGlobalVarDeclInitFunc(llvm::Function *Fn, const VarDecl *D,
                                         llvm::GlobalVariable *Addr,
                                         bool PerformInit,
                                         bool EmitInitOnly = false,

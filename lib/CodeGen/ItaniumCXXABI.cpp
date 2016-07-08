@@ -310,10 +310,8 @@ public:
                                    CharUnits cookieSize) override;
 
   void EmitGuardedInit(CodeGenFunction &CGF, const VarDecl &D,
-                       llvm::GlobalVariable *DeclPtr,
-                       bool PerformInit,
-                       bool EmitInitOnly,
-                       bool EmitDtorOnly) override;
+                       llvm::GlobalVariable *DeclPtr, bool PerformInit,
+                       bool EmitInitOnly, bool EmitDtorOnly) override;
   void registerGlobalDtor(CodeGenFunction &CGF, const VarDecl &D,
                           llvm::Constant *dtor, llvm::Constant *addr) override;
 
@@ -1907,11 +1905,9 @@ namespace {
 
 /// The ARM code here follows the Itanium code closely enough that we
 /// just special-case it at particular places.
-void ItaniumCXXABI::EmitGuardedInit(CodeGenFunction &CGF,
-                                    const VarDecl &D,
+void ItaniumCXXABI::EmitGuardedInit(CodeGenFunction &CGF, const VarDecl &D,
                                     llvm::GlobalVariable *var,
-                                    bool shouldPerformInit,
-                                    bool EmitInitOnly,
+                                    bool shouldPerformInit, bool EmitInitOnly,
                                     bool EmitDtorOnly) {
   CGBuilderTy &Builder = CGF.Builder;
 
@@ -2076,9 +2072,8 @@ void ItaniumCXXABI::EmitGuardedInit(CodeGenFunction &CGF,
   }
 
   // Emit the initializer and add a global destructor if appropriate.
-  CGF.EmitCXXGlobalVarDeclInit(D, var, shouldPerformInit,
-      EmitInitOnly,
-      EmitDtorOnly);
+  CGF.EmitCXXGlobalVarDeclInit(D, var, shouldPerformInit, EmitInitOnly,
+                               EmitDtorOnly);
 
   if (threadsafe) {
     // Pop the guard-abort cleanup if we pushed one.

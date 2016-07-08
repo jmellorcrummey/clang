@@ -1762,8 +1762,9 @@ void CodeGenModule::EmitGlobalDefinition(GlobalDecl GD, llvm::GlobalValue *GV) {
   PrettyStackTraceDecl CrashInfo(const_cast<ValueDecl *>(D), D->getLocation(), 
                                  Context.getSourceManager(),
                                  "Generating code for declaration");
-  
-  // If this is OpenMP device, check if it is legal to emit this global normally.
+
+  // If this is OpenMP device, check if it is legal to emit this global
+  // normally.
   if (OpenMPRuntime && OpenMPRuntime->emitTargetGlobal(GD))
     return;
 
@@ -1909,13 +1910,6 @@ CodeGenModule::GetOrCreateLLVMFunction(StringRef MangledName,
     llvm::Constant *BC = llvm::ConstantExpr::getBitCast(
         F, Entry->getType()->getElementType()->getPointerTo());
     addGlobalValReplacement(Entry, BC);
-  }
-
-
-  if (MangledName == "__clang_call_terminate") {
-
-    llvm::errs() << "Hey!\n";
-
   }
 
   assert(F->getName() == MangledName && "name was uniqued!");
