@@ -72,6 +72,16 @@ static cl::opt<bool>
              cl::desc("Unbundle bundled file into several output files.\n"),
              cl::init(false), cl::cat(ClangOffloadBundlerCategory));
 
+static cl::opt<bool> PrintExternalCommands(
+    "###", cl::desc("Print the external commands that are to be executed "
+                    "instead of actually execute them.\n"),
+    cl::init(false), cl::cat(ClangOffloadBundlerCategory));
+
+static cl::opt<bool> SaveTemps("save-temps",
+                               cl::desc("Keep any created temporary files.\n"),
+                               cl::init(false),
+                               cl::cat(ClangOffloadBundlerCategory));
+
 /// Magic string that marks the existence of offloading data.
 #define OFFLOAD_BUNDLER_MAGIC_STR "__CLANG_OFFLOAD_BUNDLE__"
 
@@ -449,10 +459,19 @@ public:
     if (NumberOfProcessedInputs != NumberOfInputs)
       return false;
 
-    // Create the bitcode file name to write the resulting code to.
+    // Create the bitcode file name to write the resulting code to. Keep it if
+    // save-temps is active.
     SmallString<128> BitcodeFileName;
-    if (sys::fs::createTemporaryFile("clang-offload-bundler", "bc",
-                                     BitcodeFileName)) {
+    if (SaveTemps) {
+      BitcodeFileName = sys::path::filename(OutputFileNames.front());
+      // Save the current file using the host name and the "bc" extension. If
+      // the output already uses that extension, prepend ".tmp".
+      const char *Extension =
+          (sys::path::extension(OutputFileNames.front()) == ".bc") ? "tmp.bc"
+                                                                   : "bc";
+      sys::path::replace_extension(BitcodeFileName, Extension);
+    } else if (sys::fs::createTemporaryFile("clang-offload-bundler", "bc",
+                                            BitcodeFileName)) {
       llvm::errs() << "error: unable to create temporary file.\n";
       return true;
     }
@@ -495,7 +514,14 @@ public:
                                "-nostdlib",
                                nullptr};
 
-    if (sys::ExecuteAndWait(ClangBinary.get(), ClangArgs)) {
+    // If the user asked for the commands to be printed out, we do that instead
+    // of executing it.
+    if (PrintExternalCommands) {
+      llvm::errs() << "\"" << ClangBinary.get() << "\"";
+      for (unsigned I = 1; ClangArgs[I]; ++I)
+        llvm::errs() << " \"" << ClangArgs[I] << "\"";
+      llvm::errs() << "\n";
+    } else if (sys::ExecuteAndWait(ClangBinary.get(), ClangArgs)) {
       // Remove bitcode file.
       sys::fs::remove(BitcodeFileName);
 
@@ -503,8 +529,9 @@ public:
       return true;
     }
 
-    // Remove bitcode file.
-    sys::fs::remove(BitcodeFileName);
+    // Remove bitcode file if save-temps is not enabled.
+    if (!SaveTemps)
+      sys::fs::remove(BitcodeFileName);
     return false;
   }
   void WriteBundle(raw_fd_ostream &OS, MemoryBuffer &Input) {
