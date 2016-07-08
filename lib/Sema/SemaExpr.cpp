@@ -7394,6 +7394,22 @@ Sema::CheckAssignmentConstraints(QualType LHSType, ExprResult &RHS,
         return IncompatibleVectors;
       }
     }
+
+    // When the RHS comes from another lax conversion (e.g. binops between
+    // scalars and vectors) the result is canonicalized as a vector. When the
+    // LHS is also a vector, the lax is allowed by the condition above. Handle
+    // the case where LHS is a scalar.
+    if (LHSType->isScalarType()) {
+      const VectorType *VecType = RHSType->getAs<VectorType>();
+      if (VecType && VecType->getNumElements() == 1 &&
+          isLaxVectorConversion(RHSType, LHSType)) {
+        ExprResult *VecExpr = &RHS;
+        *VecExpr = ImpCastExprToType(VecExpr->get(), LHSType, CK_BitCast);
+        Kind = CK_BitCast;
+        return Compatible;
+      }
+    }
+
     return Incompatible;
   }
 
@@ -9653,7 +9669,16 @@ static NonConstCaptureKind isReferenceToNonConstCapture(Sema &S, Expr *E) {
 
   // Decide whether the first capture was for a block or a lambda.
   DeclContext *DC = S.CurContext, *Prev = nullptr;
-  while (DC != var->getDeclContext()) {
+  // Decide whether the first capture was for a block or a lambda.
+  while (DC) {
+    // For init-capture, it is possible that the variable belongs to the
+    // template pattern of the current context.
+    if (auto *FD = dyn_cast<FunctionDecl>(DC))
+      if (var->isInitCapture() &&
+          FD->getTemplateInstantiationPattern() == var->getDeclContext())
+        break;
+    if (DC == var->getDeclContext())
+      break;
     Prev = DC;
     DC = DC->getParent();
   }
