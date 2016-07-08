@@ -2257,6 +2257,7 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
             *this, S.getLocStart(), OMPD_unknown, /*EmitChecks=*/false,
             /*ForceSimpleCall=*/true);
       }
+      // carlo
       EmitOMPPrivateClause(S, LoopScope);
       HasLastprivateClause = EmitOMPLastprivateClauseInit(S, LoopScope);
       EmitOMPReductionClauseInit(S, LoopScope);
@@ -2988,7 +2989,9 @@ void CodeGenFunction::EmitOMPDistributeLoop(
             *this, S.getLocStart(), OMPD_unknown, /*EmitChecks=*/false,
             /*ForceSimpleCall=*/true);
       }
+      // carlo
       EmitOMPPrivateClause(S, LoopScope);
+      bool HasLastprivateClause = EmitOMPLastprivateClauseInit(S, LoopScope);
       EmitOMPPrivateLoopCounters(S, LoopScope);
       (void)LoopScope.Privatize();
 
@@ -3128,6 +3131,12 @@ void CodeGenFunction::EmitOMPDistributeLoop(
                                    LB.getAddress(), UB.getAddress(),
                                    ST.getAddress(), IL.getAddress(), DistChunk);
       }
+
+      // Emit final copy of the lastprivate variables if IsLastIter != 0.
+      if (HasLastprivateClause)
+        EmitOMPLastprivateClauseFinal(
+            S, isOpenMPSimdDirective(S.getDirectiveKind()),
+            Builder.CreateIsNotNull(EmitLoadOfScalar(IL, S.getLocStart())));
     }
 
     // We're now done with the loop, so jump to the continuation block.
