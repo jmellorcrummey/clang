@@ -302,6 +302,19 @@ public:
 
   llvm::Instruction *CurrentFuncletPad = nullptr;
 
+  class CallLifetimeEnd final : public EHScopeStack::Cleanup {
+    llvm::Value *Addr;
+    llvm::Value *Size;
+
+  public:
+    CallLifetimeEnd(Address addr, llvm::Value *size)
+        : Addr(addr.getPointer()), Size(size) {}
+
+    void Emit(CodeGenFunction &CGF, Flags flags) override {
+      CGF.EmitLifetimeEnd(Size, Addr);
+    }
+  };
+
   /// Header for data within LifetimeExtendedCleanupStack.
   struct LifetimeExtendedCleanupHeader {
     /// The size of the following cleanup object.
@@ -2322,10 +2335,9 @@ public:
   llvm::Function *EmitCapturedStmt(const CapturedStmt &S, CapturedRegionKind K);
   llvm::Function *GenerateCapturedStmtFunction(const CapturedStmt &S);
   Address GenerateCapturedStmtArgument(const CapturedStmt &S);
-  llvm::Function *
-  GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S,
-                                     bool UseCapturedArgumentsOnly = false,
-                                     unsigned CaptureLevel = 1);
+  llvm::Function *GenerateOpenMPCapturedStmtFunction(
+      const CapturedStmt &S, bool UseCapturedArgumentsOnly = false,
+      unsigned CaptureLevel = 1, unsigned ImplicitParamStop = 0);
   void GenerateOpenMPCapturedVars(const CapturedStmt &S,
                                   SmallVectorImpl<llvm::Value *> &CapturedVars,
                                   unsigned CaptureLevel = 1);
@@ -2492,6 +2504,9 @@ public:
                         const RegionCodeGenTy &CodeGenDistributeLoopContent);
   void EmitOMPDistributeParallelForDirective(
       const OMPDistributeParallelForDirective &S);
+  void EmitOMPDistributeParallelForSimdDirective(
+      const OMPDistributeParallelForSimdDirective &S);
+  void EmitOMPDistributeSimdDirective(const OMPDistributeSimdDirective &S);
   void EmitOMPTargetTeamsDirective(const OMPTargetTeamsDirective &S);
   void EmitOMPTeamsDistributeParallelForDirective(
       const OMPTeamsDistributeParallelForDirective &S);

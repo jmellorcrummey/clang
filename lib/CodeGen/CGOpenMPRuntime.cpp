@@ -552,7 +552,7 @@ enum OpenMPSchedType {
   OMP_sch_runtime = 37,
   OMP_sch_auto = 38,
   /// static with chunk adjustment (e.g., simd)
-  OMP_sch_static_balanced_chunked   = 45,
+  OMP_sch_static_balanced_chunked = 45,
   /// \brief Lower bound for 'ordered' versions.
   OMP_ord_lower = 64,
   OMP_ord_static_chunked = 65,
@@ -565,6 +565,7 @@ enum OpenMPSchedType {
   /// \brief dist_schedule types
   OMP_dist_sch_static_chunked = 91,
   OMP_dist_sch_static = 92,
+  OMP_dist_sch_static_sch_static_chunkone = 93,
   /// Support for OpenMP 4.5 monotonic and nonmonotonic schedule modifiers.
   /// Set if the monotonic schedule modifier was present.
   OMP_sch_modifier_monotonic = (1 << 29),
@@ -926,7 +927,7 @@ static Address createIdentFieldGEP(CodeGenFunction &CGF, Address Addr,
 llvm::Value *CGOpenMPRuntime::emitParallelOrTeamsOutlinedFunction(
     const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
     OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen,
-    unsigned CaptureLevel) {
+    unsigned CaptureLevel, unsigned ImplicitParamStop) {
   assert(ThreadIDVar->getType()->isPointerType() &&
          "thread id variable must be of type kmp_int32 *");
   const CapturedStmt *CS = cast<CapturedStmt>(D.getAssociatedStmt());
@@ -942,7 +943,7 @@ llvm::Value *CGOpenMPRuntime::emitParallelOrTeamsOutlinedFunction(
                                     HasCancel);
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
   return CGF.GenerateOpenMPCapturedStmtFunction(
-      *CS, /*UseCapturedArgumentsOnly=*/false, CaptureLevel);
+      *CS, /*UseCapturedArgumentsOnly=*/false, CaptureLevel, ImplicitParamStop);
 }
 
 llvm::Value *CGOpenMPRuntime::emitSimdOutlinedFunction(
@@ -2523,9 +2524,12 @@ static OpenMPSchedType getRuntimeSchedule(OpenMPScheduleClauseKind ScheduleKind,
 
 /// \brief Map the OpenMP distribute schedule to the runtime enumeration.
 static OpenMPSchedType
-getRuntimeSchedule(OpenMPDistScheduleClauseKind ScheduleKind, bool Chunked) {
+getRuntimeSchedule(OpenMPDistScheduleClauseKind ScheduleKind, bool Chunked,
+                   bool Coalesced = false) {
   // only static is allowed for dist_schedule
-  return Chunked ? OMP_dist_sch_static_chunked : OMP_dist_sch_static;
+  return Coalesced
+             ? OMP_dist_sch_static_sch_static_chunkone
+             : Chunked ? OMP_dist_sch_static_chunked : OMP_dist_sch_static;
 }
 
 bool CGOpenMPRuntime::isStaticNonchunked(OpenMPScheduleClauseKind ScheduleKind,
@@ -2542,6 +2546,13 @@ bool CGOpenMPRuntime::isStaticNonchunked(
 
 bool CGOpenMPRuntime::generateCoalescedSchedule(
     OpenMPScheduleClauseKind ScheduleKind, bool ChunkSizeOne,
+    bool Ordered) const {
+  return false;
+}
+
+bool CGOpenMPRuntime::generateCoalescedSchedule(
+    OpenMPDistScheduleClauseKind DistScheduleKind,
+    OpenMPScheduleClauseKind ScheduleKind, bool DistChunked, bool ChunkSizeOne,
     bool Ordered) const {
   return false;
 }
@@ -2644,7 +2655,8 @@ static void emitForStaticInitCall(
           Schedule == OMP_sch_static_balanced_chunked ||
           Schedule == OMP_ord_static || Schedule == OMP_ord_static_chunked ||
           Schedule == OMP_dist_sch_static ||
-          Schedule == OMP_dist_sch_static_chunked);
+          Schedule == OMP_dist_sch_static_chunked ||
+          Schedule == OMP_dist_sch_static_sch_static_chunkone);
 
    // Call __kmpc_for_static_init(
    //          ident_t *loc, kmp_int32 tid, kmp_int32 schedtype,
@@ -2661,7 +2673,8 @@ static void emitForStaticInitCall(
      assert((Schedule == OMP_sch_static_chunked ||
              Schedule == OMP_sch_static_balanced_chunked ||
              Schedule == OMP_ord_static_chunked ||
-             Schedule == OMP_dist_sch_static_chunked) &&
+             Schedule == OMP_dist_sch_static_chunked ||
+             Schedule == OMP_dist_sch_static_sch_static_chunkone) &&
             "expected static chunked schedule");
    }
    llvm::Value *Args[] = {
@@ -2698,8 +2711,9 @@ void CGOpenMPRuntime::emitDistributeStaticInit(
     CodeGenFunction &CGF, SourceLocation Loc,
     OpenMPDistScheduleClauseKind SchedKind, unsigned IVSize, bool IVSigned,
     bool Ordered, Address IL, Address LB, Address UB, Address ST,
-    llvm::Value *Chunk) {
-  OpenMPSchedType ScheduleNum = getRuntimeSchedule(SchedKind, Chunk != nullptr);
+    llvm::Value *Chunk, bool Coalesced) {
+  OpenMPSchedType ScheduleNum =
+      getRuntimeSchedule(SchedKind, Chunk != nullptr, Coalesced);
   auto *UpdatedLocation = emitUpdateLocation(CGF, Loc);
   auto *ThreadId = getThreadID(CGF, Loc);
   auto *StaticInitFunction = createForStaticInitFunction(IVSize, IVSigned);
