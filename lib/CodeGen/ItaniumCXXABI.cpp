@@ -311,7 +311,9 @@ public:
 
   void EmitGuardedInit(CodeGenFunction &CGF, const VarDecl &D,
                        llvm::GlobalVariable *DeclPtr,
-                       bool PerformInit) override;
+                       bool PerformInit,
+                       bool EmitInitOnly,
+                       bool EmitDtorOnly) override;
   void registerGlobalDtor(CodeGenFunction &CGF, const VarDecl &D,
                           llvm::Constant *dtor, llvm::Constant *addr) override;
 
@@ -1908,7 +1910,9 @@ namespace {
 void ItaniumCXXABI::EmitGuardedInit(CodeGenFunction &CGF,
                                     const VarDecl &D,
                                     llvm::GlobalVariable *var,
-                                    bool shouldPerformInit) {
+                                    bool shouldPerformInit,
+                                    bool EmitInitOnly,
+                                    bool EmitDtorOnly) {
   CGBuilderTy &Builder = CGF.Builder;
 
   // Inline variables that weren't instantiated from variable templates have
@@ -2072,7 +2076,9 @@ void ItaniumCXXABI::EmitGuardedInit(CodeGenFunction &CGF,
   }
 
   // Emit the initializer and add a global destructor if appropriate.
-  CGF.EmitCXXGlobalVarDeclInit(D, var, shouldPerformInit);
+  CGF.EmitCXXGlobalVarDeclInit(D, var, shouldPerformInit,
+      EmitInitOnly,
+      EmitDtorOnly);
 
   if (threadsafe) {
     // Pop the guard-abort cleanup if we pushed one.

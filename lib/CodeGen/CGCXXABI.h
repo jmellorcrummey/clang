@@ -525,7 +525,9 @@ public:
   ///   - a static data member of a class template instantiation
   virtual void EmitGuardedInit(CodeGenFunction &CGF, const VarDecl &D,
                                llvm::GlobalVariable *DeclPtr,
-                               bool PerformInit) = 0;
+                               bool PerformInit,
+                               bool EmitInitOnly,
+                               bool EmitDtorOnly) = 0;
 
   /// Emit code to force the execution of a destructor during global
   /// teardown.  The default implementation of this uses atexit.

@@ -61,7 +61,7 @@ static void EmitDeclInit(CodeGenFunction &CGF, const VarDecl &D,
 /// Emit code to cause the destruction of the given variable with
 /// static storage duration.
 static void EmitDeclDestroy(CodeGenFunction &CGF, const VarDecl &D,
-                            ConstantAddress addr) {
+                            ConstantAddress addr, bool EmitDtorOnly) {
   CodeGenModule &CGM = CGF.CGM;
 
   // FIXME:  __attribute__((cleanup)) ?
@@ -114,6 +114,12 @@ static void EmitDeclDestroy(CodeGenFunction &CGF, const VarDecl &D,
     argument = llvm::Constant::getNullValue(CGF.Int8PtrTy);
   }
 
+  // Only emit the call if that was requested, otherwise register the destructor following the ABI rules.
+  if (EmitDtorOnly) {
+    CGF.Builder.CreateCall(function, argument);
+    return;
+  }
+
   CGM.getCXXABI().registerGlobalDtor(CGF, D, function, argument);
 }
 
@@ -139,7 +145,9 @@ static void EmitDeclInvariant(CodeGenFunction &CGF, const VarDecl &D,
 
 void CodeGenFunction::EmitCXXGlobalVarDeclInit(const VarDecl &D,
                                                llvm::Constant *DeclPtr,
-                                               bool PerformInit) {
+                                               bool PerformInit,
+                                               bool EmitInitOnly,
+                                               bool EmitDtorOnly) {
 
   const Expr *Init = D.getInit();
   QualType T = D.getType();
@@ -174,12 +182,15 @@ void CodeGenFunction::EmitCXXGlobalVarDeclInit(const VarDecl &D,
       (void)CGM.getOpenMPRuntime().emitThreadPrivateVarDefinition(
           &D, DeclAddr, D.getAttr<OMPThreadPrivateDeclAttr>()->getLocation(),
           PerformInit, this);
-    if (PerformInit)
+    if (PerformInit && !EmitDtorOnly)
       EmitDeclInit(*this, D, DeclAddr);
+    // If all we need to emit is the initializer, we are done.
+    if (EmitInitOnly)
+      return;
     if (CGM.isTypeConstant(D.getType(), true))
       EmitDeclInvariant(*this, D, DeclPtr);
     else
-      EmitDeclDestroy(*this, D, DeclAddr);
+      EmitDeclDestroy(*this, D, DeclAddr, EmitDtorOnly);
     return;
   }
 
@@ -244,7 +255,9 @@ void CodeGenFunction::registerGlobalDtorWithAtExit(const VarDecl &VD,
 
 void CodeGenFunction::EmitCXXGuardedInit(const VarDecl &D,
                                          llvm::GlobalVariable *DeclPtr,
-                                         bool PerformInit) {
+                                         bool PerformInit,
+                                         bool EmitInitOnly,
+                                         bool EmitDtorOnly) {
   // If we've been asked to forbid guard variables, emit an error now.
   // This diagnostic is hard-coded for Darwin's use case;  we can find
   // better phrasing if someone else needs it.
@@ -253,7 +266,9 @@ void CodeGenFunction::EmitCXXGuardedInit(const VarDecl &D,
               "this initialization requires a guard variable, which "
               "the kernel does not support");
 
-  CGM.getCXXABI().EmitGuardedInit(*this, D, DeclPtr, PerformInit);
+  CGM.getCXXABI().EmitGuardedInit(*this, D, DeclPtr, PerformInit,
+      EmitInitOnly,
+      EmitDtorOnly);
 }
 
 llvm::Function *CodeGenModule::CreateGlobalInitOrDestructFunction(
@@ -323,6 +338,10 @@ CodeGenModule::EmitCXXGlobalVarDeclInitFunc(const VarDecl *D,
        D->hasAttr<CUDASharedAttr>()))
     return;
 
+  // If we are in OpenMP device mode we need to generate an entry point for each structor instead of the normal initialization.
+  if (OpenMPRuntime && OpenMPRuntime->emitDeviceCtorDtor(*D, Addr, PerformInit))
+    return;
+
   // DLL imported variables will be initialized by the export side.
   if (D->hasAttr<DLLImportAttr>())
     return;
@@ -346,8 +365,7 @@ CodeGenModule::EmitCXXGlobalVarDeclInitFunc(const VarDecl *D,
                                          D->getLocation());
 
   auto *ISA = D->getAttr<InitSegAttr>();
-  CodeGenFunction(*this).GenerateCXXGlobalVarDeclInitFunc(Fn, D, Addr,
-                                                          PerformInit);
+  CodeGenFunction(*this).GenerateCXXGlobalVarDeclInitFunc(Fn, D, Addr, PerformInit);
 
   llvm::GlobalVariable *COMDATKey =
       supportsCOMDAT() && D->isExternallyVisible() ? Addr : nullptr;
@@ -499,7 +517,9 @@ void CodeGenModule::EmitCXXGlobalDtorFunc() {
 void CodeGenFunction::GenerateCXXGlobalVarDeclInitFunc(llvm::Function *Fn,
                                                        const VarDecl *D,
                                                  llvm::GlobalVariable *Addr,
-                                                       bool PerformInit) {
+                                                       bool PerformInit,
+                                                       bool EmitInitOnly,
+                                                       bool EmitDtorOnly) {
   // Check if we need to emit debug info for variable initializer.
   if (D->hasAttr<NoDebugAttr>())
     DebugInfo = nullptr; // disable debug info indefinitely for this function
@@ -515,10 +535,18 @@ void CodeGenFunction::GenerateCXXGlobalVarDeclInitFunc(llvm::Function *Fn,
   // occurs for, e.g., instantiated static data members and
   // definitions explicitly marked weak.
   if (Addr->hasWeakLinkage() || Addr->hasLinkOnceLinkage()) {
-    EmitCXXGuardedInit(*D, Addr, PerformInit);
+    EmitCXXGuardedInit(*D, Addr, PerformInit,
+        EmitInitOnly,
+        EmitDtorOnly);
   } else {
-    EmitCXXGlobalVarDeclInit(*D, Addr, PerformInit);
+    EmitCXXGlobalVarDeclInit(*D, Addr, PerformInit,
+        EmitInitOnly,
+        EmitDtorOnly);
   }
+
+  // Generate code to launch the initializers on the device and register destructors if generating code for an OpenMP host.
+  if (CGM.getLangOpts().OpenMP)
+    CGM.getOpenMPRuntime().emitDeviceCtorDtorLaunching(*this, *D, Addr, PerformInit);
 
   FinishFunction();
 }

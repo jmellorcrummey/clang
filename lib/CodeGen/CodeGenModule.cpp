@@ -1763,6 +1763,10 @@ void CodeGenModule::EmitGlobalDefinition(GlobalDecl GD, llvm::GlobalValue *GV) {
                                  Context.getSourceManager(),
                                  "Generating code for declaration");
   
+  // If this is OpenMP device, check if it is legal to emit this global normally.
+  if (OpenMPRuntime && OpenMPRuntime->emitTargetGlobal(GD))
+    return;
+
   if (isa<FunctionDecl>(D)) {
     // At -O0, don't generate IR for functions with available_externally 
     // linkage.
@@ -1773,11 +1777,15 @@ void CodeGenModule::EmitGlobalDefinition(GlobalDecl GD, llvm::GlobalValue *GV) {
       CompleteDIClassType(Method);
       // Make sure to emit the definition(s) before we emit the thunks.
       // This is necessary for the generation of certain thunks.
-      if (const auto *CD = dyn_cast<CXXConstructorDecl>(Method))
+      if (const auto *CD = dyn_cast<CXXConstructorDecl>(Method)) {
+        if (OpenMPRuntime)
+          OpenMPRuntime->registerTargetFunctionDefinition(GD);
         ABI->emitCXXStructor(CD, getFromCtorType(GD.getCtorType()));
-      else if (const auto *DD = dyn_cast<CXXDestructorDecl>(Method))
+      } else if (const auto *DD = dyn_cast<CXXDestructorDecl>(Method)) {
+        if (OpenMPRuntime)
+          OpenMPRuntime->registerTargetFunctionDefinition(GD);
         ABI->emitCXXStructor(DD, getFromDtorType(GD.getDtorType()));
-      else
+      } else
         EmitGlobalFunctionDefinition(GD, GV);
 
       if (Method->isVirtual())
@@ -1903,7 +1911,8 @@ CodeGenModule::GetOrCreateLLVMFunction(StringRef MangledName,
     addGlobalValReplacement(Entry, BC);
   }
 
-  if (MangledName == "_ZN3SSSC1Ei") {
+
+  if (MangledName == "__clang_call_terminate") {
 
     llvm::errs() << "Hey!\n";
 

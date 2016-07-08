@@ -3086,9 +3086,12 @@ public:
 
 
   /// EmitCXXGlobalVarDeclInit - Create the initializer for a C++
-  /// variable with global storage.
+  /// variable with global storage. If \a EmitInitOnly or \a EmitDtorOnly are
+  /// set to true, only the call to the initializer or destructor is emitted, respectively.
   void EmitCXXGlobalVarDeclInit(const VarDecl &D, llvm::Constant *DeclPtr,
-                                bool PerformInit);
+                                bool PerformInit,
+                                bool EmitInitOnly,
+                                bool EmitDtorOnly);
 
   llvm::Constant *createAtExitStub(const VarDecl &VD, llvm::Constant *Dtor,
                                    llvm::Constant *Addr);
@@ -3104,7 +3107,9 @@ public:
   /// once, e.g. with a static local variable or a static data member
   /// of a class template.
   void EmitCXXGuardedInit(const VarDecl &D, llvm::GlobalVariable *DeclPtr,
-                          bool PerformInit);
+                          bool PerformInit,
+                          bool EmitInitOnly = false,
+                          bool EmitDtorOnly = false);
 
   /// GenerateCXXGlobalInitFunc - Generates code for initializing global
   /// variables.
@@ -3121,7 +3126,9 @@ public:
   void GenerateCXXGlobalVarDeclInitFunc(llvm::Function *Fn,
                                         const VarDecl *D,
                                         llvm::GlobalVariable *Addr,
-                                        bool PerformInit);
+                                        bool PerformInit,
+                                        bool EmitInitOnly = false,
+                                        bool EmitDtorOnly = false);
 
   void EmitCXXConstructExpr(const CXXConstructExpr *E, AggValueSlot Dest);
   

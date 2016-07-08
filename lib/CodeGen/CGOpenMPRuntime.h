@@ -1155,6 +1155,18 @@ public:
   /// \param GD Global to scan.
   virtual bool emitTargetGlobal(GlobalDecl GD);
 
+  /// \brief Emit the entry points (target regions) that implement the initializers and destructors of the global \a D if that is meaningful for the device. Returns true if the emission was successful.
+  /// \param D Global whose initializers destructors should be emitted.
+  /// \param Addr Address of the global being initialized/destroyed.
+  /// \param PerformInit True if the initializer should be emitted.
+  virtual bool emitDeviceCtorDtor(const VarDecl &D, llvm::GlobalVariable *Addr, bool PerformInit);
+
+  /// \brief Emit the host code to launch the global initializers and destructors in the devices.
+  /// \param D Global whose initializers destructors should be emitted.
+  /// \param Addr Address of the global being initialized/destroyed.
+  /// \param PerformInit True if the initializer should be emitted.
+  virtual void emitDeviceCtorDtorLaunching(CodeGenFunction &CGF, const VarDecl &D, llvm::GlobalVariable *Addr, bool PerformInit);
+
   /// \brief Register the function definition \a GD as meaningful for the
   /// target.
   /// \param GD Global declaration whose definition is being emitted.
@@ -1164,8 +1176,10 @@ public:
   /// target.
   /// \param D Global declaration whose definition is being emitted.
   /// \param Addr Address of the global.
+  /// \param NeedsStructor Flag that specifies if the provided declaration requires a structor to be emitted.
   virtual void registerTargetVariableDefinition(const VarDecl *D,
-                                                llvm::Constant *Addr);
+                                                llvm::Constant *Addr,
+                                                bool NeedsStructor = false);
 
   /// \brief Creates the offloading descriptor in the event any target region
   /// was emitted in the current module and return the function that registers

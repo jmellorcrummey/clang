@@ -387,7 +387,9 @@ public:
 
   void EmitGuardedInit(CodeGenFunction &CGF, const VarDecl &D,
                        llvm::GlobalVariable *DeclPtr,
-                       bool PerformInit) override;
+                       bool PerformInit,
+                       bool EmitInitOnly,
+                       bool EmitDtorOnly) override;
   void registerGlobalDtor(CodeGenFunction &CGF, const VarDecl &D,
                           llvm::Constant *Dtor, llvm::Constant *Addr) override;
 
@@ -2331,7 +2333,9 @@ struct CallInitThreadAbort final : EHScopeStack::Cleanup {
 
 void MicrosoftCXXABI::EmitGuardedInit(CodeGenFunction &CGF, const VarDecl &D,
                                       llvm::GlobalVariable *GV,
-                                      bool PerformInit) {
+                                      bool PerformInit,
+                                      bool EmitInitOnly,
+                                      bool EmitDtorOnly) {
   // MSVC only uses guards for static locals.
   if (!D.isStaticLocal()) {
     assert(GV->hasWeakLinkage() || GV->hasLinkOnceLinkage());
@@ -2339,7 +2343,9 @@ void MicrosoftCXXABI::EmitGuardedInit(CodeGenFunction &CGF, const VarDecl &D,
     llvm::Function *F = CGF.CurFn;
     F->setLinkage(llvm::GlobalValue::LinkOnceODRLinkage);
     F->setComdat(CGM.getModule().getOrInsertComdat(F->getName()));
-    CGF.EmitCXXGlobalVarDeclInit(D, GV, PerformInit);
+    CGF.EmitCXXGlobalVarDeclInit(D, GV, PerformInit,
+        EmitInitOnly,
+        EmitDtorOnly);
     return;
   }
 
@@ -2439,7 +2445,9 @@ void MicrosoftCXXABI::EmitGuardedInit(CodeGenFunction &CGF, const VarDecl &D,
     CGF.EmitBlock(InitBlock);
     Builder.CreateStore(Builder.CreateOr(LI, Bit), GuardAddr);
     CGF.EHStack.pushCleanup<ResetGuardBit>(EHCleanup, GuardAddr, GuardNum);
-    CGF.EmitCXXGlobalVarDeclInit(D, GV, PerformInit);
+    CGF.EmitCXXGlobalVarDeclInit(D, GV, PerformInit,
+        EmitInitOnly,
+        EmitDtorOnly);
     CGF.PopCleanupBlock();
     Builder.CreateBr(EndBlock);
 
@@ -2484,7 +2492,9 @@ void MicrosoftCXXABI::EmitGuardedInit(CodeGenFunction &CGF, const VarDecl &D,
     // Ok, we ended up getting selected as the initializing thread.
     CGF.EmitBlock(InitBlock);
     CGF.EHStack.pushCleanup<CallInitThreadAbort>(EHCleanup, GuardAddr);
-    CGF.EmitCXXGlobalVarDeclInit(D, GV, PerformInit);
+    CGF.EmitCXXGlobalVarDeclInit(D, GV, PerformInit,
+        EmitInitOnly,
+        EmitDtorOnly);
     CGF.PopCleanupBlock();
     CGF.EmitNounwindRuntimeCall(getInitThreadFooterFn(CGM),
                                 GuardAddr.getPointer());

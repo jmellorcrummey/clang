@@ -2077,6 +2077,7 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
     // handling code for those requiring so.
     if (Opts.OpenMPIsDevice && (T.getArch() == llvm::Triple::nvptx ||
                                 T.getArch() == llvm::Triple::nvptx64)) {
+      Opts.Exceptions = 0;
       Opts.CXXExceptions = 0;
       Opts.OpenMPNoDeviceEH = 1;
     } else
