@@ -221,10 +221,8 @@
 //
 // RUN: clang-offload-bundler -type=o -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -inputs=%t.o,%t.tgt1,%t.tgt2 -outputs=%t.bundle3.o
 // RUN: llvm-readobj -sections %t.bundle3.o | FileCheck %s --check-prefix CK-OBJ
-// RUN: clang-offload-bundler -type=o -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.o,%t.res.tgt1,%t.res.tgt2 -inputs=%t.bundle3.o -unbundle
-// RUN: diff %t.bundle3.o %t.res.o
-// RUN: diff %t.tgt1 %t.res.tgt1
-// RUN: diff %t.tgt2 %t.res.tgt2
+// RUN: clang-offload-bundler -type=o -targets=openmp-powerpc64le-ibm-linux-gnu,host-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -inputs=%t.tgt1,%t.o,%t.tgt2 -outputs=%t.bundle3.unordered.o
+// RUN: llvm-readobj -sections %t.bundle3.unordered.o | FileCheck %s --check-prefix CK-OBJ-UNORDERED
 // CK-OBJ: Section {
 // CK-OBJ:  Index:
 // CK-OBJ:  Name: __CLANG_OFFLOAD_BUNDLE__host-powerpc64le-ibm-linux-gnu (
@@ -270,9 +268,67 @@
 // CK-OBJ:  AddressAlignment:
 // CK-OBJ:  EntrySize: 0
 // CK-OBJ: }
+// CK-OBJ-UNORDERED: Section {
+// CK-OBJ-UNORDERED:  Index:
+// CK-OBJ-UNORDERED:  Name: __CLANG_OFFLOAD_BUNDLE__openmp-powerpc64le-ibm-linux-gnu (
+// CK-OBJ-UNORDERED:  Type: SHT_PROGBITS (0x1)
+// CK-OBJ-UNORDERED:  Flags [ (0x2)
+// CK-OBJ-UNORDERED:    SHF_ALLOC (0x2)
+// CK-OBJ-UNORDERED:  ]
+// CK-OBJ-UNORDERED:  Address: 0x0
+// CK-OBJ-UNORDERED:  Offset: 0x
+// CK-OBJ-UNORDERED:  Size: 25
+// CK-OBJ-UNORDERED:  Link: 0
+// CK-OBJ-UNORDERED:  Info: 0
+// CK-OBJ-UNORDERED:  AddressAlignment:
+// CK-OBJ-UNORDERED:  EntrySize: 0
+// CK-OBJ-UNORDERED: }
+// CK-OBJ-UNORDERED: Section {
+// CK-OBJ-UNORDERED:  Index:
+// CK-OBJ-UNORDERED:  Name: __CLANG_OFFLOAD_BUNDLE__host-powerpc64le-ibm-linux-gnu (
+// CK-OBJ-UNORDERED:  Type: SHT_PROGBITS (0x1)
+// CK-OBJ-UNORDERED:  Flags [ (0x2)
+// CK-OBJ-UNORDERED:    SHF_ALLOC (0x2)
+// CK-OBJ-UNORDERED:  ]
+// CK-OBJ-UNORDERED:  Address: 0x0
+// CK-OBJ-UNORDERED:  Offset: 0x
+// CK-OBJ-UNORDERED:  Size: 1
+// CK-OBJ-UNORDERED:  Link: 0
+// CK-OBJ-UNORDERED:  Info: 0
+// CK-OBJ-UNORDERED:  AddressAlignment:
+// CK-OBJ-UNORDERED:  EntrySize: 0
+// CK-OBJ-UNORDERED: }
+// CK-OBJ-UNORDERED: Section {
+// CK-OBJ-UNORDERED:  Index:
+// CK-OBJ-UNORDERED:  Name: __CLANG_OFFLOAD_BUNDLE__openmp-x86_64-pc-linux-gnu (
+// CK-OBJ-UNORDERED:  Type: SHT_PROGBITS (0x1)
+// CK-OBJ-UNORDERED:  Flags [ (0x2)
+// CK-OBJ-UNORDERED:    SHF_ALLOC (0x2)
+// CK-OBJ-UNORDERED:  ]
+// CK-OBJ-UNORDERED:  Address: 0x0
+// CK-OBJ-UNORDERED:  Offset: 0x
+// CK-OBJ-UNORDERED:  Size: 25
+// CK-OBJ-UNORDERED:  Link: 0
+// CK-OBJ-UNORDERED:  Info: 0
+// CK-OBJ-UNORDERED:  AddressAlignment:
+// CK-OBJ-UNORDERED:  EntrySize: 0
+// CK-OBJ-UNORDERED: }
+
+// RUN: clang-offload-bundler -type=o -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.o,%t.res.tgt1,%t.res.tgt2 -inputs=%t.bundle3.o -unbundle
+// RUN: diff %t.bundle3.o %t.res.o
+// RUN: diff %t.tgt1 %t.res.tgt1
+// RUN: diff %t.tgt2 %t.res.tgt2
+// RUN: clang-offload-bundler -type=o -targets=openmp-powerpc64le-ibm-linux-gnu,host-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.tgt1,%t.res.o,%t.res.tgt2 -inputs=%t.bundle3.o -unbundle
+// RUN: diff %t.bundle3.o %t.res.o
+// RUN: diff %t.tgt1 %t.res.tgt1
+// RUN: diff %t.tgt2 %t.res.tgt2
 
 // Check if we can unbundle a file with no magic strings.
 // RUN: clang-offload-bundler -type=o -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.o,%t.res.tgt1,%t.res.tgt2 -inputs=%t.o -unbundle
+// RUN: diff %t.o %t.res.o
+// RUN: diff %t.empty %t.res.tgt1
+// RUN: diff %t.empty %t.res.tgt2
+// RUN: clang-offload-bundler -type=o -targets=openmp-powerpc64le-ibm-linux-gnu,host-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.tgt1,%t.res.o,%t.res.tgt2 -inputs=%t.o -unbundle
 // RUN: diff %t.o %t.res.o
 // RUN: diff %t.empty %t.res.tgt1
 // RUN: diff %t.empty %t.res.tgt2

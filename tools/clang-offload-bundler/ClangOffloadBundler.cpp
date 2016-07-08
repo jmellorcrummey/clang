@@ -75,6 +75,9 @@ static cl::opt<bool>
 /// Magic string that marks the existence of offloading data.
 #define OFFLOAD_BUNDLER_MAGIC_STR "__CLANG_OFFLOAD_BUNDLE__"
 
+/// The index of the host input in the list of inputs.
+static unsigned HostInputIndex = ~0u;
+
 /// Path to the current binary.
 static std::string BundlerExecutable;
 
@@ -420,12 +423,14 @@ public:
 
   void WriteHeader(raw_fd_ostream &OS,
                    ArrayRef<std::unique_ptr<MemoryBuffer>> Inputs) {
+    assert(HostInputIndex != ~0u && "Host input index not defined.");
+
     // Record number of inputs.
     NumberOfInputs = Inputs.size();
 
     // Create an LLVM module to have the content we need to bundle.
     auto *M = new Module("clang-offload-bundle", VMContext);
-    M->setTargetTriple(getTriple(TargetNames.front()));
+    M->setTargetTriple(getTriple(TargetNames[HostInputIndex]));
     AuxModule.reset(M);
   }
   void WriteBundleStart(raw_fd_ostream &OS, StringRef TargetTriple) {
@@ -438,6 +443,7 @@ public:
   bool WriteBundleEnd(raw_fd_ostream &OS, StringRef TargetTriple) {
     assert(NumberOfProcessedInputs <= NumberOfInputs &&
            "Processing more inputs that actually exist!");
+    assert(HostInputIndex != ~0u && "Host input index not defined.");
 
     // If this is not the last output, we don't have to do anything.
     if (NumberOfProcessedInputs != NumberOfInputs)
@@ -477,14 +483,14 @@ public:
     // Do the incremental linking. We write to the output file directly. So, we
     // close it and use the name to pass down to clang.
     OS.close();
-    SmallString<128> TargetName = getTriple(TargetNames.front());
+    SmallString<128> TargetName = getTriple(TargetNames[HostInputIndex]);
     const char *ClangArgs[] = {"clang",
                                "-r",
                                "-target",
                                TargetName.c_str(),
                                "-o",
                                OutputFileNames.front().c_str(),
-                               InputFileNames.front().c_str(),
+                               InputFileNames[HostInputIndex].c_str(),
                                BitcodeFileName.c_str(),
                                "-nostdlib",
                                nullptr};
@@ -510,10 +516,11 @@ public:
     SectionName += CurrentTriple;
 
     // Create the constant with the content of the section. For the input we are
-    // bundling into (the first input), this is just a place-holder, so a single
+    // bundling into (the host input), this is just a place-holder, so a single
     // byte is sufficient.
+    assert(HostInputIndex != ~0u && "Host input index undefined??");
     Constant *Content;
-    if (NumberOfProcessedInputs == 1) {
+    if (NumberOfProcessedInputs == HostInputIndex + 1) {
       uint8_t Byte[] = {0};
       Content = ConstantDataArray::get(VMContext, Byte);
     } else
@@ -635,8 +642,12 @@ static FileHandler *CreateObjectFileHandler(MemoryBuffer &FirstInput) {
   Expected<std::unique_ptr<Binary>> BinaryOrErr = createBinary(FirstInput);
 
   // Failed to open the input as a known binary. Use the default binary handler.
-  if (!BinaryOrErr)
+  if (!BinaryOrErr) {
+    // We don't really care about the error (we just consume it), if we could
+    // not get a valid device binary object we use the default binary handler.
+    consumeError(BinaryOrErr.takeError());
     return new BinaryFileHandler();
+  }
 
   // We only support regular object files. If this is not an object file,
   // default to the binary handler. The handler will be owned by the client of
@@ -701,9 +712,10 @@ static bool BundleFiles() {
     InputBuffers[Idx++] = std::move(CodeOrErr.get());
   }
 
-  // Get the file handler.
+  // Get the file handler. We use the host buffer as reference.
+  assert(HostInputIndex != ~0u && "Host input index undefined??");
   std::unique_ptr<FileHandler> FH;
-  FH.reset(CreateFileHandler(*InputBuffers.front().get()));
+  FH.reset(CreateFileHandler(*InputBuffers[HostInputIndex].get()));
 
   // Quit if we don't have a handler.
   if (!FH.get())
@@ -877,6 +889,7 @@ int main(int argc, const char **argv) {
 
   // Verify that the offload kinds and triples are known. We also check that we
   // have exactly one host target.
+  unsigned Index = 0u;
   unsigned HostTargetNum = 0u;
   for (StringRef Target : TargetNames) {
     StringRef Kind;
@@ -904,8 +917,13 @@ int main(int argc, const char **argv) {
       llvm::errs() << ".\n";
     }
 
-    if (KindIsValid && Kind == "host")
+    if (KindIsValid && Kind == "host") {
       ++HostTargetNum;
+      // Save the index of the input that refers to the host.
+      HostInputIndex = Index;
+    }
+
+    ++Index;
   }
 
   if (HostTargetNum != 1) {
