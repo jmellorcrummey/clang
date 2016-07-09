@@ -2823,9 +2823,9 @@ InputInfo Driver::BuildJobsForAction(
   if (BoundArch) {
     TriplePlusArch += "-";
     TriplePlusArch += BoundArch;
-    TriplePlusArch += "-";
-    TriplePlusArch += A->getOffloadingKindPrefix();
   }
+  TriplePlusArch += "-";
+  TriplePlusArch += A->getOffloadingKindPrefix();
   std::pair<const Action *, std::string> ActionTC = {A, TriplePlusArch};
   auto CachedResult = CachedResults.find(ActionTC);
   if (CachedResult != CachedResults.end()) {
