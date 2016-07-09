@@ -75,6 +75,9 @@ static cl::opt<bool>
 /// Magic string that marks the existence of offloading data.
 #define OFFLOAD_BUNDLER_MAGIC_STR "__CLANG_OFFLOAD_BUNDLE__"
 
+/// The index of the host input in the list of inputs.
+static unsigned HostInputIndex = ~0u;
+
 /// Obtain the offload kind and real machine triple out of the target
 /// information specified by the user.
 static void getOffloadKindAndTriple(StringRef Target, StringRef &OffloadKind,
@@ -122,28 +125,28 @@ public:
   virtual ~FileHandler() {}
 };
 
-// Handler for binary files. The bundled file will have the following format
-// (all integers are stored in little-endian format):
-//
-// "OFFLOAD_BUNDLER_MAGIC_STR" (ASCII encoding of the string)
-//
-// NumberOfOffloadBundles (8-byte integer)
-//
-// OffsetOfBundle1 (8-byte integer)
-// SizeOfBundle1 (8-byte integer)
-// NumberOfBytesInTripleOfBundle1 (8-byte integer)
-// TripleOfBundle1 (byte length defined before)
-//
-// ...
-//
-// OffsetOfBundleN (8-byte integer)
-// SizeOfBundleN (8-byte integer)
-// NumberOfBytesInTripleOfBundleN (8-byte integer)
-// TripleOfBundleN (byte length defined before)
-//
-// Bundle1
-// ...
-// BundleN
+/// Handler for binary files. The bundled file will have the following format
+/// (all integers are stored in little-endian format):
+///
+/// "OFFLOAD_BUNDLER_MAGIC_STR" (ASCII encoding of the string)
+///
+/// NumberOfOffloadBundles (8-byte integer)
+///
+/// OffsetOfBundle1 (8-byte integer)
+/// SizeOfBundle1 (8-byte integer)
+/// NumberOfBytesInTripleOfBundle1 (8-byte integer)
+/// TripleOfBundle1 (byte length defined before)
+///
+/// ...
+///
+/// OffsetOfBundleN (8-byte integer)
+/// SizeOfBundleN (8-byte integer)
+/// NumberOfBytesInTripleOfBundleN (8-byte integer)
+/// TripleOfBundleN (byte length defined before)
+///
+/// Bundle1
+/// ...
+/// BundleN
 
 /// Read 8-byte integers to/from a buffer in little-endian format.
 static uint64_t Read8byteIntegerFromBuffer(StringRef Buffer, size_t pos) {
@@ -309,15 +312,15 @@ public:
   ~BinaryFileHandler() {}
 };
 
-// Handler for text files. The bundled file will have the following format.
-//
-// "Comment OFFLOAD_BUNDLER_MAGIC_STR__START__ triple"
-// Bundle 1
-// "Comment OFFLOAD_BUNDLER_MAGIC_STR__END__ triple"
-// ...
-// "Comment OFFLOAD_BUNDLER_MAGIC_STR__START__ triple"
-// Bundle N
-// "Comment OFFLOAD_BUNDLER_MAGIC_STR__END__ triple"
+/// Handler for text files. The bundled file will have the following format.
+///
+/// "Comment OFFLOAD_BUNDLER_MAGIC_STR__START__ triple"
+/// Bundle 1
+/// "Comment OFFLOAD_BUNDLER_MAGIC_STR__END__ triple"
+/// ...
+/// "Comment OFFLOAD_BUNDLER_MAGIC_STR__START__ triple"
+/// Bundle N
+/// "Comment OFFLOAD_BUNDLER_MAGIC_STR__END__ triple"
 class TextFileHandler final : public FileHandler {
   /// String that begins a line comment.
   StringRef Comment;
@@ -452,9 +455,10 @@ static bool BundleFiles() {
     InputBuffers[Idx++] = std::move(CodeOrErr.get());
   }
 
-  // Get the file handler.
+  // Get the file handler. We use the host buffer as reference.
+  assert(HostInputIndex != ~0u && "Host input index undefined??");
   std::unique_ptr<FileHandler> FH;
-  FH.reset(CreateFileHandler(*InputBuffers.front().get()));
+  FH.reset(CreateFileHandler(*InputBuffers[HostInputIndex].get()));
 
   // Quit if we don't have a handler.
   if (!FH.get())
@@ -626,6 +630,7 @@ int main(int argc, const char **argv) {
 
   // Verify that the offload kinds and triples are known. We also check that we
   // have exactly one host target.
+  unsigned Index = 0u;
   unsigned HostTargetNum = 0u;
   for (StringRef Target : TargetNames) {
     StringRef Kind;
@@ -653,8 +658,13 @@ int main(int argc, const char **argv) {
       llvm::errs() << ".\n";
     }
 
-    if (KindIsValid && Kind == "host")
+    if (KindIsValid && Kind == "host") {
       ++HostTargetNum;
+      // Save the index of the input that refers to the host.
+      HostInputIndex = Index;
+    }
+
+    ++Index;
   }
 
   if (HostTargetNum != 1) {
