@@ -1263,10 +1263,10 @@ void CodeGenModule::EmitDeferred() {
     // emitted that then need those vtables.
     assert(DeferredVTables.empty());
   }
-  
-  if (LangOpts.OpenMP && !LangOpts.OpenMPIsDevice){
-	  for(auto &GD : OpenMPRuntime->TrackedDecls)
-		  OpenMPRuntime->registerTargetFunctionDefinition(GD.second);
+
+  if (LangOpts.OpenMP && !LangOpts.OpenMPIsDevice) {
+    for (auto &GD : OpenMPRuntime->TrackedDecls)
+      OpenMPRuntime->registerTargetFunctionDefinition(GD.second);
   }
 
   // Stop if we're out of both deferred vtables and deferred declarations.
@@ -1570,7 +1570,7 @@ void CodeGenModule::EmitGlobal(GlobalDecl GD) {
             return;
           }
         }
-      }
+    }
 
     StringRef MangledName = getMangledName(GD);
     OpenMPRuntime->TrackedDecls[MangledName] = GD;

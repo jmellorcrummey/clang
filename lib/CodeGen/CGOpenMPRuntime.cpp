@@ -6423,7 +6423,7 @@ void CGOpenMPRuntime::registerTargetFunctionDefinition(GlobalDecl GD) {
       CGM.getLangOpts().OMPTargetTriples.empty())
     return;
 
-  if(auto *FD = dyn_cast<FunctionDecl>(GD.getDecl())){
+  if (auto *FD = dyn_cast<FunctionDecl>(GD.getDecl())) {
     // Only declare target functions are registered.
     if (!IsDeclareTargetDeclaration(FD))
       return;

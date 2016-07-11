@@ -617,13 +617,13 @@ public:
   virtual ~CGOpenMPRuntime() {}
   virtual void clear();
 
-
   /// This contains all the decls which doesn't specified
   /// in declare target region / which are deferred for device code emission.
   /// If a decl is used in target region
-  /// implicitly without specifying under declare target, deferred decl is emitted
+  /// implicitly without specifying under declare target, deferred decl is
+  /// emitted
   /// during Codegen::Release for device codegen.
-  llvm::DenseMap<StringRef,GlobalDecl> TrackedDecls;
+  llvm::DenseMap<StringRef, GlobalDecl> TrackedDecls;
 
   /// \brief Registers the context of a parallel region with the runtime
   /// codegen implementation.
