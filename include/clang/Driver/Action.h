@@ -67,8 +67,8 @@ public:
     VerifyDebugInfoJobClass,
     VerifyPCHJobClass,
 
-    JobClassFirst=PreprocessJobClass,
-    JobClassLast=VerifyPCHJobClass
+    JobClassFirst = PreprocessJobClass,
+    JobClassLast = VerifyPCHJobClass
   };
 
   // The offloading kind determines if this action is binded to a particular
@@ -206,6 +206,7 @@ public:
 /// its dependences.
 class OffloadAction final : public Action {
   virtual void anchor();
+
 public:
   /// Type used to communicate device actions. It associates bound architecture,
   /// toolchain, and offload kind to each action.

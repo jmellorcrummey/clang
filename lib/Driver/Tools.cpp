@@ -11181,7 +11181,8 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
 
   // Obtain architecture from the action.
   CudaArch gpu_arch = StringToCudaArch(JA.getOffloadingArch());
-  assert(gpu_arch != CudaArch::UNKNOWN && "Device action expected to have an architecture.");
+  assert(gpu_arch != CudaArch::UNKNOWN &&
+         "Device action expected to have an architecture.");
 
   // Check that our installation's ptxas supports gpu_arch.
   if (!Args.hasArg(options::OPT_no_cuda_version_check)) {

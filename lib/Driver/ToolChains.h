@@ -877,12 +877,6 @@ public:
     return CudaInstallation;
   }
 
-  // Converts CUDA GPU architecture, e.g. "sm_21", to its corresponding virtual
-  // compute arch, e.g. "compute_20".  Returns null if the input arch is null or
-  // doesn't match an existing arch.
-  static const char *GpuArchToComputeName(const char *ArchName);
-
-
 protected:
   Tool *buildAssembler() const override;  // ptxas
   Tool *buildLinker() const override;     // fatbinary (ok, not really a linker)

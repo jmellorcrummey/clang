@@ -4768,21 +4768,6 @@ CudaToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
   return DAL;
 }
 
-const char *CudaToolChain::GpuArchToComputeName(const char *ArchName) {
-  if (!ArchName)
-    return nullptr;
-  return llvm::StringSwitch<const char *>(ArchName)
-      .Cases("sm_20", "sm_21", "compute_20")
-      .Case("sm_30", "compute_30")
-      .Case("sm_32", "compute_32")
-      .Case("sm_35", "compute_35")
-      .Case("sm_37", "compute_37")
-      .Case("sm_50", "compute_50")
-      .Case("sm_52", "compute_52")
-      .Case("sm_53", "compute_53")
-      .Default(nullptr);
-}
-
 Tool *CudaToolChain::buildAssembler() const {
   return new tools::NVPTX::Assembler(*this);
 }
