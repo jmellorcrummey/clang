@@ -10,6 +10,7 @@
 #ifndef LLVM_CLANG_DRIVER_ACTION_H
 #define LLVM_CLANG_DRIVER_ACTION_H
 
+#include "clang/Basic/Cuda.h"
 #include "clang/Driver/Types.h"
 #include "clang/Driver/Util.h"
 #include "llvm/ADT/STLExtras.h"

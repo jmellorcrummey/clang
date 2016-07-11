@@ -23,6 +23,7 @@
 #include "clang/Driver/ToolChain.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/StringSwitch.h"
@@ -1415,24 +1416,25 @@ static Action *buildCudaActions(Compilation &C, DerivedArgList &Args,
   }
 
   // Collect all cuda_gpu_arch parameters, removing duplicates.
-  SmallVector<const char *, 4> GpuArchList;
-  llvm::StringSet<> GpuArchNames;
+  SmallVector<CudaArch, 4> GpuArchList;
+  llvm::SmallSet<CudaArch, 4> GpuArchs;
   for (Arg *A : Args) {
     if (!A->getOption().matches(options::OPT_cuda_gpu_arch_EQ))
       continue;
     A->claim();
 
-    const auto& Arch = A->getValue();
-    if (!toolchains::CudaToolChain::GpuArchToComputeName(Arch))
-      C.getDriver().Diag(clang::diag::err_drv_cuda_bad_gpu_arch) << Arch;
-    else if (GpuArchNames.insert(Arch).second)
+    const auto &ArchStr = A->getValue();
+    CudaArch Arch = StringToCudaArch(ArchStr);
+    if (Arch == CudaArch::UNKNOWN)
+      C.getDriver().Diag(clang::diag::err_drv_cuda_bad_gpu_arch) << ArchStr;
+    else if (GpuArchs.insert(Arch).second)
       GpuArchList.push_back(Arch);
   }
 
   // Default to sm_20 which is the lowest common denominator for supported GPUs.
   // sm_20 code should work correctly, if suboptimally, on all newer GPUs.
   if (GpuArchList.empty())
-    GpuArchList.push_back("sm_20");
+    GpuArchList.push_back(CudaArch::SM_20);
 
   // Replicate inputs for each GPU architecture.
   Driver::InputList CudaDeviceInputs;
@@ -1470,7 +1472,7 @@ static Action *buildCudaActions(Compilation &C, DerivedArgList &Args,
 
     for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I) {
       OffloadAction::DeviceDependences DDep;
-      DDep.add(*CudaDeviceActions[I], *CudaTC, GpuArchList[I],
+      DDep.add(*CudaDeviceActions[I], *CudaTC, CudaArchToString(GpuArchList[I]),
                Action::OFK_Cuda);
       Actions.push_back(
           C.MakeAction<OffloadAction>(DDep, CudaDeviceActions[I]->getType()));
@@ -1496,7 +1498,7 @@ static Action *buildCudaActions(Compilation &C, DerivedArgList &Args,
 
     for (auto &A : {AssembleAction, BackendAction}) {
       OffloadAction::DeviceDependences DDep;
-      DDep.add(*A, *CudaTC, GpuArchList[I], Action::OFK_Cuda);
+      DDep.add(*A, *CudaTC, CudaArchToString(GpuArchList[I]), Action::OFK_Cuda);
       DeviceActions.push_back(C.MakeAction<OffloadAction>(DDep, A->getType()));
     }
   }
