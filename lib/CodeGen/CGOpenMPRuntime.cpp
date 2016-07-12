@@ -7054,3 +7054,11 @@ void CGOpenMPRuntime::emitDoacrossOrdered(CodeGenFunction &CGF,
   CGF.EmitRuntimeCall(RTLFn, Args);
 }
 
+void CGOpenMPRuntime::addTrackedFunction(StringRef MangledName, GlobalDecl GD){
+	TrackedDecls[MangledName] = GD;
+}
+
+void CGOpenMPRuntime::registerTrackedFunction(){
+    for (auto &GD : TrackedDecls)
+      registerTargetFunctionDefinition(GD.second);
+}

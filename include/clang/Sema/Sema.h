@@ -9321,20 +9321,6 @@ public:
                                                 unsigned ByteNo) const;
 
 private:
-  // Visit actual function body and its associated nested functions bodies.
-  // Mark automatically functions declarations with OMPDeclareTargetDeclAttr
-  // when -fopenmp-implicit-declare-target is enable.
-  class CheckFunctionCalls : public RecursiveASTVisitor<CheckFunctionCalls> {
-    Sema &SemaRef;
-
-  public:
-    CheckFunctionCalls(Sema &SemaReference) : SemaRef(SemaReference){};
-
-    bool TraverseLambdaCapture(LambdaExpr *LE, const LambdaCapture *C);
-
-    bool VisitCallExpr(CallExpr *Call);
-  };
-
   void CheckArrayAccess(const Expr *BaseExpr, const Expr *IndexExpr,
                         const ArraySubscriptExpr *ASE=nullptr,
                         bool AllowOnePastEnd=true, bool IndexNegated=false);

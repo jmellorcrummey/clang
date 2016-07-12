@@ -1265,8 +1265,7 @@ void CodeGenModule::EmitDeferred() {
   }
 
   if (LangOpts.OpenMP && !LangOpts.OpenMPIsDevice) {
-    for (auto &GD : OpenMPRuntime->TrackedDecls)
-      OpenMPRuntime->registerTargetFunctionDefinition(GD.second);
+	  OpenMPRuntime->registerTrackedFunction();
   }
 
   // Stop if we're out of both deferred vtables and deferred declarations.
@@ -1563,8 +1562,6 @@ void CodeGenModule::EmitGlobal(GlobalDecl GD) {
     if (LangOpts.OpenMPIsDevice) {
       if (const auto *FD = dyn_cast<FunctionDecl>(Global))
         if (FD->isThisDeclarationADefinition()) {
-
-          // They are directly emitted.
           if (OpenMPRuntime->MustBeEmittedForDevice(GD)) {
             EmitGlobalDefinition(GD);
             return;
@@ -1572,8 +1569,10 @@ void CodeGenModule::EmitGlobal(GlobalDecl GD) {
         }
     }
 
-    StringRef MangledName = getMangledName(GD);
-    OpenMPRuntime->TrackedDecls[MangledName] = GD;
+    if(getLangOpts().OpenMPImplicitDeclareTarget && ! LangOpts.OpenMPIsDevice){
+      StringRef MangledName = getMangledName(GD);
+      OpenMPRuntime->addTrackedFunction( MangledName,  GD) ;
+    }
 
     // If this is OpenMP device, check if it is legal to emit this global
     // normally.

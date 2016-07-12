@@ -6066,7 +6066,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(Args.MakeArgString(Inputs.back().getFilename()));
   }
 
-  // OpenMP 4.5 standart does not allow to use any declaration in target region
+  // OpenMP 4.5 standard does not allow to use any declaration in target region
   // unless they are not specified inside of declare target region.
   // Implicit declare target is an extension to enable using
   // any declaration in target region.

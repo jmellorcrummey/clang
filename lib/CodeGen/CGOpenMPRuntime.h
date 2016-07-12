@@ -612,18 +612,20 @@ private:
                             llvm::Value *TaskFunction, QualType SharedsTy,
                             Address Shareds, const OMPTaskDataTy &Data);
 
+  /// This contains all the decls which were not specified under declare target region / which are deferred for device code emission.
+  /// If a decl is used in target region implicitly without specifying under declare target, deferred decl is emitted during Codegen::Release for device codegen.
+  llvm::StringMap<GlobalDecl> TrackedDecls;
+
 public:
   explicit CGOpenMPRuntime(CodeGenModule &CGM);
   virtual ~CGOpenMPRuntime() {}
   virtual void clear();
 
-  /// This contains all the decls which doesn't specified
-  /// in declare target region / which are deferred for device code emission.
-  /// If a decl is used in target region
-  /// implicitly without specifying under declare target, deferred decl is
-  /// emitted
-  /// during Codegen::Release for device codegen.
-  llvm::DenseMap<StringRef, GlobalDecl> TrackedDecls;
+  /// \brief The function is added tracked functions list.
+  virtual void addTrackedFunction(StringRef MangledName, GlobalDecl GD);
+
+  /// \brief The function register all tracked functions if they have OMPDeclareTargetDeclAttr
+  virtual void registerTrackedFunction();
 
   /// \brief Registers the context of a parallel region with the runtime
   /// codegen implementation.
@@ -1163,8 +1165,8 @@ public:
   /// \param GD Global to scan.
   virtual bool emitTargetGlobal(GlobalDecl GD);
 
-  /// \brief Check whether the function definition in \a GD as necessary
-  /// to emit in device.
+  /// \brief Check whether the function definition in \a GD must be emitted for
+  /// the device or not.
   /// \param GD Global declaration whose definition is being emitted.
   virtual bool MustBeEmittedForDevice(GlobalDecl GD);
 
