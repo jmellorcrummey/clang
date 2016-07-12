@@ -6416,12 +6416,18 @@ void Clang::AddClangCLArgs(const ArgList &Args, types::ID InputType,
     CmdArgs.push_back(Args.MakeArgString(Twine(LangOptions::SSPStrong)));
   }
 
-  // Emit CodeView if -Z7 is present.
-  *EmitCodeView = Args.hasArg(options::OPT__SLASH_Z7);
-  if (*EmitCodeView)
-    *DebugInfoKind = codegenoptions::LimitedDebugInfo;
-  if (*EmitCodeView)
+  // Emit CodeView if -Z7 or -Zd are present.
+  if (Arg *DebugInfoArg =
+          Args.getLastArg(options::OPT__SLASH_Z7, options::OPT__SLASH_Zd)) {
+    *EmitCodeView = true;
+    if (DebugInfoArg->getOption().matches(options::OPT__SLASH_Z7))
+      *DebugInfoKind = codegenoptions::LimitedDebugInfo;
+    else
+      *DebugInfoKind = codegenoptions::DebugLineTablesOnly;
     CmdArgs.push_back("-gcodeview");
+  } else {
+    *EmitCodeView = false;
+  }
 
   const Driver &D = getToolChain().getDriver();
   EHFlags EH = parseClangCLEHFlags(D, Args);
@@ -10183,7 +10189,8 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   CmdArgs.push_back("-nologo");
 
-  if (Args.hasArg(options::OPT_g_Group, options::OPT__SLASH_Z7))
+  if (Args.hasArg(options::OPT_g_Group, options::OPT__SLASH_Z7,
+                  options::OPT__SLASH_Zd))
     CmdArgs.push_back("-debug");
 
   bool DLL = Args.hasArg(options::OPT__SLASH_LD, options::OPT__SLASH_LDd,
