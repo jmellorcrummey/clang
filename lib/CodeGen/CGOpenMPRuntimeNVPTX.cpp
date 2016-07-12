@@ -568,8 +568,11 @@ void CGOpenMPRuntimeNVPTX::syncCTAThreads(CodeGenFunction &CGF) const {
 // The runtime always starts thread_limit+warpSize threads.
 llvm::Value *CGOpenMPRuntimeNVPTX::getThreadLimit(CodeGenFunction &CGF) const {
   CGBuilderTy &Bld = CGF.Builder;
-  return Bld.CreateSub(getNVPTXNumThreads(CGF), getNVPTXWarpSize(CGF),
-                       "thread_limit");
+  if (IsSPMDExecutionMode())
+    return getNVPTXNumThreads(CGF);
+  else
+    return Bld.CreateSub(getNVPTXNumThreads(CGF), getNVPTXWarpSize(CGF),
+                         "thread_limit");
 }
 
 /// \brief Get the thread id of the OMP master thread.
@@ -819,34 +822,27 @@ void CGOpenMPRuntimeNVPTX::emitGenericEntryFooter(CodeGenFunction &CGF,
   CGF.EmitBlock(EST.ExitBB);
 }
 
+// Create a unique global variable to indicate the execution mode of this target
+// region. This variable is picked up by the offload library to setup the device
+// before kernel launch.
+static void SetPropertyExecutionMode(CodeGenModule &CGM, StringRef Name,
+                                     CGOpenMPRuntimeNVPTX::ExecutionMode Mode) {
+  (void)new llvm::GlobalVariable(
+      CGM.getModule(), CGM.Int8Ty, /*isConstant=*/true,
+      llvm::GlobalValue::ExternalLinkage,
+      llvm::ConstantInt::get(CGM.Int8Ty, Mode), Name + Twine("_exec_mode"));
+}
+
 void CGOpenMPRuntimeNVPTX::emitSPMDEntryHeader(
     CodeGenFunction &CGF, EntryFunctionState &EST,
     const OMPExecutableDirective &D) {
   auto &Bld = CGF.Builder;
 
   // Setup BBs in entry function.
-  llvm::BasicBlock *OMPInitBB = CGF.createBasicBlock(".omp.init");
   llvm::BasicBlock *ExecuteBB = CGF.createBasicBlock(".execute");
   EST.ExitBB = CGF.createBasicBlock(".sleepy.hollow");
 
-  // Get the thread limit.
-  llvm::Value *ThreadLimit = getThreadLimit(CGF);
-  // Current thread's identifier.
-  llvm::Value *ThreadID = getNVPTXThreadID(CGF);
-
-  // The runtime starts cuda threads as follows:
-  //   - the last warp is reserved for the master warp but is not used in SPMD
-  //     mode.
-  //   - it always starts thread_limit + warpSize number of cuda threads.
-  //
-  // In SPMD mode we simply ignore all cuda threads in excess of the
-  // thread_limit.
-  llvm::Value *ThreadLimitExcess =
-      Bld.CreateICmpUGE(ThreadID, ThreadLimit, "thread_limit_excess");
-  Bld.CreateCondBr(ThreadLimitExcess, EST.ExitBB, OMPInitBB);
-
   // Initialize the OMP state in the runtime; called by all active threads.
-  CGF.EmitBlock(OMPInitBB);
   llvm::Value *Mode = Bld.getInt16(EST.RequiresOMPRuntime ? 0 : 1);
   llvm::Value *Args[] = {getThreadLimit(CGF), Mode};
   CGF.EmitRuntimeCall(
@@ -1318,9 +1314,9 @@ void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
   assert(!ParentName.empty() && "Invalid target region parent name!");
 
   OpenMPDirectiveKind DirectiveKind = D.getDirectiveKind();
-  CGOpenMPRuntimeNVPTX::ExecutionMode mode =
+  CGOpenMPRuntimeNVPTX::ExecutionMode Mode =
       getExecutionMode(CGM, DirectiveKind);
-  switch (mode) {
+  switch (Mode) {
   case CGOpenMPRuntimeNVPTX::ExecutionMode::GENERIC:
     emitGenericKernel(D, ParentName, OutlinedFn, OutlinedFnID, IsOffloadEntry,
                       CodeGen);
@@ -1333,6 +1329,8 @@ void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
     llvm_unreachable(
         "Unknown programming model for OpenMP directive on NVPTX target.");
   }
+
+  SetPropertyExecutionMode(CGM, OutlinedFn->getName(), Mode);
 }
 
 void CGOpenMPRuntimeNVPTX::emitNumThreadsClause(CodeGenFunction &CGF,
