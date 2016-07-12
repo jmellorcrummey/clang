@@ -843,7 +843,7 @@ void CGOpenMPRuntimeNVPTX::emitSPMDEntryHeader(
   EST.ExitBB = CGF.createBasicBlock(".sleepy.hollow");
 
   // Initialize the OMP state in the runtime; called by all active threads.
-  llvm::Value *Mode = Bld.getInt16(EST.RequiresOMPRuntime ? 0 : 1);
+  llvm::Value *Mode = Bld.getInt16(EST.RequiresOMPRuntime ? 1 : 0);
   llvm::Value *Args[] = {getThreadLimit(CGF), Mode};
   CGF.EmitRuntimeCall(
       createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_spmd_kernel_init), Args);
