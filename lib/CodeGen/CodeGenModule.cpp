@@ -1265,7 +1265,7 @@ void CodeGenModule::EmitDeferred() {
   }
 
   if (LangOpts.OpenMP && !LangOpts.OpenMPIsDevice) {
-	  OpenMPRuntime->registerTrackedFunction();
+    OpenMPRuntime->registerTrackedFunction();
   }
 
   // Stop if we're out of both deferred vtables and deferred declarations.
@@ -1569,9 +1569,9 @@ void CodeGenModule::EmitGlobal(GlobalDecl GD) {
         }
     }
 
-    if(getLangOpts().OpenMPImplicitDeclareTarget && ! LangOpts.OpenMPIsDevice){
+    if (getLangOpts().OpenMPImplicitDeclareTarget && !LangOpts.OpenMPIsDevice) {
       StringRef MangledName = getMangledName(GD);
-      OpenMPRuntime->addTrackedFunction( MangledName,  GD) ;
+      OpenMPRuntime->addTrackedFunction(MangledName, GD);
     }
 
     // If this is OpenMP device, check if it is legal to emit this global

@@ -11720,7 +11720,8 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
     DiscardCleanupsInEvaluationContext();
   }
 
-  // In case of OpenMPImplicitDeclareTarget, semantically parsed function body is visited to mark inner callexpr with OMPDeclareTargetDeclAttr attribute.
+  // In case of OpenMPImplicitDeclareTarget, semantically parsed function body
+  // is visited to mark inner callexpr with OMPDeclareTargetDeclAttr attribute.
   if (getLangOpts().OpenMP && getLangOpts().OpenMPImplicitDeclareTarget)
     checkDeclImplicitlyUsedOpenMPTargetContext(dcl);
 

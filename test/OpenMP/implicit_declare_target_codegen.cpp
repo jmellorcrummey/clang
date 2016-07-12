@@ -1,15 +1,14 @@
-
-// Test implicit function offload codegen
-
+// expected-no-diagnostics
 #ifndef HEADER
 #define HEADER
-// RUN: %clang_cc1 -DCK1 -verify -fopenmp -x c++ -triple powerpc64le-unknown-unknown -fomptargets=nvptx64-nvidia-cuda -emit-llvm-bc %s -o %t-ppc-host.bc
-// RUN: %clang_cc1 -DCK1  -verify -fopenmp -x c++ -triple nvptx64-unknown-unknown -fomptargets=nvptx64-nvidia-cuda -emit-llvm %s -fopenmp-is-device -fomp-host-ir-file-path %t-ppc-host.bc -o - | FileCheck %s --check-prefix CK1 --check-prefix CK1-64
-// expected-no-diagnostics
+// Test implicit declare target extension
+///==========================================================================///
+// RUN: %clang_cc1 -fopenmp-implicit-declare-target -DCK1 -verify -fopenmp -x c++ -triple powerpc64le-unknown-unknown -fopenmp-targets=powerpc64le-ibm-linux-gnu -emit-llvm-bc %s -o %t-ppc-host.bc
+// RUN: %clang_cc1 -fopenmp-implicit-declare-target -DCK1  -verify -fopenmp -x c++ -triple nvptx64-unknown-unknown -fopenmp-targets=nvptx64-nvidia-cuda -emit-llvm %s -fopenmp-is-device -fopenmp-host-ir-file-path %t-ppc-host.bc -o - | FileCheck %s --check-prefix CK1 --check-prefix CK1-64
 #ifdef CK1
+
 template<typename t>
 t bar(t i);
-
 static int foo(int i) { return bar<int>(i); }
 
 extern int baz(int i);
@@ -25,15 +24,15 @@ int fooz()
     foo(i);
     baz(i);
   }
+  // CK1-NOT:	define linkonce_odr i32 @_{{.+}}faz
+  // CK1-NOT:	define linkonce_odr i32 @_{{.+}}baz
+  // CK1:  define internal i32 @_{{.+}}foo
+  // CK1:  call i32 @_{{.+}}bar
+  // CK1:  define linkonce_odr i32 @_{{.+}}bar
   // CK1:  define void @__omp_offloading_[[FILEID:[0-9a-f]+_[0-9a-f]+]]__{{.+}}fooz
   // CK1:  call i32 @_{{.+}}foo
   // CK1:  call i32 @_{{.+}}baz
-  // CK1-NOT:  define linkonce_odr i32 @_{{.+}}faz
-  // CK1:  define internal i32 @_{{.+}}foo
-  // CK1:  call i32 @_{{.+}}bar
   // CK1:  declare i32 @_{{.+}}baz
-  // CK1:  define linkonce_odr i32 @_{{.+}}bar
-
 
   return i;
 }
@@ -44,10 +43,9 @@ t bar(t i) { return i;}
 
 #endif
 
-// RUN: %clang_cc1 -DCK2 -verify -fopenmp -x c++ -triple powerpc64le-unknown-unknown -fomptargets=nvptx64-nvidia-cuda -emit-llvm-bc %s -o %t-ppc-host.bc
-// RUN: %clang_cc1 -DCK2  -verify -fopenmp -x c++ -triple nvptx64-unknown-unknown -fomptargets=nvptx64-nvidia-cuda -emit-llvm %s -fopenmp-is-device -fomp-host-ir-file-path %t-ppc-host.bc -o - | FileCheck %s --check-prefix CK2 --check-prefix CK2-64
-// expected-no-diagnostics
 
+// RUN: %clang_cc1 -fopenmp-implicit-declare-target -DCK2 -verify -fopenmp -x c++ -triple powerpc64le-unknown-unknown -fopenmp-targets=powerpc64le-ibm-linux-gnu -emit-llvm-bc %s -o %t-ppc-host.bc
+// RUN: %clang_cc1 -fopenmp-implicit-declare-target -DCK2  -verify -fopenmp -x c++ -triple nvptx64-unknown-unknown -fopenmp-targets=nvptx64-nvidia-cuda -emit-llvm %s -fopenmp-is-device -fopenmp-host-ir-file-path %t-ppc-host.bc -o - | FileCheck %s --check-prefix CK2 --check-prefix CK2-64
 #ifdef CK2
 template<typename t>
 class waldo
@@ -140,10 +138,8 @@ int fooz()
 #endif
 
 
-// RUN: %clang_cc1 -DCK3 -verify -fopenmp -std=c++11 -x c++ -triple powerpc64le-unknown-unknown -fomptargets=nvptx64-nvidia-cuda -emit-llvm-bc %s -o %t-ppc-host.bc
-// RUN: %clang_cc1 -DCK3  -verify -fopenmp -std=c++11 -x c++ -triple nvptx64-unknown-unknown -fomptargets=nvptx64-nvidia-cuda -emit-llvm %s -fopenmp-is-device -fomp-host-ir-file-path %t-ppc-host.bc -o - | FileCheck %s --check-prefix CK3 --check-prefix CK3-64
-// expected-no-diagnostics
-
+// RUN: %clang_cc1 -fopenmp-implicit-declare-target -x c++ -std=c++11 -DCK3 -verify -fopenmp -x c++ -triple powerpc64le-unknown-unknown -fopenmp-targets=powerpc64le-ibm-linux-gnu -emit-llvm-bc %s -o %t-ppc-host.bc
+// RUN: %clang_cc1 -fopenmp-implicit-declare-target -x c++ -std=c++11 -DCK3  -verify -fopenmp -x c++ -triple nvptx64-unknown-unknown -fopenmp-targets=nvptx64-nvidia-cuda -emit-llvm %s -fopenmp-is-device -fopenmp-host-ir-file-path %t-ppc-host.bc -o - | FileCheck %s --check-prefix CK3 --check-prefix CK3-64
 #ifdef CK3
 
 template<typename T, typename F>
@@ -173,22 +169,22 @@ void fooz()
           funky(a, b, n, bar);
       }
       // CK3:    %class.anon* dereferenceable(1) %plugh
-      // CK3:    %class.anon.{{.+}}* dereferenceable(1) %bar
       // CK3:    %plugh.addr = alloca %class.anon*, align 8
-      // CK3:    %bar.addr = alloca %class.anon.{{[0-9]+}}*, align 8
+	  // CK3:    %bar = alloca %class.anon.0, align 1
       // CK3:    store %class.anon* %plugh, %class.anon** %plugh.addr, align 8
-      // CK3:    store %class.anon.0* %bar, %class.anon.{{[0-9]+}}** %bar.addr, align 8
       // CK3:    call void @"_{{.+}}funky{{.+}}fooz{{.+}}
-      // CK3:    call void @"_{{.+}}funky
+	  // CK3:    call void @"_{{.+}}funky
       // CK3:    define internal void @"_{{.+}}funky{{.+}}fooz
-      // CK3:    define internal void @"_{{.+}}funky
+	  // CK3:    define internal void @"_{{.+}}funky
+
 }
 
 #endif
 
+
 // C++14 lambda test
-// RUN: %clang_cc1 -DCK4 -verify -fopenmp -I/localhd/gozen/llvm-ykt/libcxx/build/include/c++/v1 -stdlib=libc++ -std=c++14 -x c++ -triple powerpc64le-unknown-unknown -fomptargets=nvptx64-nvidia-cuda -emit-llvm-bc %s -o %t-ppc-host.bc
-// RUN: %clang_cc1 -DCK4  -verify -fopenmp -I/localhd/gozen/llvm-ykt/libcxx/build/include/c++/v1 -stdlib=libc++ -std=c++14 -x c++ -triple nvptx64-unknown-unknown -fomptargets=nvptx64-nvidia-cuda -emit-llvm %s -fopenmp-is-device -fomp-host-ir-file-path %t-ppc-host.bc -o - | FileCheck %s --check-prefix CK4 --check-prefix CK4-64
+// RUN: %clang_cc1 -fopenmp-implicit-declare-target -x c++ -std=c++14 -DCK4 -verify -fopenmp -x c++ -triple powerpc64le-unknown-unknown -fopenmp-targets=powerpc64le-ibm-linux-gnu -emit-llvm-bc %s -o %t-ppc-host.bc
+// RUN: %clang_cc1 -fopenmp-implicit-declare-target -x c++ -std=c++14 -DCK4  -verify -fopenmp -x c++ -triple nvptx64-unknown-unknown -fopenmp-targets=nvptx64-nvidia-cuda -emit-llvm %s -fopenmp-is-device -fopenmp-host-ir-file-path %t-ppc-host.bc -o - | FileCheck %s --check-prefix CK4 --check-prefix CK4-64
 #ifdef CK4
 
 template<typename Body, typename... Ts>
@@ -221,16 +217,16 @@ void fooz (int argc, char* argv[])
       return i1 + i2 + i3;
     });
   }
-  // CK4:   define void @__omp_offloading_[[FILEID:[0-9a-f]+_[0-9a-f]+]]__{{.+}}fooz
-  // CK4:   call i32 [[LAMBDANAME:@.+]](%class.anon* %3, i32* dereferenceable(4) %ref.tmp, i32* dereferenceable(4) %ref.tmp1, i32* dereferenceable(4) %ref.tmp2, %class.anon.1* dereferenceable(1) %ref.tmp3)
-  // CK4:   define internal i32 [[LAMBDANAME]]
-  // CK4:   call i32 @"_{{.+}}finalizer{{.+}}fooz
-  // CK4:   define internal i32 @"_{{.+}}finalizer{{.+}}fooz
-  // CK4:   ret i32 20
 
+  // CK4:   define internal i32 [[LAMBDANAME:@.+]](%class.anon* dereferenceable(1) %b, i32* dereferenceable(4) %args, i32* dereferenceable(4) %args1, i32* dereferenceable(4) %args3, %class.anon.0* dereferenceable(1) %args5)
+  // CK4:   define internal i32 [[LAMBDANAME2:@.+]](%class.anon.2* %this, i32* dereferenceable(4) %args, i32* dereferenceable(4) %args1, i32* dereferenceable(4) %args3, %class.anon.0* dereferenceable(1) %args5)
+  // CK4:   call i32 [[LAMBDANAME]]
+  // CK4:   define void @__omp_offloading_[[FILEID:[0-9a-f]+_[0-9a-f]+]]__{{.+}}fooz
+  // CK4:   call i32 [[LAMBDANAME2]]
 
 }
 #endif
+
 
 
 #endif

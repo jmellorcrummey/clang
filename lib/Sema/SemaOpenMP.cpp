@@ -853,24 +853,26 @@ bool DSAStackTy::hasDirective(
   return false;
 }
 
-namespace{
-  /// Visit actual function body and its associated nested functions bodies.
-  class ImplicitDeviceFunctionChecker : public RecursiveASTVisitor<ImplicitDeviceFunctionChecker> {
-    Sema &SemaRef;
+namespace {
+/// Visit actual function body and its associated nested functions bodies.
+class ImplicitDeviceFunctionChecker
+    : public RecursiveASTVisitor<ImplicitDeviceFunctionChecker> {
+  Sema &SemaRef;
 
-  public:
+public:
+  ImplicitDeviceFunctionChecker(Sema &SemaReference) : SemaRef(SemaReference){};
 
-    ImplicitDeviceFunctionChecker(Sema &SemaReference) : SemaRef(SemaReference){};
+  /// Traverse body of lambda, and mark it the with OMPDeclareTargetDeclAttr
+  bool TraverseLambdaCapture(LambdaExpr *LE, const LambdaCapture *C);
 
-    /// Traverse body of lambda, and mark it the with OMPDeclareTargetDeclAttr
-    bool TraverseLambdaCapture(LambdaExpr *LE, const LambdaCapture *C);
-
-    /// Traverse Callee of Calexpr and mark it the with OMPDeclareTargetDeclAttr
-    bool VisitCallExpr(CallExpr *Call);
-  };
+  /// Traverse Callee of Calexpr and mark it the with OMPDeclareTargetDeclAttr
+  bool VisitCallExpr(CallExpr *Call);
+};
 }
 
-/// Traverse declaration of /param D to check whether it has OMPDeclareTargetDeclAttr or not. If so, it marks definition with OMPDeclareTargetDeclAttr.
+/// Traverse declaration of /param D to check whether it has
+/// OMPDeclareTargetDeclAttr or not. If so, it marks definition with
+/// OMPDeclareTargetDeclAttr.
 void Sema::checkDeclImplicitlyUsedOpenMPTargetContext(Decl *D) {
   if (!D || D->isInvalidDecl())
     return;
@@ -893,8 +895,8 @@ void Sema::checkDeclImplicitlyUsedOpenMPTargetContext(Decl *D) {
   return;
 }
 
-bool ImplicitDeviceFunctionChecker::TraverseLambdaCapture(LambdaExpr *LE,
-                                                     const LambdaCapture *C) {
+bool ImplicitDeviceFunctionChecker::TraverseLambdaCapture(
+    LambdaExpr *LE, const LambdaCapture *C) {
   if (CXXRecordDecl *Class = LE->getLambdaClass())
     if (!Class->hasAttr<OMPDeclareTargetDeclAttr>()) {
       Attr *A = OMPDeclareTargetDeclAttr::CreateImplicit(
@@ -917,7 +919,6 @@ bool ImplicitDeviceFunctionChecker::VisitCallExpr(CallExpr *Call) {
   }
   return true;
 }
-
 
 void Sema::InitDataSharingAttributesStack() {
   VarDataSharingAttributesStack = new DSAStackTy(*this);
@@ -7082,7 +7083,7 @@ StmtResult Sema::ActOnOpenMPTargetDirective(ArrayRef<OMPClause *> Clauses,
     // Revealed function calls are marked with OMPDeclareTargetDeclAttr
     // attribute,
     // in case -fopenmp-implicit-declare-target extension is enabled.
-	ImplicitDeviceFunctionChecker FunctionCallChecker(*this);
+    ImplicitDeviceFunctionChecker FunctionCallChecker(*this);
     FunctionCallChecker.TraverseDecl(CS->getCapturedDecl());
   }
 
@@ -11945,7 +11946,10 @@ static void checkDeclInTargetContext(SourceLocation SL, SourceRange SR,
     // target region (it can be e.g. a lambda) that is legal and we do not need
     // to do anything else.
     if (LD == D) {
-      // Here, unless these declarations are not specified inside of declare target they are not valid OpenMP 4.5, we thus give warning.  In case -fopenmp-implicit-declare-target these declarations are automatically declared for target construct.
+      // Here, unless these declarations are not specified inside of declare
+      // target they are not valid OpenMP 4.5, we thus give warning.  In case
+      // -fopenmp-implicit-declare-target these declarations are automatically
+      // declared for target construct.
       if (!SemaRef.getLangOpts().OpenMPImplicitDeclareTarget)
         SemaRef.Diag(LD->getLocation(), diag::warn_omp_not_in_target_context);
       return;
