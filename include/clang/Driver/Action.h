@@ -10,6 +10,7 @@
 #ifndef LLVM_CLANG_DRIVER_ACTION_H
 #define LLVM_CLANG_DRIVER_ACTION_H
 
+#include "clang/Basic/Cuda.h"
 #include "clang/Driver/Types.h"
 #include "clang/Driver/Util.h"
 #include "llvm/ADT/STLExtras.h"
@@ -228,6 +229,7 @@ public:
 /// its dependences.
 class OffloadAction final : public Action {
   virtual void anchor();
+
 public:
   /// Type used to communicate device actions. It associates bound architecture,
   /// toolchain, and offload kind to each action.

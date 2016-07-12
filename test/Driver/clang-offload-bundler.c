@@ -93,10 +93,12 @@
 // RUN: clang-offload-bundler -type=ii -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -inputs=%t.ii,%t.tgt1,%t.tgt2 -outputs=%t.bundle3.ii
 // RUN: clang-offload-bundler -type=ll -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -inputs=%t.ll,%t.tgt1,%t.tgt2 -outputs=%t.bundle3.ll
 // RUN: clang-offload-bundler -type=s -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -inputs=%t.s,%t.tgt1,%t.tgt2 -outputs=%t.bundle3.s
+// RUN: clang-offload-bundler -type=s -targets=openmp-powerpc64le-ibm-linux-gnu,host-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -inputs=%t.tgt1,%t.s,%t.tgt2 -outputs=%t.bundle3.unordered.s
 // RUN: FileCheck %s --input-file %t.bundle3.i --check-prefix CK-TEXTI
 // RUN: FileCheck %s --input-file %t.bundle3.ii --check-prefix CK-TEXTI
 // RUN: FileCheck %s --input-file %t.bundle3.ll --check-prefix CK-TEXTLL
 // RUN: FileCheck %s --input-file %t.bundle3.s --check-prefix CK-TEXTS
+// RUN: FileCheck %s --input-file %t.bundle3.unordered.s --check-prefix CK-TEXTS-UNORDERED
 
 // CK-TEXTI: // __CLANG_OFFLOAD_BUNDLE____START__ host-powerpc64le-ibm-linux-gnu
 // CK-TEXTI: int A = 0;
@@ -131,6 +133,17 @@
 // CK-TEXTS: Content of device file 2
 // CK-TEXTS: # __CLANG_OFFLOAD_BUNDLE____END__ openmp-x86_64-pc-linux-gnu
 
+// CK-TEXTS-UNORDERED: # __CLANG_OFFLOAD_BUNDLE____START__ openmp-powerpc64le-ibm-linux-gnu
+// CK-TEXTS-UNORDERED: Content of device file 1
+// CK-TEXTS-UNORDERED: # __CLANG_OFFLOAD_BUNDLE____END__ openmp-powerpc64le-ibm-linux-gnu
+// CK-TEXTS-UNORDERED: # __CLANG_OFFLOAD_BUNDLE____START__ host-powerpc64le-ibm-linux-gnu
+// CK-TEXTS-UNORDERED: .globl {{.*}}test_func
+// CK-TEXTS-UNORDERED: .globl {{.*}}A
+// CK-TEXTS-UNORDERED: # __CLANG_OFFLOAD_BUNDLE____END__ host-powerpc64le-ibm-linux-gnu
+// CK-TEXTS-UNORDERED: # __CLANG_OFFLOAD_BUNDLE____START__ openmp-x86_64-pc-linux-gnu
+// CK-TEXTS-UNORDERED: Content of device file 2
+// CK-TEXTS-UNORDERED: # __CLANG_OFFLOAD_BUNDLE____END__ openmp-x86_64-pc-linux-gnu
+
 //
 // Check text unbundle. Check if we get the exact same content that we bundled before for each file.
 //
@@ -150,9 +163,17 @@
 // RUN: diff %t.s %t.res.s
 // RUN: diff %t.tgt1 %t.res.tgt1
 // RUN: diff %t.tgt2 %t.res.tgt2
+// RUN: clang-offload-bundler -type=s -targets=openmp-powerpc64le-ibm-linux-gnu,host-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.tgt1,%t.res.s,%t.res.tgt2 -inputs=%t.bundle3.s -unbundle
+// RUN: diff %t.s %t.res.s
+// RUN: diff %t.tgt1 %t.res.tgt1
+// RUN: diff %t.tgt2 %t.res.tgt2
 
 // Check if we can unbundle a file with no magic strings.
 // RUN: clang-offload-bundler -type=s -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.s,%t.res.tgt1,%t.res.tgt2 -inputs=%t.s -unbundle
+// RUN: diff %t.s %t.res.s
+// RUN: diff %t.empty %t.res.tgt1
+// RUN: diff %t.empty %t.res.tgt2
+// RUN: clang-offload-bundler -type=s -targets=openmp-powerpc64le-ibm-linux-gnu,host-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.tgt1,%t.res.s,%t.res.tgt2 -inputs=%t.s -unbundle
 // RUN: diff %t.s %t.res.s
 // RUN: diff %t.empty %t.res.tgt1
 // RUN: diff %t.empty %t.res.tgt2
@@ -163,6 +184,7 @@
 // RUN: clang-offload-bundler -type=bc -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -inputs=%t.bc,%t.tgt1,%t.tgt2 -outputs=%t.bundle3.bc
 // RUN: clang-offload-bundler -type=gch -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -inputs=%t.ast,%t.tgt1,%t.tgt2 -outputs=%t.bundle3.gch
 // RUN: clang-offload-bundler -type=ast -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -inputs=%t.ast,%t.tgt1,%t.tgt2 -outputs=%t.bundle3.ast
+// RUN: clang-offload-bundler -type=ast -targets=openmp-powerpc64le-ibm-linux-gnu,host-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -inputs=%t.tgt1,%t.ast,%t.tgt2 -outputs=%t.bundle3.unordered.ast
 // RUN: clang-offload-bundler -type=bc -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.bc,%t.res.tgt1,%t.res.tgt2 -inputs=%t.bundle3.bc -unbundle
 // RUN: diff %t.bc %t.res.bc
 // RUN: diff %t.tgt1 %t.res.tgt1
@@ -175,70 +197,57 @@
 // RUN: diff %t.ast %t.res.ast
 // RUN: diff %t.tgt1 %t.res.tgt1
 // RUN: diff %t.tgt2 %t.res.tgt2
+// RUN: clang-offload-bundler -type=ast -targets=openmp-powerpc64le-ibm-linux-gnu,host-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.tgt1,%t.res.ast,%t.res.tgt2 -inputs=%t.bundle3.ast -unbundle
+// RUN: diff %t.ast %t.res.ast
+// RUN: diff %t.tgt1 %t.res.tgt1
+// RUN: diff %t.tgt2 %t.res.tgt2
+// RUN: clang-offload-bundler -type=ast -targets=openmp-powerpc64le-ibm-linux-gnu,host-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.tgt1,%t.res.ast,%t.res.tgt2 -inputs=%t.bundle3.unordered.ast -unbundle
+// RUN: diff %t.ast %t.res.ast
+// RUN: diff %t.tgt1 %t.res.tgt1
+// RUN: diff %t.tgt2 %t.res.tgt2
 
 // Check if we can unbundle a file with no magic strings.
 // RUN: clang-offload-bundler -type=bc -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.bc,%t.res.tgt1,%t.res.tgt2 -inputs=%t.bc -unbundle
 // RUN: diff %t.bc %t.res.bc
 // RUN: diff %t.empty %t.res.tgt1
 // RUN: diff %t.empty %t.res.tgt2
+// RUN: clang-offload-bundler -type=bc -targets=openmp-powerpc64le-ibm-linux-gnu,host-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.tgt1,%t.res.bc,%t.res.tgt2 -inputs=%t.bc -unbundle
+// RUN: diff %t.bc %t.res.bc
+// RUN: diff %t.empty %t.res.tgt1
+// RUN: diff %t.empty %t.res.tgt2
 
 //
-// Check object bundle/unbundle. The content should be bundled into an ELF section (we are using a PowerPC little-endian host which uses ELF).
+// Check object bundle/unbundle. The content should be bundled into an ELF
+// section (we are using a PowerPC little-endian host which uses ELF). We
+// have an already bundled file to check the unbundle and do a dry run on the
+// bundling as it cannot be tested in all host platforms that will run these
+// tests.
 //
-// RUN: clang-offload-bundler -type=o -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -inputs=%t.o,%t.tgt1,%t.tgt2 -outputs=%t.bundle3.o
-// RUN: llvm-readobj -sections %t.bundle3.o | FileCheck %s --check-prefix CK-OBJ
-// RUN: clang-offload-bundler -type=o -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.o,%t.res.tgt1,%t.res.tgt2 -inputs=%t.bundle3.o -unbundle
-// RUN: diff %t.bundle3.o %t.res.o
+
+// RUN: cd %T && \
+// RUN: clang-offload-bundler -type=o -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -inputs=%t.o,%t.tgt1,%t.tgt2 -outputs=%t.bundle3.o -### -save-temps 2>&1 \
+// RUN: | FileCheck %s --check-prefix CK-OBJ-CMD
+// RUN: llvm-dis %t.bundle3.bc -o - | FileCheck %s --check-prefix CK-OBJ-BC
+// CK-OBJ-CMD: clang" "-r" "-target" "powerpc64le-ibm-linux-gnu" "-o" "{{.+}}.o" "{{.+}}.o" "{{.+}}.bc" "-nostdlib"
+// CK-OBJ-BC: private constant [1 x i8] zeroinitializer, section "__CLANG_OFFLOAD_BUNDLE__host-powerpc64le-ibm-linux-gnu"
+// CK-OBJ-BC: private constant [25 x i8] c"Content of device file 1\0A", section "__CLANG_OFFLOAD_BUNDLE__openmp-powerpc64le-ibm-linux-gnu"
+// CK-OBJ-BC: private constant [25 x i8] c"Content of device file 2\0A", section "__CLANG_OFFLOAD_BUNDLE__openmp-x86_64-pc-linux-gnu"
+
+// RUN: clang-offload-bundler -type=o -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.o,%t.res.tgt1,%t.res.tgt2 -inputs=%s.o -unbundle
+// RUN: diff %s.o %t.res.o
 // RUN: diff %t.tgt1 %t.res.tgt1
 // RUN: diff %t.tgt2 %t.res.tgt2
-// CK-OBJ: Section {
-// CK-OBJ:  Index:
-// CK-OBJ:  Name: __CLANG_OFFLOAD_BUNDLE__host-powerpc64le-ibm-linux-gnu (
-// CK-OBJ:  Type: SHT_PROGBITS (0x1)
-// CK-OBJ:  Flags [ (0x2)
-// CK-OBJ:    SHF_ALLOC (0x2)
-// CK-OBJ:  ]
-// CK-OBJ:  Address: 0x0
-// CK-OBJ:  Offset: 0x
-// CK-OBJ:  Size: 1
-// CK-OBJ:  Link: 0
-// CK-OBJ:  Info: 0
-// CK-OBJ:  AddressAlignment:
-// CK-OBJ:  EntrySize: 0
-// CK-OBJ: }
-// CK-OBJ: Section {
-// CK-OBJ:  Index:
-// CK-OBJ:  Name: __CLANG_OFFLOAD_BUNDLE__openmp-powerpc64le-ibm-linux-gnu (
-// CK-OBJ:  Type: SHT_PROGBITS (0x1)
-// CK-OBJ:  Flags [ (0x2)
-// CK-OBJ:    SHF_ALLOC (0x2)
-// CK-OBJ:  ]
-// CK-OBJ:  Address: 0x0
-// CK-OBJ:  Offset: 0x
-// CK-OBJ:  Size: 25
-// CK-OBJ:  Link: 0
-// CK-OBJ:  Info: 0
-// CK-OBJ:  AddressAlignment:
-// CK-OBJ:  EntrySize: 0
-// CK-OBJ: }
-// CK-OBJ: Section {
-// CK-OBJ:  Index:
-// CK-OBJ:  Name: __CLANG_OFFLOAD_BUNDLE__openmp-x86_64-pc-linux-gnu (
-// CK-OBJ:  Type: SHT_PROGBITS (0x1)
-// CK-OBJ:  Flags [ (0x2)
-// CK-OBJ:    SHF_ALLOC (0x2)
-// CK-OBJ:  ]
-// CK-OBJ:  Address: 0x0
-// CK-OBJ:  Offset: 0x
-// CK-OBJ:  Size: 25
-// CK-OBJ:  Link: 0
-// CK-OBJ:  Info: 0
-// CK-OBJ:  AddressAlignment:
-// CK-OBJ:  EntrySize: 0
-// CK-OBJ: }
+// RUN: clang-offload-bundler -type=o -targets=openmp-powerpc64le-ibm-linux-gnu,host-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.tgt1,%t.res.o,%t.res.tgt2 -inputs=%s.o -unbundle
+// RUN: diff %s.o %t.res.o
+// RUN: diff %t.tgt1 %t.res.tgt1
+// RUN: diff %t.tgt2 %t.res.tgt2
 
 // Check if we can unbundle a file with no magic strings.
 // RUN: clang-offload-bundler -type=o -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.o,%t.res.tgt1,%t.res.tgt2 -inputs=%t.o -unbundle
+// RUN: diff %t.o %t.res.o
+// RUN: diff %t.empty %t.res.tgt1
+// RUN: diff %t.empty %t.res.tgt2
+// RUN: clang-offload-bundler -type=o -targets=openmp-powerpc64le-ibm-linux-gnu,host-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.tgt1,%t.res.o,%t.res.tgt2 -inputs=%t.o -unbundle
 // RUN: diff %t.o %t.res.o
 // RUN: diff %t.empty %t.res.tgt1
 // RUN: diff %t.empty %t.res.tgt2

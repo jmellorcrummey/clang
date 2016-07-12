@@ -23,6 +23,7 @@
 #include "clang/Driver/ToolChain.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/StringSwitch.h"
@@ -1571,7 +1572,7 @@ class OffloadingActionBuilder final {
     bool CompileDeviceOnly = false;
 
     /// List of GPU architectures to use in this compilation.
-    SmallVector<const char *, 4> GpuArchList;
+    SmallVector<CudaArch, 4> GpuArchList;
 
     /// The CUDA actions for the current input.
     ActionList CudaDeviceActions;
@@ -1643,7 +1644,8 @@ class OffloadingActionBuilder final {
 
           for (auto &A : {AssembleAction, BackendAction}) {
             OffloadAction::DeviceDependences DDep;
-            DDep.add(*A, *ToolChains.front(), GpuArchList[I], Action::OFK_Cuda);
+            DDep.add(*A, *ToolChains.front(), CudaArchToString(GpuArchList[I]),
+                     Action::OFK_Cuda);
             DeviceActions.push_back(
                 C.MakeAction<OffloadAction>(DDep, A->getType()));
           }
@@ -1720,15 +1722,16 @@ class OffloadingActionBuilder final {
 
     void appendTopLevelActions(ActionList &AL) override {
       // Utility to append actions to the top level list.
-      auto AddTopLevel = [&](Action *A, const char *BoundArch) {
+      auto AddTopLevel = [&](Action *A, CudaArch BoundArch) {
         OffloadAction::DeviceDependences Dep;
-        Dep.add(*A, *ToolChains.front(), BoundArch, Action::OFK_Cuda);
+        Dep.add(*A, *ToolChains.front(), CudaArchToString(BoundArch),
+                Action::OFK_Cuda);
         AL.push_back(C.MakeAction<OffloadAction>(Dep, A->getType()));
       };
 
       // If we have a fat binary, add it to the list.
       if (CudaFatBinary) {
-        AddTopLevel(CudaFatBinary, /*BoundArch=*/nullptr);
+        AddTopLevel(CudaFatBinary, CudaArch::UNKNOWN);
         CudaDeviceActions.clear();
         CudaFatBinary = nullptr;
         return;
@@ -1768,18 +1771,19 @@ class OffloadingActionBuilder final {
                               options::OPT_cuda_device_only);
 
       // Collect all cuda_gpu_arch parameters, removing duplicates.
-      llvm::StringSet<> GpuArchNames;
+      llvm::SmallSet<CudaArch, 4> GpuArchs;
       bool Error = false;
       for (Arg *A : Args) {
         if (!A->getOption().matches(options::OPT_cuda_gpu_arch_EQ))
           continue;
         A->claim();
 
-        const auto &Arch = A->getValue();
-        if (!toolchains::CudaToolChain::GpuArchToComputeName(Arch)) {
-          C.getDriver().Diag(clang::diag::err_drv_cuda_bad_gpu_arch) << Arch;
+        const auto &ArchStr = A->getValue();
+        CudaArch Arch = StringToCudaArch(ArchStr);
+        if (Arch == CudaArch::UNKNOWN) {
+          C.getDriver().Diag(clang::diag::err_drv_cuda_bad_gpu_arch) << ArchStr;
           Error = true;
-        } else if (GpuArchNames.insert(Arch).second)
+        } else if (GpuArchs.insert(Arch).second)
           GpuArchList.push_back(Arch);
       }
 
@@ -1787,7 +1791,7 @@ class OffloadingActionBuilder final {
       // GPUs.
       // sm_20 code should work correctly, if suboptimally, on all newer GPUs.
       if (GpuArchList.empty())
-        GpuArchList.push_back("sm_20");
+        GpuArchList.push_back(CudaArch::SM_20);
 
       return Error;
     }
@@ -2904,9 +2908,9 @@ static std::string GetTriplePlusArchString(const ToolChain *TC,
   if (BoundArch) {
     TriplePlusArch += "-";
     TriplePlusArch += BoundArch;
-    TriplePlusArch += "-";
-    TriplePlusArch += Action::GetOffloadKindName(OffloadKind);
-  }
+	}
+  TriplePlusArch += "-";
+  TriplePlusArch += Action::GetOffloadKindName(OffloadKind);
   return TriplePlusArch;
 }
 
