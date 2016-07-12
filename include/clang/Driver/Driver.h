@@ -12,6 +12,7 @@
 
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/LLVM.h"
+#include "clang/Driver/Action.h"
 #include "clang/Driver/Phases.h"
 #include "clang/Driver/Types.h"
 #include "clang/Driver/Util.h"
@@ -44,7 +45,6 @@ class FileSystem;
 
 namespace driver {
 
-  class Action;
   class Command;
   class Compilation;
   class InputInfo;
@@ -416,14 +416,14 @@ public:
 
   /// BuildJobsForAction - Construct the jobs to perform for the action \p A and
   /// return an InputInfo for the result of running \p A.  Will only construct
-  /// jobs for a given (Action, ToolChain, BoundArch) tuple once.
+  /// jobs for a given (Action, ToolChain, BoundArch, DeviceKind) tuple once.
   InputInfo
   BuildJobsForAction(Compilation &C, const Action *A, const ToolChain *TC,
                      const char *BoundArch, bool AtTopLevel, bool MultipleArchs,
                      const char *LinkingOutput,
                      std::map<std::pair<const Action *, std::string>, InputInfo>
                          &CachedResults,
-                     bool BuildForOffloadDevice) const;
+                     Action::OffloadKind TargetDeviceOffloadKind) const;
 
   /// Returns the default name for linked images (e.g., "a.out").
   const char *getDefaultImageName() const;
@@ -491,7 +491,7 @@ private:
       const char *LinkingOutput,
       std::map<std::pair<const Action *, std::string>, InputInfo>
           &CachedResults,
-      bool BuildForOffloadDevice) const;
+      Action::OffloadKind TargetDeviceOffloadKind) const;
 
 public:
   /// GetReleaseVersion - Parse (([0-9]+)(.([0-9]+)(.([0-9]+)?))?)? and

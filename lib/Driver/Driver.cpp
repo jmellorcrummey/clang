@@ -2558,7 +2558,7 @@ void Driver::BuildJobs(Compilation &C) const {
                        /*AtTopLevel*/ true,
                        /*MultipleArchs*/ ArchNames.size() > 1,
                        /*LinkingOutput*/ LinkingOutput, CachedResults,
-                       /*BuildForOffloadDevice*/ false);
+                       /*TargetDeviceOffloadKind*/ Action::OFK_None);
   }
 
   // If the user passed -Qunused-arguments or there were errors, don't warn
@@ -2908,7 +2908,7 @@ static std::string GetTriplePlusArchString(const ToolChain *TC,
   if (BoundArch) {
     TriplePlusArch += "-";
     TriplePlusArch += BoundArch;
-	}
+  }
   TriplePlusArch += "-";
   TriplePlusArch += Action::GetOffloadKindName(OffloadKind);
   return TriplePlusArch;
@@ -2918,16 +2918,16 @@ InputInfo Driver::BuildJobsForAction(
     Compilation &C, const Action *A, const ToolChain *TC, const char *BoundArch,
     bool AtTopLevel, bool MultipleArchs, const char *LinkingOutput,
     std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults,
-    bool BuildForOffloadDevice) const {
+    Action::OffloadKind TargetDeviceOffloadKind) const {
   std::pair<const Action *, std::string> ActionTC = {
-      A, GetTriplePlusArchString(TC, BoundArch, A->getOffloadingDeviceKind())};
+      A, GetTriplePlusArchString(TC, BoundArch, TargetDeviceOffloadKind)};
   auto CachedResult = CachedResults.find(ActionTC);
   if (CachedResult != CachedResults.end()) {
     return CachedResult->second;
   }
   InputInfo Result = BuildJobsForActionNoCache(
       C, A, TC, BoundArch, AtTopLevel, MultipleArchs, LinkingOutput,
-      CachedResults, BuildForOffloadDevice);
+      CachedResults, TargetDeviceOffloadKind);
   CachedResults[ActionTC] = Result;
   return Result;
 }
@@ -2936,10 +2936,11 @@ InputInfo Driver::BuildJobsForActionNoCache(
     Compilation &C, const Action *A, const ToolChain *TC, const char *BoundArch,
     bool AtTopLevel, bool MultipleArchs, const char *LinkingOutput,
     std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults,
-    bool BuildForOffloadDevice) const {
+    Action::OffloadKind TargetDeviceOffloadKind) const {
   llvm::PrettyStackTraceString CrashInfo("Building compilation jobs");
 
   InputInfoList OffloadDependencesInputInfo;
+  bool BuildingForOffloadDevice = TargetDeviceOffloadKind != Action::OFK_None;
   if (const OffloadAction *OA = dyn_cast<OffloadAction>(A)) {
     // The offload action is expected to be used in four different situations.
     //
@@ -2972,7 +2973,7 @@ InputInfo Driver::BuildJobsForActionNoCache(
         DevA =
             BuildJobsForAction(C, DepA, DepTC, DepBoundArch, AtTopLevel,
                                /*MultipleArchs*/ !!DepBoundArch, LinkingOutput,
-                               CachedResults, /*BuildForOffloadDevice=*/true);
+                               CachedResults, DepA->getOffloadingDeviceKind());
       });
       return DevA;
     }
@@ -2982,16 +2983,15 @@ InputInfo Driver::BuildJobsForActionNoCache(
     // generate the host dependences and override the action with the device
     // dependence. The dependences can't therefore be a top-level action.
     OA->doOnEachDependence(
-        /*IsHostDependence=*/BuildForOffloadDevice,
+        /*IsHostDependence=*/BuildingForOffloadDevice,
         [&](Action *DepA, const ToolChain *DepTC, const char *DepBoundArch) {
           OffloadDependencesInputInfo.push_back(BuildJobsForAction(
               C, DepA, DepTC, DepBoundArch, /*AtTopLevel=*/false,
               /*MultipleArchs*/ !!DepBoundArch, LinkingOutput, CachedResults,
-              /*BuildForOffloadDevice=*/DepA->getOffloadingDeviceKind() !=
-                  Action::OFK_None));
+              DepA->getOffloadingDeviceKind()));
         });
 
-    A = BuildForOffloadDevice
+    A = BuildingForOffloadDevice
             ? OA->getSingleDeviceDependence(/*DoNotConsiderHostActions=*/true)
             : OA->getHostDependence();
   }
@@ -3021,7 +3021,7 @@ InputInfo Driver::BuildJobsForActionNoCache(
 
     return BuildJobsForAction(C, *BAA->input_begin(), TC, ArchName, AtTopLevel,
                               MultipleArchs, LinkingOutput, CachedResults,
-                              BuildForOffloadDevice);
+                              TargetDeviceOffloadKind);
   }
 
 
@@ -3040,13 +3040,12 @@ InputInfo Driver::BuildJobsForActionNoCache(
   // need to build jobs for host/device-side inputs it may have held.
   for (const auto *OA : CollapsedOffloadActions)
     cast<OffloadAction>(OA)->doOnEachDependence(
-        /*IsHostDependence=*/BuildForOffloadDevice,
+        /*IsHostDependence=*/BuildingForOffloadDevice,
         [&](Action *DepA, const ToolChain *DepTC, const char *DepBoundArch) {
           OffloadDependencesInputInfo.push_back(BuildJobsForAction(
               C, DepA, DepTC, DepBoundArch, AtTopLevel,
               /*MultipleArchs=*/!!DepBoundArch, LinkingOutput, CachedResults,
-              /*BuildForOffloadDevice=*/DepA->getOffloadingDeviceKind() !=
-                  Action::OFK_None));
+              DepA->getOffloadingDeviceKind()));
         });
 
   // Only use pipes when there is exactly one input.
@@ -3059,7 +3058,7 @@ InputInfo Driver::BuildJobsForActionNoCache(
         AtTopLevel && (isa<DsymutilJobAction>(A) || isa<VerifyJobAction>(A));
     InputInfos.push_back(BuildJobsForAction(
         C, Input, TC, BoundArch, SubJobAtTopLevel, MultipleArchs, LinkingOutput,
-        CachedResults, BuildForOffloadDevice));
+        CachedResults, A->getOffloadingDeviceKind()));
   }
 
   // Always use the first input as the base input.
@@ -3110,10 +3109,9 @@ InputInfo Driver::BuildJobsForActionNoCache(
     }
 
     // Now that we have all the results generated, select the one that should be
-    // return for the current depending action.
+    // returned for the current depending action.
     std::pair<const Action *, std::string> ActionTC = {
-        A,
-        GetTriplePlusArchString(TC, BoundArch, A->getOffloadingDeviceKind())};
+        A, GetTriplePlusArchString(TC, BoundArch, TargetDeviceOffloadKind)};
     assert(CachedResults.find(ActionTC) != CachedResults.end() &&
            "Result does not exist??");
     Result = CachedResults[ActionTC];
