@@ -197,8 +197,10 @@ void OffloadAction::doOnEachDeviceDependence(
     ++I;
 
   auto TI = DevToolChains.begin();
-  for (; I != E; ++I, ++TI)
+  for (; I != E; ++I, ++TI) {
+    assert(TI != DevToolChains.end() && "More dependences than tool chains??");
     Work(*I, *TI, (*I)->getOffloadingArch());
+  }
 }
 
 void OffloadAction::doOnEachDependence(const OffloadActionWorkTy &Work) const {
