@@ -3916,6 +3916,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(Args.MakeArgString(AuxToolChain->getTriple().str()));
   }
 
+  if (getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Device) {
+    AuxToolChain = C.getOffloadingHostToolChain();
+    CmdArgs.push_back("-aux-triple");
+    CmdArgs.push_back(Args.MakeArgString(AuxToolChain->getTriple().str()));
+  }
+
   if (Triple.isOSWindows() && (Triple.getArch() == llvm::Triple::arm ||
                                Triple.getArch() == llvm::Triple::thumb)) {
     unsigned Offset = Triple.getArch() == llvm::Triple::arm ? 4 : 6;
@@ -5079,7 +5085,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   // Report an error for -faltivec on anything other than PowerPC.
   if (const Arg *A = Args.getLastArg(options::OPT_faltivec)) {
-    const llvm::Triple::ArchType Arch = getToolChain().getArch();
+    const llvm::Triple::ArchType Arch =
+        (getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Device)
+            ? C.getOffloadingHostToolChain()->getArch()
+            : getToolChain().getArch();
     if (!(Arch == llvm::Triple::ppc || Arch == llvm::Triple::ppc64 ||
           Arch == llvm::Triple::ppc64le))
       D.Diag(diag::err_drv_argument_only_allowed_with) << A->getAsString(Args)

@@ -2385,6 +2385,10 @@ bool CompilerInvocation::CreateFromArgs(CompilerInvocation &Res,
       Res.getCodeGenOpts().setFPContractMode(CodeGenOptions::FPC_Fast);
   }
 
+  // Set the the triple of the host for OpenMP device compile.
+  if (LangOpts.OpenMPIsDevice)
+    Res.getTargetOpts().HostTriple = Res.getFrontendOpts().AuxTriple;
+
   // FIXME: Override value name discarding when asan or msan is used because the
   // backend passes depend on the name of the alloca in order to print out
   // names.

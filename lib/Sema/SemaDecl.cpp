@@ -6318,7 +6318,8 @@ Sema::ActOnVariableDeclarator(Scope *S, Declarator &D, DeclContext *DC,
       case SC_Register:
         // Local Named register
         if (!Context.getTargetInfo().isValidGCCRegisterName(Label) &&
-            DeclAttrsMatchCUDAMode(getLangOpts(), getCurFunctionDecl()))
+            DeclAttrsMatchOffloadMode(getLangOpts(), getCurFunctionDecl(),
+                                      IsInOpenMPDeclareTargetContext))
           Diag(E->getExprLoc(), diag::err_asm_unknown_register_name) << Label;
         break;
       case SC_Static:
@@ -6328,7 +6329,8 @@ Sema::ActOnVariableDeclarator(Scope *S, Declarator &D, DeclContext *DC,
       }
     } else if (SC == SC_Register) {
       // Global Named register
-      if (DeclAttrsMatchCUDAMode(getLangOpts(), NewVD)) {
+      if (DeclAttrsMatchOffloadMode(getLangOpts(), NewVD,
+                                    IsInOpenMPDeclareTargetContext)) {
         const auto &TI = Context.getTargetInfo();
         bool HasSizeMismatch;
 
