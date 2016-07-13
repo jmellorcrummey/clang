@@ -194,7 +194,7 @@ void OffloadAction::doOnEachDeviceDependence(
 
   // We expect to have the same number of input dependences and device tool
   // chains, except if we also have a host dependence. In that case we have one
-  // more dependence that we have device tool chains.
+  // more dependence than we have device tool chains.
   assert(getInputs().size() == DevToolChains.size() + (HostTC ? 1 : 0) &&
          "Sizes of action dependences and toolchains are not consistent!");
 
