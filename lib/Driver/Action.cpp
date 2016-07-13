@@ -192,15 +192,19 @@ void OffloadAction::doOnEachDeviceDependence(
   if (I == E)
     return;
 
+  // We expect to have the same number of input dependences and device tool
+  // chains, except if we also have a host dependence. In that case we have one
+  // more dependence that we have device tool chains.
+  assert(getInputs().size() == DevToolChains.size() + (HostTC ? 1 : 0) &&
+         "Sizes of action dependences and toolchains are not consistent!");
+
   // Skip host action
   if (HostTC)
     ++I;
 
   auto TI = DevToolChains.begin();
-  for (; I != E; ++I, ++TI) {
-    assert(TI != DevToolChains.end() && "More dependences than tool chains??");
+  for (; I != E; ++I, ++TI)
     Work(*I, *TI, (*I)->getOffloadingArch());
-  }
 }
 
 void OffloadAction::doOnEachDependence(const OffloadActionWorkTy &Work) const {
