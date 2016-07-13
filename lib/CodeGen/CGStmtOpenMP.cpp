@@ -2063,6 +2063,7 @@ void CodeGenFunction::EmitOMPForOuterLoop(
   QualType IteratorTy = IVExpr->getType();
   const unsigned IVSize = getContext().getTypeSize(IteratorTy);
   const bool IVSigned = IVExpr->getType()->hasSignedIntegerRepresentation();
+
   if (DynamicOrOrdered) {
     llvm::Value *LBVal = nullptr;
     llvm::Value *UBVal = nullptr;
@@ -2257,7 +2258,6 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
             *this, S.getLocStart(), OMPD_unknown, /*EmitChecks=*/false,
             /*ForceSimpleCall=*/true);
       }
-      // carlo
       EmitOMPPrivateClause(S, LoopScope);
       HasLastprivateClause = EmitOMPLastprivateClauseInit(S, LoopScope);
       EmitOMPReductionClauseInit(S, LoopScope);
@@ -2989,7 +2989,6 @@ void CodeGenFunction::EmitOMPDistributeLoop(
             *this, S.getLocStart(), OMPD_unknown, /*EmitChecks=*/false,
             /*ForceSimpleCall=*/true);
       }
-      // carlo
       EmitOMPPrivateClause(S, LoopScope);
       bool HasLastprivateClause = EmitOMPLastprivateClauseInit(S, LoopScope);
       EmitOMPPrivateLoopCounters(S, LoopScope);
@@ -3642,6 +3641,7 @@ static void EmitOMPAtomicExpr(CodeGenFunction &CGF, OpenMPClauseKind Kind,
   case OMPC_to:
   case OMPC_from:
   case OMPC_use_device_ptr:
+  case OMPC_is_device_ptr:
     llvm_unreachable("Clause is not allowed in 'omp atomic'.");
   }
 }

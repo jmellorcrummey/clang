@@ -94,6 +94,7 @@ const OMPClauseWithPreInit *OMPClauseWithPreInit::get(const OMPClause *C) {
   case OMPC_to:
   case OMPC_from:
   case OMPC_use_device_ptr:
+  case OMPC_is_device_ptr:
     break;
   }
 
@@ -158,6 +159,7 @@ const OMPClauseWithPostUpdate *OMPClauseWithPostUpdate::get(const OMPClause *C) 
   case OMPC_to:
   case OMPC_from:
   case OMPC_use_device_ptr:
+  case OMPC_is_device_ptr:
     break;
   }
 
@@ -756,4 +758,22 @@ OMPUseDevicePtrClause *OMPUseDevicePtrClause::CreateEmpty(const ASTContext &C,
                                                           unsigned N) {
   void *Mem = C.Allocate(totalSizeToAlloc<Expr *>(2 * N));
   return new (Mem) OMPUseDevicePtrClause(N);
+}
+
+OMPIsDevicePtrClause *OMPIsDevicePtrClause::Create(const ASTContext &C,
+                                                   SourceLocation StartLoc,
+                                                   SourceLocation LParenLoc,
+                                                   SourceLocation EndLoc,
+                                                   ArrayRef<Expr *> VL) {
+  void *Mem = C.Allocate(totalSizeToAlloc<Expr *>(VL.size()));
+  OMPIsDevicePtrClause *Clause =
+      new (Mem) OMPIsDevicePtrClause(StartLoc, LParenLoc, EndLoc, VL.size());
+  Clause->setVarRefs(VL);
+  return Clause;
+}
+
+OMPIsDevicePtrClause *OMPIsDevicePtrClause::CreateEmpty(const ASTContext &C,
+                                                        unsigned N) {
+  void *Mem = C.Allocate(totalSizeToAlloc<Expr *>(N));
+  return new (Mem) OMPIsDevicePtrClause(N);
 }

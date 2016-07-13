@@ -1925,6 +1925,9 @@ OMPClause *OMPClauseReader::readClause() {
   case OMPC_use_device_ptr:
     C = OMPUseDevicePtrClause::CreateEmpty(Context, Record[Idx++]);
     break;
+  case OMPC_is_device_ptr:
+    C = OMPIsDevicePtrClause::CreateEmpty(Context, Record[Idx++]);
+    break;
   }
   Visit(C);
   C->setLocStart(Reader->ReadSourceLocation(Record, Idx));
@@ -2458,6 +2461,17 @@ void OMPClauseReader::VisitOMPUseDevicePtrClause(OMPUseDevicePtrClause *C) {
   for (unsigned i = 0; i != NumVars; ++i)
     Vars.push_back(Reader->Reader.ReadSubExpr());
   C->setPrivateCopies(Vars);
+}
+
+void OMPClauseReader::VisitOMPIsDevicePtrClause(OMPIsDevicePtrClause *C) {
+  C->setLParenLoc(Reader->ReadSourceLocation(Record, Idx));
+  unsigned NumVars = C->varlist_size();
+  SmallVector<Expr *, 16> Vars;
+  Vars.reserve(NumVars);
+  for (unsigned i = 0; i != NumVars; ++i)
+    Vars.push_back(Reader->Reader.ReadSubExpr());
+  C->setVarRefs(Vars);
+  Vars.clear();
 }
 
 //===----------------------------------------------------------------------===//
