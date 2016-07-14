@@ -45,7 +45,7 @@
 // ASM: 8: backend, {7}, assembler, (host-cuda)
 
 //
-// Test two gpu architecture with complete compilation.
+// Test two gpu architectures with complete compilation.
 //
 // RUN: %clang -target powerpc64le-ibm-linux-gnu -ccc-print-phases --cuda-gpu-arch=sm_30 --cuda-gpu-arch=sm_35 %s 2>&1 \
 // RUN: | FileCheck -check-prefix=BIN2 %s
@@ -73,7 +73,7 @@
 // BIN2: 21: linker, {20}, image, (host-cuda)
 
 //
-// Test two gpu architectures up to the assemble phase.
+// Test two gpu architecturess up to the assemble phase.
 //
 // RUN: %clang -target powerpc64le-ibm-linux-gnu -ccc-print-phases --cuda-gpu-arch=sm_30 --cuda-gpu-arch=sm_35 %s -S 2>&1 \
 // RUN: | FileCheck -check-prefix=ASM2 %s
@@ -119,7 +119,7 @@
 // HASM: 4: backend, {3}, assembler, (host-cuda)
 
 //
-// Test two gpu architecture with complete compilation in host-only
+// Test two gpu architectures with complete compilation in host-only
 // compilation mode.
 //
 // RUN: %clang -target powerpc64le-ibm-linux-gnu -ccc-print-phases --cuda-gpu-arch=sm_30 --cuda-gpu-arch=sm_35 %s --cuda-host-only 2>&1 \
@@ -170,7 +170,7 @@
 // DASM: 4: offload, "device-cuda (nvptx64-nvidia-cuda:sm_30)" {3}, assembler
 
 //
-// Test two gpu architecture with complete compilation in device-only
+// Test two gpu architectures with complete compilation in device-only
 // compilation mode.
 //
 // RUN: %clang -target powerpc64le-ibm-linux-gnu -ccc-print-phases --cuda-gpu-arch=sm_30 --cuda-gpu-arch=sm_35 %s --cuda-device-only 2>&1 \
