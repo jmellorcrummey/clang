@@ -94,6 +94,9 @@ static OpenMPDirectiveKind ParseOpenMPDirectiveKind(Parser &P) {
     { OMPD_declare, OMPD_target, OMPD_declare_target },
     { OMPD_distribute, OMPD_parallel, OMPD_distribute_parallel },
     { OMPD_distribute_parallel, OMPD_for, OMPD_distribute_parallel_for },
+    { OMPD_distribute_parallel_for, OMPD_simd, 
+      OMPD_distribute_parallel_for_simd },
+    { OMPD_distribute, OMPD_simd, OMPD_distribute_simd },
     { OMPD_end, OMPD_declare, OMPD_end_declare },
     { OMPD_end_declare, OMPD_target, OMPD_end_declare_target },
     { OMPD_target, OMPD_data, OMPD_target_data },
@@ -115,6 +118,7 @@ static OpenMPDirectiveKind ParseOpenMPDirectiveKind(Parser &P) {
     { OMPD_taskloop, OMPD_simd, OMPD_taskloop_simd },
     { OMPD_target, OMPD_parallel, OMPD_target_parallel },
     { OMPD_target_parallel, OMPD_for, OMPD_target_parallel_for },
+    { OMPD_target_parallel_for, OMPD_simd, OMPD_target_parallel_for_simd },
     { OMPD_teams, OMPD_distribute, OMPD_teams_distribute },
     { OMPD_teams_distribute, OMPD_parallel, OMPD_teams_distribute_parallel },
     { OMPD_teams_distribute_parallel, OMPD_for,
@@ -762,6 +766,9 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
   case OMPD_end_declare_target:
   case OMPD_target_update:
   case OMPD_distribute_parallel_for:
+  case OMPD_distribute_parallel_for_simd:
+  case OMPD_distribute_simd:
+  case OMPD_target_parallel_for_simd:
   case OMPD_target_teams:
   case OMPD_teams_distribute_parallel_for:
   case OMPD_target_teams_distribute_parallel_for:
@@ -795,8 +802,10 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
 ///         'for simd' | 'parallel for simd' | 'target' | 'target data' |
 ///         'taskgroup' | 'teams' | 'taskloop' | 'taskloop simd' |
 ///         'distribute' | 'target enter data' | 'target exit data' |
-///         'target parallel' | 'target parallel for' | 'target update' |
-///         'distribute parallel for' | 'target teams' |
+///         'target parallel' | 'target parallel for' |
+///         'target update' | 'distribute parallel for' |
+///         'distribute paralle for simd' | 'distribute simd' |
+///         'target parallel for simd' | 'target teams' |
 ///         'teams distribute parallel for' |
 ///         'target teams distribute parallel for' {clause}
 ///         annot_pragma_openmp_end
@@ -904,6 +913,9 @@ StmtResult Parser::ParseOpenMPDeclarativeOrExecutableDirective(
   case OMPD_taskloop_simd:
   case OMPD_distribute:
   case OMPD_distribute_parallel_for:
+  case OMPD_distribute_parallel_for_simd:
+  case OMPD_distribute_simd:
+  case OMPD_target_parallel_for_simd:
   case OMPD_target_teams:
   case OMPD_teams_distribute_parallel_for:
   case OMPD_target_teams_distribute_parallel_for: {
@@ -1085,7 +1097,7 @@ bool Parser::ParseOpenMPSimpleVarList(
 ///       simdlen-clause | threads-clause | simd-clause | num_teams-clause |
 ///       thread_limit-clause | priority-clause | grainsize-clause |
 ///       nogroup-clause | num_tasks-clause | hint-clause | to-clause |
-///       from-clause
+///       from-clause | is_device_ptr-clause
 ///
 OMPClause *Parser::ParseOpenMPClause(OpenMPDirectiveKind DKind,
                                      OpenMPClauseKind CKind, bool FirstClause) {
@@ -1212,6 +1224,7 @@ OMPClause *Parser::ParseOpenMPClause(OpenMPDirectiveKind DKind,
   case OMPC_to:
   case OMPC_from:
   case OMPC_use_device_ptr:
+  case OMPC_is_device_ptr:
     Clause = ParseOpenMPVarListClause(DKind, CKind);
     break;
   case OMPC_unknown:
@@ -1778,6 +1791,8 @@ bool Parser::ParseOpenMPVarList(OpenMPDirectiveKind DKind,
 ///       'from' '(' list ')'
 ///    use_device_ptr-clause:
 ///       'use_device_ptr' '(' list ')'
+///    is_device_ptr-clause:
+///       'is_device_ptr' '(' list ')'
 ///
 /// For 'linear' clause linear-list may have the following forms:
 ///  list

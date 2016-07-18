@@ -108,34 +108,34 @@
 
 // Target 2 commands (x86_64)
 // CHK-COMMANDS-DAG:    ld" {{.*}}"-m" "elf_x86_64" {{.*}}"-shared" {{.*}}"-o" "[[T2LIB:.+]]" {{.*}}"[[T2OBJ:.+]].o" {{.*}}"-lomp"
-// CHK-COMMANDS-DAG:    clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-emit-obj" {{.*}}"-fopenmp" {{.*}}"-o" "[[T2OBJ]].o" "-x" "ir" "[[T2BC:.+]].bc"
-// CHK-COMMANDS-DAG:    clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[T2BC]].bc" "-x" "c" "[[SRC:.+]].c" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[HSTBC:.+]].bc"
+// CHK-COMMANDS-DAG:    clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" {{.*}}"-emit-obj" {{.*}}"-fopenmp" {{.*}}"-o" "[[T2OBJ]].o" "-x" "ir" "[[T2BC:.+]].bc"
+// CHK-COMMANDS-DAG:    clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" {{.*}}"-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[T2BC]].bc" "-x" "c" "[[SRC:.+]].c" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[HSTBC:.+]].bc"
 
 // CHK-COMMANDS-ST-DAG:    ld" {{.*}}"-m" "elf_x86_64" {{.*}}"-shared" {{.*}}"-o" "[[T2LIB:.+]]" {{.*}}"[[T2OBJ:.+]].o" {{.*}}"-lomp"
 // CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1as" "-triple" "x86_64-pc-linux-gnu" "-filetype" "obj" {{.*}}"-o" "[[T2OBJ]].o" "[[T2ASM:.+]].s"
-// CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[T2ASM]].s" "-x" "ir" "[[T2BC:.+]].bc"
-// CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[T2BC]].bc" "-x" "cpp-output" "[[T2PP:.+]].i" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[HSTBC:.+]].bc"
-// CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-E" {{.*}}"-fopenmp" {{.*}}"-o" "[[T2PP]].i" "-x" "c" "[[SRC:.+]].c"
+// CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" {{.*}}"-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[T2ASM]].s" "-x" "ir" "[[T2BC:.+]].bc"
+// CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" {{.*}}"-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[T2BC]].bc" "-x" "cpp-output" "[[T2PP:.+]].i" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[HSTBC:.+]].bc"
+// CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" {{.*}}"-E" {{.*}}"-fopenmp" {{.*}}"-o" "[[T2PP]].i" "-x" "c" "[[SRC:.+]].c"
 
 // Target 1 commands (ppc64le)
 // CHK-COMMANDS-DAG:    ld" {{.*}}"-m" "elf64lppc" {{.*}}"-shared" {{.*}}"-o" "[[T1LIB:.+]]" {{.*}}"[[T1OBJ:.+]].o" {{.*}}"-lomp"
-// CHK-COMMANDS-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" "-emit-obj" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1OBJ]].o" "-x" "ir" "[[T1BC:.+]].bc"
-// CHK-COMMANDS-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" "-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1BC]].bc" "-x" "c" "[[SRC]].c" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[HSTBC]].bc"
+// CHK-COMMANDS-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" {{.*}}"-emit-obj" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1OBJ]].o" "-x" "ir" "[[T1BC:.+]].bc"
+// CHK-COMMANDS-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" {{.*}}"-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1BC]].bc" "-x" "c" "[[SRC]].c" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[HSTBC]].bc"
 
 // CHK-COMMANDS-ST-DAG:    ld" {{.*}}"-m" "elf64lppc" {{.*}}"-shared" {{.*}}"-o" "[[T1LIB:.+]]" {{.*}}"[[T1OBJ:.+]].o" {{.*}}"-lomp"
 // CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1as" "-triple" "powerpc64le-ibm-linux-gnu" "-filetype" "obj" {{.*}}"-o" "[[T1OBJ]].o" "[[T1ASM:.+]].s"
-// CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" "-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1ASM]].s" "-x" "ir" "[[T1BC:.+]].bc"
-// CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" "-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1BC]].bc" "-x" "cpp-output" "[[T1PP:.+]].i" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[HSTBC]].bc"
-// CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" "-E" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1PP]].i" "-x" "c" "[[SRC]].c"
+// CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" {{.*}}"-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1ASM]].s" "-x" "ir" "[[T1BC:.+]].bc"
+// CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" {{.*}}"-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1BC]].bc" "-x" "cpp-output" "[[T1PP:.+]].i" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[HSTBC]].bc"
+// CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" {{.*}}"-E" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1PP]].i" "-x" "c" "[[SRC]].c"
 
 // Host object generation
-// CHK-COMMANDS-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" "-emit-obj" {{.*}}"-fopenmp" {{.*}}"-o" "[[HSTOBJ]].o" "-x" "ir" "[[HSTBC]].bc"
-// CHK-COMMANDS-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" "-emit-llvm-bc"{{.*}}"-fopenmp" {{.*}}"-o" "[[HSTBC]].bc" "-x" "c" "[[SRC]].c" "-fopenmp-targets=powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu"
+// CHK-COMMANDS-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" {{.*}}"-emit-obj" {{.*}}"-fopenmp" {{.*}}"-o" "[[HSTOBJ]].o" "-x" "ir" "[[HSTBC]].bc"
+// CHK-COMMANDS-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" {{.*}}"-emit-llvm-bc"{{.*}}"-fopenmp" {{.*}}"-o" "[[HSTBC]].bc" "-x" "c" "[[SRC]].c" "-fopenmp-targets=powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu"
 
 // CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1as" "-triple" "powerpc64le--linux" "-filetype" "obj" {{.*}}"-o" "[[HSTOBJ]].o" "[[HSTASM:.+]].s"
-// CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" "-S"{{.*}}"-fopenmp" {{.*}}"-o" "[[HSTASM]].s" "-x" "ir" "[[HSTBC:.+]].bc"
-// CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" "-emit-llvm-bc"{{.*}}"-fopenmp" {{.*}}"-o" "[[HSTBC]].bc" "-x" "cpp-output" "[[HSTPP:.+]].i" "-fopenmp-targets=powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu"
-// CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" "-E"{{.*}}"-fopenmp" {{.*}}"-o" "[[HSTPP]].i" "-x" "c" "[[SRC]].c"
+// CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" {{.*}}"-S"{{.*}}"-fopenmp" {{.*}}"-o" "[[HSTASM]].s" "-x" "ir" "[[HSTBC:.+]].bc"
+// CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" {{.*}}"-emit-llvm-bc"{{.*}}"-fopenmp" {{.*}}"-o" "[[HSTBC]].bc" "-x" "cpp-output" "[[HSTPP:.+]].i" "-fopenmp-targets=powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu"
+// CHK-COMMANDS-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" {{.*}}"-E"{{.*}}"-fopenmp" {{.*}}"-o" "[[HSTPP]].i" "-x" "c" "[[SRC]].c"
 
 /// ###########################################################################
 
@@ -167,25 +167,25 @@
 // CHK-COMMANDS-SEP-ST-DAG:    clang-offload-bundler{{.*}}" "-type=o" "-targets=offload-host-powerpc64le--linux,offload-device-powerpc64le-ibm-linux-gnu,offload-device-x86_64-pc-linux-gnu" "-outputs=[[AAOBJ:.+]].o" "-inputs=[[AAHOBJ]].o,[[AAT1OBJ]].o,[[AAT2OBJ]].o"
 
 // Create 2nd bundle.
-// CHK-COMMANDS-SEP-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" "-emit-llvm-bc"{{.*}}"-fopenmp" {{.*}}"-o" "[[BBHBC:.+]].bc" "-x" "cpp-output" "[[BBHPP]].i" "-fopenmp-targets=powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu"
-// CHK-COMMANDS-SEP-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" "-emit-obj" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBHOBJ:.+]].o" "-x" "ir" "[[BBHBC]].bc"
+// CHK-COMMANDS-SEP-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" {{.*}}"-emit-llvm-bc"{{.*}}"-fopenmp" {{.*}}"-o" "[[BBHBC:.+]].bc" "-x" "cpp-output" "[[BBHPP]].i" "-fopenmp-targets=powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu"
+// CHK-COMMANDS-SEP-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" {{.*}}"-emit-obj" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBHOBJ:.+]].o" "-x" "ir" "[[BBHBC]].bc"
 
-// CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" "-emit-llvm-bc"{{.*}}"-fopenmp" {{.*}}"-o" "[[BBHBC:.+]].bc" "-x" "cpp-output" "[[BBHPP]].i" "-fopenmp-targets=powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu"
-// CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" "-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBHASM:.+]].s" "-x" "ir" "[[BBHBC]].bc"
+// CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" {{.*}}"-emit-llvm-bc"{{.*}}"-fopenmp" {{.*}}"-o" "[[BBHBC:.+]].bc" "-x" "cpp-output" "[[BBHPP]].i" "-fopenmp-targets=powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu"
+// CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" {{.*}}"-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBHASM:.+]].s" "-x" "ir" "[[BBHBC]].bc"
 // CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1as" "-triple" "powerpc64le--linux" "-filetype" "obj" {{.*}}"-o" "[[BBHOBJ:.+]].o" "[[BBHASM]].s"
 
-// CHK-COMMANDS-SEP-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" "-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBT1BC:.+]].bc" "-x" "cpp-output" "[[BBT1PP]].i" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[BBHBC]].bc"
-// CHK-COMMANDS-SEP-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" "-emit-obj" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBT1OBJ:.+]].o" "-x" "ir" "[[BBT1BC]].bc"
+// CHK-COMMANDS-SEP-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" {{.*}}"-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBT1BC:.+]].bc" "-x" "cpp-output" "[[BBT1PP]].i" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[BBHBC]].bc"
+// CHK-COMMANDS-SEP-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" {{.*}}"-emit-obj" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBT1OBJ:.+]].o" "-x" "ir" "[[BBT1BC]].bc"
 
-// CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" "-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBT1BC:.+]].bc" "-x" "cpp-output" "[[BBT1PP]].i" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[BBHBC]].bc"
-// CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" "-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBT1ASM:.+]].s" "-x" "ir" "[[BBT1BC]].bc"
+// CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" {{.*}}"-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBT1BC:.+]].bc" "-x" "cpp-output" "[[BBT1PP]].i" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[BBHBC]].bc"
+// CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" {{.*}}"-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBT1ASM:.+]].s" "-x" "ir" "[[BBT1BC]].bc"
 // CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1as" "-triple" "powerpc64le-ibm-linux-gnu" "-filetype" "obj" {{.*}}"-o" "[[BBT1OBJ:.+]].o" "[[BBT1ASM]].s"
 
-// CHK-COMMANDS-SEP-DAG:    clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBT2BC:.+]].bc" "-x" "cpp-output" "[[BBT2PP]].i" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[BBHBC]].bc"
-// CHK-COMMANDS-SEP-DAG:    clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-emit-obj" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBT2OBJ:.+]].o" "-x" "ir" "[[BBT2BC]].bc"
+// CHK-COMMANDS-SEP-DAG:    clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" {{.*}}"-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBT2BC:.+]].bc" "-x" "cpp-output" "[[BBT2PP]].i" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[BBHBC]].bc"
+// CHK-COMMANDS-SEP-DAG:    clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" {{.*}}"-emit-obj" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBT2OBJ:.+]].o" "-x" "ir" "[[BBT2BC]].bc"
 
-// CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBT2BC:.+]].bc" "-x" "cpp-output" "[[BBT2PP]].i" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[BBHBC]].bc"
-// CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBT2ASM:.+]].s" "-x" "ir" "[[BBT2BC]].bc"
+// CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" {{.*}}"-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBT2BC:.+]].bc" "-x" "cpp-output" "[[BBT2PP]].i" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[BBHBC]].bc"
+// CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" {{.*}}"-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[BBT2ASM:.+]].s" "-x" "ir" "[[BBT2BC]].bc"
 // CHK-COMMANDS-SEP-ST-DAG:    clang{{.*}}" "-cc1as" "-triple" "x86_64-pc-linux-gnu" "-filetype" "obj" {{.*}}"-o" "[[BBT2OBJ:.+]].o" "[[BBT2ASM]].s"
 
 // CHK-COMMANDS-SEP-DAG:     clang-offload-bundler{{.*}}" "-type=o" "-targets=offload-host-powerpc64le--linux,offload-device-powerpc64le-ibm-linux-gnu,offload-device-x86_64-pc-linux-gnu" "-outputs=[[BBOBJ:.+]].o" "-inputs=[[BBHOBJ]].o,[[BBT1OBJ]].o,[[BBT2OBJ]].o"

@@ -534,10 +534,10 @@ void OMPClauseProfiler::VisitOMPFromClause(const OMPFromClause *C) {
 void OMPClauseProfiler::VisitOMPUseDevicePtrClause(
     const OMPUseDevicePtrClause *C) {
   VisitOMPClauseList(C);
-  for (auto *E : C->private_copies()) {
-    if (E)
-      Profiler->VisitStmt(E);
-  }
+}
+void OMPClauseProfiler::VisitOMPIsDevicePtrClause(
+    const OMPIsDevicePtrClause *C) {
+  VisitOMPClauseList(C);
 }
 }
 
@@ -711,6 +711,21 @@ void StmtProfiler::VisitOMPTargetUpdateDirective(
 
 void StmtProfiler::VisitOMPDistributeParallelForDirective(
     const OMPDistributeParallelForDirective *S) {
+  VisitOMPLoopDirective(S);
+}
+
+void StmtProfiler::VisitOMPDistributeParallelForSimdDirective(
+    const OMPDistributeParallelForSimdDirective *S) {
+  VisitOMPLoopDirective(S);
+}
+
+void StmtProfiler::VisitOMPDistributeSimdDirective(
+    const OMPDistributeSimdDirective *S) {
+  VisitOMPLoopDirective(S);
+}
+
+void StmtProfiler::VisitOMPTargetParallelForSimdDirective(
+    const OMPTargetParallelForSimdDirective *S) {
   VisitOMPLoopDirective(S);
 }
 

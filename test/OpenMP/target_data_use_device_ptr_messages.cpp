@@ -21,27 +21,27 @@ struct SA {
     {}
 #pragma omp target data map(i) use_device_ptr(alloc) // expected-error {{use of undeclared identifier 'alloc'}}
     {}
-#pragma omp target data map(i) use_device_ptr(arg // expected-error {{expected ')'}} expected-note {{to match this '('}} expected-error {{item used in 'use_device_pointer' clause is not a pointer}}
+#pragma omp target data map(i) use_device_ptr(arg // expected-error {{expected ')'}} expected-note {{to match this '('}} expected-error {{expected pointer or reference to pointer in 'use_device_ptr' clause}}
     {}
-#pragma omp target data map(i) use_device_ptr(i) // expected-error {{item used in 'use_device_pointer' clause is not a pointer}}
+#pragma omp target data map(i) use_device_ptr(i) // expected-error {{expected pointer or reference to pointer in 'use_device_ptr' clause}}
     {}
-#pragma omp target data map(i) use_device_ptr(j) // expected-error {{}}
+#pragma omp target data map(i) use_device_ptr(j) // expected-error {{expected pointer or reference to pointer in 'use_device_ptr' clause}}
     {}
 #pragma omp target data map(i) use_device_ptr(k) // OK
     {}
 #pragma omp target data map(i) use_device_ptr(z) // OK
     {}
-#pragma omp target data map(i) use_device_ptr(aa) // expected-error{{}}
+#pragma omp target data map(i) use_device_ptr(aa) // expected-error{{expected pointer or reference to pointer in 'use_device_ptr' clause}}
     {}
-#pragma omp target data map(i) use_device_ptr(e) // expected-error{{}}
+#pragma omp target data map(i) use_device_ptr(e) // expected-error{{expected pointer or reference to pointer in 'use_device_ptr' clause}}
     {}
-#pragma omp target data map(i) use_device_ptr(g) // expected-error{{}}
+#pragma omp target data map(i) use_device_ptr(g) // expected-error{{expected pointer or reference to pointer in 'use_device_ptr' clause}}
     {}
-#pragma omp target data map(i) use_device_ptr(k,i,j) // expected-error2 {{item used in 'use_device_pointer' clause is not a pointer}}
+#pragma omp target data map(i) use_device_ptr(k,i,j) // expected-error2 {{expected pointer or reference to pointer in 'use_device_ptr' clause}}
     {}
-#pragma omp target data map(i) use_device_ptr(d) // expected-error{{}}
+#pragma omp target data map(i) use_device_ptr(d) // expected-error{{expected pointer or reference to pointer in 'use_device_ptr' clause}}
     {}
-#pragma omp target data map(i) use_device_ptr(da) // expected-error{{}}
+#pragma omp target data map(i) use_device_ptr(da) // expected-error{{expected pointer or reference to pointer in 'use_device_ptr' clause}}
     {}
   return;
  }
@@ -137,27 +137,27 @@ T tmain(T argc) {
   {}
 #pragma omp target data map(i) use_device_ptr(alloc) // expected-error {{use of undeclared identifier 'alloc'}}
   {}
-#pragma omp target data map(i) use_device_ptr(argc // expected-error {{expected ')'}} expected-note {{to match this '('}} expected-error{{item used in 'use_device_pointer' clause is not a pointer}}
+#pragma omp target data map(i) use_device_ptr(argc // expected-error {{expected ')'}} expected-note {{to match this '('}} expected-error{{expected pointer or reference to pointer in 'use_device_ptr' clause}}
   {}
-#pragma omp target data map(i) use_device_ptr(i) // expected-error {{}}
+#pragma omp target data map(i) use_device_ptr(i) // expected-error {{expected pointer or reference to pointer in 'use_device_ptr' clause}}
   {}
-#pragma omp target data map(i) use_device_ptr(j) // expected-error {{}}
+#pragma omp target data map(i) use_device_ptr(j) // expected-error {{expected pointer or reference to pointer in 'use_device_ptr' clause}}
   {}
 #pragma omp target data map(i) use_device_ptr(k) // OK
   {}
 #pragma omp target data map(i) use_device_ptr(z) // OK
   {}
-#pragma omp target data map(i) use_device_ptr(aa) // expected-error{{}}
+#pragma omp target data map(i) use_device_ptr(aa) // expected-error{{expected pointer or reference to pointer in 'use_device_ptr' clause}}
   {}
-#pragma omp target data map(i) use_device_ptr(e) // expected-error{{}}
+#pragma omp target data map(i) use_device_ptr(e) // expected-error{{expected pointer or reference to pointer in 'use_device_ptr' clause}}
   {}
-#pragma omp target data map(i) use_device_ptr(g) // expected-error{{}}
+#pragma omp target data map(i) use_device_ptr(g) // expected-error{{expected pointer or reference to pointer in 'use_device_ptr' clause}}
   {}
-#pragma omp target data map(i) use_device_ptr(k,i,j) // expected-error2 {{item used in 'use_device_pointer' clause is not a pointer}}
+#pragma omp target data map(i) use_device_ptr(k,i,j) // expected-error2 {{expected pointer or reference to pointer in 'use_device_ptr' clause}}
   {}
-#pragma omp target data map(i) use_device_ptr(d) // expected-error{{}}
+#pragma omp target data map(i) use_device_ptr(d) // expected-error{{expected pointer or reference to pointer in 'use_device_ptr' clause}}
   {}
-#pragma omp target data map(i) use_device_ptr(da) // expected-error{{}}
+#pragma omp target data map(i) use_device_ptr(da) // expected-error{{expected pointer or reference to pointer in 'use_device_ptr' clause}}
   {}
   return 0;
 }
@@ -180,27 +180,27 @@ int main(int argc, char **argv) {
   {}
 #pragma omp target data map(i) use_device_ptr(alloc) // expected-error {{use of undeclared identifier 'alloc'}}
   {}
-#pragma omp target data map(i) use_device_ptr(argc // expected-error {{expected ')'}} expected-note {{to match this '('}} expected-error {{item used in 'use_device_pointer' clause is not a pointer}}
+#pragma omp target data map(i) use_device_ptr(argc // expected-error {{expected ')'}} expected-note {{to match this '('}} expected-error {{expected pointer or reference to pointer in 'use_device_ptr' clause}}
   {}
-#pragma omp target data map(i) use_device_ptr(i) // expected-error {{}}
+#pragma omp target data map(i) use_device_ptr(i) // expected-error {{expected pointer or reference to pointer in 'use_device_ptr' clause}}
   {}
-#pragma omp target data map(i) use_device_ptr(j) // expected-error {{}}
+#pragma omp target data map(i) use_device_ptr(j) // expected-error {{expected pointer or reference to pointer in 'use_device_ptr' clause}}
   {}
 #pragma omp target data map(i) use_device_ptr(k) // OK
   {}
 #pragma omp target data map(i) use_device_ptr(z) // OK
   {}
-#pragma omp target data map(i) use_device_ptr(aa) // expected-error{{}}
+#pragma omp target data map(i) use_device_ptr(aa) // expected-error{{expected pointer or reference to pointer in 'use_device_ptr' clause}}
   {}
-#pragma omp target data map(i) use_device_ptr(e) // expected-error{{}}
+#pragma omp target data map(i) use_device_ptr(e) // expected-error{{expected pointer or reference to pointer in 'use_device_ptr' clause}}
   {}
-#pragma omp target data map(i) use_device_ptr(g) // expected-error{{}}
+#pragma omp target data map(i) use_device_ptr(g) // expected-error{{expected pointer or reference to pointer in 'use_device_ptr' clause}}
   {}
-#pragma omp target data map(i) use_device_ptr(k,i,j) // expected-error2 {{item used in 'use_device_pointer' clause is not a pointer}}
+#pragma omp target data map(i) use_device_ptr(k,i,j) // expected-error2 {{expected pointer or reference to pointer in 'use_device_ptr' clause}}
   {}
-#pragma omp target data map(i) use_device_ptr(d) // expected-error{{}}
+#pragma omp target data map(i) use_device_ptr(d) // expected-error{{expected pointer or reference to pointer in 'use_device_ptr' clause}}
   {}
-#pragma omp target data map(i) use_device_ptr(da) // expected-error{{}}
+#pragma omp target data map(i) use_device_ptr(da) // expected-error{{expected pointer or reference to pointer in 'use_device_ptr' clause}}
   {}
   return tmain<int, 3>(argc); // expected-note {{in instantiation of function template specialization 'tmain<int, 3>' requested here}}
 }

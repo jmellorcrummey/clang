@@ -52,6 +52,10 @@ const OMPClauseWithPreInit *OMPClauseWithPreInit::get(const OMPClause *C) {
     return static_cast<const OMPNumThreadsClause *>(C);
   case OMPC_if:
     return static_cast<const OMPIfClause *>(C);
+  case OMPC_num_teams:
+    return static_cast<const OMPNumTeamsClause *>(C);
+  case OMPC_thread_limit:
+    return static_cast<const OMPThreadLimitClause *>(C);
   case OMPC_default:
   case OMPC_proc_bind:
   case OMPC_final:
@@ -79,8 +83,6 @@ const OMPClauseWithPreInit *OMPClauseWithPreInit::get(const OMPClause *C) {
   case OMPC_threads:
   case OMPC_simd:
   case OMPC_map:
-  case OMPC_num_teams:
-  case OMPC_thread_limit:
   case OMPC_priority:
   case OMPC_grainsize:
   case OMPC_nogroup:
@@ -92,6 +94,7 @@ const OMPClauseWithPreInit *OMPClauseWithPreInit::get(const OMPClause *C) {
   case OMPC_to:
   case OMPC_from:
   case OMPC_use_device_ptr:
+  case OMPC_is_device_ptr:
     break;
   }
 
@@ -156,6 +159,7 @@ const OMPClauseWithPostUpdate *OMPClauseWithPostUpdate::get(const OMPClause *C) 
   case OMPC_to:
   case OMPC_from:
   case OMPC_use_device_ptr:
+  case OMPC_is_device_ptr:
     break;
   }
 
@@ -754,4 +758,22 @@ OMPUseDevicePtrClause *OMPUseDevicePtrClause::CreateEmpty(const ASTContext &C,
                                                           unsigned N) {
   void *Mem = C.Allocate(totalSizeToAlloc<Expr *>(2 * N));
   return new (Mem) OMPUseDevicePtrClause(N);
+}
+
+OMPIsDevicePtrClause *OMPIsDevicePtrClause::Create(const ASTContext &C,
+                                                   SourceLocation StartLoc,
+                                                   SourceLocation LParenLoc,
+                                                   SourceLocation EndLoc,
+                                                   ArrayRef<Expr *> VL) {
+  void *Mem = C.Allocate(totalSizeToAlloc<Expr *>(VL.size()));
+  OMPIsDevicePtrClause *Clause =
+      new (Mem) OMPIsDevicePtrClause(StartLoc, LParenLoc, EndLoc, VL.size());
+  Clause->setVarRefs(VL);
+  return Clause;
+}
+
+OMPIsDevicePtrClause *OMPIsDevicePtrClause::CreateEmpty(const ASTContext &C,
+                                                        unsigned N) {
+  void *Mem = C.Allocate(totalSizeToAlloc<Expr *>(N));
+  return new (Mem) OMPIsDevicePtrClause(N);
 }

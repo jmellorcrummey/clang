@@ -302,6 +302,19 @@ public:
 
   llvm::Instruction *CurrentFuncletPad = nullptr;
 
+  class CallLifetimeEnd final : public EHScopeStack::Cleanup {
+    llvm::Value *Addr;
+    llvm::Value *Size;
+
+  public:
+    CallLifetimeEnd(Address addr, llvm::Value *size)
+        : Addr(addr.getPointer()), Size(size) {}
+
+    void Emit(CodeGenFunction &CGF, Flags flags) override {
+      CGF.EmitLifetimeEnd(Size, Addr);
+    }
+  };
+
   /// Header for data within LifetimeExtendedCleanupStack.
   struct LifetimeExtendedCleanupHeader {
     /// The size of the following cleanup object.
@@ -1508,6 +1521,10 @@ public:
   /// instrumented with __cyg_profile_func_* calls
   bool ShouldInstrumentFunction();
 
+  /// ShouldXRayInstrument - Return true if the current function should be
+  /// instrumented with XRay nop sleds.
+  bool ShouldXRayInstrumentFunction() const;
+
   /// EmitFunctionInstrumentation - Emit LLVM code to call the specified
   /// instrumentation function with the current function and the call site, if
   /// function instrumentation is enabled.
@@ -2322,10 +2339,9 @@ public:
   llvm::Function *EmitCapturedStmt(const CapturedStmt &S, CapturedRegionKind K);
   llvm::Function *GenerateCapturedStmtFunction(const CapturedStmt &S);
   Address GenerateCapturedStmtArgument(const CapturedStmt &S);
-  llvm::Function *
-  GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S,
-                                     bool UseCapturedArgumentsOnly = false,
-                                     unsigned CaptureLevel = 1);
+  llvm::Function *GenerateOpenMPCapturedStmtFunction(
+      const CapturedStmt &S, bool UseCapturedArgumentsOnly = false,
+      unsigned CaptureLevel = 1, unsigned ImplicitParamStop = 0);
   void GenerateOpenMPCapturedVars(const CapturedStmt &S,
                                   SmallVectorImpl<llvm::Value *> &CapturedVars,
                                   unsigned CaptureLevel = 1);
@@ -2492,6 +2508,11 @@ public:
                         const RegionCodeGenTy &CodeGenDistributeLoopContent);
   void EmitOMPDistributeParallelForDirective(
       const OMPDistributeParallelForDirective &S);
+  void EmitOMPDistributeParallelForSimdDirective(
+      const OMPDistributeParallelForSimdDirective &S);
+  void EmitOMPDistributeSimdDirective(const OMPDistributeSimdDirective &S);
+  void EmitOMPTargetParallelForSimdDirective(
+      const OMPTargetParallelForSimdDirective &S);
   void EmitOMPTargetTeamsDirective(const OMPTargetTeamsDirective &S);
   void EmitOMPTeamsDistributeParallelForDirective(
       const OMPTeamsDistributeParallelForDirective &S);
@@ -3086,9 +3107,12 @@ public:
 
 
   /// EmitCXXGlobalVarDeclInit - Create the initializer for a C++
-  /// variable with global storage.
+  /// variable with global storage. If \a EmitInitOnly or \a EmitDtorOnly are
+  /// set to true, only the call to the initializer or destructor is emitted,
+  /// respectively.
   void EmitCXXGlobalVarDeclInit(const VarDecl &D, llvm::Constant *DeclPtr,
-                                bool PerformInit);
+                                bool PerformInit, bool EmitInitOnly,
+                                bool EmitDtorOnly);
 
   llvm::Constant *createAtExitStub(const VarDecl &VD, llvm::Constant *Dtor,
                                    llvm::Constant *Addr);
@@ -3104,7 +3128,8 @@ public:
   /// once, e.g. with a static local variable or a static data member
   /// of a class template.
   void EmitCXXGuardedInit(const VarDecl &D, llvm::GlobalVariable *DeclPtr,
-                          bool PerformInit);
+                          bool PerformInit, bool EmitInitOnly = false,
+                          bool EmitDtorOnly = false);
 
   /// GenerateCXXGlobalInitFunc - Generates code for initializing global
   /// variables.
@@ -3118,10 +3143,11 @@ public:
                                   const std::vector<std::pair<llvm::WeakVH,
                                   llvm::Constant*> > &DtorsAndObjects);
 
-  void GenerateCXXGlobalVarDeclInitFunc(llvm::Function *Fn,
-                                        const VarDecl *D,
+  void GenerateCXXGlobalVarDeclInitFunc(llvm::Function *Fn, const VarDecl *D,
                                         llvm::GlobalVariable *Addr,
-                                        bool PerformInit);
+                                        bool PerformInit,
+                                        bool EmitInitOnly = false,
+                                        bool EmitDtorOnly = false);
 
   void EmitCXXConstructExpr(const CXXConstructExpr *E, AggValueSlot Dest);
   
