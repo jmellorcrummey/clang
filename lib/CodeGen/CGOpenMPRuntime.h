@@ -613,7 +613,7 @@ private:
                             Address Shareds, const OMPTaskDataTy &Data);
 
   /// This contains all the decls which were not specified under declare target
-  /// region / which are deferred for device code emission.
+  /// region, which are deferred for device code emission.
   /// If a decl is used in target region implicitly without specifying under
   /// declare target, deferred decl is emitted during Codegen::Release for
   /// device codegen.
@@ -624,7 +624,7 @@ public:
   virtual ~CGOpenMPRuntime() {}
   virtual void clear();
 
-  /// \brief The function is added tracked functions list.
+  /// The function is added tracked functions list.
   virtual void addTrackedFunction(StringRef MangledName, GlobalDecl GD);
 
   /// \brief The function register all tracked functions if they have

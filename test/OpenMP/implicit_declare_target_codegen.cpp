@@ -151,31 +151,31 @@ void funky(T *a, T *b, int n, F f)
 
 void fooz()
 {
-      auto plugh = [](int *A, int *B, int i) { A[i] += B[i]; };
-      int n =64;
-      int a[n],b[n];
+  auto plugh = [](int *A, int *B, int i) { A[i] += B[i]; };
+  int n =64;
+  int a[n],b[n];
 
-      #pragma omp target map(tofrom:a[:n],b[:n])
-      {
-    	  auto bar = [](int *A, int *B, int i ) { A[i] += B[i]; };
+  #pragma omp target map(tofrom:a[:n],b[:n])
+  {
+    auto bar = [](int *A, int *B, int i ) { A[i] += B[i]; };
 
-          for (int i = 0;  i < n; ++ i)
-              plugh(a, b, i);
-          for (int i = 0;  i < n; ++ i)
-              bar(b, a, i);
+    for (int i = 0;  i < n; ++ i)
+      plugh(a, b, i);
+    for (int i = 0;  i < n; ++ i)
+      bar(b, a, i);
 
-          funky(a, b, n, plugh);
+    funky(a, b, n, plugh);
 
-          funky(a, b, n, bar);
-      }
-      // CK3:    %class.anon* dereferenceable(1) %plugh
-      // CK3:    %plugh.addr = alloca %class.anon*, align 8
-	  // CK3:    %bar = alloca %class.anon.0, align 1
-      // CK3:    store %class.anon* %plugh, %class.anon** %plugh.addr, align 8
-      // CK3:    call void @"_{{.+}}funky{{.+}}fooz{{.+}}
-	  // CK3:    call void @"_{{.+}}funky
-      // CK3:    define internal void @"_{{.+}}funky{{.+}}fooz
-	  // CK3:    define internal void @"_{{.+}}funky
+    funky(a, b, n, bar);
+}
+  // CK3:    %class.anon* dereferenceable(1) %plugh
+  // CK3:    %plugh.addr = alloca %class.anon*, align 8
+  // CK3:    %bar = alloca %class.anon.0, align 1
+  // CK3:    store %class.anon* %plugh, %class.anon** %plugh.addr, align 8
+  // CK3:    call void @"_{{.+}}funky{{.+}}fooz{{.+}}
+  // CK3:    call void @"_{{.+}}funky
+  // CK3:    define internal void @"_{{.+}}funky{{.+}}fooz
+  // CK3:    define internal void @"_{{.+}}funky
 
 }
 
