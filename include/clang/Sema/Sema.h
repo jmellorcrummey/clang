@@ -24,6 +24,7 @@
 #include "clang/AST/MangleNumberingContext.h"
 #include "clang/AST/NSAPI.h"
 #include "clang/AST/PrettyPrinter.h"
+#include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/AST/TypeLoc.h"
 #include "clang/Basic/ExpressionTraits.h"
 #include "clang/Basic/LangOptions.h"
@@ -8025,6 +8026,9 @@ public:
   bool isInOpenMPDeclareTargetContext() const {
     return IsInOpenMPDeclareTargetContext;
   }
+  /// Check and mark recursively declarations are implicitly used inside OpenMP
+  /// target region.
+  void checkDeclImplicitlyUsedOpenMPTargetContext(Decl *D);
 
   /// \brief Initialization of captured region for OpenMP region.
   void ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope);

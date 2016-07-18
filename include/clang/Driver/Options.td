@@ -1057,6 +1057,8 @@ def fopenmp_version_EQ : Joined<["-"], "fopenmp-version=">, Group<f_Group>, Flag
 def fopenmp_EQ : Joined<["-"], "fopenmp=">, Group<f_Group>;
 def fopenmp_use_tls : Flag<["-"], "fopenmp-use-tls">, Group<f_Group>, Flags<[NoArgumentUnused]>;
 def fnoopenmp_use_tls : Flag<["-"], "fnoopenmp-use-tls">, Group<f_Group>, Flags<[CC1Option, NoArgumentUnused]>;
+def fopenmp_implicit_declare_target : Flag<["-"], "fopenmp-implicit-declare-target">, Group<f_Group>, Flags<[CC1Option, NoArgumentUnused]>;
+def fnoopenmp_implicit_declare_target : Flag<["-"], "fnoopenmp-implicit-declare-target">, Group<f_Group>, Flags<[CC1Option, NoArgumentUnused]>;
 def fopenmp_nvptx_spmd : Flag<["-"], "fopenmp-nvptx-spmd">, Group<f_Group>, Flags<[NoArgumentUnused]>;
 def fopenmp_nvptx_nospmd : Flag<["-"], "fopenmp-nvptx-nospmd">, Group<f_Group>, Flags<[CC1Option, NoArgumentUnused]>;
 def fopenmp_targets_EQ : CommaJoined<["-"], "fopenmp-targets=">, Flags<[DriverOption, CC1Option]>,
