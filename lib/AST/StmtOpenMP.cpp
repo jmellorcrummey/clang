@@ -1175,6 +1175,8 @@ OMPDistributeParallelForSimdDirective::Create(
   Dir->setPreCond(Exprs.PreCond);
   Dir->setCond(Exprs.Cond);
   Dir->setInit(Exprs.Init);
+  Dir->setLaneInit(Exprs.LaneInit);
+  Dir->setNumLanes(Exprs.NumLanes);
   Dir->setInc(Exprs.Inc);
   Dir->setIsLastIterVariable(Exprs.IL);
   Dir->setLowerBoundVariable(Exprs.LB);
@@ -1186,6 +1188,9 @@ OMPDistributeParallelForSimdDirective::Create(
   Dir->setNumIterations(Exprs.NumIterations);
   Dir->setPrevLowerBoundVariable(Exprs.PrevLB);
   Dir->setPrevUpperBoundVariable(Exprs.PrevUB);
+  Dir->setDistCond(Exprs.DistCond);
+  Dir->setDistInc(Exprs.DistInc);
+  Dir->setPrevEnsureUpperBound(Exprs.PrevEUB);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);

@@ -628,8 +628,6 @@ public:
       UB = nullptr;
       ST = nullptr;
       EUB = nullptr;
-      PrevLB = nullptr;
-      PrevUB = nullptr;
       NLB = nullptr;
       NUB = nullptr;
       NumIterations = nullptr;
