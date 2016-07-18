@@ -12316,12 +12316,6 @@ static void checkDeclInTargetContext(SourceLocation SL, SourceRange SR,
     // target region (it can be e.g. a lambda) that is legal and we do not need
     // to do anything else.
     if (LD == D) {
-      // Here, unless these declarations are not specified inside of declare
-      // target they are not valid OpenMP 4.5, we thus give warning.  In case
-      // -fopenmp-implicit-declare-target these declarations are automatically
-      // declared for target construct.
-      if (!SemaRef.getLangOpts().OpenMPImplicitDeclareTarget)
-        SemaRef.Diag(LD->getLocation(), diag::warn_omp_not_in_target_context);
       return;
     }
   }
