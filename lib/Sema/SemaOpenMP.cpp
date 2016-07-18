@@ -3685,7 +3685,9 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
       // parallel loop and parallel loop SIMD constructs are the only OpenMP
       // constructs that can be closely nested in the teams region.
       NestingProhibited = !isOpenMPParallelDirective(CurrentRegion) &&
-                          !isOpenMPDistributeDirective(CurrentRegion);
+                          !isOpenMPDistributeDirective(CurrentRegion) &&
+                          !isOpenMPParallelDirective(ParentRegion) &&
+                          !isOpenMPParallelDirective(ParentRegion);
       Recommend = ShouldBeInParallelRegion;
     }
     if (!NestingProhibited && isOpenMPDistributeDirective(CurrentRegion)) {
