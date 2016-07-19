@@ -1609,8 +1609,7 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
   case OMPD_teams:
   case OMPD_target_parallel:
   case OMPD_target_parallel_for:
-  case OMPD_target_teams:
-  case OMPD_teams_distribute_parallel_for: {
+  case OMPD_target_teams: {
     QualType KmpInt32Ty = Context.getIntTypeForBitwidth(32, 1);
     QualType KmpInt32PtrTy =
         Context.getPointerType(KmpInt32Ty).withConst().withRestrict();
@@ -1717,8 +1716,9 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
   }
   case OMPD_distribute_parallel_for_simd:
   case OMPD_distribute_simd:
-  case OMPD_target_teams_distribute_parallel_for:
-  case OMPD_distribute_parallel_for: {
+  case OMPD_distribute_parallel_for:
+  case OMPD_teams_distribute_parallel_for:
+  case OMPD_target_teams_distribute_parallel_for: {
     QualType KmpInt32Ty = Context.getIntTypeForBitwidth(32, 1);
     QualType KmpInt32PtrTy =
         Context.getPointerType(KmpInt32Ty).withConst().withRestrict();
