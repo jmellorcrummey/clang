@@ -687,6 +687,9 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
   }
 
   Opts.InstrumentFunctions = Args.hasArg(OPT_finstrument_functions);
+  Opts.XRayInstrumentFunctions = Args.hasArg(OPT_fxray_instrument);
+  Opts.XRayInstructionThreshold =
+      getLastArgIntValue(Args, OPT_fxray_instruction_threshold_, 200, Diags);
   Opts.InstrumentForProfiling = Args.hasArg(OPT_pg);
   Opts.EmitOpenCLArgMetadata = Args.hasArg(OPT_cl_kernel_arg_info);
   Opts.CompressDebugSections = Args.hasArg(OPT_compress_debug_sections);
@@ -2055,6 +2058,8 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   Opts.OpenMPIsDevice =
       Opts.OpenMP && Args.hasArg(options::OPT_fopenmp_is_device);
   Opts.OpenMPNoSPMD = Opts.OpenMP && Args.hasArg(options::OPT_fopenmp_nvptx_nospmd);
+  Opts.OpenMPImplicitDeclareTarget =
+      Opts.OpenMP && Args.hasArg(options::OPT_fopenmp_implicit_declare_target);
 
   if (Opts.OpenMP) {
     int Version =

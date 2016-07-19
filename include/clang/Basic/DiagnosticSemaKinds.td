@@ -2503,7 +2503,9 @@ def err_ifunc_resolver_params : Error<
   "ifunc resolver function must have no parameters">;
 def warn_attribute_wrong_decl_type : Warning<
   "%0 attribute only applies to %select{functions|unions|"
-  "variables and functions|functions and methods|parameters|"
+  "variables and functions|"
+  "functions, variables, and Objective-C interfaces|"
+  "functions and methods|parameters|"
   "functions, methods and blocks|functions, methods, and classes|"
   "functions, methods, and parameters|classes|enums|variables|methods|"
   "fields and global variables|structs|parameters and typedefs|variables and typedefs|"
@@ -2511,7 +2513,9 @@ def warn_attribute_wrong_decl_type : Warning<
   "types and namespaces|Objective-C interfaces|methods and properties|"
   "struct or union|struct, union or class|types|"
   "Objective-C instance methods|init methods of interface or class extension declarations|"
-  "variables, functions and classes|Objective-C protocols|"
+  "variables, functions and classes|"
+  "functions, variables, classes, and Objective-C interfaces|"
+  "Objective-C protocols|"
   "functions and global variables|structs, unions, and typedefs|structs and typedefs|"
   "interface or protocol declarations|kernel functions|non-K&R-style functions|"
   "variables, enums, fields and typedefs|functions, methods, enums, and classes|"
@@ -7502,9 +7506,6 @@ def warn_empty_switch_body : Warning<
   "switch statement has empty body">, InGroup<EmptyBody>;
 def note_empty_body_on_separate_line : Note<
   "put the semicolon on a separate line to silence this warning">;
-
-def err_init_stmt_not_supported : Error<
-  "C++1z init-statement not yet supported">;
 
 def err_va_start_used_in_non_variadic_function : Error<
   "'va_start' used in function with fixed args">;

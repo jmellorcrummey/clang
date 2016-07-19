@@ -6430,6 +6430,16 @@ bool CGOpenMPRuntime::emitTargetGlobal(GlobalDecl GD) {
   return emitTargetGlobalVariable(GD);
 }
 
+bool CGOpenMPRuntime::MustBeEmittedForDevice(GlobalDecl GD) {
+  if (!CGM.getLangOpts().OpenMPIsDevice &&
+      CGM.getLangOpts().OMPTargetTriples.empty())
+    return false;
+
+  // Should be in device if it has metadata
+  return OffloadEntriesInfoManager.hasDeviceFunctionEntryInfo(
+      CGM.getMangledName(GD));
+}
+
 /// \brief Return true if the declaration is marked as 'declare target', i.e.
 /// the declaration itself or its template declaration have the 'declare target'
 /// attribute.
@@ -6656,12 +6666,13 @@ void CGOpenMPRuntime::registerTargetFunctionDefinition(GlobalDecl GD) {
       CGM.getLangOpts().OMPTargetTriples.empty())
     return;
 
-  auto *FD = cast<FunctionDecl>(GD.getDecl());
-  // Only declare target functions are registered.
-  if (!IsDeclareTargetDeclaration(FD))
-    return;
-  OffloadEntriesInfoManager.registerDeviceFunctionEntryInfo(
-      CGM.getMangledName(GD));
+  if (auto *FD = dyn_cast<FunctionDecl>(GD.getDecl())) {
+    // Only declare target functions are registered.
+    if (!IsDeclareTargetDeclaration(FD))
+      return;
+    OffloadEntriesInfoManager.registerDeviceFunctionEntryInfo(
+        CGM.getMangledName(GD));
+  }
 }
 
 void CGOpenMPRuntime::registerTargetVariableDefinition(const VarDecl *D,
@@ -7287,3 +7298,11 @@ void CGOpenMPRuntime::emitDoacrossOrdered(CodeGenFunction &CGF,
   CGF.EmitRuntimeCall(RTLFn, Args);
 }
 
+void CGOpenMPRuntime::addTrackedFunction(StringRef MangledName, GlobalDecl GD) {
+  TrackedDecls[MangledName] = GD;
+}
+
+void CGOpenMPRuntime::registerTrackedFunction() {
+  for (auto &GD : TrackedDecls)
+    registerTargetFunctionDefinition(GD.second);
+}

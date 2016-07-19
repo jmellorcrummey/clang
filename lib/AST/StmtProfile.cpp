@@ -501,13 +501,11 @@ void OMPClauseProfiler::VisitOMPMapClause(const OMPMapClause *C) {
   VisitOMPClauseList(C);
 }
 void OMPClauseProfiler::VisitOMPNumTeamsClause(const OMPNumTeamsClause *C) {
-  VistOMPClauseWithPreInit(C);
   if (C->getNumTeams())
     Profiler->VisitStmt(C->getNumTeams());
 }
 void OMPClauseProfiler::VisitOMPThreadLimitClause(
     const OMPThreadLimitClause *C) {
-  VistOMPClauseWithPreInit(C);
   if (C->getThreadLimit())
     Profiler->VisitStmt(C->getThreadLimit());
 }
@@ -536,10 +534,6 @@ void OMPClauseProfiler::VisitOMPFromClause(const OMPFromClause *C) {
 void OMPClauseProfiler::VisitOMPUseDevicePtrClause(
     const OMPUseDevicePtrClause *C) {
   VisitOMPClauseList(C);
-  for (auto *E : C->private_copies()) {
-    if (E)
-      Profiler->VisitStmt(E);
-  }
 }
 void OMPClauseProfiler::VisitOMPIsDevicePtrClause(
     const OMPIsDevicePtrClause *C) {
@@ -727,6 +721,11 @@ void StmtProfiler::VisitOMPDistributeParallelForSimdDirective(
 
 void StmtProfiler::VisitOMPDistributeSimdDirective(
     const OMPDistributeSimdDirective *S) {
+  VisitOMPLoopDirective(S);
+}
+
+void StmtProfiler::VisitOMPTargetParallelForSimdDirective(
+    const OMPTargetParallelForSimdDirective *S) {
   VisitOMPLoopDirective(S);
 }
 

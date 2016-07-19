@@ -2570,6 +2570,9 @@ DEF_TRAVERSE_STMT(OMPDistributeParallelForSimdDirective,
 DEF_TRAVERSE_STMT(OMPDistributeSimdDirective,
                   { TRY_TO(TraverseOMPExecutableDirective(S)); })
 
+DEF_TRAVERSE_STMT(OMPTargetParallelForSimdDirective,
+                  { TRY_TO(TraverseOMPExecutableDirective(S)); })
+
 DEF_TRAVERSE_STMT(OMPTargetTeamsDirective,
                   { TRY_TO(TraverseOMPExecutableDirective(S)); })
 
