@@ -12318,6 +12318,9 @@ static void checkDeclInTargetContext(SourceLocation SL, SourceRange SR,
     // target region (it can be e.g. a lambda) that is legal and we do not need
     // to do anything else.
     if (LD == D) {
+      if (!SemaRef.getLangOpts().OpenMPImplicitDeclareTarget)
+        if(!D->hasAttr<OMPDeclareTargetDeclAttr>())
+		  SemaRef.Diag(LD->getLocation(), diag::warn_omp_not_in_target_context);
       return;
     }
   }
