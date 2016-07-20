@@ -1705,6 +1705,9 @@ public:
     LongWidth = LongAlign = 64;
     AddrSpaceMap = &NVPTXAddrSpaceMap;
     UseAddrSpaceMapMangling = true;
+    HasAtomicLoadOp = false;
+    HasAtomicStoreOp = false;
+
     // Define available target features
     // These must be defined in sorted order!
     NoAsmVariants = true;
@@ -1768,6 +1771,11 @@ public:
     //   as its double type, but that's not necessarily true on the host.
     //   TODO: nvcc emits a warning when using long double on device; we should
     //   do the same.
+  }
+  /// \brief Target supports lock-free atomics for all widths and alignments.
+  bool hasBuiltinAtomic(uint64_t AtomicSizeInBits,
+                        uint64_t AlignmentInBits) const override {
+    return true;
   }
   void getTargetDefines(const LangOptions &Opts,
                         MacroBuilder &Builder) const override {
