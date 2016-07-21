@@ -152,6 +152,13 @@ bool isOpenMPLoopDirective(OpenMPDirectiveKind DKind);
 /// otherwise - false.
 bool isOpenMPWorksharingDirective(OpenMPDirectiveKind DKind);
 
+/// \brief Checks if the specified directive contains distribute and
+/// simd directives.
+/// \param DKind Specified directive.
+/// \return true - the directive contains both distribute and a simd directive,
+/// otherwise - false.
+bool isOpenMPDistributeSimdDirective(OpenMPDirectiveKind DKind);
+
 /// \brief Checks if the specified directive is a taskloop directive.
 /// \param DKind Specified directive.
 /// \return true - the directive is a worksharing directive like 'omp taskloop',

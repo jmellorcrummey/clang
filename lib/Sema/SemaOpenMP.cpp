@@ -5730,6 +5730,12 @@ static unsigned CheckOpenMPLoop(
     Init = SemaRef.ActOnFinishFullExpr(Init.get());
   }
 
+  ExprResult CombIV;
+  if (isOpenMPDistributeSimdDirective(DKind)){
+    VarDecl *CombIVDecl = buildVarDecl(SemaRef, InitLoc, RealVType, ".omp.comb.iv");
+    CombIV = buildDeclRefExpr(SemaRef, CombIVDecl, RealVType, InitLoc);
+  }
+
   // Loop condition (IV < NumIterations) or (IV <= UB) for worksharing loops.
   SourceLocation CondLoc;
   ExprResult Cond =
@@ -5939,6 +5945,7 @@ static unsigned CheckOpenMPLoop(
   Built.DistCond = DistCond.get();
   Built.DistInc = DistInc.get();
   Built.PrevEUB = PrevEUB.get();
+  Built.CombIterationVarRef = CombIV.get();
 
   Expr *CounterVal = SemaRef.DefaultLvalueConversion(IV.get()).get();
   // Fill data for doacross depend clauses.

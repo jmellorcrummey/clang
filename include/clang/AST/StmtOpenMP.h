@@ -335,9 +335,10 @@ class OMPLoopDirective : public OMPExecutableDirective {
     DistCondOffset = 21,
     DistIncOffset = 22,
     PrevEnsureUpperBoundOffset = 23,
+    CombinedIterationVariableOffset = 24,
     // Offset to the end (and start of the following counters/updates/finals
     // arrays) for worksharing loop directives.
-    WorksharingEnd = 24,
+    WorksharingEnd = 25,
   };
 
   /// \brief Get the counters storage.
@@ -533,6 +534,11 @@ protected:
            "expected worksharing loop directive");
     *std::next(child_begin(), PrevEnsureUpperBoundOffset) = PrevEUB;
   }
+  void setCombinedIterationVariable(Expr *CombIV) {
+    assert(isOpenMPDistributeSimdDirective(getDirectiveKind()) &&
+           "expected directive containing distribute and simd");
+    *std::next(child_begin(), CombinedIterationVariableOffset) = CombIV;
+  }
   void setCounters(ArrayRef<Expr *> A);
   void setPrivateCounters(ArrayRef<Expr *> A);
   void setInits(ArrayRef<Expr *> A);
@@ -583,6 +589,8 @@ public:
     /// \brief PreviousUpperBound - local variable passed to runtime in the
     /// enclosing schedule or null if that does not apply.
     Expr *PrevUB;
+    /// \brief Loop iteration variable.
+    Expr *CombIterationVarRef;
     /// \brief Dist Loop condition.
     Expr *DistCond;
     /// \brief Dist Loop increment.
@@ -636,6 +644,7 @@ public:
       DistCond = nullptr;
       DistInc = nullptr;
       PrevEUB = nullptr;
+      CombIterationVarRef = nullptr;
       Counters.resize(Size);
       PrivateCounters.resize(Size);
       Inits.resize(Size);
@@ -798,6 +807,12 @@ public:
            "expected worksharing loop directive");
     return const_cast<Expr *>(reinterpret_cast<const Expr *>(
         *std::next(child_begin(), PrevEnsureUpperBoundOffset)));
+  }
+  Expr *getCombinedIterationVariable() const {
+    assert(isOpenMPDistributeSimdDirective(getDirectiveKind()) &&
+           "expected directive containing distribute and simd");
+    return const_cast<Expr *>(reinterpret_cast<const Expr *>(
+        *std::next(child_begin(), CombinedIterationVariableOffset)));
   }
   const Stmt *getBody() const {
     // This relies on the loop form is already checked by Sema.
