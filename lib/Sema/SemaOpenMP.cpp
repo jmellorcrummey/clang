@@ -1730,8 +1730,8 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
     Sema::CapturedParamNameType Params[] = {
         std::make_pair(".lane_id.", KmpInt32PtrTy),
         std::make_pair(".num_lanes.", KmpInt32PtrTy),
-        std::make_pair(".previous.lb.", Context.getSizeType()),
-        std::make_pair(".previous.ub.", Context.getSizeType()),
+        // std::make_pair(".previous.lb.", Context.getSizeType()),
+        // std::make_pair(".previous.ub.", Context.getSizeType()),
         std::make_pair(StringRef(), QualType()) // __context with shared vars
     };
     ActOnCapturedRegionStart(DSAStack->getConstructLoc(), CurScope, CR_OpenMP,

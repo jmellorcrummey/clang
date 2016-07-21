@@ -2503,6 +2503,7 @@ public:
   void EmitOMPTaskLoopDirective(const OMPTaskLoopDirective &S);
   void EmitOMPTaskLoopSimdDirective(const OMPTaskLoopSimdDirective &S);
   void EmitOMPDistributeDirective(const OMPDistributeDirective &S);
+  void EmitOMPSimdLoop(const OMPLoopDirective &S, bool OutlinedSimd);
   void
   EmitOMPDistributeLoop(const OMPLoopDirective &S,
                         const RegionCodeGenTy &CodeGenDistributeLoopContent);
