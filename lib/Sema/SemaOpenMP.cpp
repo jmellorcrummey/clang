@@ -865,8 +865,17 @@ public:
   /// Traverse body of lambda, and mark it the with OMPDeclareTargetDeclAttr
   bool TraverseLambdaCapture(LambdaExpr *LE, const LambdaCapture *C);
 
+  /// Traverse FunctionDecl and mark it the with OMPDeclareTargetDeclAttr
+  bool VisitFunctionDecl(FunctionDecl *F);
+
   /// Traverse Callee of Calexpr and mark it the with OMPDeclareTargetDeclAttr
   bool VisitCallExpr(CallExpr *Call);
+
+  /// Traverse Constructs and mark it the with OMPDeclareTargetDeclAttr
+  bool VisitCXXConstructExpr(CXXConstructExpr *E);
+
+  /// Traverse Destructor and mark it the with OMPDeclareTargetDeclAttr
+  bool VisitCXXDestructorDecl(CXXDestructorDecl *D);
 };
 }
 
@@ -908,16 +917,40 @@ bool ImplicitDeviceFunctionChecker::TraverseLambdaCapture(
   return true;
 }
 
-bool ImplicitDeviceFunctionChecker::VisitCallExpr(CallExpr *Call) {
-  if (FunctionDecl *Callee = Call->getDirectCallee()) {
-    if (!Callee->hasAttr<OMPDeclareTargetDeclAttr>()) {
-      Attr *A = OMPDeclareTargetDeclAttr::CreateImplicit(
-          SemaRef.Context, OMPDeclareTargetDeclAttr::MT_To);
-      Callee->addAttr(A);
-      TraverseDecl(Callee);
-    }
+bool ImplicitDeviceFunctionChecker::VisitFunctionDecl(FunctionDecl *F) {
+  if (!F->hasAttr<OMPDeclareTargetDeclAttr>()) {
+    Attr *A = OMPDeclareTargetDeclAttr::CreateImplicit(
+        SemaRef.Context, OMPDeclareTargetDeclAttr::MT_To);
+    F->addAttr(A);
+    TraverseDecl(F);
   }
   return true;
+}
+
+bool ImplicitDeviceFunctionChecker::VisitCallExpr(CallExpr *Call) {
+  if (FunctionDecl *Callee = Call->getDirectCallee()) {
+    return VisitFunctionDecl(Callee);
+  }
+  return true;
+}
+
+bool ImplicitDeviceFunctionChecker::VisitCXXConstructExpr(CXXConstructExpr *E) {
+  CXXConstructorDecl *Constructor = E->getConstructor();
+  // When constructor is invoked, it is checked whether the object has
+  // destructor or not. In case it has destructor, destructor is automatically
+  // marked with declare target attribute since it is needed to emit for device,
+  QualType Ty = E->getType();
+  const RecordType *RT =
+      SemaRef.Context.getBaseElementType(Ty)->getAs<RecordType>();
+  CXXRecordDecl *RD = cast<CXXRecordDecl>(RT->getDecl());
+  VisitCXXDestructorDecl(RD->getDestructor());
+
+  return VisitFunctionDecl(Constructor);
+}
+
+bool ImplicitDeviceFunctionChecker::VisitCXXDestructorDecl(
+    CXXDestructorDecl *D) {
+  return VisitFunctionDecl(D);
 }
 
 void Sema::InitDataSharingAttributesStack() {
