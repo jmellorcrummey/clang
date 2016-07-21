@@ -498,7 +498,7 @@ static void EmitAtomicOp(CodeGenFunction &CGF, AtomicExpr *E, Address Dest,
                          uint64_t Size, llvm::AtomicOrdering Order) {
   llvm::AtomicRMWInst::BinOp Op = llvm::AtomicRMWInst::Add;
   llvm::Instruction::BinaryOps PostOp = (llvm::Instruction::BinaryOps)0;
-  QualType AtomicTy = E->getPtr()->getType()->getPointeeType();
+  QualType AtomicTy = E->getType();
   LValue AtomicVal = CGF.MakeAddrLValue(Ptr, AtomicTy);
   AtomicInfo Atomics(CGF, AtomicVal);
 
