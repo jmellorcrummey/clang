@@ -1805,7 +1805,8 @@ void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
   }
 
   // Emit the loop iteration variable.
-  const Expr *IVExpr = S.getIterationVariable();
+  const Expr *IVExpr = isOpenMPDistributeSimdDirective(S.getDirectiveKind()) ? 
+        S.getCombinedIterationVariable() : S.getIterationVariable();
   const VarDecl *IVDecl = cast<VarDecl>(cast<DeclRefExpr>(IVExpr)->getDecl());
   CGF.EmitVarDecl(*IVDecl);
   CGF.EmitIgnoredExpr(S.getInit());
