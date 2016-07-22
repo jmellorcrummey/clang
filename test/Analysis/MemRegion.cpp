@@ -1,5 +1,4 @@
-// RUN: /bin/true
-// RxUN: %clang_cc1 -analyze -analyzer-checker=optin.mpi.MPI-Checker -verify %s
+// RUN: %clang_cc1 -analyze -analyzer-checker=optin.mpi.MPI-Checker -verify %s
 
 #include "MPIMock.h"
 
