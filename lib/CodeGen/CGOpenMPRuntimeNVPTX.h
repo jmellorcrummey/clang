@@ -326,6 +326,16 @@ private:
   /// \brief Signal termination of SPMD OMP execution.
   void emitSPMDEntryFooter(CodeGenFunction &CGF, EntryFunctionState &EST);
 
+  /// \brief Emits a critical region.
+  /// \param CriticalName Name of the critical region.
+  /// \param CriticalOpGen Generator for the statement associated with the given
+  /// critical region.
+  /// \param Hint Value of the 'hint' clause (optional).
+  void emitCriticalRegion(CodeGenFunction &CGF, StringRef CriticalName,
+                                  const RegionCodeGenTy &CriticalOpGen,
+                                  SourceLocation Loc,
+                                  const Expr *Hint = nullptr) override;
+
   /// \brief Returns specified OpenMP runtime function for the current OpenMP
   /// implementation.  Specialized for the NVPTX device.
   /// \param Function OpenMP runtime function.

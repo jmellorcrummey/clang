@@ -2681,81 +2681,17 @@ void CodeGenFunction::EmitOMPMasterDirective(const OMPMasterDirective &S) {
 }
 
 void CodeGenFunction::EmitOMPCriticalDirective(const OMPCriticalDirective &S) {
-  if (CGM.getTriple().isNVPTX()) {  
-
-    CodeGenFunction& CGF = *this;
-
-    auto *LoopBB = CGF.createBasicBlock("omp.critical.loop");
-    auto *TestBB = CGF.createBasicBlock("omp.critical.test");
-    auto *SyncBB = CGF.createBasicBlock("omp.critical.sync");
-    auto *BodyBB = CGF.createBasicBlock("omp.critical.body");
-    auto *ExitBB = CGF.createBasicBlock("omp.critical.exit");
-
-    /// FIXME: Call helper instead.
-    //auto *ThreadID = getThreadID(CGF, S.getLocStart());
-    auto ThreadID = CGF.Builder.CreateCall(
-        llvm::Intrinsic::getDeclaration(
-          &CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_tid_x),
-        llvm::None, "nvptx_tid");
-
-    /// FIXME: This is duplicated as local exists already.
-    /// Get the size of the CTA as loop bound.
-    auto CTAWidth = CGF.Builder.CreateCall(
-        llvm::Intrinsic::getDeclaration(
-          &CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_x),
-        llvm::None, "nvptx_nt_id");
-
-    /// Initialise the counter variable for the loop.
-    auto Int32Ty =
-      CGF.getContext().getIntTypeForBitwidth(/*DestWidth*/ 32, /*Signed*/ true);
-    auto Counter = CGF.CreateMemTemp(Int32Ty, "critical-counter");
-    CGF.Builder.CreateStore(CGF.Builder.getInt32(0), Counter);
-    CGF.EmitBranch(LoopBB);
-
-    /// Block checks if loop counter exceeds upper bound.
-    CGF.EmitBlock(LoopBB);
-    auto *CounterVal = CGF.Builder.CreateLoad(Counter);
-    auto *CmpLoopBound = CGF.Builder.CreateICmpSLT(CounterVal, CTAWidth);
-    CGF.Builder.CreateCondBr(CmpLoopBound, TestBB, ExitBB);
-
-    /// Block tests if which single thread should execute region, and 
-    /// which threads should go straight to synchronisation point.
-    CGF.EmitBlock(TestBB);
-    CounterVal = CGF.Builder.CreateLoad(Counter);
-    auto *CmpThreadToCounter = CGF.Builder.CreateICmpEQ(ThreadID, CounterVal);
-    CGF.Builder.CreateCondBr(CmpThreadToCounter, BodyBB, SyncBB);
-
-    /// Block emits the body of the critical region.
-    CGF.EmitBlock(BodyBB);
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
+    Action.Enter(CGF);
     CGF.EmitStmt(cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
-    CGF.EmitBranch(SyncBB);
-
-    /// Block waits for all threads in current CTA to finish then increments
-    /// the counter variable and returns to the loop.
-    CGF.EmitBlock(SyncBB);
-    CGF.Builder.CreateCall(llvm::Intrinsic::getDeclaration(
-          &CGM.getModule(), llvm::Intrinsic::nvvm_barrier0));
-    auto *IncCounterVal = 
-      CGF.Builder.CreateAdd(CGF.Builder.getInt32(1), CounterVal);
-    CGF.Builder.CreateStore(IncCounterVal, Counter);
-    CGF.EmitBranch(LoopBB);
-
-    /// Block that is reached when  all threads in the CTA complete the region.
-    CGF.EmitBlock(ExitBB, /*IsFinished=*/true);
-
-  } else {
-    auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
-      Action.Enter(CGF);
-      CGF.EmitStmt(cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
-    };
-    Expr *Hint = nullptr;
-    if (auto *HintClause = S.getSingleClause<OMPHintClause>())
-      Hint = HintClause->getHint();
-    OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
-    CGM.getOpenMPRuntime().emitCriticalRegion(*this,
-        S.getDirectiveName().getAsString(),
-        CodeGen, S.getLocStart(), Hint);
-  }
+  };
+  Expr *Hint = nullptr;
+  if (auto *HintClause = S.getSingleClause<OMPHintClause>())
+    Hint = HintClause->getHint();
+  OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
+  CGM.getOpenMPRuntime().emitCriticalRegion(*this,
+      S.getDirectiveName().getAsString(),
+      CodeGen, S.getLocStart(), Hint);
 }
 
 void CodeGenFunction::EmitOMPParallelForDirective(
