@@ -2690,8 +2690,8 @@ void CodeGenFunction::EmitOMPCriticalDirective(const OMPCriticalDirective &S) {
     Hint = HintClause->getHint();
   OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
   CGM.getOpenMPRuntime().emitCriticalRegion(*this,
-      S.getDirectiveName().getAsString(),
-      CodeGen, S.getLocStart(), Hint);
+                                            S.getDirectiveName().getAsString(),
+                                            CodeGen, S.getLocStart(), Hint);
 }
 
 void CodeGenFunction::EmitOMPParallelForDirective(
