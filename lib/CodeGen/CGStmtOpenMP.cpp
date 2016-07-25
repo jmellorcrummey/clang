@@ -2699,8 +2699,8 @@ void CodeGenFunction::EmitOMPCriticalDirective(const OMPCriticalDirective &S) {
         llvm::None, "nvptx_tid");
 
     /// FIXME: This is duplicated as local exists already.
-    /// Get the width of the block as loop bound.
-    auto BlockWidth = CGF.Builder.CreateCall(
+    /// Get the size of the CTA as loop bound.
+    auto CTAWidth = CGF.Builder.CreateCall(
         llvm::Intrinsic::getDeclaration(
           &CGM.getModule(), llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_x),
         llvm::None, "nvptx_nt_id");
@@ -2710,42 +2710,37 @@ void CodeGenFunction::EmitOMPCriticalDirective(const OMPCriticalDirective &S) {
       CGF.getContext().getIntTypeForBitwidth(/*DestWidth*/ 32, /*Signed*/ true);
     auto Counter = CGF.CreateMemTemp(Int32Ty, "critical-counter");
     CGF.Builder.CreateStore(CGF.Builder.getInt32(0), Counter);
-
-    /// Emit a loop of length ntid.x.
     CGF.EmitBranch(LoopBB);
-    CGF.EmitBlock(LoopBB);
 
+    /// Block checks if loop counter exceeds upper bound.
+    CGF.EmitBlock(LoopBB);
     auto *CounterVal = CGF.Builder.CreateLoad(Counter);
-    /// Check that counter is lower than block width.
-    auto *CmpLoopBound = CGF.Builder.CreateICmpSLT(CounterVal, BlockWidth);
+    auto *CmpLoopBound = CGF.Builder.CreateICmpSLT(CounterVal, CTAWidth);
     CGF.Builder.CreateCondBr(CmpLoopBound, TestBB, ExitBB);
 
+    /// Block tests if which single thread should execute region, and 
+    /// which threads should go straight to synchronisation point.
     CGF.EmitBlock(TestBB);
-
-    /// FIXME: Should be new variable?
     CounterVal = CGF.Builder.CreateLoad(Counter);
-    /// Check whether it is this thread's turn.
     auto *CmpThreadToCounter = CGF.Builder.CreateICmpEQ(ThreadID, CounterVal);
     CGF.Builder.CreateCondBr(CmpThreadToCounter, BodyBB, SyncBB);
 
+    /// Block emits the body of the critical region.
     CGF.EmitBlock(BodyBB);
-
-    /// Emit the body of the critical region and synchronise with block.
     CGF.EmitStmt(cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
     CGF.EmitBranch(SyncBB);
 
-    /// Wait for all threads in current block to complete the region.
+    /// Block waits for all threads in current CTA to finish then increments
+    /// the counter variable and returns to the loop.
     CGF.EmitBlock(SyncBB);
     CGF.Builder.CreateCall(llvm::Intrinsic::getDeclaration(
           &CGM.getModule(), llvm::Intrinsic::nvvm_barrier0));
-
-    /// Increment the counter variable.
     auto *IncCounterVal = 
       CGF.Builder.CreateAdd(CGF.Builder.getInt32(1), CounterVal);
     CGF.Builder.CreateStore(IncCounterVal, Counter);
-
     CGF.EmitBranch(LoopBB);
 
+    /// Block that is reached when  all threads in the CTA complete the region.
     CGF.EmitBlock(ExitBB, /*IsFinished=*/true);
 
   } else {
