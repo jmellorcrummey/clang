@@ -381,7 +381,6 @@ void CGOpenMPRuntimeNVPTX::initializeDataSharing(CodeGenFunction &CGF,
   return;
 }
 
-
 // \brief Initialize the data sharing slots and pointers and return the
 // generated call.
 llvm::Function *CGOpenMPRuntimeNVPTX::createKernelInitializerFunction(
@@ -2880,7 +2879,7 @@ void CGOpenMPRuntimeNVPTX::emitCriticalRegion(CodeGenFunction &CGF,
   auto *ExitBB = CGF.createBasicBlock("omp.critical.exit");
 
   /// Fetch team-local id of the thread.
-  auto ThreadID = getNVPTXThreadId(CGF);
+  auto ThreadID = getNVPTXThreadID(CGF);
 
   /// Get the width of the team.
   auto TeamWidth = getNVPTXNumThreads(CGF);
@@ -2901,7 +2900,9 @@ void CGOpenMPRuntimeNVPTX::emitCriticalRegion(CodeGenFunction &CGF,
   /// Block tests if which single thread should execute region, and
   /// which threads should go straight to synchronisation point.
   CGF.EmitBlock(TestBB);
-  auto CounterVal = CGF.Builder.CreateLoad(Counter);
+
+  /// FIXME: How do we put this back into the same register, does it matter?
+  CounterVal = CGF.Builder.CreateLoad(Counter);
   auto *CmpThreadToCounter = CGF.Builder.CreateICmpEQ(ThreadID, CounterVal);
   CGF.Builder.CreateCondBr(CmpThreadToCounter, BodyBB, SyncBB);
 
