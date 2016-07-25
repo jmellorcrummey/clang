@@ -2887,7 +2887,7 @@ void CGOpenMPRuntimeNVPTX::emitCriticalRegion(CodeGenFunction &CGF,
   /// Initialise the counter variable for the loop.
   auto Int32Ty =
     CGF.getContext().getIntTypeForBitwidth(/*DestWidth*/ 32, /*Signed*/ true);
-  auto Counter = CGF.CreateMemTemp(Int32Ty, "critical-counter");
+  auto Counter = CGF.CreateMemTemp(Int32Ty, "critical_counter");
   CGF.Builder.CreateStore(CGF.Builder.getInt32(0), Counter);
   CGF.EmitBranch(LoopBB);
 
