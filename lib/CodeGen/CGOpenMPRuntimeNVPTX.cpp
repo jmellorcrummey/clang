@@ -2849,6 +2849,8 @@ void CGOpenMPRuntimeNVPTX::emitSimdCall(CodeGenFunction &CGF,
     llvm::SmallVector<llvm::Value *, 16> OutlinedFnArgs;
     OutlinedFnArgs.push_back(LaneId.getPointer());
     OutlinedFnArgs.push_back(NumLanes.getPointer());
+    // OutlinedFnArgs.push_back();
+    // OutlinedFnArgs.push_back();
     OutlinedFnArgs.append(CapturedVars.begin(), CapturedVars.end());
     CGF.EmitCallOrInvoke(Fn, OutlinedFnArgs);
   };

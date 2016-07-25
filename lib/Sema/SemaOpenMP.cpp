@@ -1697,8 +1697,6 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
     Sema::CapturedParamNameType Params[] = {
         std::make_pair(".lane_id.", KmpInt32PtrTy),
         std::make_pair(".num_lanes.", KmpInt32PtrTy),
-        // std::make_pair(".previous.lb.", Context.getSizeType()),
-        // std::make_pair(".previous.ub.", Context.getSizeType()),
         std::make_pair(StringRef(), QualType()) // __context with shared vars
     };
     ActOnCapturedRegionStart(DSAStack->getConstructLoc(), CurScope, CR_OpenMP,
@@ -1786,7 +1784,6 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
     break;
   }
   case OMPD_distribute_parallel_for_simd:
-  case OMPD_distribute_simd:
   case OMPD_target_teams_distribute_parallel_for:
   case OMPD_distribute_parallel_for: {
     QualType KmpInt32Ty = Context.getIntTypeForBitwidth(32, 1);
@@ -1795,6 +1792,21 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
     Sema::CapturedParamNameType Params[] = {
         std::make_pair(".global_tid.", KmpInt32PtrTy),
         std::make_pair(".bound_tid.", KmpInt32PtrTy),
+        std::make_pair(".previous.lb.", Context.getSizeType()),
+        std::make_pair(".previous.ub.", Context.getSizeType()),
+        std::make_pair(StringRef(), QualType()) // __context with shared vars
+    };
+    ActOnCapturedRegionStart(DSAStack->getConstructLoc(), CurScope, CR_OpenMP,
+                             Params);
+    break;
+  }
+  case OMPD_distribute_simd: {
+    QualType KmpInt32Ty = Context.getIntTypeForBitwidth(32, 1);
+    QualType KmpInt32PtrTy =
+        Context.getPointerType(KmpInt32Ty).withConst().withRestrict();
+    Sema::CapturedParamNameType Params[] = {
+        std::make_pair(".lane_id.", KmpInt32PtrTy),
+        std::make_pair(".num_lanes.", KmpInt32PtrTy),
         std::make_pair(".previous.lb.", Context.getSizeType()),
         std::make_pair(".previous.ub.", Context.getSizeType()),
         std::make_pair(StringRef(), QualType()) // __context with shared vars
@@ -5630,7 +5642,7 @@ static unsigned CheckOpenMPLoop(
   // Build variables passed into runtime, necessary for worksharing directives.
   ExprResult LB, UB, IL, ST, EUB, PrevLB, PrevUB;
   if (isOpenMPWorksharingDirective(DKind) || isOpenMPTaskLoopDirective(DKind) ||
-      isOpenMPDistributeDirective(DKind)) {
+      isOpenMPDistributeDirective(DKind) || isOpenMPDistributeSimdDirective(DKind)) {
     // Lower bound variable, initialized with zero.
     VarDecl *LBDecl = buildVarDecl(SemaRef, InitLoc, VType, ".omp.lb");
     LB = buildDeclRefExpr(SemaRef, LBDecl, VType, InitLoc);
@@ -5699,7 +5711,7 @@ static unsigned CheckOpenMPLoop(
   }
 
   // Build iteration variable initializer for simd loop on nvptx.
-  bool OutlinedSimd = DKind == OMPD_simd &&
+  bool OutlinedSimd = (DKind == OMPD_simd || isOpenMPDistributeSimdDirective(DKind)) &&
                       SemaRef.getLangOpts().OpenMPIsDevice &&
                       SemaRef.Context.getTargetInfo().getTriple().isNVPTX();
   ExprResult LaneInit;
@@ -5719,19 +5731,18 @@ static unsigned CheckOpenMPLoop(
   {
     VarDecl *IVDecl = buildVarDecl(SemaRef, InitLoc, RealVType, ".omp.iv");
     IV = buildDeclRefExpr(SemaRef, IVDecl, RealVType, InitLoc);
-    Expr *RHS =
-        (isOpenMPWorksharingDirective(DKind) ||
-         isOpenMPTaskLoopDirective(DKind) || isOpenMPDistributeDirective(DKind))
-            ? LB.get()
-            : OutlinedSimd
-                  ? LaneInit.get()
-                  : SemaRef.ActOnIntegerConstant(SourceLocation(), 0).get();
+    Expr *RHS = (isOpenMPWorksharingDirective(DKind) ||
+           isOpenMPTaskLoopDirective(DKind) || isOpenMPDistributeDirective(DKind))
+              ? LB.get()
+              : OutlinedSimd
+                    ? LaneInit.get()
+                    : SemaRef.ActOnIntegerConstant(SourceLocation(), 0).get();
     Init = SemaRef.BuildBinOp(CurScope, InitLoc, BO_Assign, IV.get(), RHS);
     Init = SemaRef.ActOnFinishFullExpr(Init.get());
   }
 
   ExprResult CombIV;
-  if (isOpenMPDistributeSimdDirective(DKind)){
+  if (isOpenMPDistributeSimdDirective(DKind) && !OutlinedSimd){
     VarDecl *CombIVDecl = buildVarDecl(SemaRef, InitLoc, RealVType, ".omp.comb.iv");
     CombIV = buildDeclRefExpr(SemaRef, CombIVDecl, RealVType, InitLoc);
   }
@@ -5741,7 +5752,9 @@ static unsigned CheckOpenMPLoop(
   ExprResult Cond =
       (!CoalescedSchedule &&
        (isOpenMPWorksharingDirective(DKind) ||
-        isOpenMPTaskLoopDirective(DKind) || isOpenMPDistributeDirective(DKind)))
+        isOpenMPTaskLoopDirective(DKind) ||
+        isOpenMPDistributeDirective(DKind) ||
+        isOpenMPDistributeSimdDirective(DKind)))
           ? SemaRef.BuildBinOp(CurScope, CondLoc, BO_LE, IV.get(), UB.get())
           : (CoalescedSchedule && isOpenMPLoopBoundSharingDirective(DKind))
                 ? SemaRef.BuildBinOp(CurScope, CondLoc, BO_LE, IV.get(),
