@@ -1736,14 +1736,12 @@ static void emitDeviceOMPSimdDirective(CodeGenFunction &CGF,
   auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
   llvm::SmallVector<llvm::Value *, 16> CapturedVars;
 
-  // Save lower and upper bounds in case the SIMD is not a directive
-  // on its own. If it needs to share its loop bounds with any previous
+  // Save lower and upper bounds in case the SIMD is combined with
+  // other constructs. If it needs to share its loop bounds with any previous
   // executable directive (or combination of directives)
   // its iteration range may be restricted to something other than 0 to N.
   // Pass LB and UB to be included in the outlined function argument list.
   if (isOpenMPDistributeSimdDirective(S.getDirectiveKind())) {
-    // Emit loop bounds and append them to the argument list to be passed to
-    // the outlined function.
     CapturedVars = emitLoopBounds(CGF, S);
   }
 
@@ -1772,7 +1770,6 @@ static void emitDeviceOMPSimdDirective(CodeGenFunction &CGF,
 
 void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
                                       bool OutlinedSimd) {
-  // CodeGenFunction &CGF = *this;
   auto &&CodeGen = [&S, OutlinedSimd](CodeGenFunction &CGF, PrePostActionTy &) {
     OMPLoopScope PreInitScope(CGF, S);
     // if (PreCond) {
@@ -1853,37 +1850,6 @@ void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
 
     // Emit Iteration variable initialization
     CGF.EmitIgnoredExpr(S.getInit());
-
-    /*
-        EmitOMPLinearClauseInit(S);
-    // Emit helper vars inits.
-    LValue LB =
-        EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getLowerBoundVariable()));
-    LValue UB =
-        EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getUpperBoundVariable()));
-    LValue ST =
-        EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getStrideVariable()));
-    LValue IL =
-        EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getIsLastIterVariable()));
-
-    if (isOpenMPLoopBoundSharingDirective(S.getDirectiveKind())) {
-      // When composing distribute with for we need to use the pragma distribute
-      // chunk lower and upper bounds rather than the whole loop iteration
-      // space. Therefore we copy the bounds of the previous schedule into the
-      // the current ones.
-      const unsigned IVSize = getContext().getTypeSize(IVExpr->getType());
-      LValue PrevLB = EmitLValue(S.getPrevLowerBoundVariable());
-      LValue PrevUB = EmitLValue(S.getPrevUpperBoundVariable());
-      auto PrevLBVal = EmitLoadOfScalar(PrevLB, SourceLocation());
-      PrevLBVal = Builder.CreateIntCast(PrevLBVal, Builder.getIntNTy(IVSize),
-                                        false);
-      auto PrevUBVal = EmitLoadOfScalar(PrevUB, SourceLocation());
-      PrevUBVal = Builder.CreateIntCast(PrevUBVal, Builder.getIntNTy(IVSize),
-                                        false);
-      EmitStoreOfScalar(PrevLBVal, LB);
-      EmitStoreOfScalar(PrevUBVal, UB);
-    }
-    */
 
     // Emit the iterations count variable.
     // If it is not a variable, Sema decided to calculate iterations count on
