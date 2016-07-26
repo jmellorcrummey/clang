@@ -1742,21 +1742,9 @@ static void emitDeviceOMPSimdDirective(CodeGenFunction &CGF,
   // its iteration range may be restricted to something other than 0 to N.
   // Pass LB and UB to be included in the outlined function argument list.
   if (isOpenMPDistributeSimdDirective(S.getDirectiveKind())) {
-    // emitLoopBounds(CGF, S, CapturedVars);
     // Emit loop bounds and append them to the argument list to be passed to
     // the outlined function.
     CapturedVars = emitLoopBounds(CGF, S);
-    // const OMPLoopDirective &Dir = cast<OMPLoopDirective>(S);
-    // LValue LB = CGF.EmitLValue(cast<DeclRefExpr>(Dir.getLowerBoundVariable()));
-    // auto LBCast =
-    //     CGF.Builder.CreateIntCast(CGF.Builder.CreateLoad(LB.getAddress()),
-    //                               CGF.SizeTy, /*isSigned=*/false);
-    // CapturedVars.push_back(LBCast);
-    // LValue UB = CGF.EmitLValue(cast<DeclRefExpr>(Dir.getUpperBoundVariable()));
-    // auto UBCast =
-    //     CGF.Builder.CreateIntCast(CGF.Builder.CreateLoad(UB.getAddress()),
-    //                               CGF.SizeTy, /*isSigned=*/false);
-    // CapturedVars.push_back(UBCast);
   }
 
   // Capture any implicit OpenMP variables
