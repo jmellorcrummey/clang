@@ -2628,6 +2628,9 @@ void CGOpenMPRuntimeNVPTX::emitGenericParallelCall(
     llvm::BasicBlock *DoCondBB = CGF.createBasicBlock(".do.cond");
     llvm::BasicBlock *DoEndBB = CGF.createBasicBlock(".do.end");
 
+    // Initialize WorkSource before each call to the parallel region.
+    Bld.CreateStore(Bld.getInt32(/*C=*/-1), WorkSource);
+
     CGF.EmitBranch(DoBodyBB);
     CGF.EmitBlock(DoBodyBB);
     auto ArrayDecay = Bld.CreateConstInBoundsGEP2_32(
@@ -2791,6 +2794,9 @@ void CGOpenMPRuntimeNVPTX::emitSimdCall(CodeGenFunction &CGF,
     llvm::BasicBlock *ExecuteBB = CGF.createBasicBlock(".do.body.execute");
     llvm::BasicBlock *DoCondBB = CGF.createBasicBlock(".do.cond");
     llvm::BasicBlock *DoEndBB = CGF.createBasicBlock(".do.end");
+
+    // Initialize WorkSource before each call to the simd region.
+    Bld.CreateStore(Bld.getInt32(/*C=*/-1), WorkSource);
 
     CGF.EmitBranch(DoBodyBB);
     CGF.EmitBlock(DoBodyBB);
