@@ -1821,30 +1821,28 @@ void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
     const VarDecl *IVDecl = cast<VarDecl>(cast<DeclRefExpr>(IVExpr)->getDecl());
     CGF.EmitVarDecl(*IVDecl);
 
-    if (OutlinedSimd){
+    if (isOpenMPDistributeSimdDirective(S.getDirectiveKind()) && OutlinedSimd) {
       // Emit initialization of lower and upper bounds
       LValue LB =
           EmitOMPHelperVar(CGF, cast<DeclRefExpr>(S.getLowerBoundVariable()));
       LValue UB =
           EmitOMPHelperVar(CGF, cast<DeclRefExpr>(S.getUpperBoundVariable()));
 
-      if (isOpenMPDistributeSimdDirective(S.getDirectiveKind())) {
-        // When composing distribute with for we need to use the pragma distribute
-        // chunk lower and upper bounds rather than the whole loop iteration
-        // space. Therefore we copy the bounds of the previous schedule into the
-        // the current ones.
-        const unsigned IVSize = CGF.getContext().getTypeSize(IVExpr->getType());
-        LValue PrevLB = CGF.EmitLValue(S.getPrevLowerBoundVariable());
-        LValue PrevUB = CGF.EmitLValue(S.getPrevUpperBoundVariable());
-        auto PrevLBVal = CGF.EmitLoadOfScalar(PrevLB, SourceLocation());
-        PrevLBVal = CGF.Builder.CreateIntCast(PrevLBVal, CGF.Builder.getIntNTy(IVSize),
-                                          false);
-        auto PrevUBVal = CGF.EmitLoadOfScalar(PrevUB, SourceLocation());
-        PrevUBVal = CGF.Builder.CreateIntCast(PrevUBVal, CGF.Builder.getIntNTy(IVSize),
-                                          false);
-        CGF.EmitStoreOfScalar(PrevLBVal, LB);
-        CGF.EmitStoreOfScalar(PrevUBVal, UB);
-      }
+      // When composing distribute with for we need to use the pragma distribute
+      // chunk lower and upper bounds rather than the whole loop iteration
+      // space. Therefore we copy the bounds of the previous schedule into the
+      // the current ones.
+      const unsigned IVSize = CGF.getContext().getTypeSize(IVExpr->getType());
+      LValue PrevLB = CGF.EmitLValue(S.getPrevLowerBoundVariable());
+      LValue PrevUB = CGF.EmitLValue(S.getPrevUpperBoundVariable());
+      auto PrevLBVal = CGF.EmitLoadOfScalar(PrevLB, SourceLocation());
+      PrevLBVal = CGF.Builder.CreateIntCast(PrevLBVal, CGF.Builder.getIntNTy(IVSize),
+                                        false);
+      auto PrevUBVal = CGF.EmitLoadOfScalar(PrevUB, SourceLocation());
+      PrevUBVal = CGF.Builder.CreateIntCast(PrevUBVal, CGF.Builder.getIntNTy(IVSize),
+                                        false);
+      CGF.EmitStoreOfScalar(PrevLBVal, LB);
+      CGF.EmitStoreOfScalar(PrevUBVal, UB);
     }
 
     // Emit Iteration variable initialization
