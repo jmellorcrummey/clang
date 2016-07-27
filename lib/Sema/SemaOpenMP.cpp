@@ -1816,6 +1816,7 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
             Context, AlwaysInlineAttr::Keyword_forceinline, SourceRange()));
     break;
   }
+  case OMPD_distribute_simd:
   case OMPD_distribute_parallel_for_simd:
   case OMPD_target_teams_distribute_parallel_for:
   case OMPD_distribute_parallel_for: {
@@ -1825,21 +1826,6 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
     Sema::CapturedParamNameType Params[] = {
         std::make_pair(".global_tid.", KmpInt32PtrTy),
         std::make_pair(".bound_tid.", KmpInt32PtrTy),
-        std::make_pair(".previous.lb.", Context.getSizeType()),
-        std::make_pair(".previous.ub.", Context.getSizeType()),
-        std::make_pair(StringRef(), QualType()) // __context with shared vars
-    };
-    ActOnCapturedRegionStart(DSAStack->getConstructLoc(), CurScope, CR_OpenMP,
-                             Params);
-    break;
-  }
-  case OMPD_distribute_simd: {
-    QualType KmpInt32Ty = Context.getIntTypeForBitwidth(32, 1);
-    QualType KmpInt32PtrTy =
-        Context.getPointerType(KmpInt32Ty).withConst().withRestrict();
-    Sema::CapturedParamNameType Params[] = {
-        std::make_pair(".lane_id.", KmpInt32PtrTy),
-        std::make_pair(".num_lanes.", KmpInt32PtrTy),
         std::make_pair(".previous.lb.", Context.getSizeType()),
         std::make_pair(".previous.ub.", Context.getSizeType()),
         std::make_pair(StringRef(), QualType()) // __context with shared vars
@@ -5744,7 +5730,7 @@ static unsigned CheckOpenMPLoop(
   }
 
   // Build iteration variable initializer for simd loop on nvptx.
-  bool OutlinedSimd = (DKind == OMPD_simd || DKind == OMPD_distribute_simd) &&
+  bool OutlinedSimd = DKind == OMPD_simd &&
                       SemaRef.getLangOpts().OpenMPIsDevice &&
                       SemaRef.Context.getTargetInfo().getTriple().isNVPTX();
   ExprResult LaneInit;

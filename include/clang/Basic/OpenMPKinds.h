@@ -225,13 +225,6 @@ bool isOpenMPLoopBoundSharingDirective(OpenMPDirectiveKind Kind);
 /// \return true - the directive is a combined directive and requires an
 /// additional iteration variable, otherwise - false.
 bool requiresAdditionalIterationVar(OpenMPDirectiveKind DKind);
-
-/// \brief Checks if the specified directive is a distribute simd
-/// directive.
-/// \param DKind Specified directive.
-/// \return true - the directive is a combined distribute simd directive,
-/// otherwise - false.
-bool isOpenMPDistributeSimdDirective(OpenMPDirectiveKind DKind);
 }
 
 #endif

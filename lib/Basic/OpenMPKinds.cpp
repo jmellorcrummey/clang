@@ -762,7 +762,3 @@ bool clang::requiresAdditionalIterationVar(OpenMPDirectiveKind DKind){
   return DKind == OMPD_distribute_simd;
   // TODO add more directives if we detect any other cases.
 }
-
-bool clang::isOpenMPDistributeSimdDirective(OpenMPDirectiveKind DKind){
-  return DKind == OMPD_distribute_simd;
-}

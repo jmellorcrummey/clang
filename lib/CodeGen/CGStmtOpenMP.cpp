@@ -1290,26 +1290,6 @@ static void emitPostUpdateForReductionClause(
     CGF.EmitBlock(DoneBB, /*IsFinished=*/true);
 }
 
-static llvm::SmallVector<llvm::Value *, 16> emitLoopBounds(
-                           CodeGenFunction &CGF,
-                           const OMPExecutableDirective &S){
-  // Emit loop bounds and append them to the argument list to be passed to
-  // the outlined function.
-  llvm::SmallVector<llvm::Value *, 16> CapturedVars;
-  const OMPLoopDirective &Dir = cast<OMPLoopDirective>(S);
-  LValue LB = CGF.EmitLValue(cast<DeclRefExpr>(Dir.getLowerBoundVariable()));
-  auto LBCast =
-      CGF.Builder.CreateIntCast(CGF.Builder.CreateLoad(LB.getAddress()),
-                                CGF.SizeTy, /*isSigned=*/false);
-  CapturedVars.push_back(LBCast);
-  LValue UB = CGF.EmitLValue(cast<DeclRefExpr>(Dir.getUpperBoundVariable()));
-  auto UBCast =
-      CGF.Builder.CreateIntCast(CGF.Builder.CreateLoad(UB.getAddress()),
-                                CGF.SizeTy, /*isSigned=*/false);
-  CapturedVars.push_back(UBCast);
-  return CapturedVars;
-}
-
 static void emitCommonOMPParallelDirective(CodeGenFunction &CGF,
                                            const OMPExecutableDirective &S,
                                            OpenMPDirectiveKind InnermostKind,
@@ -1350,8 +1330,19 @@ static void emitCommonOMPParallelDirective(CodeGenFunction &CGF,
   // lexical scope was already initiated if parallel is not the first component
   // of a combined directive.
   if (isOpenMPLoopBoundSharingDirective(S.getDirectiveKind())) {
-    CapturedVars = emitLoopBounds(CGF, S);
+    const OMPLoopDirective &Dir = cast<OMPLoopDirective>(S);
+    LValue LB = CGF.EmitLValue(cast<DeclRefExpr>(Dir.getLowerBoundVariable()));
+    auto LBCast =
+        CGF.Builder.CreateIntCast(CGF.Builder.CreateLoad(LB.getAddress()),
+                                  CGF.SizeTy, /*isSigned=*/false);
+    CapturedVars.push_back(LBCast);
+    LValue UB = CGF.EmitLValue(cast<DeclRefExpr>(Dir.getUpperBoundVariable()));
+    auto UBCast =
+        CGF.Builder.CreateIntCast(CGF.Builder.CreateLoad(UB.getAddress()),
+                                  CGF.SizeTy, /*isSigned=*/false);
+    CapturedVars.push_back(UBCast);
   }
+
   CGF.GenerateOpenMPCapturedVars(*CS, CapturedVars, CaptureLevel);
   CGF.CGM.getOpenMPRuntime().emitParallelCall(CGF, S.getLocStart(), OutlinedFn,
                                               CapturedVars, IfCond);
@@ -1736,15 +1727,6 @@ static void emitDeviceOMPSimdDirective(CodeGenFunction &CGF,
   auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
   llvm::SmallVector<llvm::Value *, 16> CapturedVars;
 
-  // Save lower and upper bounds in case the SIMD is combined with
-  // other constructs. If it needs to share its loop bounds with any previous
-  // executable directive (or combination of directives)
-  // its iteration range may be restricted to something other than 0 to N.
-  // Pass LB and UB to be included in the outlined function argument list.
-  if (isOpenMPDistributeSimdDirective(S.getDirectiveKind())) {
-    CapturedVars = emitLoopBounds(CGF, S);
-  }
-
   // Capture any implicit OpenMP variables
   CGF.GenerateOpenMPCapturedVars(*CS, CapturedVars);
   auto *LaneId = CS->getCapturedDecl()->param_begin();
@@ -1820,30 +1802,6 @@ void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
           S.getCombinedIterationVariable() : S.getIterationVariable();
     const VarDecl *IVDecl = cast<VarDecl>(cast<DeclRefExpr>(IVExpr)->getDecl());
     CGF.EmitVarDecl(*IVDecl);
-
-    if (isOpenMPDistributeSimdDirective(S.getDirectiveKind()) && OutlinedSimd) {
-      // Emit initialization of lower and upper bounds
-      LValue LB =
-          EmitOMPHelperVar(CGF, cast<DeclRefExpr>(S.getLowerBoundVariable()));
-      LValue UB =
-          EmitOMPHelperVar(CGF, cast<DeclRefExpr>(S.getUpperBoundVariable()));
-
-      // When composing distribute with for we need to use the pragma distribute
-      // chunk lower and upper bounds rather than the whole loop iteration
-      // space. Therefore we copy the bounds of the previous schedule into the
-      // the current ones.
-      const unsigned IVSize = CGF.getContext().getTypeSize(IVExpr->getType());
-      LValue PrevLB = CGF.EmitLValue(S.getPrevLowerBoundVariable());
-      LValue PrevUB = CGF.EmitLValue(S.getPrevUpperBoundVariable());
-      auto PrevLBVal = CGF.EmitLoadOfScalar(PrevLB, SourceLocation());
-      PrevLBVal = CGF.Builder.CreateIntCast(PrevLBVal, CGF.Builder.getIntNTy(IVSize),
-                                        false);
-      auto PrevUBVal = CGF.EmitLoadOfScalar(PrevUB, SourceLocation());
-      PrevUBVal = CGF.Builder.CreateIntCast(PrevUBVal, CGF.Builder.getIntNTy(IVSize),
-                                        false);
-      CGF.EmitStoreOfScalar(PrevLBVal, LB);
-      CGF.EmitStoreOfScalar(PrevUBVal, UB);
-    }
 
     // Emit Iteration variable initialization
     CGF.EmitIgnoredExpr(S.getInit());
@@ -2202,15 +2160,11 @@ void CodeGenFunction::EmitOMPDistributeParallelForSimdDirective(
 
 void CodeGenFunction::EmitOMPDistributeSimdDirective(
     const OMPDistributeSimdDirective &S) {
-  bool OutlinedSimd =
-      CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX();
-
-  auto &&CGSimd = [&S, OutlinedSimd](CodeGenFunction &CGF, PrePostActionTy &) {
-    CGF.EmitOMPSimdLoop(S, OutlinedSimd);
-  };
-
-  auto &&CodeGen = [&S, &CGSimd](CodeGenFunction &CGF,
+  auto &&CodeGen = [&S](CodeGenFunction &CGF,
                                  PrePostActionTy &) {
+    auto &&CGSimd = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+      CGF.EmitOMPSimdLoop(S, false);
+    };
     CGF.EmitOMPDistributeLoop(S, CGSimd);
   };
   OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
