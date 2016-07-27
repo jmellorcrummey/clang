@@ -1853,9 +1853,9 @@ void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
     }
   };
 
-  if (OutlinedSimd) {
+  if (OutlinedSimd)
     emitDeviceOMPSimdDirective(*this, S, OMPD_simd, CodeGen);
-  } else {
+  else {
     OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
     CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_simd, CodeGen);
   }
