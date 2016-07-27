@@ -686,8 +686,7 @@ bool clang::isOpenMPWorksharingDirective(OpenMPDirectiveKind DKind) {
 }
 
 bool clang::isOpenMPDistributeSimdDirective(OpenMPDirectiveKind DKind) {
-  return DKind == OMPD_distribute_parallel_for_simd ||
-         DKind == OMPD_distribute_simd;
+  return DKind == OMPD_distribute_simd;
   // TODO add more directives if we detect any other cases.
 }
 

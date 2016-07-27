@@ -535,7 +535,10 @@ protected:
     *std::next(child_begin(), PrevEnsureUpperBoundOffset) = PrevEUB;
   }
   void setCombinedIterationVariable(Expr *CombIV) {
-    assert(isOpenMPDistributeSimdDirective(getDirectiveKind()) &&
+    assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
+            isOpenMPTaskLoopDirective(getDirectiveKind()) ||
+            isOpenMPDistributeDirective(getDirectiveKind()) ||
+            isOpenMPDistributeSimdDirective(getDirectiveKind())) &&
            "expected directive containing distribute and simd");
     *std::next(child_begin(), CombinedIterationVariableOffset) = CombIV;
   }
@@ -809,7 +812,10 @@ public:
         *std::next(child_begin(), PrevEnsureUpperBoundOffset)));
   }
   Expr *getCombinedIterationVariable() const {
-    assert(isOpenMPDistributeSimdDirective(getDirectiveKind()) &&
+    assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
+            isOpenMPTaskLoopDirective(getDirectiveKind()) ||
+            isOpenMPDistributeDirective(getDirectiveKind()) ||
+            isOpenMPDistributeSimdDirective(getDirectiveKind())) &&
            "expected directive containing distribute and simd");
     return const_cast<Expr *>(reinterpret_cast<const Expr *>(
         *std::next(child_begin(), CombinedIterationVariableOffset)));
