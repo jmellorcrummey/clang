@@ -2148,14 +2148,19 @@ void CodeGenFunction::EmitOMPDistributeOuterLoop(
 
 void CodeGenFunction::EmitOMPDistributeParallelForSimdDirective(
     const OMPDistributeParallelForSimdDirective &S) {
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+    auto &&CGParallelFor = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+      auto &&CGInlinedWorksharingLoop = [&S](CodeGenFunction &CGF,
+                                             PrePostActionTy &) {
+        CGF.EmitOMPWorksharingLoop(S);
+      };
+      emitCommonOMPParallelDirective(CGF, S, OMPD_for, CGInlinedWorksharingLoop);
+    };
+    CGF.EmitOMPDistributeLoop(S, CGParallelFor);
+  };
   OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
-  CGM.getOpenMPRuntime().emitInlinedDirective(
-      *this, OMPD_distribute_parallel_for_simd,
-      [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-        OMPLoopScope PreInitScope(CGF, S);
-        CGF.EmitStmt(
-            cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
-      });
+  CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_distribute, CodeGen,
+                                              false);
 }
 
 void CodeGenFunction::EmitOMPDistributeSimdDirective(
