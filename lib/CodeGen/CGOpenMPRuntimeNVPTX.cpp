@@ -2888,21 +2888,20 @@ void CGOpenMPRuntimeNVPTX::emitCriticalRegion(CodeGenFunction &CGF,
   auto Int32Ty =
     CGF.getContext().getIntTypeForBitwidth(/*DestWidth*/ 32, /*Signed*/ true);
   auto Counter = CGF.CreateMemTemp(Int32Ty, "critical_counter");
-  CGF.Builder.CreateStore(CGF.Builder.getInt32(0), Counter);
+  auto CounterLVal = CGF.MakeNaturalAlignAddrLValue(Counter.getPointer(), Int32Ty);
+  CGF.EmitStoreOfScalar(llvm::ConstantInt::get(CGM.Int32Ty, 0), CounterLVal);
   CGF.EmitBranch(LoopBB);
 
   /// Block checks if loop counter exceeds upper bound.
   CGF.EmitBlock(LoopBB);
-  auto *CounterVal = CGF.Builder.CreateLoad(Counter);
+  auto *CounterVal = CGF.EmitLoadOfScalar(CounterLVal, Loc);
   auto *CmpLoopBound = CGF.Builder.CreateICmpSLT(CounterVal, TeamWidth);
   CGF.Builder.CreateCondBr(CmpLoopBound, TestBB, ExitBB);
 
-  /// Block tests if which single thread should execute region, and
+  /// Block tests which single thread should execute region, and
   /// which threads should go straight to synchronisation point.
   CGF.EmitBlock(TestBB);
-
-  /// FIXME: How do we put this back into the same register, does it matter?
-  CounterVal = CGF.Builder.CreateLoad(Counter);
+  CounterVal = CGF.EmitLoadOfScalar(CounterLVal, Loc);
   auto *CmpThreadToCounter = CGF.Builder.CreateICmpEQ(ThreadID, CounterVal);
   CGF.Builder.CreateCondBr(CmpThreadToCounter, BodyBB, SyncBB);
 
@@ -2920,9 +2919,10 @@ void CGOpenMPRuntimeNVPTX::emitCriticalRegion(CodeGenFunction &CGF,
   /// the counter variable and returns to the loop.
   CGF.EmitBlock(SyncBB);
   getNVPTXCTABarrier(CGF);
-  auto *IncCounterVal =
-    CGF.Builder.CreateAdd(CGF.Builder.getInt32(1), CounterVal);
-  CGF.Builder.CreateStore(IncCounterVal, Counter);
+
+  auto *IncCounterVal = 
+    CGF.Builder.CreateNSWAdd(CounterVal, CGF.Builder.getInt32(1));
+  CGF.EmitStoreOfScalar(IncCounterVal, CounterLVal);
   CGF.EmitBranch(LoopBB);
 
   /// Block that is reached when  all threads in the team complete the region.
