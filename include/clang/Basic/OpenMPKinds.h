@@ -152,13 +152,6 @@ bool isOpenMPLoopDirective(OpenMPDirectiveKind DKind);
 /// otherwise - false.
 bool isOpenMPWorksharingDirective(OpenMPDirectiveKind DKind);
 
-/// \brief Checks if the specified directive contains distribute and
-/// simd directives.
-/// \param DKind Specified directive.
-/// \return true - the directive contains both distribute and a simd directive,
-/// otherwise - false.
-bool isOpenMPDistributeSimdDirective(OpenMPDirectiveKind DKind);
-
 /// \brief Checks if the specified directive is a taskloop directive.
 /// \param DKind Specified directive.
 /// \return true - the directive is a worksharing directive like 'omp taskloop',
@@ -225,6 +218,20 @@ bool isOpenMPTaskingDirective(OpenMPDirectiveKind Kind);
 /// directives that need loop bound sharing across loops outlined in nested
 /// functions
 bool isOpenMPLoopBoundSharingDirective(OpenMPDirectiveKind Kind);
+
+/// \brief Checks if the specified directive requires an additional
+/// iteration variable.
+/// \param DKind Specified directive.
+/// \return true - the directive is a combined directive and requires an
+/// additional iteration variable, otherwise - false.
+bool requiresAdditionalIterationVar(OpenMPDirectiveKind DKind);
+
+/// \brief Checks if the specified directive is a distribute simd
+/// directive.
+/// \param DKind Specified directive.
+/// \return true - the directive is a combined distribute simd directive,
+/// otherwise - false.
+bool isOpenMPDistributeSimdDirective(OpenMPDirectiveKind DKind);
 }
 
 #endif

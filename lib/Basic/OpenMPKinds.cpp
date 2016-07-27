@@ -685,11 +685,6 @@ bool clang::isOpenMPWorksharingDirective(OpenMPDirectiveKind DKind) {
   // TODO add next directives.
 }
 
-bool clang::isOpenMPDistributeSimdDirective(OpenMPDirectiveKind DKind) {
-  return DKind == OMPD_distribute_simd;
-  // TODO add more directives if we detect any other cases.
-}
-
 bool clang::isOpenMPTaskLoopDirective(OpenMPDirectiveKind DKind) {
   return DKind == OMPD_taskloop || DKind == OMPD_taskloop_simd;
 }
@@ -761,4 +756,13 @@ bool clang::isOpenMPLoopBoundSharingDirective(OpenMPDirectiveKind Kind) {
          Kind == OMPD_distribute_parallel_for_simd ||
          Kind == OMPD_distribute_simd ||
 				 Kind == OMPD_target_teams_distribute_parallel_for;
+}
+
+bool clang::requiresAdditionalIterationVar(OpenMPDirectiveKind DKind){
+  return DKind == OMPD_distribute_simd;
+  // TODO add more directives if we detect any other cases.
+}
+
+bool clang::isOpenMPDistributeSimdDirective(OpenMPDirectiveKind DKind){
+  return DKind == OMPD_distribute_simd;
 }

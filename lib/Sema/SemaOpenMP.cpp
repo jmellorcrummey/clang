@@ -5675,7 +5675,7 @@ static unsigned CheckOpenMPLoop(
   // Build variables passed into runtime, necessary for worksharing directives.
   ExprResult LB, UB, IL, ST, EUB, PrevLB, PrevUB;
   if (isOpenMPWorksharingDirective(DKind) || isOpenMPTaskLoopDirective(DKind) ||
-      isOpenMPDistributeDirective(DKind) || isOpenMPDistributeSimdDirective(DKind)) {
+      isOpenMPDistributeDirective(DKind)) {
     // Lower bound variable, initialized with zero.
     VarDecl *LBDecl = buildVarDecl(SemaRef, InitLoc, VType, ".omp.lb");
     LB = buildDeclRefExpr(SemaRef, LBDecl, VType, InitLoc);
@@ -5744,7 +5744,7 @@ static unsigned CheckOpenMPLoop(
   }
 
   // Build iteration variable initializer for simd loop on nvptx.
-  bool OutlinedSimd = (DKind == OMPD_simd || isOpenMPDistributeSimdDirective(DKind)) &&
+  bool OutlinedSimd = (DKind == OMPD_simd || DKind == OMPD_distribute_simd) &&
                       SemaRef.getLangOpts().OpenMPIsDevice &&
                       SemaRef.Context.getTargetInfo().getTriple().isNVPTX();
   ExprResult LaneInit;
@@ -5775,7 +5775,7 @@ static unsigned CheckOpenMPLoop(
   }
 
   ExprResult CombIV;
-  if (isOpenMPDistributeSimdDirective(DKind) && !OutlinedSimd){
+  if (requiresAdditionalIterationVar(DKind) && !OutlinedSimd){
     VarDecl *CombIVDecl = buildVarDecl(SemaRef, InitLoc, RealVType, ".omp.comb.iv");
     CombIV = buildDeclRefExpr(SemaRef, CombIVDecl, RealVType, InitLoc);
   }
@@ -5786,8 +5786,7 @@ static unsigned CheckOpenMPLoop(
       (!CoalescedSchedule &&
        (isOpenMPWorksharingDirective(DKind) ||
         isOpenMPTaskLoopDirective(DKind) ||
-        isOpenMPDistributeDirective(DKind) ||
-        isOpenMPDistributeSimdDirective(DKind)))
+        isOpenMPDistributeDirective(DKind)))
           ? SemaRef.BuildBinOp(CurScope, CondLoc, BO_LE, IV.get(), UB.get())
           : (CoalescedSchedule && isOpenMPLoopBoundSharingDirective(DKind))
                 ? SemaRef.BuildBinOp(CurScope, CondLoc, BO_LE, IV.get(),

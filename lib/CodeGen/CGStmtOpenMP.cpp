@@ -1815,7 +1815,7 @@ void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
     }
 
     // Emit the loop iteration variable.
-    const Expr *IVExpr = isOpenMPDistributeSimdDirective(S.getDirectiveKind()) &&
+    const Expr *IVExpr = requiresAdditionalIterationVar(S.getDirectiveKind()) &&
                          !OutlinedSimd ?
           S.getCombinedIterationVariable() : S.getIterationVariable();
     const VarDecl *IVDecl = cast<VarDecl>(cast<DeclRefExpr>(IVExpr)->getDecl());
@@ -1828,8 +1828,7 @@ void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
       LValue UB =
           EmitOMPHelperVar(CGF, cast<DeclRefExpr>(S.getUpperBoundVariable()));
 
-      if (isOpenMPLoopBoundSharingDirective(S.getDirectiveKind()) ||
-          isOpenMPDistributeSimdDirective(S.getDirectiveKind())) {
+      if (isOpenMPDistributeSimdDirective(S.getDirectiveKind())) {
         // When composing distribute with for we need to use the pragma distribute
         // chunk lower and upper bounds rather than the whole loop iteration
         // space. Therefore we copy the bounds of the previous schedule into the

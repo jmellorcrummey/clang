@@ -537,9 +537,8 @@ protected:
   void setCombinedIterationVariable(Expr *CombIV) {
     assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
             isOpenMPTaskLoopDirective(getDirectiveKind()) ||
-            isOpenMPDistributeDirective(getDirectiveKind()) ||
-            isOpenMPDistributeSimdDirective(getDirectiveKind())) &&
-           "expected directive containing distribute and simd");
+            isOpenMPDistributeDirective(getDirectiveKind())) &&
+           "expected worksharing loop directive");
     *std::next(child_begin(), CombinedIterationVariableOffset) = CombIV;
   }
   void setCounters(ArrayRef<Expr *> A);
@@ -592,7 +591,7 @@ public:
     /// \brief PreviousUpperBound - local variable passed to runtime in the
     /// enclosing schedule or null if that does not apply.
     Expr *PrevUB;
-    /// \brief Loop iteration variable.
+    /// \brief Additional iteration variable for worksharing constructs.
     Expr *CombIterationVarRef;
     /// \brief Dist Loop condition.
     Expr *DistCond;
@@ -814,9 +813,8 @@ public:
   Expr *getCombinedIterationVariable() const {
     assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
             isOpenMPTaskLoopDirective(getDirectiveKind()) ||
-            isOpenMPDistributeDirective(getDirectiveKind()) ||
-            isOpenMPDistributeSimdDirective(getDirectiveKind())) &&
-           "expected directive containing distribute and simd");
+            isOpenMPDistributeDirective(getDirectiveKind())) &&
+           "expected worksharing loop directive");
     return const_cast<Expr *>(reinterpret_cast<const Expr *>(
         *std::next(child_begin(), CombinedIterationVariableOffset)));
   }
