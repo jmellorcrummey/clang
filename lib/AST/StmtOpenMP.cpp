@@ -159,7 +159,7 @@ OMPForDirective::Create(const ASTContext &C, SourceLocation StartLoc,
   Dir->setDistCond(Exprs.DistCond);
   Dir->setDistInc(Exprs.DistInc);
   Dir->setPrevEnsureUpperBound(Exprs.PrevEUB);
-  Dir->setCombinedIterationVariable(Exprs.CombIterationVarRef);
+  Dir->setInnermostIterationVariable(Exprs.InnermostIterationVarRef);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -218,7 +218,7 @@ OMPForSimdDirective::Create(const ASTContext &C, SourceLocation StartLoc,
   Dir->setDistCond(Exprs.DistCond);
   Dir->setDistInc(Exprs.DistInc);
   Dir->setPrevEnsureUpperBound(Exprs.PrevEUB);
-  Dir->setCombinedIterationVariable(Exprs.CombIterationVarRef);
+  Dir->setInnermostIterationVariable(Exprs.InnermostIterationVarRef);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -393,7 +393,7 @@ OMPParallelForDirective *OMPParallelForDirective::Create(
   Dir->setDistCond(Exprs.DistCond);
   Dir->setDistInc(Exprs.DistInc);
   Dir->setPrevEnsureUpperBound(Exprs.PrevEUB);
-  Dir->setCombinedIterationVariable(Exprs.CombIterationVarRef);
+  Dir->setInnermostIterationVariable(Exprs.InnermostIterationVarRef);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -450,7 +450,7 @@ OMPParallelForSimdDirective *OMPParallelForSimdDirective::Create(
   Dir->setDistCond(Exprs.DistCond);
   Dir->setDistInc(Exprs.DistInc);
   Dir->setPrevEnsureUpperBound(Exprs.PrevEUB);
-  Dir->setCombinedIterationVariable(Exprs.CombIterationVarRef);
+  Dir->setInnermostIterationVariable(Exprs.InnermostIterationVarRef);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -796,7 +796,7 @@ OMPTargetParallelForDirective *OMPTargetParallelForDirective::Create(
   Dir->setDistCond(Exprs.DistCond);
   Dir->setDistInc(Exprs.DistInc);
   Dir->setPrevEnsureUpperBound(Exprs.PrevEUB);
-  Dir->setCombinedIterationVariable(Exprs.CombIterationVarRef);
+  Dir->setInnermostIterationVariable(Exprs.InnermostIterationVarRef);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -945,7 +945,7 @@ OMPTaskLoopDirective *OMPTaskLoopDirective::Create(
   Dir->setDistCond(Exprs.DistCond);
   Dir->setDistInc(Exprs.DistInc);
   Dir->setPrevEnsureUpperBound(Exprs.PrevEUB);
-  Dir->setCombinedIterationVariable(Exprs.CombIterationVarRef);
+  Dir->setInnermostIterationVariable(Exprs.InnermostIterationVarRef);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -1002,7 +1002,7 @@ OMPTaskLoopSimdDirective *OMPTaskLoopSimdDirective::Create(
   Dir->setDistCond(Exprs.DistCond);
   Dir->setDistInc(Exprs.DistInc);
   Dir->setPrevEnsureUpperBound(Exprs.PrevEUB);
-  Dir->setCombinedIterationVariable(Exprs.CombIterationVarRef);
+  Dir->setInnermostIterationVariable(Exprs.InnermostIterationVarRef);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -1058,7 +1058,7 @@ OMPDistributeDirective *OMPDistributeDirective::Create(
   Dir->setDistCond(Exprs.DistCond);
   Dir->setDistInc(Exprs.DistInc);
   Dir->setPrevEnsureUpperBound(Exprs.PrevEUB);
-  Dir->setCombinedIterationVariable(Exprs.CombIterationVarRef);
+  Dir->setInnermostIterationVariable(Exprs.InnermostIterationVarRef);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -1138,7 +1138,7 @@ OMPDistributeParallelForDirective *OMPDistributeParallelForDirective::Create(
   Dir->setDistCond(Exprs.DistCond);
   Dir->setDistInc(Exprs.DistInc);
   Dir->setPrevEnsureUpperBound(Exprs.PrevEUB);
-  Dir->setCombinedIterationVariable(Exprs.CombIterationVarRef);
+  Dir->setInnermostIterationVariable(Exprs.InnermostIterationVarRef);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -1200,7 +1200,7 @@ OMPDistributeParallelForSimdDirective::Create(
   Dir->setDistCond(Exprs.DistCond);
   Dir->setDistInc(Exprs.DistInc);
   Dir->setPrevEnsureUpperBound(Exprs.PrevEUB);
-  Dir->setCombinedIterationVariable(Exprs.CombIterationVarRef);
+  Dir->setInnermostIterationVariable(Exprs.InnermostIterationVarRef);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -1261,7 +1261,7 @@ OMPDistributeSimdDirective *OMPDistributeSimdDirective::Create(
   Dir->setDistCond(Exprs.DistCond);
   Dir->setDistInc(Exprs.DistInc);
   Dir->setPrevEnsureUpperBound(Exprs.PrevEUB);
-  Dir->setCombinedIterationVariable(Exprs.CombIterationVarRef);
+  Dir->setInnermostIterationVariable(Exprs.InnermostIterationVarRef);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -1321,7 +1321,7 @@ OMPTargetParallelForSimdDirective *OMPTargetParallelForSimdDirective::Create(
   Dir->setDistCond(Exprs.DistCond);
   Dir->setDistInc(Exprs.DistInc);
   Dir->setPrevEnsureUpperBound(Exprs.PrevEUB);
-  Dir->setCombinedIterationVariable(Exprs.CombIterationVarRef);
+  Dir->setInnermostIterationVariable(Exprs.InnermostIterationVarRef);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);
   Dir->setInits(Exprs.Inits);
@@ -1402,7 +1402,7 @@ OMPTeamsDistributeParallelForDirective::Create(
   Dir->setDistCond(Exprs.DistCond);
   Dir->setDistInc(Exprs.DistInc);
   Dir->setPrevEnsureUpperBound(Exprs.PrevEUB);
-  Dir->setCombinedIterationVariable(Exprs.CombIterationVarRef);
+  Dir->setInnermostIterationVariable(Exprs.InnermostIterationVarRef);
   Dir->setStrideVariable(Exprs.ST);
   Dir->setEnsureUpperBound(Exprs.EUB);
   Dir->setNextLowerBound(Exprs.NLB);
@@ -1467,7 +1467,7 @@ OMPTargetTeamsDistributeParallelForDirective::Create(
   Dir->setDistCond(Exprs.DistCond);
   Dir->setDistInc(Exprs.DistInc);
   Dir->setPrevEnsureUpperBound(Exprs.PrevEUB);
-  Dir->setCombinedIterationVariable(Exprs.CombIterationVarRef);
+  Dir->setInnermostIterationVariable(Exprs.InnermostIterationVarRef);
   Dir->setStrideVariable(Exprs.ST);
   Dir->setEnsureUpperBound(Exprs.EUB);
   Dir->setNextLowerBound(Exprs.NLB);

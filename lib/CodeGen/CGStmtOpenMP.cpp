@@ -1342,7 +1342,6 @@ static void emitCommonOMPParallelDirective(CodeGenFunction &CGF,
                                   CGF.SizeTy, /*isSigned=*/false);
     CapturedVars.push_back(UBCast);
   }
-
   CGF.GenerateOpenMPCapturedVars(*CS, CapturedVars, CaptureLevel);
   CGF.CGM.getOpenMPRuntime().emitParallelCall(CGF, S.getLocStart(), OutlinedFn,
                                               CapturedVars, IfCond);
@@ -1799,7 +1798,7 @@ void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
     // Emit the loop iteration variable.
     const Expr *IVExpr = requiresAdditionalIterationVar(S.getDirectiveKind()) &&
                          !OutlinedSimd ?
-          S.getCombinedIterationVariable() : S.getIterationVariable();
+          S.getInnermostIterationVariable() : S.getIterationVariable();
     const VarDecl *IVDecl = cast<VarDecl>(cast<DeclRefExpr>(IVExpr)->getDecl());
     CGF.EmitVarDecl(*IVDecl);
 

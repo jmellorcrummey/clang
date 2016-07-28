@@ -5760,10 +5760,10 @@ static unsigned CheckOpenMPLoop(
     Init = SemaRef.ActOnFinishFullExpr(Init.get());
   }
 
-  ExprResult CombIV;
+  ExprResult InnermostIV;
   if (requiresAdditionalIterationVar(DKind) && !OutlinedSimd){
-    VarDecl *CombIVDecl = buildVarDecl(SemaRef, InitLoc, RealVType, ".omp.comb.iv");
-    CombIV = buildDeclRefExpr(SemaRef, CombIVDecl, RealVType, InitLoc);
+    VarDecl *InnermostIVDecl = buildVarDecl(SemaRef, InitLoc, RealVType, ".omp.innermost.iv");
+    InnermostIV = buildDeclRefExpr(SemaRef, InnermostIVDecl, RealVType, InitLoc);
   }
 
   // Loop condition (IV < NumIterations) or (IV <= UB) for worksharing loops.
@@ -5771,8 +5771,7 @@ static unsigned CheckOpenMPLoop(
   ExprResult Cond =
       (!CoalescedSchedule &&
        (isOpenMPWorksharingDirective(DKind) ||
-        isOpenMPTaskLoopDirective(DKind) ||
-        isOpenMPDistributeDirective(DKind)))
+        isOpenMPTaskLoopDirective(DKind) || isOpenMPDistributeDirective(DKind)))
           ? SemaRef.BuildBinOp(CurScope, CondLoc, BO_LE, IV.get(), UB.get())
           : (CoalescedSchedule && isOpenMPLoopBoundSharingDirective(DKind))
                 ? SemaRef.BuildBinOp(CurScope, CondLoc, BO_LE, IV.get(),
@@ -5976,7 +5975,7 @@ static unsigned CheckOpenMPLoop(
   Built.DistCond = DistCond.get();
   Built.DistInc = DistInc.get();
   Built.PrevEUB = PrevEUB.get();
-  Built.CombIterationVarRef = CombIV.get();
+  Built.InnermostIterationVarRef = InnermostIV.get();
 
   Expr *CounterVal = SemaRef.DefaultLvalueConversion(IV.get()).get();
   // Fill data for doacross depend clauses.
