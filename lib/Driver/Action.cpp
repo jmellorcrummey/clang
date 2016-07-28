@@ -104,7 +104,7 @@ std::string Action::getOffloadingKindPrefix() const {
 }
 
 std::string
-Action::getOffloadingFileNamePrefix(StringRef NormalizedTriple) const {
+Action::getOffloadingFileNamePrefix(llvm::StringRef NormalizedTriple) const {
   // A file prefix is only generated for device actions and consists of the
   // offload kind and triple.
   if (!OffloadingDeviceKind)
@@ -136,7 +136,7 @@ OffloadAction::OffloadAction(const HostDependence &HDep)
   ActiveOffloadKindMask = HDep.getOffloadKinds();
   HDep.getAction()->propagateHostOffloadInfo(HDep.getOffloadKinds(),
                                              HDep.getBoundArch());
-};
+}
 
 OffloadAction::OffloadAction(const DeviceDependences &DDeps, types::ID Ty)
     : Action(OffloadClass, DDeps.getActions(), Ty),
@@ -153,7 +153,7 @@ OffloadAction::OffloadAction(const DeviceDependences &DDeps, types::ID Ty)
     OffloadingArch = BArchs.front();
 
   // Propagate info to the dependencies.
-  for (unsigned i = 0; i < getInputs().size(); ++i)
+  for (unsigned i = 0, e = getInputs().size(); i != e; ++i)
     getInputs()[i]->propagateDeviceOffloadInfo(OKinds[i], BArchs[i]);
 }
 
@@ -167,21 +167,20 @@ OffloadAction::OffloadAction(const HostDependence &HDep,
   HDep.getAction()->propagateHostOffloadInfo(HDep.getOffloadKinds(),
                                              HDep.getBoundArch());
 
-  // Add device inputs and propagate info to the device actions.
-  for (unsigned i = 0; i < DDeps.getActions().size(); ++i) {
-    auto *A = DDeps.getActions()[i];
-    // Skip actions of empty dependences.
-    if (!A)
-      continue;
-    getInputs().push_back(A);
-    A->propagateDeviceOffloadInfo(DDeps.getOffloadKinds()[i],
-                                  DDeps.getBoundArchs()[i]);
-  }
+  // Add device inputs and propagate info to the device actions. Do work only if
+  // we have dependencies.
+  for (unsigned i = 0, e = DDeps.getActions().size(); i != e; ++i)
+    if (auto *A = DDeps.getActions()[i]) {
+      getInputs().push_back(A);
+      A->propagateDeviceOffloadInfo(DDeps.getOffloadKinds()[i],
+                                    DDeps.getBoundArchs()[i]);
+    }
 }
 
 void OffloadAction::doOnHostDependence(const OffloadActionWorkTy &Work) const {
   if (!HostTC)
     return;
+  assert(!getInputs().empty() && "No dependencies for offload action??");
   auto *A = getInputs().front();
   Work(A, HostTC, A->getOffloadingArch());
 }
@@ -192,6 +191,12 @@ void OffloadAction::doOnEachDeviceDependence(
   auto E = getInputs().end();
   if (I == E)
     return;
+
+  // We expect to have the same number of input dependences and device tool
+  // chains, except if we also have a host dependence. In that case we have one
+  // more dependence than we have device tool chains.
+  assert(getInputs().size() == DevToolChains.size() + (HostTC ? 1 : 0) &&
+         "Sizes of action dependences and toolchains are not consistent!");
 
   // Skip host action
   if (HostTC)
@@ -219,6 +224,7 @@ bool OffloadAction::hasHostDependence() const { return HostTC != nullptr; }
 
 Action *OffloadAction::getHostDependence() const {
   assert(hasHostDependence() && "Host dependence does not exist!");
+  assert(!getInputs().empty() && "No dependencies for offload action??");
   return HostTC ? getInputs().front() : nullptr;
 }
 
@@ -233,6 +239,8 @@ Action *
 OffloadAction::getSingleDeviceDependence(bool DoNotConsiderHostActions) const {
   assert(hasSingleDeviceDependence(DoNotConsiderHostActions) &&
          "Single device dependence does not exist!");
+  // The previous assert ensures the number of entries in getInputs() is
+  // consistent with what we are doing here.
   return HostTC ? getInputs()[1] : getInputs().front();
 }
 

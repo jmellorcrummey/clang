@@ -1803,6 +1803,18 @@ bool RecursiveASTVisitor<Derived>::TraverseDeclaratorHelper(DeclaratorDecl *D) {
   return true;
 }
 
+DEF_TRAVERSE_DECL(DecompositionDecl, {
+  TRY_TO(TraverseVarHelper(D));
+  for (auto *Binding : D->bindings()) {
+    TRY_TO(TraverseDecl(Binding));
+  }
+})
+
+DEF_TRAVERSE_DECL(BindingDecl, {
+  if (getDerived().shouldVisitImplicitCode())
+    TRY_TO(TraverseStmt(D->getBinding()));
+})
+
 DEF_TRAVERSE_DECL(MSPropertyDecl, { TRY_TO(TraverseDeclaratorHelper(D)); })
 
 DEF_TRAVERSE_DECL(FieldDecl, {
@@ -2352,6 +2364,7 @@ DEF_TRAVERSE_STMT(ObjCIndirectCopyRestoreExpr, {})
 DEF_TRAVERSE_STMT(ObjCBridgedCastExpr, {
   TRY_TO(TraverseTypeLoc(S->getTypeInfoAsWritten()->getTypeLoc()));
 })
+DEF_TRAVERSE_STMT(ObjCAvailabilityCheckExpr, {})
 DEF_TRAVERSE_STMT(ParenExpr, {})
 DEF_TRAVERSE_STMT(ParenListExpr, {})
 DEF_TRAVERSE_STMT(PredefinedExpr, {})
@@ -2568,6 +2581,12 @@ DEF_TRAVERSE_STMT(OMPDistributeParallelForSimdDirective,
                   { TRY_TO(TraverseOMPExecutableDirective(S)); })
 
 DEF_TRAVERSE_STMT(OMPDistributeSimdDirective,
+                  { TRY_TO(TraverseOMPExecutableDirective(S)); })
+
+DEF_TRAVERSE_STMT(OMPTargetParallelForSimdDirective,
+                  { TRY_TO(TraverseOMPExecutableDirective(S)); })
+
+DEF_TRAVERSE_STMT(OMPTargetSimdDirective,
                   { TRY_TO(TraverseOMPExecutableDirective(S)); })
 
 // OpenMP clauses.
@@ -2948,6 +2967,20 @@ bool RecursiveASTVisitor<Derived>::VisitOMPToClause(OMPToClause *C) {
 
 template <typename Derived>
 bool RecursiveASTVisitor<Derived>::VisitOMPFromClause(OMPFromClause *C) {
+  TRY_TO(VisitOMPClauseList(C));
+  return true;
+}
+
+template <typename Derived>
+bool RecursiveASTVisitor<Derived>::VisitOMPUseDevicePtrClause(
+    OMPUseDevicePtrClause *C) {
+  TRY_TO(VisitOMPClauseList(C));
+  return true;
+}
+
+template <typename Derived>
+bool RecursiveASTVisitor<Derived>::VisitOMPIsDevicePtrClause(
+    OMPIsDevicePtrClause *C) {
   TRY_TO(VisitOMPClauseList(C));
   return true;
 }
