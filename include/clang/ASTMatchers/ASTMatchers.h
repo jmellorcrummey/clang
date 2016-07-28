@@ -51,7 +51,6 @@
 #include "clang/AST/DeclTemplate.h"
 #include "clang/ASTMatchers/ASTMatchersInternal.h"
 #include "clang/ASTMatchers/ASTMatchersMacros.h"
-#include "llvm/ADT/Twine.h"
 #include "llvm/Support/Regex.h"
 #include <iterator>
 
@@ -4065,6 +4064,34 @@ AST_MATCHER(MemberExpr, isArrow) {
 /// matches "a(int)", "b(long)", but not "c(double)".
 AST_MATCHER(QualType, isInteger) {
     return Node->isIntegerType();
+}
+
+/// \brief Matches QualType nodes that are of unsigned integer type.
+///
+/// Given
+/// \code
+///   void a(int);
+///   void b(unsigned long);
+///   void c(double);
+/// \endcode
+/// functionDecl(hasAnyParameter(hasType(isInteger())))
+/// matches "b(unsigned long)", but not "a(int)" and "c(double)".
+AST_MATCHER(QualType, isUnsignedInteger) {
+    return Node->isUnsignedIntegerType();
+}
+
+/// \brief Matches QualType nodes that are of signed integer type.
+///
+/// Given
+/// \code
+///   void a(int);
+///   void b(unsigned long);
+///   void c(double);
+/// \endcode
+/// functionDecl(hasAnyParameter(hasType(isInteger())))
+/// matches "a(int)", but not "b(unsigned long)" and "c(double)".
+AST_MATCHER(QualType, isSignedInteger) {
+    return Node->isSignedIntegerType();
 }
 
 /// \brief Matches QualType nodes that are of character type.
