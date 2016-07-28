@@ -14,6 +14,7 @@
 #ifndef LLVM_CLANG_PARSE_PARSER_H
 #define LLVM_CLANG_PARSE_PARSER_H
 
+#include "clang/AST/Availability.h"
 #include "clang/Basic/OpenMPKinds.h"
 #include "clang/Basic/OperatorPrecedence.h"
 #include "clang/Basic/Specifiers.h"
@@ -311,6 +312,10 @@ public:
       return false;
     Loc = PrevTokLocation;
     return true;
+  }
+
+  SourceLocation getEndOfPreviousToken() {
+    return PP.getLocForEndOfToken(PrevTokLocation);
   }
 
   /// Retrieve the underscored keyword (_Nonnull, _Nullable) that corresponds
@@ -2244,6 +2249,9 @@ private:
                                   SourceLocation ScopeLoc,
                                   AttributeList::Syntax Syntax);
 
+  Optional<AvailabilitySpec> ParseAvailabilitySpec();
+  ExprResult ParseAvailabilityCheckExpr(SourceLocation StartLoc);
+
   void ParseObjCBridgeRelatedAttribute(IdentifierInfo &ObjCBridgeRelated,
                                        SourceLocation ObjCBridgeRelatedLoc,
                                        ParsedAttributes &attrs,
@@ -2348,6 +2356,7 @@ private:
                                  bool AtomicAllowed = true,
                                  bool IdentifierRequired = false);
   void ParseDirectDeclarator(Declarator &D);
+  void ParseDecompositionDeclarator(Declarator &D);
   void ParseParenDeclarator(Declarator &D);
   void ParseFunctionDeclarator(Declarator &D,
                                ParsedAttributes &attrs,
