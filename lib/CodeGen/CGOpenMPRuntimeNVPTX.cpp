@@ -1545,6 +1545,8 @@ public:
   /// \return LValue for num lanes variable. This LValue always has type int32*.
   virtual LValue getNumLanesVariableLValue(CodeGenFunction &CGF);
 
+  virtual void emitUntiedSwitch(CodeGenFunction & /*CGF*/) {}
+
   CGOpenMPRegionKind getRegionKind() const { return RegionKind; }
 
   OpenMPDirectiveKind getDirectiveKind() const { return Kind; }
@@ -1555,6 +1557,8 @@ public:
     return Info->getKind() == CR_OpenMP;
   }
 
+  ~CGOpenMPRegionInfo() override = default;
+
 protected:
   CGOpenMPRegionKind RegionKind;
   RegionCodeGenTy CodeGen;
@@ -1563,7 +1567,7 @@ protected:
 };
 
 /// \brief API for captured statement code generation in OpenMP constructs.
-class CGOpenMPOutlinedRegionInfo : public CGOpenMPRegionInfo {
+class CGOpenMPOutlinedRegionInfo final : public CGOpenMPRegionInfo {
 public:
   CGOpenMPOutlinedRegionInfo(const CapturedStmt &CS, const VarDecl *ThreadIDVar,
                              const RegionCodeGenTy &CodeGen,
@@ -1573,6 +1577,7 @@ public:
         ThreadIDVar(ThreadIDVar) {
     assert(ThreadIDVar != nullptr && "No ThreadID in OpenMP region.");
   }
+
   /// \brief Get a variable or parameter for storing global thread id
   /// inside OpenMP construct.
   const VarDecl *getThreadIDVariable() const override { return ThreadIDVar; }
