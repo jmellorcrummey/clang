@@ -17,16 +17,14 @@
 #include "clang/Driver/Util.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/Triple.h"
-#include "llvm/Support/Path.h" // FIXME: Kill when CompilationInfo lands.
 
 #include <list>
 #include <map>
-#include <memory>
-#include <set>
 #include <string>
 
 namespace llvm {
+class Triple;
+
 namespace opt {
   class Arg;
   class ArgList;
@@ -152,9 +150,6 @@ public:
   /// If the standard library is used
   bool UseStdLib;
 
-  /// Default target triple.
-  std::string DefaultTargetTriple;
-
   /// Driver title to use with help.
   std::string DriverTitle;
 
@@ -203,6 +198,9 @@ public:
   unsigned CCGenDiagnostics : 1;
 
 private:
+  /// Default target triple.
+  std::string DefaultTargetTriple;
+
   /// Name to use when invoking gcc/g++.
   std::string CCCGenericGCCName;
 

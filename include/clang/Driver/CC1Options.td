@@ -388,6 +388,8 @@ def ast_dump_filter : Separate<["-"], "ast-dump-filter">,
   HelpText<"Use with -ast-dump or -ast-print to dump/print only AST declaration"
            " nodes having a certain substring in a qualified name. Use"
            " -ast-list to list all filterable declaration node names.">;
+def fmodules_ts : Flag <["-"], "fmodules-ts">, Group<f_Group>,
+  HelpText<"Enable support for the C++ Modules TS">;
 def fno_modules_global_index : Flag<["-"], "fno-modules-global-index">,
   HelpText<"Do not automatically generate or update the global module index">;
 def fno_modules_error_recovery : Flag<["-"], "fno-modules-error-recovery">,
@@ -509,6 +511,8 @@ def find_pch_source_EQ : Joined<["-"], "find-pch-source=">,
   HelpText<"When building a pch, try to find the input file in include "
            "directories, as if it had been included by the argument passed "
            "to this flag.">;
+def fno_pch_timestamp : Flag<["-"], "fno-pch-timestamp">,
+  HelpText<"Disable inclusion of timestamp in precompiled headers">;
   
 //===----------------------------------------------------------------------===//
 // Language Options
