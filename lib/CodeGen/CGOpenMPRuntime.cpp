@@ -4538,8 +4538,8 @@ static void EmitOMPAggregateReduction(
 /// Emit reduction combiner. If the combiner is a simple expression emit it as
 /// is, otherwise consider it as combiner of UDR decl and emit it as a call of
 /// UDR combiner function.
-static void emitReductionCombiner(CodeGenFunction &CGF,
-                                  const Expr *ReductionOp) {
+void CGOpenMPRuntime::emitReductionCombiner(CodeGenFunction &CGF,
+                                            const Expr *ReductionOp) {
   if (auto *CE = dyn_cast<CallExpr>(ReductionOp))
     if (auto *OVE = dyn_cast<OpaqueValueExpr>(CE->getCallee()))
       if (auto *DRE =
@@ -4555,12 +4555,10 @@ static void emitReductionCombiner(CodeGenFunction &CGF,
   CGF.EmitIgnoredExpr(ReductionOp);
 }
 
-static llvm::Value *emitReductionFunction(CodeGenModule &CGM,
-                                          llvm::Type *ArgsType,
-                                          ArrayRef<const Expr *> Privates,
-                                          ArrayRef<const Expr *> LHSExprs,
-                                          ArrayRef<const Expr *> RHSExprs,
-                                          ArrayRef<const Expr *> ReductionOps) {
+llvm::Value *CGOpenMPRuntime::emitReductionFunction(
+    CodeGenModule &CGM, llvm::Type *ArgsType, ArrayRef<const Expr *> Privates,
+    ArrayRef<const Expr *> LHSExprs, ArrayRef<const Expr *> RHSExprs,
+    ArrayRef<const Expr *> ReductionOps) {
   auto &C = CGM.getContext();
 
   // void reduction_func(void *LHSArg, void *RHSArg);
@@ -4643,11 +4641,11 @@ static llvm::Value *emitReductionFunction(CodeGenModule &CGM,
   return Fn;
 }
 
-static void emitSingleReductionCombiner(CodeGenFunction &CGF,
-                                        const Expr *ReductionOp,
-                                        const Expr *PrivateRef,
-                                        const DeclRefExpr *LHS,
-                                        const DeclRefExpr *RHS) {
+void CGOpenMPRuntime::emitSingleReductionCombiner(CodeGenFunction &CGF,
+                                                  const Expr *ReductionOp,
+                                                  const Expr *PrivateRef,
+                                                  const DeclRefExpr *LHS,
+                                                  const DeclRefExpr *RHS) {
   if (PrivateRef->getType()->isArrayType()) {
     // Emit reduction for array section.
     auto *LHSVar = cast<VarDecl>(LHS->getDecl());
@@ -4667,7 +4665,8 @@ void CGOpenMPRuntime::emitReduction(CodeGenFunction &CGF, SourceLocation Loc,
                                     ArrayRef<const Expr *> LHSExprs,
                                     ArrayRef<const Expr *> RHSExprs,
                                     ArrayRef<const Expr *> ReductionOps,
-                                    bool WithNowait, bool SimpleReduction) {
+                                    bool WithNowait, bool ParallelReduction,
+                                    bool SimdReduction, bool TeamsReduction) {
   if (!CGF.HaveInsertPoint())
     return;
   // Next code should be emitted for reduction:
@@ -4700,14 +4699,14 @@ void CGOpenMPRuntime::emitReduction(CodeGenFunction &CGF, SourceLocation Loc,
   // default:;
   // }
   //
-  // if SimpleReduction is true, only the next code is generated:
+  // if SimdReduction is true, only the next code is generated:
   //  ...
   //  <LHSExprs>[i] = RedOp<i>(*<LHSExprs>[i], *<RHSExprs>[i]);
   //  ...
 
   auto &C = CGM.getContext();
 
-  if (SimpleReduction) {
+  if (SimdReduction) {
     CodeGenFunction::RunCleanupsScope Scope(CGF);
     auto IPriv = Privates.begin();
     auto ILHS = LHSExprs.begin();
@@ -4773,9 +4772,8 @@ void CGOpenMPRuntime::emitReduction(CodeGenFunction &CGF, SourceLocation Loc,
   auto *IdentTLoc = emitUpdateLocation(CGF, Loc, OMP_ATOMIC_REDUCE);
   auto *ThreadId = getThreadID(CGF, Loc);
   auto *ReductionArrayTySize = CGF.getTypeSize(ReductionArrayTy);
-  auto *RL =
-    CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(ReductionList.getPointer(),
-                                                    CGF.VoidPtrTy);
+  auto *RL = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
+      ReductionList.getPointer(), CGF.VoidPtrTy);
   llvm::Value *Args[] = {
       IdentTLoc,                             // ident_t *<loc>
       ThreadId,                              // i32 <gtid>
@@ -4810,8 +4808,8 @@ void CGOpenMPRuntime::emitReduction(CodeGenFunction &CGF, SourceLocation Loc,
       ThreadId,  // i32 <gtid>
       Lock       // kmp_critical_name *&<lock>
   };
-  auto &&CodeGen = [&Privates, &LHSExprs, &RHSExprs, &ReductionOps](
-      CodeGenFunction &CGF, PrePostActionTy &Action) {
+  auto &&CodeGen = [&Privates, &LHSExprs, &RHSExprs, &ReductionOps,
+                    this](CodeGenFunction &CGF, PrePostActionTy &Action) {
     auto IPriv = Privates.begin();
     auto ILHS = LHSExprs.begin();
     auto IRHS = RHSExprs.begin();
@@ -4843,8 +4841,8 @@ void CGOpenMPRuntime::emitReduction(CodeGenFunction &CGF, SourceLocation Loc,
   SwInst->addCase(CGF.Builder.getInt32(2), Case2BB);
   CGF.EmitBlock(Case2BB);
 
-  auto &&AtomicCodeGen = [Loc, &Privates, &LHSExprs, &RHSExprs, &ReductionOps](
-      CodeGenFunction &CGF, PrePostActionTy &Action) {
+  auto &&AtomicCodeGen = [Loc, &Privates, &LHSExprs, &RHSExprs, &ReductionOps,
+                          this](CodeGenFunction &CGF, PrePostActionTy &Action) {
     auto ILHS = LHSExprs.begin();
     auto IRHS = RHSExprs.begin();
     auto IPriv = Privates.begin();
@@ -4911,8 +4909,8 @@ void CGOpenMPRuntime::emitReduction(CodeGenFunction &CGF, SourceLocation Loc,
           AtomicRedGen(CGF, XExpr, EExpr, UpExpr);
       } else {
         // Emit as a critical region.
-        auto &&CritRedGen = [E, Loc](CodeGenFunction &CGF, const Expr *,
-                                     const Expr *, const Expr *) {
+        auto &&CritRedGen = [E, Loc, this](CodeGenFunction &CGF, const Expr *,
+                                           const Expr *, const Expr *) {
           auto &RT = CGF.CGM.getOpenMPRuntime();
           RT.emitCriticalRegion(
               CGF, ".atomic_reduction",
