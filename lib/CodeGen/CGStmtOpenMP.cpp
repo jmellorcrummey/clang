@@ -1261,7 +1261,10 @@ void CodeGenFunction::EmitOMPReductionClauseFinal(
         D.getSingleClause<OMPNowaitClause>() ||
             isOpenMPParallelDirective(D.getDirectiveKind()) ||
             D.getDirectiveKind() == OMPD_simd,
-        D.getDirectiveKind() == OMPD_simd);
+        isOpenMPParallelDirective(D.getDirectiveKind()) ||
+            isOpenMPWorksharingDirective(D.getDirectiveKind()),
+        isOpenMPSimdDirective(D.getDirectiveKind()),
+        isOpenMPTeamsDirective(D.getDirectiveKind()));
   }
 }
 
