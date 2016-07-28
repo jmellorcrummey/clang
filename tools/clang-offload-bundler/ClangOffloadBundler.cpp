@@ -73,14 +73,15 @@ static cl::opt<bool>
              cl::init(false), cl::cat(ClangOffloadBundlerCategory));
 
 static cl::opt<bool> PrintExternalCommands(
-    "###", cl::desc("Print the external commands that are to be executed "
-                    "instead of actually execute them.\n"),
+    "###",
+    cl::desc("Print any external commands that are to be executed "
+             "instead of actually executing them - for testing purposes.\n"),
     cl::init(false), cl::cat(ClangOffloadBundlerCategory));
 
-static cl::opt<bool> SaveTemps("save-temps",
-                               cl::desc("Keep any created temporary files.\n"),
-                               cl::init(false),
-                               cl::cat(ClangOffloadBundlerCategory));
+static cl::opt<bool> DumpTemporaryFiles(
+    "dump-temporary-files",
+    cl::desc("Dumps any temporary files created - for testing purposes.\n"),
+    cl::init(false), cl::cat(ClangOffloadBundlerCategory));
 
 /// Magic string that marks the existence of offloading data.
 #define OFFLOAD_BUNDLER_MAGIC_STR "__CLANG_OFFLOAD_BUNDLE__"
@@ -462,29 +463,16 @@ public:
     // Create the bitcode file name to write the resulting code to. Keep it if
     // save-temps is active.
     SmallString<128> BitcodeFileName;
-    if (SaveTemps) {
-      BitcodeFileName = sys::path::filename(OutputFileNames.front());
-      // Save the current file using the host name and the "bc" extension. If
-      // the output already uses that extension, prepend ".tmp".
-      const char *Extension =
-          (sys::path::extension(OutputFileNames.front()) == ".bc") ? "tmp.bc"
-                                                                   : "bc";
-      sys::path::replace_extension(BitcodeFileName, Extension);
-    } else if (sys::fs::createTemporaryFile("clang-offload-bundler", "bc",
-                                            BitcodeFileName)) {
+    if (sys::fs::createTemporaryFile("clang-offload-bundler", "bc",
+                                     BitcodeFileName)) {
       llvm::errs() << "error: unable to create temporary file.\n";
       return true;
     }
 
-    // Write the bitcode to the temporary file.
-    {
-      std::error_code EC;
-      raw_fd_ostream BitcodeFile(BitcodeFileName, EC, sys::fs::F_None);
-      if (EC) {
-        llvm::errs() << "error: unable to open temporary file.\n";
-        return true;
-      }
-      WriteBitcodeToFile(AuxModule.get(), BitcodeFile);
+    // Dump the contents of the temporary file if that was requested.
+    if (DumpTemporaryFiles) {
+      llvm::errs() << ";\n; Object file bundler IR file.\n;\n";
+      AuxModule.get()->dump();
     }
 
     // Find clang in order to create the bundle binary.
@@ -521,17 +509,29 @@ public:
       for (unsigned I = 1; ClangArgs[I]; ++I)
         llvm::errs() << " \"" << ClangArgs[I] << "\"";
       llvm::errs() << "\n";
-    } else if (sys::ExecuteAndWait(ClangBinary.get(), ClangArgs)) {
+    } else {
+      // Write the bitcode contents to the temporary file.
+      {
+        std::error_code EC;
+        raw_fd_ostream BitcodeFile(BitcodeFileName, EC, sys::fs::F_None);
+        if (EC) {
+          llvm::errs() << "error: unable to open temporary file.\n";
+          return true;
+        }
+        WriteBitcodeToFile(AuxModule.get(), BitcodeFile);
+      }
+
+      bool Failed = sys::ExecuteAndWait(ClangBinary.get(), ClangArgs);
+
       // Remove bitcode file.
       sys::fs::remove(BitcodeFileName);
 
-      llvm::errs() << "error: incremental linking by external tool failed.\n";
-      return true;
+      if (Failed) {
+        llvm::errs() << "error: incremental linking by external tool failed.\n";
+        return true;
+      }
     }
 
-    // Remove bitcode file if save-temps is not enabled.
-    if (!SaveTemps)
-      sys::fs::remove(BitcodeFileName);
     return false;
   }
   void WriteBundle(raw_fd_ostream &OS, MemoryBuffer &Input) {
@@ -924,10 +924,11 @@ int main(int argc, const char **argv) {
     getOffloadKindAndTriple(Target, Kind, Triple);
 
     bool KindIsValid = !Kind.empty();
-    KindIsValid &= StringSwitch<bool>(Kind)
-                       .Case("host", true)
-                       .Case("openmp", true)
-                       .Default(false);
+    KindIsValid = KindIsValid &&
+                  StringSwitch<bool>(Kind)
+                      .Case("host", true)
+                      .Case("openmp", true)
+                      .Default(false);
 
     bool TripleIsValid = !Triple.empty();
     llvm::Triple T(Triple);
