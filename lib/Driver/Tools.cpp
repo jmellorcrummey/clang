@@ -311,14 +311,13 @@ static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
     LKS = C.addTempFile(C.getArgs().MakeArgString(Name.c_str()));
   }
 
-  // Open script file in order to write contents.
-  std::error_code EC;
-  llvm::raw_fd_ostream Lksf(LKS, EC, llvm::sys::fs::F_None);
+  // Add linker script option to the command.
+  CmdArgs.push_back("-T");
+  CmdArgs.push_back(LKS);
 
-  if (EC) {
-    C.getDriver().Diag(clang::diag::err_unable_to_make_temp) << EC.message();
-    return;
-  }
+  // Create a buffer to write the contents of the linker script.
+  std::string LksBuffer;
+  llvm::raw_string_ostream LksStream(LksBuffer);
 
   // Get the OpenMP offload tool chains so that we can extract the triple
   // associated with each device input.
@@ -334,7 +333,10 @@ static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
   // image is 16-byte aligned. This is not mandatory, but increases the
   // likelihood of data to be aligned with a cache block in several main host
   // machines.
-  Lksf << "TARGET(binary)\n";
+  LksStream << "/*\n";
+  LksStream << "  OpenMP Offload Linker Script.\n";
+  LksStream << "*/\n";
+  LksStream << "TARGET(binary)\n";
   auto DTC = OpenMPToolChains.first;
   for (auto &II : Inputs) {
     const Action *A = II.getAction();
@@ -346,47 +348,63 @@ static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
       InputBinaryInfo.push_back(std::make_pair(
           DTC->second->getTriple().normalize(), II.getFilename()));
       ++DTC;
-      Lksf << "INPUT(" << II.getFilename() << ")\n";
+      LksStream << "INPUT(" << II.getFilename() << ")\n";
     }
   }
 
   assert(DTC == OpenMPToolChains.second &&
          "Less device inputs than device toolchains??");
 
-  Lksf << "SECTIONS\n";
-  Lksf << "{\n";
-  Lksf << "  .omp_offloading :\n";
-  Lksf << "  ALIGN(0x10)\n";
-  Lksf << "  {\n";
+  LksStream << "SECTIONS\n";
+  LksStream << "SECTIONS\n";
+  LksStream << "{\n";
+  LksStream << "  .omp_offloading :\n";
+  LksStream << "  ALIGN(0x10)\n";
+  LksStream << "  {\n";
 
   for (auto &BI : InputBinaryInfo) {
-    Lksf << "    . = ALIGN(0x10);\n";
-    Lksf << "    PROVIDE_HIDDEN(.omp_offloading.img_start." << BI.first
-         << " = .);\n";
-    Lksf << "    " << BI.second << "\n";
-    Lksf << "    PROVIDE_HIDDEN(.omp_offloading.img_end." << BI.first
-         << " = .);\n";
+    LksStream << "    . = ALIGN(0x10);\n";
+    LksStream << "    PROVIDE_HIDDEN(.omp_offloading.img_start." << BI.first
+              << " = .);\n";
+    LksStream << "    " << BI.second << "\n";
+    LksStream << "    PROVIDE_HIDDEN(.omp_offloading.img_end." << BI.first
+              << " = .);\n";
   }
 
-  Lksf << "  }\n";
+  LksStream << "  }\n";
   // Add commands to define host entries begin and end. We use 1-byte subalign
   // so that the linker does not add any padding and the elements in this
   // section form an array.
-  Lksf << "  .omp_offloading.entries :\n";
-  Lksf << "  ALIGN(0x10)\n";
-  Lksf << "  SUBALIGN(0x01)\n";
-  Lksf << "  {\n";
-  Lksf << "    PROVIDE_HIDDEN(.omp_offloading.entries_begin = .);\n";
-  Lksf << "    *(.omp_offloading.entries)\n";
-  Lksf << "    PROVIDE_HIDDEN(.omp_offloading.entries_end = .);\n";
-  Lksf << "  }\n";
-  Lksf << "}\n";
-  Lksf << "INSERT BEFORE .data\n";
+  LksStream << "  .omp_offloading.entries :\n";
+  LksStream << "  ALIGN(0x10)\n";
+  LksStream << "  SUBALIGN(0x01)\n";
+  LksStream << "  {\n";
+  LksStream << "    PROVIDE_HIDDEN(.omp_offloading.entries_begin = .);\n";
+  LksStream << "    *(.omp_offloading.entries)\n";
+  LksStream << "    PROVIDE_HIDDEN(.omp_offloading.entries_end = .);\n";
+  LksStream << "  }\n";
+  LksStream << "}\n";
+  LksStream << "INSERT BEFORE .data\n";
+  LksStream.flush();
 
-  Lksf.close();
+  // Dump the contents of the linker script if the user requested that.
+  if (C.getArgs().hasArg(options::OPT_fopenmp_dump_offload_linker_script))
+    llvm::errs() << LksBuffer;
 
-  CmdArgs.push_back("-T");
-  CmdArgs.push_back(LKS);
+  // If this is a dry run, do not create the linker script file.
+  if (C.getArgs().hasArg(options::OPT__HASH_HASH_HASH))
+    return;
+
+  // Open script file and write the contents.
+  std::error_code EC;
+  llvm::raw_fd_ostream Lksf(LKS, EC, llvm::sys::fs::F_None);
+
+  if (EC) {
+    C.getDriver().Diag(clang::diag::err_unable_to_make_temp) << EC.message();
+    return;
+  }
+
+  Lksf << LksBuffer;
 }
 
 /// \brief Determine whether Objective-C automated reference counting is
@@ -5079,12 +5097,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddLastArg(CmdArgs, options::OPT_fno_elide_type);
 
   // Forward flags for OpenMP. We don't do this if the current action is an
-  // device offloading action.
-  //
-  // TODO: Allow OpenMP offload actions when they become available.
+  // device offloading action other than OpenMP.
   if (Args.hasFlag(options::OPT_fopenmp, options::OPT_fopenmp_EQ,
                    options::OPT_fno_openmp, false) &&
-      JA.isDeviceOffloading(Action::OFK_None)) {
+      (JA.isDeviceOffloading(Action::OFK_None) ||
+       JA.isDeviceOffloading(Action::OFK_OpenMP))) {
     switch (getToolChain().getDriver().getOpenMPRuntime(Args)) {
     case Driver::OMPRT_OMP:
     case Driver::OMPRT_IOMP5:
