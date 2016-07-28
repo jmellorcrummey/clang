@@ -119,7 +119,7 @@ std::string Action::getOffloadingKindPrefix() const {
 /// for each offloading kind.
 std::string
 Action::GetOffloadingFileNamePrefix(OffloadKind Kind,
-                                    StringRef llvm::NormalizedTriple,
+                                    llvm::StringRef NormalizedTriple,
                                     bool CreatePrefixForHost) {
   // Don't generate prefix for host actions unless required.
   if (!CreatePrefixForHost && (Kind == OFK_None || Kind == OFK_Host))
