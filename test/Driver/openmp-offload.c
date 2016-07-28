@@ -151,59 +151,32 @@
 /// -fopenmp-host-ir-file-path: specifies the host IR file that can be loaded by
 /// the target code generation to gather information about which declaration
 /// really need to be emitted.
+/// We use -fopenmp-dump-offload-linker-script to dump the linker script and
+/// check its contents.
 ///
+// RUN:   %clang -### -fopenmp -o %t.out -target powerpc64le-linux -fopenmp-targets=powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu %s -fopenmp-dump-offload-linker-script 2>&1 \
+// RUN:   | FileCheck -check-prefix=CHK-COMMANDS -check-prefix=CHK-LKS -check-prefix=CHK-LKS-REG %s
+// RUN:   %clang -### -fopenmp -o %t.out -target powerpc64le-linux -fopenmp-targets=powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu %s -save-temps -fopenmp-dump-offload-linker-script 2>&1 \
+// RUN:   | FileCheck -check-prefix=CHK-COMMANDS-ST -check-prefix=CHK-LKS -check-prefix=CHK-LKS-ST %s
+
+// Make sure we are not dumping the script unless the user requested it.
 // RUN:   %clang -### -fopenmp -o %t.out -target powerpc64le-linux -fopenmp-targets=powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu %s 2>&1 \
-// RUN:   | FileCheck -check-prefix=CHK-COMMANDS %s
-// Run the save temp test in a temporary folder as the linker script will be
-// created there.
-// RUN:   cd %T &&  \
+// RUN:   | FileCheck -check-prefix=CHK-LKS-NODUMP %s
 // RUN:   %clang -### -fopenmp -o %t.out -target powerpc64le-linux -fopenmp-targets=powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu %s -save-temps 2>&1 \
-// RUN:   | FileCheck -check-prefix=CHK-COMMANDS-ST %s
-// RUN:   FileCheck -check-prefix=CHK-LKS %s --input-file %t.lk
-//
-// Generate host BC file.
-//
-// CHK-COMMANDS: clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" "-emit-llvm-bc" {{.*}}"-o" "[[HOSTBC:.+\.bc]]" "-x" "c" "[[INPUT:.+\.c]]" "-fopenmp-targets=powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu"
-// CHK-COMMANDS-ST: clang-3.9" "-cc1" "-triple" "powerpc64le--linux" "-E" {{.*}}"-fopenmp" {{.*}}"-o" "[[HOSTPP:.+\.i]]" "-x" "c" "[[INPUT:.+\.c]]"
-// CHK-COMMANDS-ST: clang-3.9" "-cc1" "-triple" "powerpc64le--linux" "-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[HOSTBC:.+\.bc]]" "-x" "cpp-output" "[[HOSTPP]]" "-fopenmp-targets=powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu"
-
-//
-// Compile for the powerpc device.
-//
-// CHK-COMMANDS: clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" "-emit-obj" {{.*}}"-pic-level" "2" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1OBJ:.+\.o]]" "-x" "c" "[[INPUT]]" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[HOSTBC]]"
-// CHK-COMMANDS: ld" {{.*}}"-o" "[[T1BIN:.+\.out]]" {{.*}}"[[T1OBJ]]"
-// CHK-COMMANDS-ST: clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" "-E" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1PP:.+\.i]]" "-x" "c" "[[INPUT]]"
-// CHK-COMMANDS-ST: clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" "-emit-llvm-bc" {{.*}}"-pic-level" "2" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1BC:.+\.bc]]" "-x" "cpp-output" "[[T1PP]]" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[HOSTBC]]"
-// CHK-COMMANDS-ST: clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" "-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1ASM:.+\.s]]" "-x" "ir" "[[T1BC]]"
-// CHK-COMMANDS-ST: clang{{.*}}" "-cc1as" "-triple" "powerpc64le-ibm-linux-gnu" "-filetype" "obj" {{.*}}"-o" "[[T1OBJ:.+\.o]]" "[[T1ASM]]"
-// CHK-COMMANDS-ST: ld" {{.*}}"-shared" "-o" "[[T1BIN:.+\.out-device-openmp-powerpc64le-ibm-linux-gnu]]" {{.*}}[[T1OBJ]]
-
-//
-// Compile for the x86 device.
-//
-// CHK-COMMANDS: clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-emit-obj"  {{.*}}"-pic-level" "2" {{.*}}"-fopenmp"  {{.*}}"-o" "[[T2OBJ:.+\.o]]" "-x" "c" "[[INPUT]]" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[HOSTBC]]"
-// CHK-COMMANDS: ld" {{.*}}"-o" "[[T2BIN:.+\.out]]" {{.*}}"[[T2OBJ]]"
-// CHK-COMMANDS-ST: clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-E" {{.*}}"-fopenmp" {{.*}}"-o" "[[T2PP:.+\.i]]" "-x" "c" "[[INPUT]]"
-// CHK-COMMANDS-ST: clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-emit-llvm-bc" {{.*}}"-pic-level" "2" {{.*}}"-fopenmp" {{.*}}"-o" "[[T2BC:.+\.bc]]" "-x" "cpp-output" "[[T2PP]]" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[HOSTBC]]"
-// CHK-COMMANDS-ST: clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[T2ASM:.+\.s]]" "-x" "ir" "[[T2BC]]"
-// CHK-COMMANDS-ST: clang{{.*}}" "-cc1as" "-triple" "x86_64-pc-linux-gnu" "-filetype" "obj" {{.*}}"-o" "[[T2OBJ:.+\.o]]" "[[T2ASM]]"
-// CHK-COMMANDS-ST: ld" {{.*}}"-shared" "-o" "[[T2BIN:.+\.out-device-openmp-x86_64-pc-linux-gnu]]" {{.*}}[[T2OBJ]]
-
-//
-// Generate host object from the BC file and link using the linker script.
-//
-// CHK-COMMANDS: clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" "-emit-obj" {{.*}}"-fopenmp" {{.*}}"-o" "[[HOSTOBJ:.+\.o]]" "-x" "ir" "[[HOSTBC]]"
-// CHK-COMMANDS: ld" {{.*}}"-o" "[[HOSTBIN:.+\.out]]"  {{.*}}"-lomptarget" {{.*}}"-T" "[[HOSTLK:.+\.lk]]"
-// CHK-COMMANDS-ST: clang-3.9" "-cc1" "-triple" "powerpc64le--linux" "-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[HOSTASM:.+\.s]]" "-x" "ir" "[[HOSTBC]]"
-// CHK-COMMANDS-ST: clang-3.9" "-cc1as" "-triple" "powerpc64le--linux" "-filetype" "obj" {{.*}}"-o" [[HOSTOBJ:.+\.o]]" [[HOSTASM:.+\.s]]
-// CHK-COMMANDS-ST: ld" {{.*}}"-o" "[[HOSTBIN:.+\.out]]"  {{.*}}"-lomptarget" {{.*}}"-T" "[[HOSTLK:.+\.lk]]"
+// RUN:   | FileCheck -check-prefix=CHK-LKS-NODUMP %s
 
 //
 // Check the linker script contains what we expect.
 //
+// CHK-LKS: /*
+// CHK-LKS:             OpenMP Offload Linker Script.
+// CHK-LKS-NODUMP-NOT:  OpenMP Offload Linker Script.
+// CHK-LKS: */
 // CHK-LKS: TARGET(binary)
-// CHK-LKS: INPUT({{.+}}.out-device-openmp-powerpc64le-ibm-linux-gnu)
-// CHK-LKS: INPUT({{.+}}.out-device-openmp-x86_64-pc-linux-gnu)
+// CHK-LKS-REG: INPUT([[T1BIN:.+\.out]])
+// CHK-LKS-REG: INPUT([[T2BIN:.+\.out]])
+// CHK-LKS-ST: INPUT([[T1BIN:.+\.out-device-openmp-powerpc64le-ibm-linux-gnu]])
+// CHK-LKS-ST: INPUT([[T2BIN:.+\.out-device-openmp-x86_64-pc-linux-gnu]])
 // CHK-LKS: SECTIONS
 // CHK-LKS: {
 // CHK-LKS:   .omp_offloading :
@@ -211,11 +184,11 @@
 // CHK-LKS:   {
 // CHK-LKS:     . = ALIGN(0x10);
 // CHK-LKS:     PROVIDE_HIDDEN(.omp_offloading.img_start.powerpc64le-ibm-linux-gnu = .);
-// CHK-LKS:     {{.+}}.out-device-openmp-powerpc64le-ibm-linux-gnu
+// CHK-LKS:     [[T1BIN]]
 // CHK-LKS:     PROVIDE_HIDDEN(.omp_offloading.img_end.powerpc64le-ibm-linux-gnu = .);
 // CHK-LKS:     . = ALIGN(0x10);
 // CHK-LKS:     PROVIDE_HIDDEN(.omp_offloading.img_start.x86_64-pc-linux-gnu = .);
-// CHK-LKS:     {{.+}}.out-device-openmp-x86_64-pc-linux-gnu
+// CHK-LKS:     [[T2BIN]]
 // CHK-LKS:     PROVIDE_HIDDEN(.omp_offloading.img_end.x86_64-pc-linux-gnu = .);
 // CHK-LKS:   }
 // CHK-LKS:   .omp_offloading.entries :
@@ -228,6 +201,44 @@
 // CHK-LKS:   }
 // CHK-LKS: }
 // CHK-LKS: INSERT BEFORE .data
+
+//
+// Generate host BC file.
+//
+// CHK-COMMANDS: clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" "-emit-llvm-bc" {{.*}}"-o" "[[HOSTBC:.+\.bc]]" "-x" "c" "[[INPUT:.+\.c]]" "-fopenmp-targets=powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu"
+// CHK-COMMANDS-ST: clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" "-E" {{.*}}"-fopenmp" {{.*}}"-o" "[[HOSTPP:.+\.i]]" "-x" "c" "[[INPUT:.+\.c]]"
+// CHK-COMMANDS-ST: clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" "-emit-llvm-bc" {{.*}}"-fopenmp" {{.*}}"-o" "[[HOSTBC:.+\.bc]]" "-x" "cpp-output" "[[HOSTPP]]" "-fopenmp-targets=powerpc64le-ibm-linux-gnu,x86_64-pc-linux-gnu"
+
+//
+// Compile for the powerpc device.
+//
+// CHK-COMMANDS: clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" "-emit-obj" {{.*}}"-pic-level" "2" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1OBJ:.+\.o]]" "-x" "c" "[[INPUT]]" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[HOSTBC]]"
+// CHK-COMMANDS: ld" {{.*}}"-o" "[[T1BIN]]" {{.*}}"[[T1OBJ]]"
+// CHK-COMMANDS-ST: clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" "-E" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1PP:.+\.i]]" "-x" "c" "[[INPUT]]"
+// CHK-COMMANDS-ST: clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" "-emit-llvm-bc" {{.*}}"-pic-level" "2" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1BC:.+\.bc]]" "-x" "cpp-output" "[[T1PP]]" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[HOSTBC]]"
+// CHK-COMMANDS-ST: clang{{.*}}" "-cc1" "-triple" "powerpc64le-ibm-linux-gnu" "-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[T1ASM:.+\.s]]" "-x" "ir" "[[T1BC]]"
+// CHK-COMMANDS-ST: clang{{.*}}" "-cc1as" "-triple" "powerpc64le-ibm-linux-gnu" "-filetype" "obj" {{.*}}"-o" "[[T1OBJ:.+\.o]]" "[[T1ASM]]"
+// CHK-COMMANDS-ST: ld" {{.*}}"-shared" {{.*}}"-o" "[[T1BIN]]" {{.*}}[[T1OBJ]]
+
+//
+// Compile for the x86 device.
+//
+// CHK-COMMANDS: clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-emit-obj" {{.*}}"-pic-level" "2" {{.*}}"-fopenmp"  {{.*}}"-o" "[[T2OBJ:.+\.o]]" "-x" "c" "[[INPUT]]" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[HOSTBC]]"
+// CHK-COMMANDS: ld" {{.*}}"-o" "[[T2BIN]]" {{.*}}"[[T2OBJ]]"
+// CHK-COMMANDS-ST: clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-E" {{.*}}"-fopenmp" {{.*}}"-o" "[[T2PP:.+\.i]]" "-x" "c" "[[INPUT]]"
+// CHK-COMMANDS-ST: clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-emit-llvm-bc" {{.*}}"-pic-level" "2" {{.*}}"-fopenmp" {{.*}}"-o" "[[T2BC:.+\.bc]]" "-x" "cpp-output" "[[T2PP]]" "-fopenmp-is-device" "-fopenmp-host-ir-file-path" "[[HOSTBC]]"
+// CHK-COMMANDS-ST: clang{{.*}}" "-cc1" "-triple" "x86_64-pc-linux-gnu" "-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[T2ASM:.+\.s]]" "-x" "ir" "[[T2BC]]"
+// CHK-COMMANDS-ST: clang{{.*}}" "-cc1as" "-triple" "x86_64-pc-linux-gnu" "-filetype" "obj" {{.*}}"-o" "[[T2OBJ:.+\.o]]" "[[T2ASM]]"
+// CHK-COMMANDS-ST: ld" {{.*}}"-shared" {{.*}}"-o" "[[T2BIN]]" {{.*}}[[T2OBJ]]
+
+//
+// Generate host object from the BC file and link using the linker script.
+//
+// CHK-COMMANDS: clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" "-emit-obj" {{.*}}"-fopenmp" {{.*}}"-o" "[[HOSTOBJ:.+\.o]]" "-x" "ir" "[[HOSTBC]]"
+// CHK-COMMANDS: ld" {{.*}}"-o" "[[HOSTBIN:.+\.out]]"  {{.*}}"-lomptarget" {{.*}}"-T" "[[HOSTLK:.+\.lk]]"
+// CHK-COMMANDS-ST: clang{{.*}}" "-cc1" "-triple" "powerpc64le--linux" "-S" {{.*}}"-fopenmp" {{.*}}"-o" "[[HOSTASM:.+\.s]]" "-x" "ir" "[[HOSTBC]]"
+// CHK-COMMANDS-ST: clang{{.*}}" "-cc1as" "-triple" "powerpc64le--linux" "-filetype" "obj" {{.*}}"-o" [[HOSTOBJ:.+\.o]]" [[HOSTASM:.+\.s]]
+// CHK-COMMANDS-ST: ld" {{.*}}"-o" "[[HOSTBIN:.+\.out]]"  {{.*}}"-lomptarget" {{.*}}"-T" "[[HOSTLK:.+\.lk]]"
 
 
 /// ###########################################################################
