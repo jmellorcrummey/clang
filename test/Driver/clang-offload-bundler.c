@@ -224,14 +224,12 @@
 // tests.
 //
 
-// RUN: cd %T && \
-// RUN: clang-offload-bundler -type=o -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -inputs=%t.o,%t.tgt1,%t.tgt2 -outputs=%t.bundle3.o -### -save-temps 2>&1 \
+// RUN: clang-offload-bundler -type=o -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -inputs=%t.o,%t.tgt1,%t.tgt2 -outputs=%t.bundle3.o -### -dump-temporary-files 2>&1 \
 // RUN: | FileCheck %s --check-prefix CK-OBJ-CMD
-// RUN: llvm-dis %t.bundle3.bc -o - | FileCheck %s --check-prefix CK-OBJ-BC
+// CK-OBJ-CMD: private constant [1 x i8] zeroinitializer, section "__CLANG_OFFLOAD_BUNDLE__host-powerpc64le-ibm-linux-gnu"
+// CK-OBJ-CMD: private constant [25 x i8] c"Content of device file 1\0A", section "__CLANG_OFFLOAD_BUNDLE__openmp-powerpc64le-ibm-linux-gnu"
+// CK-OBJ-CMD: private constant [25 x i8] c"Content of device file 2\0A", section "__CLANG_OFFLOAD_BUNDLE__openmp-x86_64-pc-linux-gnu"
 // CK-OBJ-CMD: clang" "-r" "-target" "powerpc64le-ibm-linux-gnu" "-o" "{{.+}}.o" "{{.+}}.o" "{{.+}}.bc" "-nostdlib"
-// CK-OBJ-BC: private constant [1 x i8] zeroinitializer, section "__CLANG_OFFLOAD_BUNDLE__host-powerpc64le-ibm-linux-gnu"
-// CK-OBJ-BC: private constant [25 x i8] c"Content of device file 1\0A", section "__CLANG_OFFLOAD_BUNDLE__openmp-powerpc64le-ibm-linux-gnu"
-// CK-OBJ-BC: private constant [25 x i8] c"Content of device file 2\0A", section "__CLANG_OFFLOAD_BUNDLE__openmp-x86_64-pc-linux-gnu"
 
 // RUN: clang-offload-bundler -type=o -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.o,%t.res.tgt1,%t.res.tgt2 -inputs=%s.o -unbundle
 // RUN: diff %s.o %t.res.o
