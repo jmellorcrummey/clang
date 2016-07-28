@@ -638,10 +638,11 @@ int main(int argc, const char **argv) {
     getOffloadKindAndTriple(Target, Kind, Triple);
 
     bool KindIsValid = !Kind.empty();
-    KindIsValid &= StringSwitch<bool>(Kind)
-                       .Case("host", true)
-                       .Case("openmp", true)
-                       .Default(false);
+    KindIsValid = KindIsValid &&
+                  StringSwitch<bool>(Kind)
+                      .Case("host", true)
+                      .Case("openmp", true)
+                      .Default(false);
 
     bool TripleIsValid = !Triple.empty();
     llvm::Triple T(Triple);
