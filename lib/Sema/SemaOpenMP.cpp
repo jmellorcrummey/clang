@@ -1709,8 +1709,7 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
   case OMPD_teams:
   case OMPD_target_parallel:
   case OMPD_target_parallel_for:
-  case OMPD_target_teams:
-  case OMPD_teams_distribute_parallel_for: {
+  case OMPD_target_teams: {
     QualType KmpInt32Ty = Context.getIntTypeForBitwidth(32, 1);
     QualType KmpInt32PtrTy =
         Context.getPointerType(KmpInt32Ty).withConst().withRestrict();
@@ -1816,10 +1815,11 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
             Context, AlwaysInlineAttr::Keyword_forceinline, SourceRange()));
     break;
   }
-  case OMPD_distribute_parallel_for_simd:
   case OMPD_distribute_simd:
-  case OMPD_target_teams_distribute_parallel_for:
-  case OMPD_distribute_parallel_for: {
+  case OMPD_distribute_parallel_for_simd:
+  case OMPD_distribute_parallel_for:
+  case OMPD_teams_distribute_parallel_for:
+  case OMPD_target_teams_distribute_parallel_for: {
     QualType KmpInt32Ty = Context.getIntTypeForBitwidth(32, 1);
     QualType KmpInt32PtrTy =
         Context.getPointerType(KmpInt32Ty).withConst().withRestrict();
@@ -5750,15 +5750,20 @@ static unsigned CheckOpenMPLoop(
   {
     VarDecl *IVDecl = buildVarDecl(SemaRef, InitLoc, RealVType, ".omp.iv");
     IV = buildDeclRefExpr(SemaRef, IVDecl, RealVType, InitLoc);
-    Expr *RHS =
-        (isOpenMPWorksharingDirective(DKind) ||
-         isOpenMPTaskLoopDirective(DKind) || isOpenMPDistributeDirective(DKind))
-            ? LB.get()
-            : OutlinedSimd
-                  ? LaneInit.get()
-                  : SemaRef.ActOnIntegerConstant(SourceLocation(), 0).get();
+    Expr *RHS = (isOpenMPWorksharingDirective(DKind) ||
+           isOpenMPTaskLoopDirective(DKind) || isOpenMPDistributeDirective(DKind))
+              ? LB.get()
+              : OutlinedSimd
+                    ? LaneInit.get()
+                    : SemaRef.ActOnIntegerConstant(SourceLocation(), 0).get();
     Init = SemaRef.BuildBinOp(CurScope, InitLoc, BO_Assign, IV.get(), RHS);
     Init = SemaRef.ActOnFinishFullExpr(Init.get());
+  }
+
+  ExprResult InnermostIV;
+  if (requiresAdditionalIterationVar(DKind) && !OutlinedSimd){
+    VarDecl *InnermostIVDecl = buildVarDecl(SemaRef, InitLoc, RealVType, ".omp.innermost.iv");
+    InnermostIV = buildDeclRefExpr(SemaRef, InnermostIVDecl, RealVType, InitLoc);
   }
 
   // Loop condition (IV < NumIterations) or (IV <= UB) for worksharing loops.
@@ -5970,6 +5975,7 @@ static unsigned CheckOpenMPLoop(
   Built.DistCond = DistCond.get();
   Built.DistInc = DistInc.get();
   Built.PrevEUB = PrevEUB.get();
+  Built.InnermostIterationVarRef = InnermostIV.get();
 
   Expr *CounterVal = SemaRef.DefaultLvalueConversion(IV.get()).get();
   // Fill data for doacross depend clauses.
@@ -7770,13 +7776,14 @@ StmtResult Sema::ActOnOpenMPDistributeParallelForSimdDirective(
   // longjmp() and throw() must not violate the entry/exit criteria.
   CS->getCapturedDecl()->setNothrow();
 
+  bool CoalescedSchedule = generateCoalescedSchedule(*this, Clauses);
   OMPLoopDirective::HelperExprs B;
   // In presence of clause 'collapse' with number of loops, it will
   // define the nested loops number.
   unsigned NestedLoopCount = CheckOpenMPLoop(
       OMPD_distribute_parallel_for_simd, getCollapseNumberExpr(Clauses),
       nullptr /*ordered not a clause on distribute*/, AStmt, *this, *DSAStack,
-      VarsWithImplicitDSA, B);
+      VarsWithImplicitDSA, B, CoalescedSchedule);
   if (NestedLoopCount == 0)
     return StmtError();
 

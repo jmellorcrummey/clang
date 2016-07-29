@@ -335,9 +335,10 @@ class OMPLoopDirective : public OMPExecutableDirective {
     DistCondOffset = 21,
     DistIncOffset = 22,
     PrevEnsureUpperBoundOffset = 23,
+    InnermostIterationVariableOffset = 24,
     // Offset to the end (and start of the following counters/updates/finals
     // arrays) for worksharing loop directives.
-    WorksharingEnd = 24,
+    WorksharingEnd = 25,
   };
 
   /// \brief Get the counters storage.
@@ -533,6 +534,13 @@ protected:
            "expected worksharing loop directive");
     *std::next(child_begin(), PrevEnsureUpperBoundOffset) = PrevEUB;
   }
+  void setInnermostIterationVariable(Expr *CombIV) {
+    assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
+            isOpenMPTaskLoopDirective(getDirectiveKind()) ||
+            isOpenMPDistributeDirective(getDirectiveKind())) &&
+           "expected worksharing loop directive");
+    *std::next(child_begin(), InnermostIterationVariableOffset) = CombIV;
+  }
   void setCounters(ArrayRef<Expr *> A);
   void setPrivateCounters(ArrayRef<Expr *> A);
   void setInits(ArrayRef<Expr *> A);
@@ -583,6 +591,8 @@ public:
     /// \brief PreviousUpperBound - local variable passed to runtime in the
     /// enclosing schedule or null if that does not apply.
     Expr *PrevUB;
+    /// \brief Additional iteration variable for worksharing constructs.
+    Expr *InnermostIterationVarRef;
     /// \brief Dist Loop condition.
     Expr *DistCond;
     /// \brief Dist Loop increment.
@@ -636,6 +646,7 @@ public:
       DistCond = nullptr;
       DistInc = nullptr;
       PrevEUB = nullptr;
+      InnermostIterationVarRef = nullptr;
       Counters.resize(Size);
       PrivateCounters.resize(Size);
       Inits.resize(Size);
@@ -798,6 +809,14 @@ public:
            "expected worksharing loop directive");
     return const_cast<Expr *>(reinterpret_cast<const Expr *>(
         *std::next(child_begin(), PrevEnsureUpperBoundOffset)));
+  }
+  Expr *getInnermostIterationVariable() const {
+    assert((isOpenMPWorksharingDirective(getDirectiveKind()) ||
+            isOpenMPTaskLoopDirective(getDirectiveKind()) ||
+            isOpenMPDistributeDirective(getDirectiveKind())) &&
+           "expected worksharing loop directive");
+    return const_cast<Expr *>(reinterpret_cast<const Expr *>(
+        *std::next(child_begin(), InnermostIterationVariableOffset)));
   }
   const Stmt *getBody() const {
     // This relies on the loop form is already checked by Sema.

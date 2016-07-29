@@ -181,24 +181,6 @@ private:
   // NVPTX calls.
   //
 
-  /// \brief Get the GPU warp size.
-  llvm::Value *getNVPTXWarpSize(CodeGenFunction &CGF) const;
-
-  /// \brief Get the id of the current thread on the GPU.
-  llvm::Value *getNVPTXThreadID(CodeGenFunction &CGF) const;
-
-  /// \brief Get the id of the current thread in the Warp.
-  llvm::Value *getNVPTXThreadWarpID(CodeGenFunction &CGF) const;
-
-  /// \brief Get the id of the current block on the GPU.
-  llvm::Value *getNVPTXBlockID(CodeGenFunction &CGF) const;
-
-  /// \brief Get the id of the warp in the block.
-  llvm::Value *getNVPTXWarpID(CodeGenFunction &CGF) const;
-
-  // \brief Get the maximum number of threads in a block of the GPU.
-  llvm::Value *getNVPTXNumThreads(CodeGenFunction &CGF) const;
-
   // \brief Get a 32 bit mask, whose bits set to 1 represent the active threads.
   llvm::Value *getNVPTXWarpActiveThreadsMask(CodeGenFunction &CGF);
 
@@ -212,52 +194,6 @@ private:
   // \brief Get a conditional that is set to true if the thread is the master of
   // the active threads in the warp.
   llvm::Value *getNVPTXIsWarpActiveMaster(CodeGenFunction &CGF);
-
-  /// \brief Get barrier to synchronize all threads in a block.
-  void getNVPTXCTABarrier(CodeGenFunction &CGF) const;
-
-  /// \brief Get barrier #n to synchronize selected (multiple of 32) threads in
-  /// a block.
-  void getNVPTXBarrier(CodeGenFunction &CGF, int ID, int NumThreads) const;
-
-  // \brief Synchronize all GPU threads in a block.
-  void syncCTAThreads(CodeGenFunction &CGF) const;
-
-  // \brief Get the value of the thread_limit clause in the teams directive.
-  // The runtime always starts thread_limit + warpSize threads.
-  llvm::Value *getThreadLimit(CodeGenFunction &CGF) const;
-
-  //  // \brief Emit code that allocates a memory chunk in global memory with
-  //  size \a Size.
-  //  llvm::Value *emitMallocCall(CodeGenFunction &CGF, QualType DataTy,
-  //  llvm::Value *Size);
-  //
-  //  // \brief Deallocates the memory chunk pointed by \a Ptr;
-  //  void emitFreeCall(CodeGenFunction &CGF, llvm::Value *Ptr);
-
-  //
-  // OMP calls.
-  //
-
-  /// \brief Get the thread id of the OMP master thread.
-  /// The master thread id is the first thread (lane) of the last warp in the
-  /// GPU block.  Warp size is assumed to be some power of 2.
-  /// Thread id is 0 indexed.
-  /// E.g: If NumThreads is 33, master id is 32.
-  ///      If NumThreads is 64, master id is 32.
-  ///      If NumThreads is 1024, master id is 992.
-  llvm::Value *getMasterThreadID(CodeGenFunction &CGF);
-
-  /// \brief Get number of OMP workers for parallel region after subtracting
-  /// the master warp.
-  llvm::Value *getNumWorkers(CodeGenFunction &CGF);
-
-  /// \brief Get thread id in team.
-  /// FIXME: Remove the expensive remainder operation.
-  llvm::Value *getTeamThreadId(CodeGenFunction &CGF);
-
-  /// \brief Get global thread id.
-  llvm::Value *getGlobalThreadId(CodeGenFunction &CGF);
 
   //
   // Private state and methods.
@@ -471,7 +407,7 @@ private:
 
   // \brief Test if we are codegen'ing a target construct in generic or spmd
   // mode.
-  bool IsSPMDExecutionMode() const;
+  bool isSPMDExecutionMode() const;
 
 public:
   explicit CGOpenMPRuntimeNVPTX(CodeGenModule &CGM);
@@ -604,6 +540,15 @@ public:
   // \brief Sanitize identifiers for NVPTX backend.
   //
   virtual std::string sanitizeIdentifier(const llvm::Twine &Name) override;
+
+  virtual void emitReduction(CodeGenFunction &CGF, SourceLocation Loc,
+                             ArrayRef<const Expr *> Privates,
+                             ArrayRef<const Expr *> LHSExprs,
+                             ArrayRef<const Expr *> RHSExprs,
+                             ArrayRef<const Expr *> ReductionOps,
+                             bool WithNowait, bool SimpleReduction,
+                             bool ParallelReduction, bool SimdReduction,
+                             bool TeamsReduction) override;
 };
 
 } // CodeGen namespace.

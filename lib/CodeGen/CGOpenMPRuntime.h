@@ -148,6 +148,30 @@ protected:
   /// \brief Returns pointer to ident_t type.
   llvm::Type *getIdentTyPointerTy();
 
+  /// Emits reduction combiner.
+  /// \param ReductionOp Reduction operation expression to emit.
+  void emitReductionCombiner(CodeGenFunction &CGF, const Expr *ReductionOp);
+
+  /// Emits reduction function.
+  /// \param ArgsType Array type containing pointers to reduction variables.
+  /// \param Privates List of private copies for original reduction arguments.
+  /// \param LHSExprs List of LHS in \a ReductionOps reduction operations.
+  /// \param RHSExprs List of RHS in \a ReductionOps reduction operations.
+  /// \param ReductionOps List of reduction operations in form 'LHS binop RHS'
+  /// or 'operator binop(LHS, RHS)'.
+  llvm::Value *emitReductionFunction(CodeGenModule &CGM, llvm::Type *ArgsType,
+                                     ArrayRef<const Expr *> Privates,
+                                     ArrayRef<const Expr *> LHSExprs,
+                                     ArrayRef<const Expr *> RHSExprs,
+                                     ArrayRef<const Expr *> ReductionOps);
+
+  /// Emits single reduction combiner
+  void emitSingleReductionCombiner(CodeGenFunction &CGF,
+                                   const Expr *ReductionOp,
+                                   const Expr *PrivateRef,
+                                   const DeclRefExpr *LHS,
+                                   const DeclRefExpr *RHS);
+
 public:
   virtual StringRef RenameStandardFunction(StringRef name);
 
@@ -1108,12 +1132,20 @@ public:
   /// or 'operator binop(LHS, RHS)'.
   /// \param WithNowait true if parent directive has also nowait clause, false
   /// otherwise.
+  /// \param ParallelReduction true if parent directive indicates reduction
+  /// across threads in a team.
+  /// \param SimdReduction true if parent directive indicates reduction
+  /// across simd lanes.
+  /// \param TeamsReduction true if parent directive indicates reduction
+  /// across teams.
   virtual void emitReduction(CodeGenFunction &CGF, SourceLocation Loc,
                              ArrayRef<const Expr *> Privates,
                              ArrayRef<const Expr *> LHSExprs,
                              ArrayRef<const Expr *> RHSExprs,
                              ArrayRef<const Expr *> ReductionOps,
-                             bool WithNowait, bool SimpleReduction);
+                             bool WithNowait, bool SimpleReduction,
+                             bool ParallelReduction, bool SimdReduction,
+                             bool TeamsReduction);
 
   /// \brief Emit code for 'taskwait' directive.
   virtual void emitTaskwaitCall(CodeGenFunction &CGF, SourceLocation Loc);
