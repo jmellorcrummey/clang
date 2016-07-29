@@ -356,7 +356,6 @@ static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
          "Less device inputs than device toolchains??");
 
   LksStream << "SECTIONS\n";
-  LksStream << "SECTIONS\n";
   LksStream << "{\n";
   LksStream << "  .omp_offloading :\n";
   LksStream << "  ALIGN(0x10)\n";
