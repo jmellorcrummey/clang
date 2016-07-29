@@ -1143,8 +1143,9 @@ public:
                              ArrayRef<const Expr *> LHSExprs,
                              ArrayRef<const Expr *> RHSExprs,
                              ArrayRef<const Expr *> ReductionOps,
-                             bool WithNowait, bool ParallelReduction,
-                             bool SimdReduction, bool TeamsReduction);
+                             bool WithNowait, bool SimpleReduction,
+                             bool ParallelReduction, bool SimdReduction,
+                             bool TeamsReduction);
 
   /// \brief Emit code for 'taskwait' directive.
   virtual void emitTaskwaitCall(CodeGenFunction &CGF, SourceLocation Loc);

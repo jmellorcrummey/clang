@@ -4660,13 +4660,11 @@ void CGOpenMPRuntime::emitSingleReductionCombiner(CodeGenFunction &CGF,
     emitReductionCombiner(CGF, ReductionOp);
 }
 
-void CGOpenMPRuntime::emitReduction(CodeGenFunction &CGF, SourceLocation Loc,
-                                    ArrayRef<const Expr *> Privates,
-                                    ArrayRef<const Expr *> LHSExprs,
-                                    ArrayRef<const Expr *> RHSExprs,
-                                    ArrayRef<const Expr *> ReductionOps,
-                                    bool WithNowait, bool ParallelReduction,
-                                    bool SimdReduction, bool TeamsReduction) {
+void CGOpenMPRuntime::emitReduction(
+    CodeGenFunction &CGF, SourceLocation Loc, ArrayRef<const Expr *> Privates,
+    ArrayRef<const Expr *> LHSExprs, ArrayRef<const Expr *> RHSExprs,
+    ArrayRef<const Expr *> ReductionOps, bool WithNowait, bool SimpleReduction,
+    bool ParallelReduction, bool SimdReduction, bool TeamsReduction) {
   if (!CGF.HaveInsertPoint())
     return;
   // Next code should be emitted for reduction:
@@ -4706,7 +4704,7 @@ void CGOpenMPRuntime::emitReduction(CodeGenFunction &CGF, SourceLocation Loc,
 
   auto &C = CGM.getContext();
 
-  if (SimdReduction) {
+  if (SimpleReduction) {
     CodeGenFunction::RunCleanupsScope Scope(CGF);
     auto IPriv = Privates.begin();
     auto ILHS = LHSExprs.begin();

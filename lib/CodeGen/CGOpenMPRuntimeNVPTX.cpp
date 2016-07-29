@@ -3941,7 +3941,7 @@ EmitShuffleAndReduceFunction(CodeGenModule &CGM,
 void CGOpenMPRuntimeNVPTX::emitReduction(
     CodeGenFunction &CGF, SourceLocation Loc, ArrayRef<const Expr *> Privates,
     ArrayRef<const Expr *> LHSExprs, ArrayRef<const Expr *> RHSExprs,
-    ArrayRef<const Expr *> ReductionOps, bool WithNowait,
+    ArrayRef<const Expr *> ReductionOps, bool WithNowait, bool SimpleReduction,
     bool ParallelReduction, bool SimdReduction, bool TeamsReduction) {
   if (!CGF.HaveInsertPoint())
     return;

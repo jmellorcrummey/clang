@@ -1271,6 +1271,7 @@ void CodeGenFunction::EmitOMPReductionClauseFinal(
         D.getSingleClause<OMPNowaitClause>() ||
             isOpenMPParallelDirective(D.getDirectiveKind()) ||
             D.getDirectiveKind() == OMPD_simd,
+        D.getDirectiveKind() == OMPD_simd,
         isOpenMPParallelDirective(D.getDirectiveKind()) ||
             isOpenMPWorksharingDirective(D.getDirectiveKind()),
         isOpenMPSimdDirective(D.getDirectiveKind()),
@@ -1723,13 +1724,23 @@ void CodeGenFunction::EmitOMPSimdFinal(
     EmitBlock(DoneBB, /*IsFinished=*/true);
 }
 
-static void emitCommonOMPSimdDirective(CodeGenFunction &CGF,
+/// \brief Emit a helper variable and return corresponding lvalue.
+static LValue EmitOMPHelperVar(CodeGenFunction &CGF,
+                               const DeclRefExpr *Helper) {
+  auto VDecl = cast<VarDecl>(Helper->getDecl());
+  CGF.EmitVarDecl(*VDecl);
+  return CGF.EmitLValue(Helper);
+}
+
+static void emitDeviceOMPSimdDirective(CodeGenFunction &CGF,
                                        const OMPExecutableDirective &S,
                                        OpenMPDirectiveKind InnermostKind,
                                        const RegionCodeGenTy &CodeGen) {
   CGF.CGM.getOpenMPRuntime().registerParallelContext(CGF, S);
   auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
   llvm::SmallVector<llvm::Value *, 16> CapturedVars;
+
+  // Capture any implicit OpenMP variables
   CGF.GenerateOpenMPCapturedVars(*CS, CapturedVars);
   auto *LaneId = CS->getCapturedDecl()->param_begin();
   auto *NumLanes = std::next(LaneId);
@@ -1752,9 +1763,8 @@ static void emitCommonOMPSimdDirective(CodeGenFunction &CGF,
                                           CapturedVars);
 }
 
-void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
-  bool OutlinedSimd =
-      CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX();
+void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
+                                      bool OutlinedSimd) {
   auto &&CodeGen = [&S, OutlinedSimd](CodeGenFunction &CGF, PrePostActionTy &) {
     OMPLoopScope PreInitScope(CGF, S);
     // if (PreCond) {
@@ -1800,9 +1810,13 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
     }
 
     // Emit the loop iteration variable.
-    const Expr *IVExpr = S.getIterationVariable();
+    const Expr *IVExpr = requiresAdditionalIterationVar(S.getDirectiveKind()) &&
+                         !OutlinedSimd ?
+          S.getInnermostIterationVariable() : S.getIterationVariable();
     const VarDecl *IVDecl = cast<VarDecl>(cast<DeclRefExpr>(IVExpr)->getDecl());
     CGF.EmitVarDecl(*IVDecl);
+
+    // Emit Iteration variable initialization
     CGF.EmitIgnoredExpr(S.getInit());
 
     // Emit the iterations count variable.
@@ -1852,12 +1866,18 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
     }
   };
 
-  if (OutlinedSimd) {
-    emitCommonOMPSimdDirective(*this, S, OMPD_simd, CodeGen);
-  } else {
+  if (OutlinedSimd)
+    emitDeviceOMPSimdDirective(*this, S, OMPD_simd, CodeGen);
+  else {
     OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
     CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_simd, CodeGen);
   }
+}
+
+void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
+  bool OutlinedSimd =
+      CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX();
+  EmitOMPSimdLoop(S, OutlinedSimd);
 }
 
 void CodeGenFunction::EmitOMPOuterLoop(bool DynamicOrOrdered, bool IsMonotonic,
@@ -2153,6 +2173,13 @@ void CodeGenFunction::EmitOMPDistributeParallelForSimdDirective(
 
 void CodeGenFunction::EmitOMPDistributeSimdDirective(
     const OMPDistributeSimdDirective &S) {
+  auto &&CodeGen = [&S](CodeGenFunction &CGF,
+                                 PrePostActionTy &) {
+    auto &&CGSimd = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+      CGF.EmitOMPSimdLoop(S, false);
+    };
+    CGF.EmitOMPDistributeLoop(S, CGSimd);
+  };
   OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
   CGM.getOpenMPRuntime().emitInlinedDirective(
       *this, OMPD_distribute_simd,

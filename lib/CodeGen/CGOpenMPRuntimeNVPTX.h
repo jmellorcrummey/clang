@@ -536,8 +536,9 @@ public:
                              ArrayRef<const Expr *> LHSExprs,
                              ArrayRef<const Expr *> RHSExprs,
                              ArrayRef<const Expr *> ReductionOps,
-                             bool WithNowait, bool ParallelReduction,
-                             bool SimdReduction, bool TeamsReduction) override;
+                             bool WithNowait, bool SimpleReduction,
+                             bool ParallelReduction, bool SimdReduction,
+                             bool TeamsReduction) override;
 };
 
 } // CodeGen namespace.
