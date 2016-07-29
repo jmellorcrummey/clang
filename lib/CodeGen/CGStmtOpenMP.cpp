@@ -1825,10 +1825,14 @@ void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
       OMPPrivateScope LoopScope(CGF);
       CGF.EmitOMPPrivateLoopCounters(S, LoopScope);
       CGF.EmitOMPLinearClause(S, LoopScope);
-      CGF.EmitOMPPrivateClause(S, LoopScope);
+      bool lastprivateAlreadyEmitted = false;
+      //     requiresAdditionalIterationVar(S.getDirectiveKind());
+      if (!lastprivateAlreadyEmitted)
+        CGF.EmitOMPPrivateClause(S, LoopScope);
       CGF.EmitOMPReductionClauseInit(S, LoopScope);
-      bool HasLastprivateClause =
-          CGF.EmitOMPLastprivateClauseInit(S, LoopScope);
+      bool HasLastprivateClause = false;
+      if (!lastprivateAlreadyEmitted)
+        HasLastprivateClause = CGF.EmitOMPLastprivateClauseInit(S, LoopScope);
       (void)LoopScope.Privatize();
       CGF.EmitOMPInnerLoop(S, LoopScope.requiresCleanups(), S.getCond(),
                            S.getInc(),
@@ -3017,8 +3021,13 @@ void CodeGenFunction::EmitOMPDistributeLoop(
             *this, S.getLocStart(), OMPD_unknown, /*EmitChecks=*/false,
             /*ForceSimpleCall=*/true);
       }
-      EmitOMPPrivateClause(S, LoopScope);
-      bool HasLastprivateClause = EmitOMPLastprivateClauseInit(S, LoopScope);
+      bool lastprivateAlreadyEmitted =
+        requiresAdditionalIterationVar(S.getDirectiveKind());
+      if (!lastprivateAlreadyEmitted)
+        EmitOMPPrivateClause(S, LoopScope);
+      bool HasLastprivateClause = false;
+      if (!lastprivateAlreadyEmitted)
+        HasLastprivateClause = EmitOMPLastprivateClauseInit(S, LoopScope);
       EmitOMPPrivateLoopCounters(S, LoopScope);
       (void)LoopScope.Privatize();
 
