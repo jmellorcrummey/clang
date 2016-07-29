@@ -356,7 +356,6 @@ static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
          "Less device inputs than device toolchains??");
 
   LksStream << "SECTIONS\n";
-  LksStream << "SECTIONS\n";
   LksStream << "{\n";
   LksStream << "  .omp_offloading :\n";
   LksStream << "  ALIGN(0x10)\n";
@@ -443,6 +442,13 @@ forAllAssociatedToolChains(Compilation &C, const JobAction &JA,
   if (JA.isHostOffloading(Action::OFK_Cuda))
     Work(*C.getSingleOffloadToolChain<Action::OFK_Cuda>());
   else if (JA.isDeviceOffloading(Action::OFK_Cuda))
+    Work(*C.getSingleOffloadToolChain<Action::OFK_Host>());
+
+  if (JA.isHostOffloading(Action::OFK_OpenMP)) {
+    auto TCs = C.getOffloadToolChains<Action::OFK_OpenMP>();
+    for (auto II = TCs.first, IE = TCs.second; II != IE; ++II)
+      Work(*II->second);
+  } else if (JA.isDeviceOffloading(Action::OFK_OpenMP))
     Work(*C.getSingleOffloadToolChain<Action::OFK_Host>());
 
   //
@@ -3952,6 +3958,15 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(Args.MakeArgString(NormalizedTriple));
   }
 
+  if (IsOpenMPDevice) {
+    // We have to pass the triple of the host if compiling for an OpenMP device.
+    std::string NormalizedTriple = C.getSingleOffloadToolChain<Action::OFK_Host>()
+                             ->getTriple()
+                             .normalize();
+    CmdArgs.push_back("-aux-triple");
+    CmdArgs.push_back(Args.MakeArgString(NormalizedTriple));
+  }
+
   if (Triple.isOSWindows() && (Triple.getArch() == llvm::Triple::arm ||
                                Triple.getArch() == llvm::Triple::thumb)) {
     unsigned Offset = Triple.getArch() == llvm::Triple::arm ? 4 : 6;
@@ -6124,10 +6139,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // device declarations can be identified. Also, -fopenmp-is-device is passed
   // along to tell the frontend that it is generating code for a device, so that
   // only the relevant declarations are emitted.
-  if (IsOpenMPDevice && Inputs.size() == 2) {
+  if (IsOpenMPDevice) {
     CmdArgs.push_back("-fopenmp-is-device");
-    CmdArgs.push_back("-fopenmp-host-ir-file-path");
-    CmdArgs.push_back(Args.MakeArgString(Inputs.back().getFilename()));
+    if (Inputs.size() == 2) {
+      CmdArgs.push_back("-fopenmp-host-ir-file-path");
+      CmdArgs.push_back(Args.MakeArgString(Inputs.back().getFilename()));
+    }
   }
 
   // OpenMP 4.5 standard does not allow to use any declaration in target region
@@ -11514,8 +11531,18 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
       static_cast<const toolchains::CudaToolChain &>(getToolChain());
   assert(TC.getTriple().isNVPTX() && "Wrong platform");
 
+  StringRef gpu_arch_name;
+  std::vector<std::string> gpu_arch_names;
+  // If this is an OpenMP action we need to extract the device architecture from the -march option.
+  if (JA.isDeviceOffloading(Action::OFK_OpenMP)) {
+    gpu_arch_names = Args.getAllArgValues(options::OPT_march_EQ);
+    assert(gpu_arch_names.size() == 1 && "Exactly one GPU Arch required for ptxas.");
+    gpu_arch_name = gpu_arch_names[0];
+  } else
+    gpu_arch_name = JA.getOffloadingArch();
+
   // Obtain architecture from the action.
-  CudaArch gpu_arch = StringToCudaArch(JA.getOffloadingArch());
+  CudaArch gpu_arch = StringToCudaArch(gpu_arch_name);
   assert(gpu_arch != CudaArch::UNKNOWN &&
          "Device action expected to have an architecture.");
 
