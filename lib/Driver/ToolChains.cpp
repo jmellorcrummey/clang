@@ -4788,10 +4788,9 @@ CudaToolChain::CudaToolChain(const Driver &D, const llvm::Triple &Triple,
     getProgramPaths().push_back(CudaInstallation.getBinPath());
 }
 
-void
-CudaToolChain::addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
-                                     llvm::opt::ArgStringList &CC1Args,
-                                     Action::OffloadKind DeviceOffloadingKind) const {
+void CudaToolChain::addClangTargetOptions(
+    const llvm::opt::ArgList &DriverArgs, llvm::opt::ArgStringList &CC1Args,
+    Action::OffloadKind DeviceOffloadingKind) const {
   Linux::addClangTargetOptions(DriverArgs, CC1Args, DeviceOffloadingKind);
   std::string LibDeviceFile;
 

@@ -1810,9 +1810,10 @@ void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
     }
 
     // Emit the loop iteration variable.
-    const Expr *IVExpr = requiresAdditionalIterationVar(S.getDirectiveKind()) &&
-                         !OutlinedSimd ?
-          S.getInnermostIterationVariable() : S.getIterationVariable();
+    const Expr *IVExpr =
+        requiresAdditionalIterationVar(S.getDirectiveKind()) && !OutlinedSimd
+            ? S.getInnermostIterationVariable()
+            : S.getIterationVariable();
     const VarDecl *IVDecl = cast<VarDecl>(cast<DeclRefExpr>(IVExpr)->getDecl());
     CGF.EmitVarDecl(*IVDecl);
 
@@ -2173,8 +2174,7 @@ void CodeGenFunction::EmitOMPDistributeParallelForSimdDirective(
 
 void CodeGenFunction::EmitOMPDistributeSimdDirective(
     const OMPDistributeSimdDirective &S) {
-  auto &&CodeGen = [&S](CodeGenFunction &CGF,
-                                 PrePostActionTy &) {
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
     auto &&CGSimd = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
       CGF.EmitOMPSimdLoop(S, false);
     };

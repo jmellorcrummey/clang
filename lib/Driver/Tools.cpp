@@ -3960,9 +3960,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   if (IsOpenMPDevice) {
     // We have to pass the triple of the host if compiling for an OpenMP device.
-    std::string NormalizedTriple = C.getSingleOffloadToolChain<Action::OFK_Host>()
-                             ->getTriple()
-                             .normalize();
+    std::string NormalizedTriple =
+        C.getSingleOffloadToolChain<Action::OFK_Host>()
+            ->getTriple()
+            .normalize();
     CmdArgs.push_back("-aux-triple");
     CmdArgs.push_back(Args.MakeArgString(NormalizedTriple));
   }
@@ -4478,7 +4479,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                    AsynchronousUnwindTables))
     CmdArgs.push_back("-munwind-tables");
 
-  getToolChain().addClangTargetOptions(Args, CmdArgs, JA.getOffloadingDeviceKind());
+  getToolChain().addClangTargetOptions(Args, CmdArgs,
+                                       JA.getOffloadingDeviceKind());
 
   if (Arg *A = Args.getLastArg(options::OPT_flimited_precision_EQ)) {
     CmdArgs.push_back("-mlimit-float-precision");
@@ -5148,7 +5150,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // Report an error for -faltivec on anything other than PowerPC.
   if (const Arg *A = Args.getLastArg(options::OPT_faltivec)) {
     const llvm::Triple::ArchType Arch =
-        JA.isDeviceOffloading(Action::OFK_None) ? getToolChain().getArch()
+        JA.isDeviceOffloading(Action::OFK_None)
+            ? getToolChain().getArch()
             : C.getSingleOffloadToolChain<Action::OFK_Host>()->getArch();
     if (!(Arch == llvm::Triple::ppc || Arch == llvm::Triple::ppc64 ||
           Arch == llvm::Triple::ppc64le))
@@ -6156,7 +6159,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                    /*Default=*/false))
     CmdArgs.push_back("-fopenmp-implicit-declare-target");
 
-  if (Args.hasFlag(options::OPT_fopenmp_nvptx_nospmd, options::OPT_fopenmp_nvptx_spmd,
+  if (Args.hasFlag(options::OPT_fopenmp_nvptx_nospmd,
+                   options::OPT_fopenmp_nvptx_spmd,
                    /*Default=*/false)) {
     CmdArgs.push_back("-fopenmp-nvptx-nospmd");
   }
@@ -11533,10 +11537,12 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
 
   StringRef gpu_arch_name;
   std::vector<std::string> gpu_arch_names;
-  // If this is an OpenMP action we need to extract the device architecture from the -march option.
+  // If this is an OpenMP action we need to extract the device architecture from
+  // the -march option.
   if (JA.isDeviceOffloading(Action::OFK_OpenMP)) {
     gpu_arch_names = Args.getAllArgValues(options::OPT_march_EQ);
-    assert(gpu_arch_names.size() == 1 && "Exactly one GPU Arch required for ptxas.");
+    assert(gpu_arch_names.size() == 1 &&
+           "Exactly one GPU Arch required for ptxas.");
     gpu_arch_name = gpu_arch_names[0];
   } else
     gpu_arch_name = JA.getOffloadingArch();

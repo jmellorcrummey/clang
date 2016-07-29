@@ -361,8 +361,9 @@ public:
   // and return true if any issue is found.
   bool checkMappableExprComponentListsForDeclAtLevel(
       ValueDecl *VD, unsigned Level,
-      const llvm::function_ref<bool(
-          OMPClauseMappableExprCommon::MappableExprComponentListRef, OpenMPClauseKind)> &Check) {
+      const llvm::function_ref<
+          bool(OMPClauseMappableExprCommon::MappableExprComponentListRef,
+               OpenMPClauseKind)> &Check) {
     auto StartI = std::next(Stack.begin());
     auto EndI = Stack.end();
     if (std::distance(StartI, EndI) <= (int)Level)
@@ -371,8 +372,8 @@ public:
 
     auto MI = StartI->MappedExprComponents.find(VD);
     if (MI != StartI->MappedExprComponents.end())
-        for (auto &L : MI->second.Components)
-          if (Check(L, MI->second.Kind))
+      for (auto &L : MI->second.Components)
+        if (Check(L, MI->second.Kind))
           return true;
     return false;
   }
@@ -1036,10 +1037,9 @@ bool Sema::IsOpenMPCapturedByRef(ValueDecl *D, unsigned Level) {
     bool IsVariableAssociatedWithSection = false;
 
     DSAStack->checkMappableExprComponentListsForDeclAtLevel(
-        D, Level,
-        [&](OMPClauseMappableExprCommon::MappableExprComponentListRef
-                MapExprComponents,
-            OpenMPClauseKind WhereFoundClauseKind) {
+        D, Level, [&](OMPClauseMappableExprCommon::MappableExprComponentListRef
+                          MapExprComponents,
+                      OpenMPClauseKind WhereFoundClauseKind) {
           // Only the map clause information influences how a variable is
           // captured. E.g. is_device_ptr does not require changing the default
           // behaviour.
@@ -3523,7 +3523,7 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  |parallel for simd|                                    |
   // | target teams     | distribute simd | !                                  |
   // | target teams     | target parallel |                                    |
-  // |                  | for simd        |                                    |  
+  // |                  | for simd        |                                    |
   // | target teams     | target simd     |                                    |
   // | target teams     | target teams    |                                    |
   // | target teams     | teams distribute|                                    |
@@ -3876,7 +3876,7 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
                             Stack->isParentOrderedRegion());
       Recommend = ShouldBeInOrderedRegion;
     } else if (isOpenMPTeamsDirective(CurrentRegion) &&
-        !isOpenMPTargetExecutionDirective(CurrentRegion)) {
+               !isOpenMPTargetExecutionDirective(CurrentRegion)) {
       // OpenMP [2.16, Nesting of Regions]
       // If specified, a teams construct must be contained within a target
       // construct.
@@ -5866,20 +5866,23 @@ static unsigned CheckOpenMPLoop(
   {
     VarDecl *IVDecl = buildVarDecl(SemaRef, InitLoc, RealVType, ".omp.iv");
     IV = buildDeclRefExpr(SemaRef, IVDecl, RealVType, InitLoc);
-    Expr *RHS = (isOpenMPWorksharingDirective(DKind) ||
-           isOpenMPTaskLoopDirective(DKind) || isOpenMPDistributeDirective(DKind))
-              ? LB.get()
-              : OutlinedSimd
-                    ? LaneInit.get()
-                    : SemaRef.ActOnIntegerConstant(SourceLocation(), 0).get();
+    Expr *RHS =
+        (isOpenMPWorksharingDirective(DKind) ||
+         isOpenMPTaskLoopDirective(DKind) || isOpenMPDistributeDirective(DKind))
+            ? LB.get()
+            : OutlinedSimd
+                  ? LaneInit.get()
+                  : SemaRef.ActOnIntegerConstant(SourceLocation(), 0).get();
     Init = SemaRef.BuildBinOp(CurScope, InitLoc, BO_Assign, IV.get(), RHS);
     Init = SemaRef.ActOnFinishFullExpr(Init.get());
   }
 
   ExprResult InnermostIV;
-  if (requiresAdditionalIterationVar(DKind) && !OutlinedSimd){
-    VarDecl *InnermostIVDecl = buildVarDecl(SemaRef, InitLoc, RealVType, ".omp.innermost.iv");
-    InnermostIV = buildDeclRefExpr(SemaRef, InnermostIVDecl, RealVType, InitLoc);
+  if (requiresAdditionalIterationVar(DKind) && !OutlinedSimd) {
+    VarDecl *InnermostIVDecl =
+        buildVarDecl(SemaRef, InitLoc, RealVType, ".omp.innermost.iv");
+    InnermostIV =
+        buildDeclRefExpr(SemaRef, InnermostIVDecl, RealVType, InitLoc);
   }
 
   // Loop condition (IV < NumIterations) or (IV <= UB) for worksharing loops.
@@ -12275,7 +12278,7 @@ OMPClause *Sema::ActOnOpenMPNumTeamsClause(Expr *NumTeams,
 
   OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
   if (isOpenMPTargetExecutionDirective(DKind) &&
-        !CurContext->isDependentContext()) {
+      !CurContext->isDependentContext()) {
     llvm::MapVector<Expr *, DeclRefExpr *> Captures;
     ValExpr = tryBuildCapture(*this, ValExpr, Captures).get();
     HelperValStmt = buildPreInits(Context, Captures);
@@ -12554,8 +12557,8 @@ static void checkDeclInTargetContext(SourceLocation SL, SourceRange SR,
     // to do anything else.
     if (LD == D) {
       if (!SemaRef.getLangOpts().OpenMPImplicitDeclareTarget)
-        if(!D->hasAttr<OMPDeclareTargetDeclAttr>())
-		  SemaRef.Diag(LD->getLocation(), diag::warn_omp_not_in_target_context);
+        if (!D->hasAttr<OMPDeclareTargetDeclAttr>())
+          SemaRef.Diag(LD->getLocation(), diag::warn_omp_not_in_target_context);
       return;
     }
   }
