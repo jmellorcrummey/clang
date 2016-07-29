@@ -2157,7 +2157,7 @@ void CodeGenFunction::EmitOMPDistributeParallelForSimdDirective(
                                              PrePostActionTy &) {
         CGF.EmitOMPWorksharingLoop(S);
       };
-      emitCommonOMPParallelDirective(CGF, S, OMPD_for, CGInlinedWorksharingLoop);
+      emitCommonOMPParallelDirective(CGF, S, OMPD_simd, CGInlinedWorksharingLoop);
     };
     CGF.EmitOMPDistributeLoop(S, CGParallelFor);
   };
