@@ -1353,6 +1353,8 @@ OMPTargetSimdDirective::Create(const ASTContext &C, SourceLocation StartLoc,
   Dir->setPreCond(Exprs.PreCond);
   Dir->setCond(Exprs.Cond);
   Dir->setInit(Exprs.Init);
+  Dir->setLaneInit(Exprs.LaneInit);
+  Dir->setNumLanes(Exprs.NumLanes);
   Dir->setInc(Exprs.Inc);
   Dir->setCounters(Exprs.Counters);
   Dir->setPrivateCounters(Exprs.PrivateCounters);

@@ -4463,7 +4463,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                    AsynchronousUnwindTables))
     CmdArgs.push_back("-munwind-tables");
 
-  getToolChain().addClangTargetOptions(Args, CmdArgs);
+  getToolChain().addClangTargetOptions(Args, CmdArgs, JA.getOffloadingDeviceKind());
 
   if (Arg *A = Args.getLastArg(options::OPT_flimited_precision_EQ)) {
     CmdArgs.push_back("-mlimit-float-precision");
@@ -5133,9 +5133,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // Report an error for -faltivec on anything other than PowerPC.
   if (const Arg *A = Args.getLastArg(options::OPT_faltivec)) {
     const llvm::Triple::ArchType Arch =
-        (getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Device)
-            ? C.getOffloadingHostToolChain()->getArch()
-            : getToolChain().getArch();
+        JA.isDeviceOffloading(Action::OFK_None) ? getToolChain().getArch()
+            : C.getSingleOffloadToolChain<Action::OFK_Host>()->getArch();
     if (!(Arch == llvm::Triple::ppc || Arch == llvm::Triple::ppc64 ||
           Arch == llvm::Triple::ppc64le))
       D.Diag(diag::err_drv_argument_only_allowed_with) << A->getAsString(Args)
@@ -11580,7 +11579,7 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(Args.MakeArgString(A));
 
   // In OpenMP we need to generate relocatable code.
-  if (getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Device)
+  if (JA.isOffloading(Action::OFK_OpenMP))
     CmdArgs.push_back("-c");
 
   const char *Exec = Args.MakeArgString(TC.GetProgramPath("ptxas"));
@@ -11603,10 +11602,9 @@ void NVPTX::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   // OpenMP uses nvlink to link cubin files. The result will be embedded in the
   // host binary by the host linker.
-  assert(TC.getOffloadingKind() != ToolChain::OK_OpenMP_Host &&
+  assert(!JA.isHostOffloading(Action::OFK_OpenMP) &&
          "CUDA toolchain not expected for an OpenMP host device.");
-  if (TC.getOffloadingKind() == ToolChain::OK_OpenMP_Device) {
-
+  if (JA.isDeviceOffloading(Action::OFK_OpenMP)) {
     if (Output.isFilename()) {
       CmdArgs.push_back("-o");
       CmdArgs.push_back(Output.getFilename());
@@ -11675,7 +11673,7 @@ void NVPTX::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back(CubinF);
     }
 
-    AddOpenMPLinkerScript(getToolChain(), C, Output, Inputs, Args, CmdArgs);
+    AddOpenMPLinkerScript(getToolChain(), C, Output, Inputs, Args, CmdArgs, JA);
 
     // add paths specified in LIBRARY_PATH environment variable as -L options
     addDirectoryList(Args, CmdArgs, "-L", "LIBRARY_PATH");

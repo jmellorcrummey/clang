@@ -3526,7 +3526,6 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |  
   // | target teams     | target simd     |                                    |
   // | target teams     | target teams    |                                    |
-  // |                  |                 |                                    |
   // | target teams     | teams distribute|                                    |
   // |                  | parallel for    |                                    |
   // | target teams     | target teams    |                                    |
@@ -3603,7 +3602,7 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | teams distribute | distribute simd |                                    |
   // | parallel for     |                 |                                    |
   // | teams distribute | target parallel |                                    |
-  // | parallel for     | for simd        |                                    |                                    |
+  // | parallel for     | for simd        |                                    |
   // | teams distribute | target simd     |                                    |
   // | parallel for     |                 |                                    |
   // | teams distribute | target teams    |                                    |
@@ -3716,8 +3715,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | distribute       |                 |                                    |
   // | parallel for     |                 |                                    |
   // | target teams     | target parallel |                                    |
-  // | distribute       | for simd        |                                    |  
-  // | parallel for     |                 |                                    |                                    |
+  // | distribute       | for simd        |                                    |
+  // | parallel for     |                 |                                    |
   // | target teams     | target simd     |                                    |
   // | distribute       |                 |                                    |
   // | parallel for     |                 |                                    |
@@ -9448,7 +9447,7 @@ OMPClause *Sema::ActOnOpenMPFirstprivateClause(ArrayRef<Expr *> VarList,
       // OpenMP 4.5 [2.15.5.1, Restrictions, p.3]
       // A list item cannot appear in both a map clause and a data-sharing
       // attribute clause on the same construct
-      if (CurrDir == OMPD_target) {
+      if (isOpenMPTargetExecutionDirective(CurrDir)) {
         OpenMPClauseKind ConflictKind;
         if (DSAStack->checkMappableExprComponentListsForDecl(
                 VD, /* CurrentRegionOnly = */ true,

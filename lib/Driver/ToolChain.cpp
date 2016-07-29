@@ -525,7 +525,8 @@ void ToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
 }
 
 void ToolChain::addClangTargetOptions(const ArgList &DriverArgs,
-                                      ArgStringList &CC1Args) const {
+                                      ArgStringList &CC1Args,
+                                      Action::OffloadKind DeviceOffloadKind) const {
 }
 
 void ToolChain::addClangWarningOptions(ArgStringList &CC1Args) const {}

@@ -66,12 +66,6 @@ public:
     RM_DisabledImplicitly
   };
 
-  enum OffloadingKind {
-    OK_None,
-    OK_OpenMP_Host,
-    OK_OpenMP_Device,
-  };
-
 private:
   const Driver &D;
   const llvm::Triple Triple;
@@ -79,7 +73,6 @@ private:
   // We need to initialize CachedRTTIArg before CachedRTTIMode
   const llvm::opt::Arg *const CachedRTTIArg;
   const RTTIMode CachedRTTIMode;
-  OffloadingKind CachedOffloadingKind;
 
   /// The list of toolchain specific path prefixes to search for
   /// files.
@@ -146,9 +139,6 @@ public:
   vfs::FileSystem &getVFS() const;
   const llvm::Triple &getTriple() const { return Triple; }
 
-  OffloadingKind getOffloadingKind() const { return CachedOffloadingKind; }
-  void setOffloadingKind(OffloadingKind OT);
-
   llvm::Triple::ArchType getArch() const { return Triple.getArch(); }
   StringRef getArchName() const { return Triple.getArchName(); }
   StringRef getPlatform() const { return Triple.getVendorName(); }
@@ -212,26 +202,6 @@ public:
   TranslateArgs(const llvm::opt::DerivedArgList &Args, const char *BoundArch,
                 Action::OffloadKind DeviceOffloadKind) const {
     return nullptr;
-  }
-
-  /// TranslateOffloadArgs - Create a new derived argument list for any argument
-  /// translations this ToolChain may wish to perform if supporting offloading,
-  // or 0 if no tool chain specific translations are needed. If this tool chain
-  // does not refer to an offloading tool chain 0 is returned too.
-  ///
-  /// \param BoundArch - The bound architecture name, or 0.
-  virtual llvm::opt::DerivedArgList *
-  TranslateOffloadArgs(const llvm::opt::DerivedArgList &Args,
-                       const char *BoundArch) const {
-    return nullptr;
-  }
-
-  /// RequiresHostToolChainForOffloadingAction - Return true if the action \a A
-  /// should be fulfilled by the host tool chain in case this is an offloading
-  /// toolchain. Returns false by default, meaning the current toolchain can
-  /// handle the provided action.
-  virtual bool RequiresHostToolChainForOffloadingAction(const Action *A) const {
-    return false;
   }
 
   /// Choose a tool to use to handle the action \p JA.
@@ -418,7 +388,8 @@ public:
 
   /// \brief Add options that need to be passed to cc1 for this target.
   virtual void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
-                                     llvm::opt::ArgStringList &CC1Args) const;
+                                     llvm::opt::ArgStringList &CC1Args,
+                                     Action::OffloadKind DeviceOffloadKind) const;
 
   /// \brief Add warning options that need to be passed to cc1 for this target.
   virtual void addClangWarningOptions(llvm::opt::ArgStringList &CC1Args) const;

@@ -2835,7 +2835,8 @@ Generic_GCC::TranslateArgs(const llvm::opt::DerivedArgList &Args, const char *,
 }
 
 void Generic_ELF::addClangTargetOptions(const ArgList &DriverArgs,
-                                        ArgStringList &CC1Args) const {
+                                        ArgStringList &CC1Args,
+                                        Action::OffloadKind) const {
   const Generic_GCC::GCCVersion &V = GCCInstallation.getVersion();
   bool UseInitArrayDefault =
       getTriple().getArch() == llvm::Triple::aarch64 ||
@@ -4789,13 +4790,12 @@ CudaToolChain::CudaToolChain(const Driver &D, const llvm::Triple &Triple,
 
 void
 CudaToolChain::addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
-                                     llvm::opt::ArgStringList &CC1Args) const {
-  Linux::addClangTargetOptions(DriverArgs, CC1Args);
+                                     llvm::opt::ArgStringList &CC1Args,
+                                     Action::OffloadKind DeviceOffloadingKind) const {
+  Linux::addClangTargetOptions(DriverArgs, CC1Args, DeviceOffloadingKind);
   std::string LibDeviceFile;
 
-  assert(getOffloadingKind() != OK_OpenMP_Host &&
-         "CUDA toolchain not expected for host device.");
-  if (getOffloadingKind() == OK_OpenMP_Device) {
+  if (DeviceOffloadingKind == Action::OFK_OpenMP) {
     LibDeviceFile = CudaInstallation.getLibDeviceFile(
         DriverArgs.getLastArgValue(options::OPT_march_EQ));
   } else {
@@ -4826,7 +4826,7 @@ CudaToolChain::addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
     CC1Args.push_back("-target-feature");
     CC1Args.push_back("+ptx42");
   }
-  if (getOffloadingKind() == OK_OpenMP_Device) {
+  if (DeviceOffloadingKind == Action::OFK_OpenMP) {
     SmallVector<std::string, 8> LibraryPaths;
     if (char *env = ::getenv("LIBRARY_PATH")) {
       StringRef CompilerPath = env;
@@ -4866,16 +4866,13 @@ void CudaToolChain::AddCudaIncludeArgs(const ArgList &DriverArgs,
 llvm::opt::DerivedArgList *
 CudaToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
                              const char *BoundArch,
-                             Action::OffloadKind) const {
+                             Action::OffloadKind DeviceOffloadingKind) const {
   DerivedArgList *DAL = new DerivedArgList(Args.getBaseArgs());
   const OptTable &Opts = getDriver().getOpts();
 
-  // If this is an OpenMP device we do not need to translate anything. Also, we
-  // do not expect a CUDA device to be the host. We only need to append the gpu
-  // name.
-  assert(getOffloadingKind() != OK_OpenMP_Host &&
-         "CUDA device not expected to be using a host toolchain.");
-  if (getOffloadingKind() == OK_OpenMP_Device) {
+  // If this is an OpenMP device we do not need to translate anything. We only
+  // need to append the gpu name.
+  if (DeviceOffloadingKind == Action::OFK_OpenMP) {
     for (Arg *A : Args)
       DAL->append(A);
 // FIXME: get the right arch from the offloading arguments.
@@ -4981,7 +4978,8 @@ void XCoreToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
 }
 
 void XCoreToolChain::addClangTargetOptions(const ArgList &DriverArgs,
-                                           ArgStringList &CC1Args) const {
+                                           ArgStringList &CC1Args,
+                                           Action::OffloadKind) const {
   CC1Args.push_back("-nostdsysteminc");
 }
 
@@ -5126,7 +5124,8 @@ bool WebAssembly::SupportsProfiling() const { return false; }
 bool WebAssembly::HasNativeLLVMSupport() const { return true; }
 
 void WebAssembly::addClangTargetOptions(const ArgList &DriverArgs,
-                                        ArgStringList &CC1Args) const {
+                                        ArgStringList &CC1Args,
+                                        Action::OffloadKind) const {
   if (DriverArgs.hasFlag(options::OPT_fuse_init_array,
                          options::OPT_fno_use_init_array, true))
     CC1Args.push_back("-fuse-init-array");

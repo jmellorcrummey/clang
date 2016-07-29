@@ -613,7 +613,8 @@ public:
       : Generic_GCC(D, Triple, Args) {}
 
   void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
-                             llvm::opt::ArgStringList &CC1Args) const override;
+                             llvm::opt::ArgStringList &CC1Args,
+                             Action::OffloadKind DeviceOffloadKind) const override;
 };
 
 class LLVM_LIBRARY_VISIBILITY CloudABI : public Generic_ELF {
@@ -862,7 +863,8 @@ public:
   TranslateArgs(const llvm::opt::DerivedArgList &Args, const char *BoundArch,
                 Action::OffloadKind DeviceOffloadKind) const override;
   void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
-                             llvm::opt::ArgStringList &CC1Args) const override;
+                             llvm::opt::ArgStringList &CC1Args,
+                             Action::OffloadKind DeviceOffloadKind) const override;
 
   // Never try to use the integrated assembler with CUDA; always fork out to
   // ptxas.
@@ -1127,7 +1129,8 @@ public:
   AddClangSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,
                             llvm::opt::ArgStringList &CC1Args) const override;
   void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
-                             llvm::opt::ArgStringList &CC1Args) const override;
+                             llvm::opt::ArgStringList &CC1Args,
+                             Action::OffloadKind DeviceOffloadKind) const override;
   void AddClangCXXStdlibIncludeArgs(
       const llvm::opt::ArgList &DriverArgs,
       llvm::opt::ArgStringList &CC1Args) const override;
@@ -1181,7 +1184,8 @@ private:
   bool SupportsProfiling() const override;
   bool HasNativeLLVMSupport() const override;
   void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
-                             llvm::opt::ArgStringList &CC1Args) const override;
+                             llvm::opt::ArgStringList &CC1Args,
+                             Action::OffloadKind DeviceOffloadKind) const override;
   RuntimeLibType GetDefaultRuntimeLibType() const override;
   CXXStdlibType GetCXXStdlibType(const llvm::opt::ArgList &Args) const override;
   void AddClangSystemIncludeArgs(
