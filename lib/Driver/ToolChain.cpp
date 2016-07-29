@@ -7,6 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "clang/Driver/ToolChain.h"
 #include "Tools.h"
 #include "clang/Basic/ObjCRuntime.h"
 #include "clang/Config/config.h"
@@ -15,16 +16,15 @@
 #include "clang/Driver/DriverDiagnostic.h"
 #include "clang/Driver/Options.h"
 #include "clang/Driver/SanitizerArgs.h"
-#include "clang/Driver/ToolChain.h"
 #include "llvm/ADT/SmallString.h"
-#include "llvm/ADT/StringSwitch.h"
 #include "llvm/Option/Arg.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Option/Option.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
-#include "llvm/Support/TargetRegistry.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/TargetParser.h"
+#include "llvm/Support/TargetRegistry.h"
 
 using namespace clang::driver;
 using namespace clang::driver::tools;
@@ -69,7 +69,7 @@ ToolChain::ToolChain(const Driver &D, const llvm::Triple &T,
                      const ArgList &Args)
     : D(D), Triple(T), Args(Args), CachedRTTIArg(GetRTTIArgument(Args)),
       CachedRTTIMode(CalculateRTTIMode(Args, Triple, CachedRTTIArg)),
-      CachedOffloadingKind(OK_None) {
+      EffectiveTriple() {
   if (Arg *A = Args.getLastArg(options::OPT_mthread_model))
     if (!isThreadModelSupported(A->getValue()))
       D.Diag(diag::err_drv_invalid_thread_model_for_target)
@@ -186,12 +186,6 @@ ToolChain::getTargetAndModeFromProgramName(StringRef PN) {
   return std::make_pair(Target, ModeFlag);
 }
 
-void ToolChain::setOffloadingKind(OffloadingKind OK) {
-  assert(CachedOffloadingKind == OK_None &&
-         "Offloading kind not expected to change once it is set.");
-  CachedOffloadingKind = OK;
-}
-
 StringRef ToolChain::getDefaultUniversalArchName() const {
   // In universal driver terms, the arch name accepted by -arch isn't exactly
   // the same as the ones that appear in the triple. Roughly speaking, this is
@@ -261,8 +255,7 @@ Tool *ToolChain::getTool(Action::ActionClass AC) const {
 
   case Action::InputClass:
   case Action::BindArchClass:
-  case Action::CudaDeviceClass:
-  case Action::CudaHostClass:
+  case Action::OffloadClass:
   case Action::LipoJobClass:
   case Action::DsymutilJobClass:
   case Action::VerifyDebugInfoJobClass:
@@ -505,8 +498,10 @@ std::string ToolChain::ComputeLLVMTriple(const ArgList &Args,
       ArchName = "arm";
 
     // Assembly files should start in ARM mode, unless arch is M-profile.
+    // Windows is always thumb.
     if ((InputType != types::TY_PP_Asm && Args.hasFlag(options::OPT_mthumb,
-         options::OPT_mno_thumb, ThumbDefault)) || IsMProfile) {
+         options::OPT_mno_thumb, ThumbDefault)) || IsMProfile ||
+         getTriple().isOSWindows()) {
       if (IsBigEndian)
         ArchName = "thumbeb";
       else
@@ -544,15 +539,19 @@ void ToolChain::addProfileRTLibs(const llvm::opt::ArgList &Args,
 
 ToolChain::RuntimeLibType ToolChain::GetRuntimeLibType(
     const ArgList &Args) const {
-  if (Arg *A = Args.getLastArg(options::OPT_rtlib_EQ)) {
-    StringRef Value = A->getValue();
-    if (Value == "compiler-rt")
-      return ToolChain::RLT_CompilerRT;
-    if (Value == "libgcc")
-      return ToolChain::RLT_Libgcc;
-    getDriver().Diag(diag::err_drv_invalid_rtlib_name)
-      << A->getAsString(Args);
-  }
+  const Arg* A = Args.getLastArg(options::OPT_rtlib_EQ);
+  StringRef LibName = A ? A->getValue() : CLANG_DEFAULT_RTLIB;
+
+  // "platform" is only used in tests to override CLANG_DEFAULT_RTLIB
+  if (LibName == "compiler-rt")
+    return ToolChain::RLT_CompilerRT;
+  else if (LibName == "libgcc")
+    return ToolChain::RLT_Libgcc;
+  else if (LibName == "platform")
+    return GetDefaultRuntimeLibType();
+
+  if (A)
+    getDriver().Diag(diag::err_drv_invalid_rtlib_name) << A->getAsString(Args);
 
   return GetDefaultRuntimeLibType();
 }
@@ -587,6 +586,8 @@ ToolChain::CXXStdlibType ToolChain::GetCXXStdlibType(const ArgList &Args) const{
         << A->getAsString(Args);
   }
 
+  // If no argument was provided or its value was invalid, look for the
+  // default unless forced or configured to take the platform default.
   if (!HasValidType && (ForcePlatformDefault ||
       !ParseCXXStdlibType(CLANG_DEFAULT_CXX_STDLIB, Type)))
     Type = GetDefaultCXXStdlibType();

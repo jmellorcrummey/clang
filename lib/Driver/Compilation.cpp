@@ -37,11 +37,9 @@ Compilation::~Compilation() {
   delete Args;
 
   // Free any derived arg lists.
-  for (llvm::DenseMap<std::pair<const ToolChain*, const char*>,
-                      DerivedArgList*>::iterator it = TCArgs.begin(),
-         ie = TCArgs.end(); it != ie; ++it)
-    if (it->second != TranslatedArgs)
-      delete it->second;
+  for (auto &Arg : TCArgs)
+    if (Arg.second != TranslatedArgs)
+      delete Arg.second;
 
   // Free redirections of stdout/stderr.
   if (Redirects) {
@@ -52,23 +50,17 @@ Compilation::~Compilation() {
   }
 }
 
-const DerivedArgList &Compilation::getArgsForToolChain(const ToolChain *TC,
-                                                       const char *BoundArch) {
+const DerivedArgList &
+Compilation::getArgsForToolChain(const ToolChain *TC, const char *BoundArch,
+                                 Action::OffloadKind DeviceOffloadKind) {
   if (!TC)
     TC = &DefaultToolChain;
 
-  DerivedArgList *&Entry = TCArgs[std::make_pair(TC, BoundArch)];
+  DerivedArgList *&Entry = TCArgs[{TC, BoundArch, DeviceOffloadKind}];
   if (!Entry) {
-    DerivedArgList *DefaultArgs = TC->TranslateArgs(*TranslatedArgs, BoundArch);
-    Entry = (DefaultArgs) ? DefaultArgs : TranslatedArgs;
-
-    // Check if there is any offloading specific translation to do.
-    DerivedArgList *OffloadArgs = TC->TranslateOffloadArgs(*Entry, BoundArch);
-    if (OffloadArgs) {
-      // There are offloading translated args, so we have to use them instead.
-      delete DefaultArgs;
-      Entry = OffloadArgs;
-    }
+    Entry = TC->TranslateArgs(*TranslatedArgs, BoundArch, DeviceOffloadKind);
+    if (!Entry)
+      Entry = TranslatedArgs;
   }
 
   return *Entry;

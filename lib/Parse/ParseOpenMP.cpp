@@ -12,7 +12,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "RAIIObjectsForParser.h"
-#include "clang/AST/ASTConsumer.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/StmtOpenMP.h"
 #include "clang/Parse/ParseDiagnostic.h"
@@ -117,6 +116,7 @@ static OpenMPDirectiveKind ParseOpenMPDirectiveKind(Parser &P) {
     { OMPD_parallel, OMPD_sections, OMPD_parallel_sections },
     { OMPD_taskloop, OMPD_simd, OMPD_taskloop_simd },
     { OMPD_target, OMPD_parallel, OMPD_target_parallel },
+    { OMPD_target, OMPD_simd, OMPD_target_simd },
     { OMPD_target_parallel, OMPD_for, OMPD_target_parallel_for },
     { OMPD_target_parallel_for, OMPD_simd, OMPD_target_parallel_for_simd },
     { OMPD_teams, OMPD_distribute, OMPD_teams_distribute },
@@ -769,6 +769,7 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
   case OMPD_distribute_parallel_for_simd:
   case OMPD_distribute_simd:
   case OMPD_target_parallel_for_simd:
+  case OMPD_target_simd:
   case OMPD_target_teams:
   case OMPD_teams_distribute_parallel_for:
   case OMPD_target_teams_distribute_parallel_for:
@@ -805,7 +806,7 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
 ///         'target parallel' | 'target parallel for' |
 ///         'target update' | 'distribute parallel for' |
 ///         'distribute paralle for simd' | 'distribute simd' |
-///         'target parallel for simd' | 'target teams' |
+///         'target parallel for simd' | 'target simd' | 'target teams' |
 ///         'teams distribute parallel for' |
 ///         'target teams distribute parallel for' {clause}
 ///         annot_pragma_openmp_end
@@ -916,6 +917,7 @@ StmtResult Parser::ParseOpenMPDeclarativeOrExecutableDirective(
   case OMPD_distribute_parallel_for_simd:
   case OMPD_distribute_simd:
   case OMPD_target_parallel_for_simd:
+  case OMPD_target_simd:
   case OMPD_target_teams:
   case OMPD_teams_distribute_parallel_for:
   case OMPD_target_teams_distribute_parallel_for: {
