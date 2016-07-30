@@ -6,6 +6,8 @@ add_clang_executable(clang-offload-bundler
 
 set(CLANG_OFFLOAD_BUNDLER_LIB_DEPS
   clangBasic
+  LLVMBitWriter
+  LLVMObject
   )
 
 target_link_libraries(clang-offload-bundler

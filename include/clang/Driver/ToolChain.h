@@ -18,7 +18,6 @@
 #include "clang/Driver/Util.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/Support/Path.h"
 #include "llvm/Target/TargetOptions.h"
 #include <memory>
 #include <string>
@@ -41,6 +40,7 @@ namespace driver {
   class Compilation;
   class Driver;
   class JobAction;
+  class RegisterEffectiveTriple;
   class SanitizerArgs;
   class Tool;
 
@@ -66,12 +66,6 @@ public:
     RM_DisabledImplicitly
   };
 
-  enum OffloadingKind {
-    OK_None,
-    OK_OpenMP_Host,
-    OK_OpenMP_Device,
-  };
-
 private:
   const Driver &D;
   const llvm::Triple Triple;
@@ -79,7 +73,6 @@ private:
   // We need to initialize CachedRTTIArg before CachedRTTIMode
   const llvm::opt::Arg *const CachedRTTIArg;
   const RTTIMode CachedRTTIMode;
-  OffloadingKind CachedOffloadingKind;
 
   /// The list of toolchain specific path prefixes to search for
   /// files.
@@ -100,6 +93,14 @@ private:
   Tool *getOffloadBundler() const;
 
   mutable std::unique_ptr<SanitizerArgs> SanitizerArguments;
+
+  /// The effective clang triple for the current Job.
+  mutable llvm::Triple EffectiveTriple;
+
+  /// Set the toolchain's effective clang triple.
+  void setEffectiveTriple(llvm::Triple ET) const { EffectiveTriple = ET; }
+
+  friend class RegisterEffectiveTriple;
 
 protected:
   MultilibSet Multilibs;
@@ -138,9 +139,6 @@ public:
   vfs::FileSystem &getVFS() const;
   const llvm::Triple &getTriple() const { return Triple; }
 
-  OffloadingKind getOffloadingKind() const { return CachedOffloadingKind; }
-  void setOffloadingKind(OffloadingKind OT);
-
   llvm::Triple::ArchType getArch() const { return Triple.getArch(); }
   StringRef getArchName() const { return Triple.getArchName(); }
   StringRef getPlatform() const { return Triple.getVendorName(); }
@@ -152,6 +150,12 @@ public:
 
   std::string getTripleString() const {
     return Triple.getTriple();
+  }
+
+  /// Get the toolchain's effective clang triple.
+  const llvm::Triple &getEffectiveTriple() const {
+    assert(!EffectiveTriple.getTriple().empty() && "No effective triple");
+    return EffectiveTriple;
   }
 
   path_list &getFilePaths() { return FilePaths; }
@@ -188,33 +192,16 @@ public:
 
   /// TranslateArgs - Create a new derived argument list for any argument
   /// translations this ToolChain may wish to perform, or 0 if no tool chain
-  /// specific translations are needed.
+  /// specific translations are needed. If \p DeviceOffloadKind is specified
+  /// the translation specific for that offload kind is performed.
   ///
   /// \param BoundArch - The bound architecture name, or 0.
+  /// \param DeviceOffloadKind - The device offload kind used for the
+  /// translation.
   virtual llvm::opt::DerivedArgList *
-  TranslateArgs(const llvm::opt::DerivedArgList &Args,
-                const char *BoundArch) const {
+  TranslateArgs(const llvm::opt::DerivedArgList &Args, const char *BoundArch,
+                Action::OffloadKind DeviceOffloadKind) const {
     return nullptr;
-  }
-
-  /// TranslateOffloadArgs - Create a new derived argument list for any argument
-  /// translations this ToolChain may wish to perform if supporting offloading,
-  // or 0 if no tool chain specific translations are needed. If this tool chain
-  // does not refer to an offloading tool chain 0 is returned too.
-  ///
-  /// \param BoundArch - The bound architecture name, or 0.
-  virtual llvm::opt::DerivedArgList *
-  TranslateOffloadArgs(const llvm::opt::DerivedArgList &Args,
-                       const char *BoundArch) const {
-    return nullptr;
-  }
-
-  /// RequiresHostToolChainForOffloadingAction - Return true if the action \a A
-  /// should be fulfilled by the host tool chain in case this is an offloading
-  /// toolchain. Returns false by default, meaning the current toolchain can
-  /// handle the provided action.
-  virtual bool RequiresHostToolChainForOffloadingAction(const Action *A) const {
-    return false;
   }
 
   /// Choose a tool to use to handle the action \p JA.
@@ -400,8 +387,10 @@ public:
                             llvm::opt::ArgStringList &CC1Args) const;
 
   /// \brief Add options that need to be passed to cc1 for this target.
-  virtual void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
-                                     llvm::opt::ArgStringList &CC1Args) const;
+  virtual void
+  addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
+                        llvm::opt::ArgStringList &CC1Args,
+                        Action::OffloadKind DeviceOffloadKind) const;
 
   /// \brief Add warning options that need to be passed to cc1 for this target.
   virtual void addClangWarningOptions(llvm::opt::ArgStringList &CC1Args) const;
@@ -463,6 +452,19 @@ public:
   /// \brief On Windows, returns the version of cl.exe.  On other platforms,
   /// returns an empty VersionTuple.
   virtual VersionTuple getMSVCVersionFromExe() const { return VersionTuple(); }
+};
+
+/// Set a ToolChain's effective triple. Reset it when the registration object
+/// is destroyed.
+class RegisterEffectiveTriple {
+  const ToolChain &TC;
+
+public:
+  RegisterEffectiveTriple(const ToolChain &TC, llvm::Triple T) : TC(TC) {
+    TC.setEffectiveTriple(T);
+  }
+
+  ~RegisterEffectiveTriple() { TC.setEffectiveTriple(llvm::Triple()); }
 };
 
 } // end namespace driver
