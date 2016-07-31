@@ -3011,10 +3011,10 @@ void CGOpenMPRuntimeNVPTX::emitCriticalRegion(CodeGenFunction &CGF,
   auto *ExitBB = CGF.createBasicBlock("omp.critical.exit");
 
   /// Fetch team-local id of the thread.
-  auto ThreadID = getNVPTXThreadID(CGF);
+  auto ThreadID = GetNVPTXThreadID(CGF);
 
   /// Get the width of the team.
-  auto TeamWidth = getNVPTXNumThreads(CGF);
+  auto TeamWidth = GetNVPTXNumThreads(CGF);
 
   /// Initialise the counter variable for the loop.
   auto Int32Ty =
@@ -3050,9 +3050,9 @@ void CGOpenMPRuntimeNVPTX::emitCriticalRegion(CodeGenFunction &CGF,
   /// Block waits for all threads in current team to finish then increments
   /// the counter variable and returns to the loop.
   CGF.EmitBlock(SyncBB);
-  getNVPTXCTABarrier(CGF);
+  GetNVPTXCTABarrier(CGF);
 
-  auto *IncCounterVal = 
+  auto *IncCounterVal =
     CGF.Builder.CreateNSWAdd(CounterVal, CGF.Builder.getInt32(1));
   CGF.EmitStoreOfScalar(IncCounterVal, CounterLVal);
   CGF.EmitBranch(LoopBB);
