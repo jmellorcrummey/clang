@@ -233,26 +233,23 @@ static void addDirectoryList(const ArgList &Args, ArgStringList &CmdArgs,
 }
 
 static void AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
-                            const ArgList &Args, ArgStringList &CmdArgs) {
+                            const ArgList &Args, ArgStringList &CmdArgs,
+                            const JobAction &JA) {
   const Driver &D = TC.getDriver();
-  unsigned NumberOfInputs = Inputs.size();
-
-  // If the current toolchain is an OpenMP host toolchain, we need to ignore
-  // the last inputs - one for each offloading device - as they are going to be
-  // embedded in the fat binary by a custom linker script.
-  if (TC.getOffloadingKind() == ToolChain::OK_OpenMP_Host) {
-    Arg *Tgts = Args.getLastArg(options::OPT_fopenmp_targets_EQ);
-    assert(Tgts && Tgts->getNumValues() &&
-           "OpenMP offloading has to have targets specified.");
-    NumberOfInputs -= Tgts->getNumValues();
-  }
 
   // Add extra linker input arguments which are not treated as inputs
   // (constructed via -Xarch_).
   Args.AddAllArgValues(CmdArgs, options::OPT_Zlinker_input);
 
-  for (unsigned i = 0; i < NumberOfInputs; ++i) {
-    const auto &II = Inputs[i];
+  for (const auto &II : Inputs) {
+    // If the current tool chain refers to an OpenMP offloading host, we should
+    // ignore inputs that refer to OpenMP offloading devices - they will be
+    // embedded recurring to a proper linker script.
+    if (auto *IA = II.getAction())
+      if (JA.isHostOffloading(Action::OFK_OpenMP) &&
+          IA->isDeviceOffloading(Action::OFK_OpenMP))
+        continue;
+
     if (!TC.HasNativeLLVMSupport() && types::isLLVMIR(II.getType()))
       // Don't try to pass LLVM inputs unless we have native support.
       D.Diag(diag::err_drv_no_linker_llvm_support) << TC.getTripleString();
@@ -286,47 +283,118 @@ static void AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
     addDirectoryList(Args, CmdArgs, "-L", "LIBRARY_PATH");
 }
 
-/// \brief Add OpenMP linker script arguments at the end of the argument list
-/// so that the fat binary is built by embedding each of the device images into
-/// the host. The device images are the last inputs, one for each device and
-/// come in the same order the triples are passed through the fopenmp_targets
-/// option.
-/// The linker script also defines a few symbols required by the code generation
-/// so that the images can be easily retrieved at runtime by the offloading
-/// library. This should be used in tool chains that support linker scripts.
+/// Add OpenMP linker script arguments at the end of the argument list so that
+/// the fat binary is built by embedding each of the device images into the
+/// host. The linker script also defines a few symbols required by the code
+/// generation so that the images can be easily retrieved at runtime by the
+/// offloading library. This should be used only in tool chains that support
+/// linker scripts.
 static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
                                   const InputInfo &Output,
                                   const InputInfoList &Inputs,
-                                  const ArgList &Args, ArgStringList &CmdArgs) {
+                                  const ArgList &Args, ArgStringList &CmdArgs,
+                                  const JobAction &JA) {
 
   // If this is not an OpenMP host toolchain, we don't need to do anything.
-  if (TC.getOffloadingKind() != ToolChain::OK_OpenMP_Host)
+  if (!JA.isHostOffloading(Action::OFK_OpenMP))
     return;
 
-  // Gather the pairs (target triple)-(file name). The files names are at the
-  // end of the input list. So we do a reverse scanning.
-  SmallVector<std::pair<llvm::Triple, const char *>, 4> Targets;
-
-  Arg *Tgts = Args.getLastArg(options::OPT_fopenmp_targets_EQ);
-  assert(Tgts && Tgts->getNumValues() &&
-         "OpenMP offloading has to have targets specified.");
-
-  auto TriplesIt = Tgts->getValues().end();
-  auto FileNamesIt = Inputs.end();
-  for (unsigned i = 0; i < Tgts->getNumValues(); ++i) {
-    --TriplesIt;
-    --FileNamesIt;
-    Targets.push_back(
-        std::make_pair(llvm::Triple(*TriplesIt), FileNamesIt->getFilename()));
+  // Create temporary linker script. Keep it if save-temps is enabled.
+  const char *LKS;
+  SmallString<256> Name = llvm::sys::path::filename(Output.getFilename());
+  if (C.getDriver().isSaveTempsEnabled()) {
+    llvm::sys::path::replace_extension(Name, "lk");
+    LKS = C.getArgs().MakeArgString(Name.c_str());
+  } else {
+    llvm::sys::path::replace_extension(Name, "");
+    Name = C.getDriver().GetTemporaryPath(Name, "lk");
+    LKS = C.addTempFile(C.getArgs().MakeArgString(Name.c_str()));
   }
 
-  // Create temporary linker script
-  StringRef Name = llvm::sys::path::filename(Output.getFilename());
-  std::pair<StringRef, StringRef> Split = Name.rsplit('.');
-  std::string TmpName = C.getDriver().GetTemporaryPath(Split.first, "lk");
-  const char *LKS = C.addTempFile(C.getArgs().MakeArgString(TmpName.c_str()));
+  // Add linker script option to the command.
+  CmdArgs.push_back("-T");
+  CmdArgs.push_back(LKS);
 
-  // Open script file in order to write contents
+  // Create a buffer to write the contents of the linker script.
+  std::string LksBuffer;
+  llvm::raw_string_ostream LksStream(LksBuffer);
+
+  // Get the OpenMP offload tool chains so that we can extract the triple
+  // associated with each device input.
+  auto OpenMPToolChains = C.getOffloadToolChains<Action::OFK_OpenMP>();
+  assert(OpenMPToolChains.first != OpenMPToolChains.second &&
+         "No OpenMP toolchains??");
+
+  // Track the input file name and device triple in order to build the script,
+  // inserting binaries in the designated sections.
+  SmallVector<std::pair<std::string, const char *>, 8> InputBinaryInfo;
+
+  // Add commands to embed target binaries. We ensure that each section and
+  // image is 16-byte aligned. This is not mandatory, but increases the
+  // likelihood of data to be aligned with a cache block in several main host
+  // machines.
+  LksStream << "/*\n";
+  LksStream << "  OpenMP Offload Linker Script.\n";
+  LksStream << "*/\n";
+  LksStream << "TARGET(binary)\n";
+  auto DTC = OpenMPToolChains.first;
+  for (auto &II : Inputs) {
+    const Action *A = II.getAction();
+    // Is this a device linking action?
+    if (A && isa<LinkJobAction>(A) &&
+        A->isDeviceOffloading(Action::OFK_OpenMP)) {
+      assert(DTC != OpenMPToolChains.second &&
+             "More device inputs than device toolchains??");
+      InputBinaryInfo.push_back(std::make_pair(
+          DTC->second->getTriple().normalize(), II.getFilename()));
+      ++DTC;
+      LksStream << "INPUT(" << II.getFilename() << ")\n";
+    }
+  }
+
+  assert(DTC == OpenMPToolChains.second &&
+         "Less device inputs than device toolchains??");
+
+  LksStream << "SECTIONS\n";
+  LksStream << "{\n";
+  LksStream << "  .omp_offloading :\n";
+  LksStream << "  ALIGN(0x10)\n";
+  LksStream << "  {\n";
+
+  for (auto &BI : InputBinaryInfo) {
+    LksStream << "    . = ALIGN(0x10);\n";
+    LksStream << "    PROVIDE_HIDDEN(.omp_offloading.img_start." << BI.first
+              << " = .);\n";
+    LksStream << "    " << BI.second << "\n";
+    LksStream << "    PROVIDE_HIDDEN(.omp_offloading.img_end." << BI.first
+              << " = .);\n";
+  }
+
+  LksStream << "  }\n";
+  // Add commands to define host entries begin and end. We use 1-byte subalign
+  // so that the linker does not add any padding and the elements in this
+  // section form an array.
+  LksStream << "  .omp_offloading.entries :\n";
+  LksStream << "  ALIGN(0x10)\n";
+  LksStream << "  SUBALIGN(0x01)\n";
+  LksStream << "  {\n";
+  LksStream << "    PROVIDE_HIDDEN(.omp_offloading.entries_begin = .);\n";
+  LksStream << "    *(.omp_offloading.entries)\n";
+  LksStream << "    PROVIDE_HIDDEN(.omp_offloading.entries_end = .);\n";
+  LksStream << "  }\n";
+  LksStream << "}\n";
+  LksStream << "INSERT BEFORE .data\n";
+  LksStream.flush();
+
+  // Dump the contents of the linker script if the user requested that.
+  if (C.getArgs().hasArg(options::OPT_fopenmp_dump_offload_linker_script))
+    llvm::errs() << LksBuffer;
+
+  // If this is a dry run, do not create the linker script file.
+  if (C.getArgs().hasArg(options::OPT__HASH_HASH_HASH))
+    return;
+
+  // Open script file and write the contents.
   std::error_code EC;
   llvm::raw_fd_ostream Lksf(LKS, EC, llvm::sys::fs::F_None);
 
@@ -335,48 +403,7 @@ static void AddOpenMPLinkerScript(const ToolChain &TC, Compilation &C,
     return;
   }
 
-  // Add commands to embed target binaries. We ensure that each section and
-  // image s 16-byte aligned. This is not mandatory, but increases the
-  // likelihood of data to be aligned with a cache block in several main host
-  // machines.
-  Lksf << "TARGET(binary)\n";
-  for (unsigned i = 0; i < Targets.size(); ++i)
-    Lksf << "INPUT(" << Targets[i].second << ")\n";
-
-  Lksf << "SECTIONS\n";
-  Lksf << "{\n";
-  Lksf << "  .omp_offloading :\n";
-  Lksf << "  ALIGN(0x10)\n";
-  Lksf << "  {\n";
-
-  for (unsigned i = 0; i < Targets.size(); ++i) {
-    std::string TgtName(Targets[i].first.getTriple());
-    // std::replace(TgtName.begin(), TgtName.end(), '-', '_');
-    Lksf << "    . = ALIGN(0x10);\n";
-    Lksf << "    PROVIDE_HIDDEN(.omp_offloading.img_start." << TgtName
-         << " = .);\n";
-    Lksf << "    " << Targets[i].second << "\n";
-    Lksf << "    PROVIDE_HIDDEN(.omp_offloading.img_end." << TgtName
-         << " = .);\n";
-  }
-
-  Lksf << "  }\n";
-  // Add commands to define host entries begin and end
-  Lksf << "  .omp_offloading.entries :\n";
-  Lksf << "  ALIGN(0x10)\n";
-  Lksf << "  SUBALIGN(0x01)\n";
-  Lksf << "  {\n";
-  Lksf << "    PROVIDE_HIDDEN(.omp_offloading.entries_begin = .);\n";
-  Lksf << "    *(.omp_offloading.entries)\n";
-  Lksf << "    PROVIDE_HIDDEN(.omp_offloading.entries_end = .);\n";
-  Lksf << "  }\n";
-  Lksf << "}\n";
-  Lksf << "INSERT BEFORE .data\n";
-
-  Lksf.close();
-
-  CmdArgs.push_back("-T");
-  CmdArgs.push_back(LKS);
+  Lksf << LksBuffer;
 }
 
 /// \brief Determine whether Objective-C automated reference counting is
@@ -401,12 +428,39 @@ static bool forwardToGCC(const Option &O) {
          !O.hasFlag(options::DriverOption) && !O.hasFlag(options::LinkerInput);
 }
 
+/// Apply \a Work on the current tool chain \a RegularToolChain and any other
+/// offloading tool chain that is associated with the current action \a JA.
+static void
+forAllAssociatedToolChains(Compilation &C, const JobAction &JA,
+                           const ToolChain &RegularToolChain,
+                           llvm::function_ref<void(const ToolChain &)> Work) {
+  // Apply Work on the current/regular tool chain.
+  Work(RegularToolChain);
+
+  // Apply Work on all the offloading tool chains associated with the current
+  // action.
+  if (JA.isHostOffloading(Action::OFK_Cuda))
+    Work(*C.getSingleOffloadToolChain<Action::OFK_Cuda>());
+  else if (JA.isDeviceOffloading(Action::OFK_Cuda))
+    Work(*C.getSingleOffloadToolChain<Action::OFK_Host>());
+
+  if (JA.isHostOffloading(Action::OFK_OpenMP)) {
+    auto TCs = C.getOffloadToolChains<Action::OFK_OpenMP>();
+    for (auto II = TCs.first, IE = TCs.second; II != IE; ++II)
+      Work(*II->second);
+  } else if (JA.isDeviceOffloading(Action::OFK_OpenMP))
+    Work(*C.getSingleOffloadToolChain<Action::OFK_Host>());
+
+  //
+  // TODO: Add support for other offloading programming models here.
+  //
+}
+
 void Clang::AddPreprocessingOptions(Compilation &C, const JobAction &JA,
                                     const Driver &D, const ArgList &Args,
                                     ArgStringList &CmdArgs,
                                     const InputInfo &Output,
-                                    const InputInfoList &Inputs,
-                                    const ToolChain *AuxToolChain) const {
+                                    const InputInfoList &Inputs) const {
   Arg *A;
   const bool IsIAMCU = getToolChain().getTriple().isOSIAMCU();
 
@@ -671,30 +725,30 @@ void Clang::AddPreprocessingOptions(Compilation &C, const JobAction &JA,
   // OBJCPLUS_INCLUDE_PATH - system includes enabled when compiling ObjC++.
   addDirectoryList(Args, CmdArgs, "-objcxx-isystem", "OBJCPLUS_INCLUDE_PATH");
 
-  // Optional AuxToolChain indicates that we need to include headers
-  // for more than one target. If that's the case, add include paths
-  // from AuxToolChain right after include paths of the same kind for
-  // the current target.
+  // While adding the include arguments, we also attempt to retrieve the
+  // arguments of related offloading toolchains or arguments that are specific
+  // of an offloading programming model.
 
   // Add C++ include arguments, if needed.
-  if (types::isCXX(Inputs[0].getType())) {
-    getToolChain().AddClangCXXStdlibIncludeArgs(Args, CmdArgs);
-    if (AuxToolChain)
-      AuxToolChain->AddClangCXXStdlibIncludeArgs(Args, CmdArgs);
-  }
+  if (types::isCXX(Inputs[0].getType()))
+    forAllAssociatedToolChains(C, JA, getToolChain(),
+                               [&Args, &CmdArgs](const ToolChain &TC) {
+                                 TC.AddClangCXXStdlibIncludeArgs(Args, CmdArgs);
+                               });
 
   // Add system include arguments for all targets but IAMCU.
-  if (!IsIAMCU) {
-    getToolChain().AddClangSystemIncludeArgs(Args, CmdArgs);
-    if (AuxToolChain)
-      AuxToolChain->AddClangCXXStdlibIncludeArgs(Args, CmdArgs);
-  } else {
+  if (!IsIAMCU)
+    forAllAssociatedToolChains(C, JA, getToolChain(),
+                               [&Args, &CmdArgs](const ToolChain &TC) {
+                                 TC.AddClangSystemIncludeArgs(Args, CmdArgs);
+                               });
+  else {
     // For IAMCU add special include arguments.
     getToolChain().AddIAMCUIncludeArgs(Args, CmdArgs);
   }
 
-  // Add CUDA include arguments, if needed.
-  if (types::isCuda(Inputs[0].getType()))
+  // Add offload include arguments specific for CUDA if that is required.
+  if (JA.isOffloading(Action::OFK_Cuda))
     getToolChain().AddCudaIncludeArgs(Args, CmdArgs);
 }
 
@@ -849,7 +903,7 @@ static bool useAAPCSForMachO(const llvm::Triple &T) {
 // -mfloat-abi=.
 arm::FloatABI arm::getARMFloatABI(const ToolChain &TC, const ArgList &Args) {
   const Driver &D = TC.getDriver();
-  const llvm::Triple Triple(TC.ComputeEffectiveClangTriple(Args));
+  const llvm::Triple &Triple = TC.getEffectiveTriple();
   auto SubArch = getARMSubArchVersionNumber(Triple);
   arm::FloatABI ABI = FloatABI::Invalid;
   if (Arg *A =
@@ -1250,8 +1304,7 @@ static std::string getAArch64TargetCPU(const ArgList &Args) {
 
 void Clang::AddAArch64TargetArgs(const ArgList &Args,
                                  ArgStringList &CmdArgs) const {
-  std::string TripleStr = getToolChain().ComputeEffectiveClangTriple(Args);
-  llvm::Triple Triple(TripleStr);
+  const llvm::Triple &Triple = getToolChain().getEffectiveTriple();
 
   if (!Args.hasFlag(options::OPT_mred_zone, options::OPT_mno_red_zone, true) ||
       Args.hasArg(options::OPT_mkernel) ||
@@ -2426,24 +2479,8 @@ static bool DecodeAArch64Features(const Driver &D, StringRef text,
   text.split(Split, StringRef("+"), -1, false);
 
   for (StringRef Feature : Split) {
-    const char *result = llvm::StringSwitch<const char *>(Feature)
-                             .Case("fp", "+fp-armv8")
-                             .Case("simd", "+neon")
-                             .Case("crc", "+crc")
-                             .Case("crypto", "+crypto")
-                             .Case("fp16", "+fullfp16")
-                             .Case("profile", "+spe")
-                             .Case("ras", "+ras")
-                             .Case("nofp", "-fp-armv8")
-                             .Case("nosimd", "-neon")
-                             .Case("nocrc", "-crc")
-                             .Case("nocrypto", "-crypto")
-                             .Case("nofp16", "-fullfp16")
-                             .Case("noprofile", "-spe")
-                             .Case("noras", "-ras")
-                             .Default(nullptr);
-    if (result)
-      Features.push_back(result);
+    if (const char *FeatureName = llvm::AArch64::getArchExtFeature(Feature))
+      Features.push_back(FeatureName);
     else if (Feature == "neon" || Feature == "noneon")
       D.Diag(diag::err_drv_no_neon_modifier);
     else
@@ -2458,20 +2495,16 @@ static bool DecodeAArch64Mcpu(const Driver &D, StringRef Mcpu, StringRef &CPU,
                               std::vector<const char *> &Features) {
   std::pair<StringRef, StringRef> Split = Mcpu.split("+");
   CPU = Split.first;
-  if (CPU == "cortex-a53" || CPU == "cortex-a57" ||
-      CPU == "cortex-a72" || CPU == "cortex-a35" || CPU == "exynos-m1" ||
-      CPU == "kryo"       || CPU == "cortex-a73" || CPU == "vulcan") {
-    Features.push_back("+neon");
-    Features.push_back("+crc");
-    Features.push_back("+crypto");
-  } else if (CPU == "cyclone") {
-    Features.push_back("+neon");
-    Features.push_back("+crypto");
-  } else if (CPU == "generic") {
+
+  if (CPU == "generic") {
     Features.push_back("+neon");
   } else {
-    return false;
-  }
+    unsigned ArchKind = llvm::AArch64::parseCPUArch(CPU);
+    unsigned Extersion = llvm::AArch64::getDefaultExtensions(CPU, ArchKind);
+
+    if (!llvm::AArch64::getExtensionFeatures(Extersion, Features))
+      return false;
+   }
 
   if (Split.second.size() && !DecodeAArch64Features(D, Split.second, Features))
     return false;
@@ -2486,17 +2519,10 @@ getAArch64ArchFeaturesFromMarch(const Driver &D, StringRef March,
   std::string MarchLowerCase = March.lower();
   std::pair<StringRef, StringRef> Split = StringRef(MarchLowerCase).split("+");
 
-  if (Split.first == "armv8-a" || Split.first == "armv8a") {
-    // ok, no additional features.
-  } else if (Split.first == "armv8.1-a" || Split.first == "armv8.1a") {
-    Features.push_back("+v8.1a");
-  } else if (Split.first == "armv8.2-a" || Split.first == "armv8.2a" ) {
-    Features.push_back("+v8.2a");
-  } else {
-    return false;
-  }
-
-  if (Split.second.size() && !DecodeAArch64Features(D, Split.second, Features))
+  unsigned ArchKind = llvm::AArch64::parseArch(Split.first);
+  if (ArchKind == static_cast<unsigned>(llvm::AArch64::ArchKind::AK_INVALID) ||
+      !llvm::AArch64::getArchFeatures(ArchKind, Features) ||
+      (Split.second.size() && !DecodeAArch64Features(D, Split.second, Features)))
     return false;
 
   return true;
@@ -2940,6 +2966,27 @@ static void CollectArgsForIntegratedAssembler(Compilation &C,
                    DefaultIncrementalLinkerCompatible))
     CmdArgs.push_back("-mincremental-linker-compatible");
 
+  switch (C.getDefaultToolChain().getArch()) {
+  case llvm::Triple::arm:
+  case llvm::Triple::armeb:
+  case llvm::Triple::thumb:
+  case llvm::Triple::thumbeb:
+    if (Arg *A = Args.getLastArg(options::OPT_mimplicit_it_EQ)) {
+      StringRef Value = A->getValue();
+      if (Value == "always" || Value == "never" || Value == "arm" ||
+          Value == "thumb") {
+        CmdArgs.push_back("-mllvm");
+        CmdArgs.push_back(Args.MakeArgString("-arm-implicit-it=" + Value));
+      } else {
+        D.Diag(diag::err_drv_unsupported_option_argument)
+            << A->getOption().getName() << Value;
+      }
+    }
+    break;
+  default:
+    break;
+  }
+
   // When passing -I arguments to the assembler we sometimes need to
   // unconditionally take the next argument.  For example, when parsing
   // '-Wa,-I -Wa,foo' we need to accept the -Wa,foo arg after seeing the
@@ -3080,72 +3127,23 @@ static void addClangRT(const ToolChain &TC, const ArgList &Args,
   CmdArgs.push_back(TC.getCompilerRTArgString(Args, "builtins"));
 }
 
-namespace {
-enum OpenMPRuntimeKind {
-  /// An unknown OpenMP runtime. We can't generate effective OpenMP code
-  /// without knowing what runtime to target.
-  OMPRT_Unknown,
-
-  /// The LLVM OpenMP runtime. When completed and integrated, this will become
-  /// the default for Clang.
-  OMPRT_OMP,
-
-  /// The GNU OpenMP runtime. Clang doesn't support generating OpenMP code for
-  /// this runtime but can swallow the pragmas, and find and link against the
-  /// runtime library itself.
-  OMPRT_GOMP,
-
-  /// The legacy name for the LLVM OpenMP runtime from when it was the Intel
-  /// OpenMP runtime. We support this mode for users with existing dependencies
-  /// on this runtime library name.
-  OMPRT_IOMP5
-};
-}
-
-/// Compute the desired OpenMP runtime from the flag provided.
-static OpenMPRuntimeKind getOpenMPRuntime(const ToolChain &TC,
-                                          const ArgList &Args) {
-  StringRef RuntimeName(CLANG_DEFAULT_OPENMP_RUNTIME);
-
-  const Arg *A = Args.getLastArg(options::OPT_fopenmp_EQ);
-  if (A)
-    RuntimeName = A->getValue();
-
-  auto RT = llvm::StringSwitch<OpenMPRuntimeKind>(RuntimeName)
-                .Case("libomp", OMPRT_OMP)
-                .Case("libgomp", OMPRT_GOMP)
-                .Case("libiomp5", OMPRT_IOMP5)
-                .Default(OMPRT_Unknown);
-
-  if (RT == OMPRT_Unknown) {
-    if (A)
-      TC.getDriver().Diag(diag::err_drv_unsupported_option_argument)
-          << A->getOption().getName() << A->getValue();
-    else
-      // FIXME: We could use a nicer diagnostic here.
-      TC.getDriver().Diag(diag::err_drv_unsupported_opt) << "-fopenmp";
-  }
-
-  return RT;
-}
-
 static void addOpenMPRuntime(ArgStringList &CmdArgs, const ToolChain &TC,
                               const ArgList &Args) {
   if (!Args.hasFlag(options::OPT_fopenmp, options::OPT_fopenmp_EQ,
                     options::OPT_fno_openmp, false))
     return;
 
-  switch (getOpenMPRuntime(TC, Args)) {
-  case OMPRT_OMP:
+  switch (TC.getDriver().getOpenMPRuntime(Args)) {
+  case Driver::OMPRT_OMP:
     CmdArgs.push_back("-lomp");
     break;
-  case OMPRT_GOMP:
+  case Driver::OMPRT_GOMP:
     CmdArgs.push_back("-lgomp");
     break;
-  case OMPRT_IOMP5:
+  case Driver::OMPRT_IOMP5:
     CmdArgs.push_back("-liomp5");
     break;
-  case OMPRT_Unknown:
+  case Driver::OMPRT_Unknown:
     // Already diagnosed.
     break;
   }
@@ -3605,15 +3603,26 @@ VersionTuple visualstudio::getMSVCVersion(const Driver *D, const ToolChain &TC,
 static void addPGOAndCoverageFlags(Compilation &C, const Driver &D,
                                    const InputInfo &Output, const ArgList &Args,
                                    ArgStringList &CmdArgs) {
+
+  auto *PGOGenerateArg = Args.getLastArg(options::OPT_fprofile_generate,
+                                         options::OPT_fprofile_generate_EQ,
+                                         options::OPT_fno_profile_generate);
+  if (PGOGenerateArg &&
+      PGOGenerateArg->getOption().matches(options::OPT_fno_profile_generate))
+    PGOGenerateArg = nullptr;
+
   auto *ProfileGenerateArg = Args.getLastArg(
       options::OPT_fprofile_instr_generate,
-      options::OPT_fprofile_instr_generate_EQ, options::OPT_fprofile_generate,
-      options::OPT_fprofile_generate_EQ,
+      options::OPT_fprofile_instr_generate_EQ,
       options::OPT_fno_profile_instr_generate);
   if (ProfileGenerateArg &&
       ProfileGenerateArg->getOption().matches(
           options::OPT_fno_profile_instr_generate))
     ProfileGenerateArg = nullptr;
+
+  if (PGOGenerateArg && ProfileGenerateArg)
+    D.Diag(diag::err_drv_argument_not_allowed_with)
+        << PGOGenerateArg->getSpelling() << ProfileGenerateArg->getSpelling();
 
   auto *ProfileUseArg = Args.getLastArg(
       options::OPT_fprofile_instr_use, options::OPT_fprofile_instr_use_EQ,
@@ -3622,6 +3631,10 @@ static void addPGOAndCoverageFlags(Compilation &C, const Driver &D,
   if (ProfileUseArg &&
       ProfileUseArg->getOption().matches(options::OPT_fno_profile_instr_use))
     ProfileUseArg = nullptr;
+
+  if (PGOGenerateArg && ProfileUseArg)
+    D.Diag(diag::err_drv_argument_not_allowed_with)
+        << ProfileUseArg->getSpelling() << PGOGenerateArg->getSpelling();
 
   if (ProfileGenerateArg && ProfileUseArg)
     D.Diag(diag::err_drv_argument_not_allowed_with)
@@ -3632,15 +3645,19 @@ static void addPGOAndCoverageFlags(Compilation &C, const Driver &D,
             options::OPT_fprofile_instr_generate_EQ))
       CmdArgs.push_back(Args.MakeArgString(Twine("-fprofile-instrument-path=") +
                                            ProfileGenerateArg->getValue()));
-    else if (ProfileGenerateArg->getOption().matches(
-                 options::OPT_fprofile_generate_EQ)) {
-      SmallString<128> Path(ProfileGenerateArg->getValue());
-      llvm::sys::path::append(Path, "default.profraw");
+    // The default is to use Clang Instrumentation.
+    CmdArgs.push_back("-fprofile-instrument=clang");
+  }
+
+  if (PGOGenerateArg) {
+    CmdArgs.push_back("-fprofile-instrument=llvm");
+    if (PGOGenerateArg->getOption().matches(
+            options::OPT_fprofile_generate_EQ)) {
+      SmallString<128> Path(PGOGenerateArg->getValue());
+      llvm::sys::path::append(Path, "default_%m.profraw");
       CmdArgs.push_back(
           Args.MakeArgString(Twine("-fprofile-instrument-path=") + Path));
     }
-    // The default is to use Clang Instrumentation.
-    CmdArgs.push_back("-fprofile-instrument=clang");
   }
 
   if (ProfileUseArg) {
@@ -3847,13 +3864,13 @@ ParsePICArgs(const ToolChain &ToolChain, const llvm::Triple &Triple,
     // match that of llvm-gcc and Apple GCC before that.
     PIC = ToolChain.isPICDefault() && ToolChain.isPICDefaultForced();
 
-    return std::make_tuple(llvm::Reloc::DynamicNoPIC, PIC ? 2 : 0, false);
+    return std::make_tuple(llvm::Reloc::DynamicNoPIC, PIC ? 2U : 0U, false);
   }
 
   if (PIC)
-    return std::make_tuple(llvm::Reloc::PIC_, IsPICLevelTwo ? 2 : 1, PIE);
+    return std::make_tuple(llvm::Reloc::PIC_, IsPICLevelTwo ? 2U : 1U, PIE);
 
-  return std::make_tuple(llvm::Reloc::Static, 0, false);
+  return std::make_tuple(llvm::Reloc::Static, 0U, false);
 }
 
 static const char *RelocationModelName(llvm::Reloc::Model Model) {
@@ -3883,8 +3900,8 @@ static void AddAssemblerKPIC(const ToolChain &ToolChain, const ArgList &Args,
 void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                          const InputInfo &Output, const InputInfoList &Inputs,
                          const ArgList &Args, const char *LinkingOutput) const {
-  std::string TripleStr = getToolChain().ComputeEffectiveClangTriple(Args);
-  const llvm::Triple Triple(TripleStr);
+  const llvm::Triple &Triple = getToolChain().getEffectiveTriple();
+  const std::string &TripleStr = Triple.getTriple();
 
   bool KernelOrKext =
       Args.hasArg(options::OPT_mkernel, options::OPT_fapple_kext);
@@ -3902,14 +3919,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   assert(Inputs.size() >= 1 && "Must have at least one input.");
   const InputInfo &Input = Inputs[0];
   // CUDA compilation may have multiple inputs (source file + results of
-  // device-side compilations). OpenMP offloading device compile jobs also take
-  // the host IR as an extra input. All other jobs are expected to have exactly
-  // one input.
-  bool IsCuda = types::isCuda(Input.getType());
-  bool IsOpenMPDeviceCompileJob =
-      isa<CompileJobAction>(JA) &&
-      getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Device;
-  assert((IsCuda || (IsOpenMPDeviceCompileJob && Inputs.size() == 2) ||
+  // device-side compilations). OpenMP device jobs also take the host IR as a
+  // second input. All other jobs are expected to have exactly one
+  // input.
+  bool IsCuda = JA.isOffloading(Action::OFK_Cuda);
+  bool IsOpenMPDevice = JA.isDeviceOffloading(Action::OFK_OpenMP);
+  assert((IsCuda || (IsOpenMPDevice && Inputs.size() == 2) ||
           Inputs.size() == 1) &&
          "Unable to handle multiple inputs.");
 
@@ -3926,27 +3941,31 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   CmdArgs.push_back("-triple");
   CmdArgs.push_back(Args.MakeArgString(TripleStr));
 
-  const ToolChain *AuxToolChain = nullptr;
   if (IsCuda) {
-    // FIXME: We need a (better) way to pass information about
-    // particular compilation pass we're constructing here. For now we
-    // can check which toolchain we're using and pick the other one to
-    // extract the triple.
-    if (&getToolChain() == C.getSingleOffloadToolChain<Action::OFK_Cuda>())
-      AuxToolChain = C.getOffloadingHostToolChain();
-    else if (&getToolChain() == C.getOffloadingHostToolChain())
-      AuxToolChain = C.getSingleOffloadToolChain<Action::OFK_Cuda>();
+    // We have to pass the triple of the host if compiling for a CUDA device and
+    // vice-versa.
+    std::string NormalizedTriple;
+    if (JA.isDeviceOffloading(Action::OFK_Cuda))
+      NormalizedTriple = C.getSingleOffloadToolChain<Action::OFK_Host>()
+                             ->getTriple()
+                             .normalize();
     else
-      llvm_unreachable("Can't figure out CUDA compilation mode.");
-    assert(AuxToolChain != nullptr && "No aux toolchain.");
+      NormalizedTriple = C.getSingleOffloadToolChain<Action::OFK_Cuda>()
+                             ->getTriple()
+                             .normalize();
+
     CmdArgs.push_back("-aux-triple");
-    CmdArgs.push_back(Args.MakeArgString(AuxToolChain->getTriple().str()));
+    CmdArgs.push_back(Args.MakeArgString(NormalizedTriple));
   }
 
-  if (getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Device) {
-    AuxToolChain = C.getOffloadingHostToolChain();
+  if (IsOpenMPDevice) {
+    // We have to pass the triple of the host if compiling for an OpenMP device.
+    std::string NormalizedTriple =
+        C.getSingleOffloadToolChain<Action::OFK_Host>()
+            ->getTriple()
+            .normalize();
     CmdArgs.push_back("-aux-triple");
-    CmdArgs.push_back(Args.MakeArgString(AuxToolChain->getTriple().str()));
+    CmdArgs.push_back(Args.MakeArgString(NormalizedTriple));
   }
 
   if (Triple.isOSWindows() && (Triple.getArch() == llvm::Triple::arm ||
@@ -4211,6 +4230,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                     true))
     CmdArgs.push_back("-fno-jump-tables");
 
+  if (!Args.hasFlag(options::OPT_fpreserve_as_comments,
+                    options::OPT_fno_preserve_as_comments, true))
+    CmdArgs.push_back("-fno-preserve-as-comments");
+
   if (Arg *A = Args.getLastArg(options::OPT_mregparm_EQ)) {
     CmdArgs.push_back("-mregparm");
     CmdArgs.push_back(A->getValue());
@@ -4456,7 +4479,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                    AsynchronousUnwindTables))
     CmdArgs.push_back("-munwind-tables");
 
-  getToolChain().addClangTargetOptions(Args, CmdArgs);
+  getToolChain().addClangTargetOptions(Args, CmdArgs,
+                                       JA.getOffloadingDeviceKind());
 
   if (Arg *A = Args.getLastArg(options::OPT_flimited_precision_EQ)) {
     CmdArgs.push_back("-mlimit-float-precision");
@@ -4835,8 +4859,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   //
   // FIXME: Support -fpreprocessed
   if (types::getPreprocessedType(InputType) != types::TY_INVALID)
-    AddPreprocessingOptions(C, JA, D, Args, CmdArgs, Output, Inputs,
-                            AuxToolChain);
+    AddPreprocessingOptions(C, JA, D, Args, CmdArgs, Output, Inputs);
 
   // Don't warn about "clang -c -DPIC -fPIC test.i" because libtool.m4 assumes
   // that "The compiler can only warn and ignore the option if not recognized".
@@ -5090,12 +5113,15 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddLastArg(CmdArgs, options::OPT_fdiagnostics_show_template_tree);
   Args.AddLastArg(CmdArgs, options::OPT_fno_elide_type);
 
-  // Forward flags for OpenMP
+  // Forward flags for OpenMP. We don't do this if the current action is an
+  // device offloading action other than OpenMP.
   if (Args.hasFlag(options::OPT_fopenmp, options::OPT_fopenmp_EQ,
-                   options::OPT_fno_openmp, false)) {
-    switch (getOpenMPRuntime(getToolChain(), Args)) {
-    case OMPRT_OMP:
-    case OMPRT_IOMP5:
+                   options::OPT_fno_openmp, false) &&
+      (JA.isDeviceOffloading(Action::OFK_None) ||
+       JA.isDeviceOffloading(Action::OFK_OpenMP))) {
+    switch (getToolChain().getDriver().getOpenMPRuntime(Args)) {
+    case Driver::OMPRT_OMP:
+    case Driver::OMPRT_IOMP5:
       // Clang can generate useful OpenMP code for these two runtime libraries.
       CmdArgs.push_back("-fopenmp");
 
@@ -5124,9 +5150,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // Report an error for -faltivec on anything other than PowerPC.
   if (const Arg *A = Args.getLastArg(options::OPT_faltivec)) {
     const llvm::Triple::ArchType Arch =
-        (getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Device)
-            ? C.getOffloadingHostToolChain()->getArch()
-            : getToolChain().getArch();
+        JA.isDeviceOffloading(Action::OFK_None)
+            ? getToolChain().getArch()
+            : C.getSingleOffloadToolChain<Action::OFK_Host>()->getArch();
     if (!(Arch == llvm::Triple::ppc || Arch == llvm::Triple::ppc64 ||
           Arch == llvm::Triple::ppc64le))
       D.Diag(diag::err_drv_argument_only_allowed_with) << A->getAsString(Args)
@@ -5485,6 +5511,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   Args.AddLastArg(CmdArgs, options::OPT_fmodules_validate_system_headers);
+  Args.AddLastArg(CmdArgs, options::OPT_fmodules_disable_diagnostic_validation);
 
   // -faccess-control is default.
   if (Args.hasFlag(options::OPT_fno_access_control,
@@ -6115,10 +6142,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // device declarations can be identified. Also, -fopenmp-is-device is passed
   // along to tell the frontend that it is generating code for a device, so that
   // only the relevant declarations are emitted.
-  if (IsOpenMPDeviceCompileJob) {
+  if (IsOpenMPDevice) {
     CmdArgs.push_back("-fopenmp-is-device");
-    CmdArgs.push_back("-fopenmp-host-ir-file-path");
-    CmdArgs.push_back(Args.MakeArgString(Inputs.back().getFilename()));
+    if (Inputs.size() == 2) {
+      CmdArgs.push_back("-fopenmp-host-ir-file-path");
+      CmdArgs.push_back(Args.MakeArgString(Inputs.back().getFilename()));
+    }
   }
 
   // OpenMP 4.5 standard does not allow to use any declaration in target region
@@ -6130,15 +6159,15 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                    /*Default=*/false))
     CmdArgs.push_back("-fopenmp-implicit-declare-target");
 
-  if (Args.hasFlag(options::OPT_fopenmp_nvptx_nospmd, options::OPT_fopenmp_nvptx_spmd,
+  if (Args.hasFlag(options::OPT_fopenmp_nvptx_nospmd,
+                   options::OPT_fopenmp_nvptx_spmd,
                    /*Default=*/false)) {
     CmdArgs.push_back("-fopenmp-nvptx-nospmd");
   }
 
   // For all the host OpenMP offloading compile jobs we need to pass the targets
   // information using -fopenmp-targets= option.
-  if (isa<CompileJobAction>(JA) &&
-      getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Host) {
+  if (isa<CompileJobAction>(JA) && JA.isHostOffloading(Action::OFK_OpenMP)) {
     SmallString<128> TargetInfo("-fopenmp-targets=");
 
     Arg *Tgts = Args.getLastArg(options::OPT_fopenmp_targets_EQ);
@@ -6578,6 +6607,20 @@ void ClangAs::AddMIPSTargetArgs(const ArgList &Args,
   CmdArgs.push_back(ABIName.data());
 }
 
+void ClangAs::AddX86TargetArgs(const ArgList &Args,
+                               ArgStringList &CmdArgs) const {
+  if (Arg *A = Args.getLastArg(options::OPT_masm_EQ)) {
+    StringRef Value = A->getValue();
+    if (Value == "intel" || Value == "att") {
+      CmdArgs.push_back("-mllvm");
+      CmdArgs.push_back(Args.MakeArgString("-x86-asm-syntax=" + Value));
+    } else {
+      getToolChain().getDriver().Diag(diag::err_drv_unsupported_option_argument)
+          << A->getOption().getName() << Value;
+    }
+  }
+}
+
 void ClangAs::ConstructJob(Compilation &C, const JobAction &JA,
                            const InputInfo &Output, const InputInfoList &Inputs,
                            const ArgList &Args,
@@ -6587,9 +6630,8 @@ void ClangAs::ConstructJob(Compilation &C, const JobAction &JA,
   assert(Inputs.size() == 1 && "Unexpected number of inputs.");
   const InputInfo &Input = Inputs[0];
 
-  std::string TripleStr =
-      getToolChain().ComputeEffectiveClangTriple(Args, Input.getType());
-  const llvm::Triple Triple(TripleStr);
+  const llvm::Triple &Triple = getToolChain().getEffectiveTriple();
+  const std::string &TripleStr = Triple.getTriple();
 
   // Don't warn about "clang -w -c foo.s"
   Args.ClaimAllArgs(options::OPT_w);
@@ -6725,6 +6767,11 @@ void ClangAs::ConstructJob(Compilation &C, const JobAction &JA,
   case llvm::Triple::mips64el:
     AddMIPSTargetArgs(Args, CmdArgs);
     break;
+    
+  case llvm::Triple::x86:
+  case llvm::Triple::x86_64:
+    AddX86TargetArgs(Args, CmdArgs);
+    break;
   }
 
   // Consume all the warning flags. Usually this would be handled more
@@ -6763,60 +6810,122 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
                                   const InputInfoList &Inputs,
                                   const llvm::opt::ArgList &TCArgs,
                                   const char *LinkingOutput) const {
+  // The version with only one output is expected to refer to a bundling job.
+  assert(isa<OffloadBundlingJobAction>(JA) && "Expecting bundling job!");
 
-  // The (un)bundling command looks like this:
+  // The bundling command looks like this:
   // clang-offload-bundler -type=bc
-  //   -targets=host-triple,device-triple1,device-triple2
-  //   -inputs=input_file
-  //   -outputs=unbundle_file_host,unbundle_file_tgt1,unbundle_file_tgt2"
-  //   (-unbundle)
-
-  auto BundledFile = Output;
-  auto UnbundledFiles = Inputs;
-
-  bool IsUnbundle = isa<OffloadUnbundlingJobAction>(JA);
+  //   -targets=host-triple,openmp-triple1,openmp-triple2
+  //   -outputs=input_file
+  //   -inputs=unbundle_file_host,unbundle_file_tgt1,unbundle_file_tgt2"
 
   ArgStringList CmdArgs;
 
   // Get the type.
   CmdArgs.push_back(TCArgs.MakeArgString(
-      Twine("-type=") + types::getTypeTempSuffix(BundledFile.getType())));
+      Twine("-type=") + types::getTypeTempSuffix(Output.getType())));
 
-  // Get the triples. The order is the same that comes in fopenmp-targets
-  // option.
-  {
-    SmallString<128> Triples;
-    Triples += "-targets=offload-host-";
-    Triples += getToolChain().getTripleString();
+  assert(JA.getInputs().size() == Inputs.size() &&
+         "Not have inputs for all dependence actions??");
 
-    Arg *TargetsArg = TCArgs.getLastArg(options::OPT_fopenmp_targets_EQ);
-    for (auto *A : TargetsArg->getValues()) {
-      // We have to use the string that exactly matches the triple here.
-      llvm::Triple T(A);
-      Triples += ",offload-device-";
-      Triples += T.getTriple();
+  // Get the targets.
+  SmallString<128> Triples;
+  Triples += "-targets=";
+  for (unsigned I = 0; I < Inputs.size(); ++I) {
+    if (I)
+      Triples += ',';
+
+    Action::OffloadKind CurKind = Action::OFK_Host;
+    const ToolChain *CurTC = &getToolChain();
+    const Action *CurDep = JA.getInputs()[I];
+
+    if (const auto *OA = dyn_cast<OffloadAction>(CurDep)) {
+      OA->doOnEachDependence([&](Action *A, const ToolChain *TC, const char *) {
+        CurKind = A->getOffloadingDeviceKind();
+        CurTC = TC;
+      });
     }
-    CmdArgs.push_back(TCArgs.MakeArgString(Triples));
+    Triples += Action::GetOffloadKindName(CurKind);
+    Triples += '-';
+    Triples += CurTC->getTriple().normalize();
   }
+  CmdArgs.push_back(TCArgs.MakeArgString(Triples));
 
   // Get bundled file command.
   CmdArgs.push_back(
-      TCArgs.MakeArgString(Twine(IsUnbundle ? "-inputs=" : "-outputs=") +
-                           BundledFile.getFilename()));
+      TCArgs.MakeArgString(Twine("-outputs=") + Output.getFilename()));
 
   // Get unbundled files command.
-  {
-    SmallString<128> UB(IsUnbundle ? "-outputs=" : "-inputs=");
-    for (unsigned i = 0; i < UnbundledFiles.size(); ++i) {
-      if (i)
-        UB += ',';
-      UB += UnbundledFiles[i].getFilename();
-    }
-    CmdArgs.push_back(TCArgs.MakeArgString(UB));
+  SmallString<128> UB;
+  UB += "-inputs=";
+  for (unsigned I = 0; I < Inputs.size(); ++I) {
+    if (I)
+      UB += ',';
+    UB += Inputs[I].getFilename();
+  }
+  CmdArgs.push_back(TCArgs.MakeArgString(UB));
+
+  // All the inputs are encoded as commands.
+  C.addCommand(llvm::make_unique<Command>(
+      JA, *this,
+      TCArgs.MakeArgString(getToolChain().GetProgramPath(getShortName())),
+      CmdArgs, None));
+}
+
+void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
+                                  const InputInfoList &Outputs,
+                                  const InputInfoList &Inputs,
+                                  const llvm::opt::ArgList &TCArgs,
+                                  const char *LinkingOutput) const {
+  // The version with multiple outputs is expected to refer to a unbundling job.
+  auto &UA = cast<OffloadUnbundlingJobAction>(JA);
+
+  // The unbundling command looks like this:
+  // clang-offload-bundler -type=bc
+  //   -targets=host-triple,openmp-triple1,openmp-triple2
+  //   -inputs=input_file
+  //   -outputs=unbundle_file_host,unbundle_file_tgt1,unbundle_file_tgt2"
+  //   -unbundle
+
+  ArgStringList CmdArgs;
+
+  assert(Inputs.size() == 1 && "Expecting to unbundle a single file!");
+  InputInfo Input = Inputs.front();
+
+  // Get the type.
+  CmdArgs.push_back(TCArgs.MakeArgString(
+      Twine("-type=") + types::getTypeTempSuffix(Input.getType())));
+
+  // Get the targets.
+  SmallString<128> Triples;
+  Triples += "-targets=";
+  auto DepInfo = UA.getDependingActionsInfo();
+  for (unsigned I = 0; I < DepInfo.size(); ++I) {
+    if (I)
+      Triples += ',';
+
+    auto &Dep = DepInfo[I];
+    Triples += Action::GetOffloadKindName(Dep.DependingOffloadKind);
+    Triples += '-';
+    Triples += Dep.DependingToolChain->getTriple().normalize();
   }
 
-  if (IsUnbundle)
-    CmdArgs.push_back("-unbundle");
+  CmdArgs.push_back(TCArgs.MakeArgString(Triples));
+
+  // Get bundled file command.
+  CmdArgs.push_back(
+      TCArgs.MakeArgString(Twine("-inputs=") + Input.getFilename()));
+
+  // Get unbundled files command.
+  SmallString<128> UB;
+  UB += "-outputs=";
+  for (unsigned I = 0; I < Outputs.size(); ++I) {
+    if (I)
+      UB += ',';
+    UB += Outputs[I].getFilename();
+  }
+  CmdArgs.push_back(TCArgs.MakeArgString(UB));
+  CmdArgs.push_back("-unbundle");
 
   // All the inputs are encoded as commands.
   C.addCommand(llvm::make_unique<Command>(
@@ -7202,7 +7311,7 @@ constructHexagonLinkArgs(Compilation &C, const JobAction &JA,
                   {options::OPT_T_Group, options::OPT_e, options::OPT_s,
                    options::OPT_t, options::OPT_u_Group});
 
-  AddLinkerInputs(HTC, Inputs, Args, CmdArgs);
+  AddLinkerInputs(HTC, Inputs, Args, CmdArgs, JA);
 
   //----------------------------------------------------------------------------
   // Libraries
@@ -7261,7 +7370,7 @@ void amdgpu::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   std::string Linker = getToolChain().GetProgramPath(getShortName());
   ArgStringList CmdArgs;
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
   CmdArgs.push_back("-shared");
   CmdArgs.push_back("-o");
   CmdArgs.push_back(Output.getFilename());
@@ -7324,7 +7433,7 @@ void wasm::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("crti.o")));
   }
 
-  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
+  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs, JA);
 
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
     if (D.CCCIsCXX())
@@ -7668,7 +7777,7 @@ void cloudabi::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   if (D.isUsingLTO())
     AddGoldPlugin(ToolChain, Args, CmdArgs, D.getLTOMode() == LTOK_Thin);
 
-  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
+  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs, JA);
 
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
     if (D.CCCIsCXX())
@@ -8044,7 +8153,7 @@ void darwin::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   Args.AddAllArgs(CmdArgs, options::OPT_L);
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
   // Build the input file for -filelist (list of linker input files) in case we
   // need it later
   for (const auto &II : Inputs) {
@@ -8262,7 +8371,7 @@ void solaris::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddAllArgs(CmdArgs, {options::OPT_L, options::OPT_T_Group,
                             options::OPT_e, options::OPT_r});
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
 
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
     if (getToolChain().getDriver().CCCIsCXX())
@@ -8435,7 +8544,7 @@ void openbsd::Linker::ConstructJob(Compilation &C, const JobAction &JA,
                             options::OPT_e, options::OPT_s, options::OPT_t,
                             options::OPT_Z_Flag, options::OPT_r});
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
 
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
     if (D.CCCIsCXX()) {
@@ -8554,7 +8663,7 @@ void bitrig::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddAllArgs(CmdArgs,
                   {options::OPT_L, options::OPT_T_Group, options::OPT_e});
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
 
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
     if (D.CCCIsCXX()) {
@@ -8820,7 +8929,7 @@ void freebsd::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     AddGoldPlugin(ToolChain, Args, CmdArgs, D.getLTOMode() == LTOK_Thin);
 
   bool NeedsSanitizerDeps = addSanitizerRuntimes(ToolChain, Args, CmdArgs);
-  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
+  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs, JA);
 
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
     addOpenMPRuntime(CmdArgs, ToolChain, Args);
@@ -9027,9 +9136,7 @@ void netbsd::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     break;
   case llvm::Triple::armeb:
   case llvm::Triple::thumbeb:
-    arm::appendEBLinkFlags(
-        Args, CmdArgs,
-        llvm::Triple(getToolChain().ComputeEffectiveClangTriple(Args)));
+    arm::appendEBLinkFlags(Args, CmdArgs, getToolChain().getEffectiveTriple());
     CmdArgs.push_back("-m");
     switch (getToolChain().getTriple().getEnvironment()) {
     case llvm::Triple::EABI:
@@ -9117,7 +9224,7 @@ void netbsd::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddAllArgs(CmdArgs, options::OPT_Z_Flag);
   Args.AddAllArgs(CmdArgs, options::OPT_r);
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
 
   unsigned Major, Minor, Micro;
   getToolChain().getTriple().getOSVersion(Major, Minor, Micro);
@@ -9193,8 +9300,7 @@ void gnutools::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
                                        const char *LinkingOutput) const {
   claimNoWarnArgs(Args);
 
-  std::string TripleStr = getToolChain().ComputeEffectiveClangTriple(Args);
-  llvm::Triple Triple = llvm::Triple(TripleStr);
+  const llvm::Triple &Triple = getToolChain().getEffectiveTriple();
 
   ArgStringList CmdArgs;
 
@@ -9529,8 +9635,7 @@ void gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       static_cast<const toolchains::Linux &>(getToolChain());
   const Driver &D = ToolChain.getDriver();
 
-  std::string TripleStr = getToolChain().ComputeEffectiveClangTriple(Args);
-  llvm::Triple Triple = llvm::Triple(TripleStr);
+  const llvm::Triple &Triple = getToolChain().getEffectiveTriple();
 
   const llvm::Triple::ArchType Arch = ToolChain.getArch();
   const bool isAndroid = ToolChain.getTriple().isAndroid();
@@ -9661,7 +9766,7 @@ void gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   bool NeedsSanitizerDeps = addSanitizerRuntimes(ToolChain, Args, CmdArgs);
   bool NeedsXRayDeps = addXRayRuntime(ToolChain, Args, CmdArgs);
-  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
+  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs, JA);
   // The profile runtime also needs access to system libraries.
   getToolChain().addProfileRTLibs(Args, CmdArgs);
 
@@ -9700,25 +9805,25 @@ void gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
         WantPthread = true;
 
         // Also link the particular OpenMP runtimes.
-        switch (getOpenMPRuntime(ToolChain, Args)) {
-        case OMPRT_OMP:
+        switch (ToolChain.getDriver().getOpenMPRuntime(Args)) {
+        case Driver::OMPRT_OMP:
           CmdArgs.push_back("-lomp");
           break;
-        case OMPRT_GOMP:
+        case Driver::OMPRT_GOMP:
           CmdArgs.push_back("-lgomp");
 
           // FIXME: Exclude this for platforms with libgomp that don't require
           // librt. Most modern Linux platforms require it, but some may not.
           CmdArgs.push_back("-lrt");
           break;
-        case OMPRT_IOMP5:
+        case Driver::OMPRT_IOMP5:
           CmdArgs.push_back("-liomp5");
           break;
-        case OMPRT_Unknown:
+        case Driver::OMPRT_Unknown:
           // Already diagnosed.
           break;
         }
-        if (getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Host)
+        if (JA.isHostOffloading(Action::OFK_OpenMP))
           CmdArgs.push_back("-lomptarget");
       }
 
@@ -9766,7 +9871,7 @@ void gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   // Add OpenMP offloading linker script args if required.
-  AddOpenMPLinkerScript(getToolChain(), C, Output, Inputs, Args, CmdArgs);
+  AddOpenMPLinkerScript(getToolChain(), C, Output, Inputs, Args, CmdArgs, JA);
 
   C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, Inputs));
 }
@@ -9877,7 +9982,7 @@ void nacltools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.hasArg(options::OPT_Z_Xlinker__no_demangle))
     CmdArgs.push_back("--no-demangle");
 
-  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
+  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs, JA);
 
   if (D.CCCIsCXX() &&
       !Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
@@ -9989,7 +10094,7 @@ void minix::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddAllArgs(CmdArgs,
                   {options::OPT_L, options::OPT_T_Group, options::OPT_e});
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
 
   getToolChain().addProfileRTLibs(Args, CmdArgs);
 
@@ -10110,7 +10215,7 @@ void dragonfly::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddAllArgs(CmdArgs,
                   {options::OPT_L, options::OPT_T_Group, options::OPT_e});
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
 
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
     CmdArgs.push_back("-L/usr/lib/gcc50");
@@ -10288,16 +10393,16 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-nodefaultlib:vcompd.lib");
     CmdArgs.push_back(Args.MakeArgString(std::string("-libpath:") +
                                          TC.getDriver().Dir + "/../lib"));
-    switch (getOpenMPRuntime(getToolChain(), Args)) {
-    case OMPRT_OMP:
+    switch (TC.getDriver().getOpenMPRuntime(Args)) {
+    case Driver::OMPRT_OMP:
       CmdArgs.push_back("-defaultlib:libomp.lib");
       break;
-    case OMPRT_IOMP5:
+    case Driver::OMPRT_IOMP5:
       CmdArgs.push_back("-defaultlib:libiomp5md.lib");
       break;
-    case OMPRT_GOMP:
+    case Driver::OMPRT_GOMP:
       break;
-    case OMPRT_Unknown:
+    case Driver::OMPRT_Unknown:
       // Already diagnosed.
       break;
     }
@@ -10637,7 +10742,7 @@ void MinGW::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   Args.AddAllArgs(CmdArgs, options::OPT_L);
   TC.AddFilePathLibArgs(Args, CmdArgs);
-  AddLinkerInputs(TC, Inputs, Args, CmdArgs);
+  AddLinkerInputs(TC, Inputs, Args, CmdArgs, JA);
 
   // TODO: Add ASan stuff here
 
@@ -10761,7 +10866,7 @@ void XCore::Linker::ConstructJob(Compilation &C, const JobAction &JA,
                    false))
     CmdArgs.push_back("-fexceptions");
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
 
   const char *Exec = Args.MakeArgString(getToolChain().GetProgramPath("xcc"));
   C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, Inputs));
@@ -10915,7 +11020,7 @@ void CrossWindows::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   Args.AddAllArgs(CmdArgs, options::OPT_L);
   TC.AddFilePathLibArgs(Args, CmdArgs);
-  AddLinkerInputs(TC, Inputs, Args, CmdArgs);
+  AddLinkerInputs(TC, Inputs, Args, CmdArgs, JA);
 
   if (D.CCCIsCXX() && !Args.hasArg(options::OPT_nostdlib) &&
       !Args.hasArg(options::OPT_nodefaultlibs)) {
@@ -11096,7 +11201,7 @@ void tools::Myriad::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   TC.AddFilePathLibArgs(Args, CmdArgs);
 
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
+  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
 
   if (UseDefaultLibs) {
     if (C.getDriver().CCCIsCXX())
@@ -11205,7 +11310,7 @@ static void ConstructPS4LinkJob(const Tool &T, Compilation &C,
   if (Args.hasArg(options::OPT_Z_Xlinker__no_demangle))
     CmdArgs.push_back("--no-demangle");
 
-  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
+  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs, JA);
 
   if (Args.hasArg(options::OPT_pthread)) {
     CmdArgs.push_back("-lpthread");
@@ -11301,7 +11406,7 @@ static void ConstructGoldLinkJob(const Tool &T, Compilation &C,
   if (Args.hasArg(options::OPT_Z_Xlinker__no_demangle))
     CmdArgs.push_back("--no-demangle");
 
-  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
+  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs, JA);
 
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs)) {
     // For PS4, we always want to pass libm, libstdc++ and libkernel
@@ -11430,15 +11535,26 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
       static_cast<const toolchains::CudaToolChain &>(getToolChain());
   assert(TC.getTriple().isNVPTX() && "Wrong platform");
 
-  std::vector<std::string> gpu_archs =
-      Args.getAllArgValues(options::OPT_march_EQ);
-  assert(gpu_archs.size() == 1 && "Exactly one GPU Arch required for ptxas.");
-  const std::string& gpu_arch = gpu_archs[0];
+  StringRef gpu_arch_name;
+  std::vector<std::string> gpu_arch_names;
+  // If this is an OpenMP action we need to extract the device architecture from
+  // the -march option.
+  if (JA.isDeviceOffloading(Action::OFK_OpenMP)) {
+    gpu_arch_names = Args.getAllArgValues(options::OPT_march_EQ);
+    assert(gpu_arch_names.size() == 1 &&
+           "Exactly one GPU Arch required for ptxas.");
+    gpu_arch_name = gpu_arch_names[0];
+  } else
+    gpu_arch_name = JA.getOffloadingArch();
+
+  // Obtain architecture from the action.
+  CudaArch gpu_arch = StringToCudaArch(gpu_arch_name);
+  assert(gpu_arch != CudaArch::UNKNOWN &&
+         "Device action expected to have an architecture.");
 
   // Check that our installation's ptxas supports gpu_arch.
   if (!Args.hasArg(options::OPT_no_cuda_version_check)) {
-    TC.cudaInstallation().CheckCudaVersionSupportsArch(
-        StringToCudaArch(gpu_arch));
+    TC.cudaInstallation().CheckCudaVersionSupportsArch(gpu_arch);
   }
 
   ArgStringList CmdArgs;
@@ -11486,7 +11602,7 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-v");
 
   CmdArgs.push_back("--gpu-name");
-  CmdArgs.push_back(Args.MakeArgString(gpu_arch));
+  CmdArgs.push_back(Args.MakeArgString(CudaArchToString(gpu_arch)));
   CmdArgs.push_back("--output-file");
   CmdArgs.push_back(Args.MakeArgString(Output.getFilename()));
   for (const auto& II : Inputs)
@@ -11496,7 +11612,7 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(Args.MakeArgString(A));
 
   // In OpenMP we need to generate relocatable code.
-  if (getToolChain().getOffloadingKind() == ToolChain::OK_OpenMP_Device)
+  if (JA.isOffloading(Action::OFK_OpenMP))
     CmdArgs.push_back("-c");
 
   const char *Exec = Args.MakeArgString(TC.GetProgramPath("ptxas"));
@@ -11519,10 +11635,9 @@ void NVPTX::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   // OpenMP uses nvlink to link cubin files. The result will be embedded in the
   // host binary by the host linker.
-  assert(TC.getOffloadingKind() != ToolChain::OK_OpenMP_Host &&
+  assert(!JA.isHostOffloading(Action::OFK_OpenMP) &&
          "CUDA toolchain not expected for an OpenMP host device.");
-  if (TC.getOffloadingKind() == ToolChain::OK_OpenMP_Device) {
-
+  if (JA.isDeviceOffloading(Action::OFK_OpenMP)) {
     if (Output.isFilename()) {
       CmdArgs.push_back("-o");
       CmdArgs.push_back(Output.getFilename());
@@ -11591,7 +11706,7 @@ void NVPTX::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back(CubinF);
     }
 
-    AddOpenMPLinkerScript(getToolChain(), C, Output, Inputs, Args, CmdArgs);
+    AddOpenMPLinkerScript(getToolChain(), C, Output, Inputs, Args, CmdArgs, JA);
 
     // add paths specified in LIBRARY_PATH environment variable as -L options
     addDirectoryList(Args, CmdArgs, "-L", "LIBRARY_PATH");
@@ -11608,13 +11723,20 @@ void NVPTX::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   CmdArgs.push_back(Args.MakeArgString(Output.getFilename()));
 
   for (const auto& II : Inputs) {
-    auto* A = cast<const CudaDeviceAction>(II.getAction());
+    auto *A = II.getAction();
+    assert(A->getInputs().size() == 1 &&
+           "Device offload action is expected to have a single input");
+    const char *gpu_arch_str = A->getOffloadingArch();
+    assert(gpu_arch_str &&
+           "Device action expected to have associated a GPU architecture!");
+    CudaArch gpu_arch = StringToCudaArch(gpu_arch_str);
+
     // We need to pass an Arch of the form "sm_XX" for cubin files and
     // "compute_XX" for ptx.
     const char *Arch =
         (II.getType() == types::TY_PP_Asm)
-            ? CudaVirtualArchToString(VirtualArchForCudaArch(A->getGpuArch()))
-            : CudaArchToString(A->getGpuArch());
+            ? CudaVirtualArchToString(VirtualArchForCudaArch(gpu_arch))
+            : gpu_arch_str;
     CmdArgs.push_back(Args.MakeArgString(llvm::Twine("--image=profile=") +
                                          Arch + ",file=" + II.getFilename()));
   }

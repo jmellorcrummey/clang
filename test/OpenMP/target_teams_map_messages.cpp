@@ -419,7 +419,7 @@ T tmain(T argc) {
 #pragma omp target data map(j)
 #pragma omp target teams map(l) map(l[:5]) // expected-error 2 {{variable already marked as mapped in current construct}} expected-note 2 {{used here}}
   foo();
-#pragma omp target data map(k[:4], j, l[:5]) // expected-note 4 {{used here}}
+#pragma omp target data map(k[:4], j, l[:4]) // expected-note 4 {{used here}}
 #pragma omp target data map(k) // expected-error 2 {{pointer cannot be mapped along with a section derived from itself}}
 #pragma omp target data map(j)
 #pragma omp target teams map(l) // expected-error 2 {{original storage of expression in data environment is shared but data environment do not fully contain mapped expression storage}}
@@ -488,7 +488,7 @@ int main(int argc, char **argv) {
 #pragma omp target data map(j)
 #pragma omp target teams map(l) map(l[:5]) // expected-error {{variable already marked as mapped in current construct}} expected-note {{used here}}
   foo();
-#pragma omp target data map(k[:4], j, l[:5]) // expected-note 2 {{used here}}
+#pragma omp target data map(k[:4], j, l[:4]) // expected-note 2 {{used here}}
 #pragma omp target data map(k) // expected-error {{pointer cannot be mapped along with a section derived from itself}}
 #pragma omp target data map(j)
 #pragma omp target teams map(l) // expected-error {{original storage of expression in data environment is shared but data environment do not fully contain mapped expression storage}}

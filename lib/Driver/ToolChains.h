@@ -16,7 +16,6 @@
 #include "clang/Driver/Action.h"
 #include "clang/Driver/Multilib.h"
 #include "clang/Driver/ToolChain.h"
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/Support/Compiler.h"
@@ -224,8 +223,8 @@ public:
   bool isPICDefaultForced() const override;
   bool IsIntegratedAssemblerDefault() const override;
   llvm::opt::DerivedArgList *
-  TranslateOffloadArgs(const llvm::opt::DerivedArgList &Args,
-                       const char *BoundArch) const override;
+  TranslateArgs(const llvm::opt::DerivedArgList &Args, const char *BoundArch,
+                Action::OffloadKind DeviceOffloadKind) const override;
 
 protected:
   Tool *getTool(Action::ActionClass AC) const override;
@@ -316,16 +315,13 @@ public:
   /// @name ToolChain Implementation
   /// {
 
-  std::string ComputeEffectiveClangTriple(const llvm::opt::ArgList &Args,
-                                          types::ID InputType) const override;
-
   types::ID LookupTypeForExtension(const char *Ext) const override;
 
   bool HasNativeLLVMSupport() const override;
 
   llvm::opt::DerivedArgList *
-  TranslateArgs(const llvm::opt::DerivedArgList &Args,
-                const char *BoundArch) const override;
+  TranslateArgs(const llvm::opt::DerivedArgList &Args, const char *BoundArch,
+                Action::OffloadKind DeviceOffloadKind) const override;
 
   bool IsBlocksDefault() const override {
     // Always allow blocks on Apple; users interested in versioning are
@@ -529,8 +525,8 @@ public:
   bool isCrossCompiling() const override { return false; }
 
   llvm::opt::DerivedArgList *
-  TranslateArgs(const llvm::opt::DerivedArgList &Args,
-                const char *BoundArch) const override;
+  TranslateArgs(const llvm::opt::DerivedArgList &Args, const char *BoundArch,
+                Action::OffloadKind DeviceOffloadKind) const override;
 
   CXXStdlibType GetDefaultCXXStdlibType() const override;
   ObjCRuntime getDefaultObjCRuntime(bool isNonFragile) const override;
@@ -576,6 +572,8 @@ public:
   /// @name Apple ToolChain Implementation
   /// {
 
+  RuntimeLibType GetRuntimeLibType(const llvm::opt::ArgList &Args) const override;
+
   void AddLinkRuntimeLibArgs(const llvm::opt::ArgList &Args,
                              llvm::opt::ArgStringList &CmdArgs) const override;
 
@@ -614,8 +612,10 @@ public:
               const llvm::opt::ArgList &Args)
       : Generic_GCC(D, Triple, Args) {}
 
-  void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
-                             llvm::opt::ArgStringList &CC1Args) const override;
+  void
+  addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
+                        llvm::opt::ArgStringList &CC1Args,
+                        Action::OffloadKind DeviceOffloadKind) const override;
 };
 
 class LLVM_LIBRARY_VISIBILITY CloudABI : public Generic_ELF {
@@ -861,14 +861,12 @@ public:
                 const llvm::opt::ArgList &Args);
 
   llvm::opt::DerivedArgList *
-  TranslateArgs(const llvm::opt::DerivedArgList &Args,
-                const char *BoundArch) const override;
-  llvm::opt::DerivedArgList *
-  TranslateOffloadArgs(const llvm::opt::DerivedArgList &Args,
-                       const char *BoundArch) const override;
-  bool RequiresHostToolChainForOffloadingAction(const Action *A) const override;
-  void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
-                             llvm::opt::ArgStringList &CC1Args) const override;
+  TranslateArgs(const llvm::opt::DerivedArgList &Args, const char *BoundArch,
+                Action::OffloadKind DeviceOffloadKind) const override;
+  void
+  addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
+                        llvm::opt::ArgStringList &CC1Args,
+                        Action::OffloadKind DeviceOffloadKind) const override;
 
   // Never try to use the integrated assembler with CUDA; always fork out to
   // ptxas.
@@ -1038,8 +1036,8 @@ public:
                 const llvm::opt::ArgList &Args);
 
   llvm::opt::DerivedArgList *
-  TranslateArgs(const llvm::opt::DerivedArgList &Args,
-                const char *BoundArch) const override;
+  TranslateArgs(const llvm::opt::DerivedArgList &Args, const char *BoundArch,
+                Action::OffloadKind DeviceOffloadKind) const override;
 
   bool IsIntegratedAssemblerDefault() const override;
   bool IsUnwindTablesDefault() const override;
@@ -1132,8 +1130,10 @@ public:
   void
   AddClangSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,
                             llvm::opt::ArgStringList &CC1Args) const override;
-  void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
-                             llvm::opt::ArgStringList &CC1Args) const override;
+  void
+  addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
+                        llvm::opt::ArgStringList &CC1Args,
+                        Action::OffloadKind DeviceOffloadKind) const override;
   void AddClangCXXStdlibIncludeArgs(
       const llvm::opt::ArgList &DriverArgs,
       llvm::opt::ArgStringList &CC1Args) const override;
@@ -1186,8 +1186,10 @@ private:
   bool SupportsObjCGC() const override;
   bool SupportsProfiling() const override;
   bool HasNativeLLVMSupport() const override;
-  void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
-                             llvm::opt::ArgStringList &CC1Args) const override;
+  void
+  addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
+                        llvm::opt::ArgStringList &CC1Args,
+                        Action::OffloadKind DeviceOffloadKind) const override;
   RuntimeLibType GetDefaultRuntimeLibType() const override;
   CXXStdlibType GetCXXStdlibType(const llvm::opt::ArgList &Args) const override;
   void AddClangSystemIncludeArgs(

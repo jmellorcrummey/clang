@@ -11,13 +11,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "CodeGenFunction.h"
 #include "CGCall.h"
 #include "CGRecordLayout.h"
+#include "CodeGenFunction.h"
 #include "CodeGenModule.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/CodeGen/CGFunctionInfo.h"
-#include "llvm/ADT/StringExtras.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Operator.h"
@@ -549,7 +548,7 @@ static void EmitAtomicOp(CodeGenFunction &CGF, AtomicExpr *E, Address Dest,
   case AtomicExpr::AO__atomic_load: {
     llvm::LoadInst *Load = CGF.Builder.CreateLoad(Ptr);
     /// Add atomic qualifier, if the target supports an atomic load operation.
-    if(Atomics.targetHasAtomicLoadOp())
+    if (Atomics.targetHasAtomicLoadOp())
       Load->setAtomic(Order);
     Load->setVolatile(E->isVolatile());
     CGF.Builder.CreateStore(Load, Dest);
@@ -562,7 +561,7 @@ static void EmitAtomicOp(CodeGenFunction &CGF, AtomicExpr *E, Address Dest,
     llvm::Value *LoadVal1 = CGF.Builder.CreateLoad(Val1);
     llvm::StoreInst *Store = CGF.Builder.CreateStore(LoadVal1, Ptr);
     /// Add atomic qualifier, if target has atomic store operation.
-    if(Atomics.targetHasAtomicStoreOp())
+    if (Atomics.targetHasAtomicStoreOp())
       Store->setAtomic(Order);
     Store->setVolatile(E->isVolatile());
     return;
@@ -1270,7 +1269,7 @@ llvm::Value *AtomicInfo::EmitAtomicLoadOp(llvm::AtomicOrdering AO,
   llvm::LoadInst *Load = CGF.Builder.CreateLoad(Addr, "atomic-load");
 
   /// Add atomic qualifier, if the target supports an atomic load operation.
-  if(targetHasAtomicLoadOp())
+  if (targetHasAtomicLoadOp())
     Load->setAtomic(AO);
 
   // Other decoration.
@@ -1785,7 +1784,7 @@ void CodeGenFunction::EmitAtomicStore(RValue rvalue, LValue dest,
         intValue, addr.getElementType(), /*isSigned=*/false);
     llvm::StoreInst *store = Builder.CreateStore(intValue, addr);
 
-    /// Initializations don't need to be atomic, and only emit qualifier 
+    /// Initializations don't need to be atomic, and only emit qualifier
     /// if the target supports and atomic store operation.
     if (!isInit && atomics.targetHasAtomicStoreOp())
       store->setAtomic(AO);

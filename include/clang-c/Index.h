@@ -2014,7 +2014,11 @@ enum CXCursorKind {
    */
   CXCursor_OMPArraySectionExpr           = 147,
 
-  CXCursor_LastExpr                      = CXCursor_OMPArraySectionExpr,
+  /** \brief Represents an @available(...) check.
+   */
+  CXCursor_ObjCAvailabilityCheckExpr     = 148,
+
+  CXCursor_LastExpr                      = CXCursor_ObjCAvailabilityCheckExpr,
 
   /* Statements */
   CXCursor_FirstStmt                     = 200,
@@ -2321,17 +2325,21 @@ enum CXCursorKind {
    */
   CXCursor_OMPTargetParallelForSimdDirective = 269,
 
+  /** \brief OpenMP target simd directive.
+   */
+  CXCursor_OMPTargetSimdDirective = 270,
+
   /** \brief OpenMP target teams directive.
    */
-  CXCursor_OMPTargetTeamsDirective = 270,
+  CXCursor_OMPTargetTeamsDirective = 271,
 
   /** \brief OpenMP teams distribute parallel for directive.
    */
-  CXCursor_OMPTeamsDistributeParallelForDirective = 271,
+  CXCursor_OMPTeamsDistributeParallelForDirective = 272,
 
   /** \brief OpenMP target teams distribute parallel for directive.
    */
-  CXCursor_OMPTargetTeamsDistributeParallelForDirective = 272,
+  CXCursor_OMPTargetTeamsDistributeParallelForDirective = 273,
 
   CXCursor_LastStmt     = CXCursor_OMPTargetTeamsDistributeParallelForDirective,
 
