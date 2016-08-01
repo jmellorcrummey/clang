@@ -1,6 +1,10 @@
 // RUN:   %clangxx -DCK1 -fopenmp -target x86_64-pc-linux-gnu -fopenmp-targets=nvptx64-nvidia-cuda -O3 -S -emit-llvm %s -o - \
 // RUN:   | FileCheck --check-prefix CK1 %s
 #ifdef CK1
+
+
+// CK1: define void @__omp_offloading_{{.+}}bar{{.+}}
+
 int foo (float myvar)
 {
   int a;
@@ -12,8 +16,7 @@ int foo (float myvar)
 int bar (int a, float b){
   int c = a + foo(b);
 
-  // CK1: tgt_target
-  // CK1: define void @__omp_offloading
+  // CK1: tgt_target(i32 -1
   #pragma omp target
     b = a+1;
 

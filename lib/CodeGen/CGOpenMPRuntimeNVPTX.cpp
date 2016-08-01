@@ -2995,6 +2995,72 @@ void CGOpenMPRuntimeNVPTX::emitSimdCall(CodeGenFunction &CGF,
   emitParallelismLevelCode(CGF, SeqGen, L1SimdGen, SeqGen);
 }
 
+/// \brief Emits a critical region.
+/// \param CriticalName Name of the critical region.
+/// \param CriticalOpGen Generator for the statement associated with the given
+/// critical region.
+/// \param Hint Value of the 'hint' clause (optional).
+void CGOpenMPRuntimeNVPTX::emitCriticalRegion(CodeGenFunction &CGF,
+    StringRef CriticalName, const RegionCodeGenTy &CriticalOpGen,
+    SourceLocation Loc, const Expr *Hint) {
+
+  auto *LoopBB = CGF.createBasicBlock("omp.critical.loop");
+  auto *TestBB = CGF.createBasicBlock("omp.critical.test");
+  auto *SyncBB = CGF.createBasicBlock("omp.critical.sync");
+  auto *BodyBB = CGF.createBasicBlock("omp.critical.body");
+  auto *ExitBB = CGF.createBasicBlock("omp.critical.exit");
+
+  /// Fetch team-local id of the thread.
+  auto ThreadID = GetNVPTXThreadID(CGF);
+
+  /// Get the width of the team.
+  auto TeamWidth = GetNVPTXNumThreads(CGF);
+
+  /// Initialise the counter variable for the loop.
+  auto Int32Ty =
+    CGF.getContext().getIntTypeForBitwidth(/*DestWidth*/ 32, /*Signed*/ true);
+  auto Counter = CGF.CreateMemTemp(Int32Ty, "critical_counter");
+  auto CounterLVal = CGF.MakeNaturalAlignAddrLValue(Counter.getPointer(), Int32Ty);
+  CGF.EmitStoreOfScalar(llvm::ConstantInt::get(CGM.Int32Ty, 0), CounterLVal);
+  CGF.EmitBranch(LoopBB);
+
+  /// Block checks if loop counter exceeds upper bound.
+  CGF.EmitBlock(LoopBB);
+  auto *CounterVal = CGF.EmitLoadOfScalar(CounterLVal, Loc);
+  auto *CmpLoopBound = CGF.Builder.CreateICmpSLT(CounterVal, TeamWidth);
+  CGF.Builder.CreateCondBr(CmpLoopBound, TestBB, ExitBB);
+
+  /// Block tests which single thread should execute region, and
+  /// which threads should go straight to synchronisation point.
+  CGF.EmitBlock(TestBB);
+  CounterVal = CGF.EmitLoadOfScalar(CounterLVal, Loc);
+  auto *CmpThreadToCounter = CGF.Builder.CreateICmpEQ(ThreadID, CounterVal);
+  CGF.Builder.CreateCondBr(CmpThreadToCounter, BodyBB, SyncBB);
+
+  /// Block emits the body of the critical region.
+  CGF.EmitBlock(BodyBB);
+
+  /// Output the critical statement.
+  CriticalOpGen(CGF);
+
+  /// After the body surrounded by the critical region, the single executing
+  /// thread will jump to the synchronisation point.
+  CGF.EmitBranch(SyncBB);
+
+  /// Block waits for all threads in current team to finish then increments
+  /// the counter variable and returns to the loop.
+  CGF.EmitBlock(SyncBB);
+  GetNVPTXCTABarrier(CGF);
+
+  auto *IncCounterVal =
+    CGF.Builder.CreateNSWAdd(CounterVal, CGF.Builder.getInt32(1));
+  CGF.EmitStoreOfScalar(IncCounterVal, CounterLVal);
+  CGF.EmitBranch(LoopBB);
+
+  /// Block that is reached when  all threads in the team complete the region.
+  CGF.EmitBlock(ExitBB, /*IsFinished=*/true);
+}
+
 //
 // Generate optimized code resembling static schedule with chunk size of 1
 // whenever the standard gives us freedom.  This allows maximum coalescing on

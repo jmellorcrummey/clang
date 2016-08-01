@@ -80,6 +80,7 @@ TargetInfo::TargetInfo(const llvm::Triple &T) : TargetOpts(), Triple(T) {
   SSERegParmMax = 0;
   HasAlignMac68kSupport = false;
   HasBuiltinMSVaList = false;
+  IsRenderScriptTarget = false;
   HasAtomicLoadOp = true;
   HasAtomicStoreOp = true;
 

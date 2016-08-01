@@ -32,7 +32,6 @@
 #include "llvm/Option/OptSpecifier.h"
 #include "llvm/Option/OptTable.h"
 #include "llvm/Option/Option.h"
-#include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
@@ -55,12 +54,12 @@ Driver::Driver(StringRef ClangExecutable, StringRef DefaultTargetTriple,
       Mode(GCCMode), SaveTemps(SaveTempsNone), BitcodeEmbed(EmbedNone),
       LTOMode(LTOK_None), ClangExecutable(ClangExecutable),
       SysRoot(DEFAULT_SYSROOT), UseStdLib(true),
-      DefaultTargetTriple(DefaultTargetTriple),
       DriverTitle("clang LLVM compiler"), CCPrintOptionsFilename(nullptr),
       CCPrintHeadersFilename(nullptr), CCLogDiagnosticsFilename(nullptr),
       CCCPrintBindings(false), CCPrintHeaders(false), CCLogDiagnostics(false),
-      CCGenDiagnostics(false), CCCGenericGCCName(""), CheckInputsExist(true),
-      CCCUsePCH(true), SuppressMissingInputWarning(false) {
+      CCGenDiagnostics(false), DefaultTargetTriple(DefaultTargetTriple),
+      CCCGenericGCCName(""), CheckInputsExist(true), CCCUsePCH(true),
+      SuppressMissingInputWarning(false) {
 
   // Provide a sane fallback if no VFS is specified.
   if (!this->VFS)
@@ -87,7 +86,6 @@ Driver::~Driver() {
   delete Opts;
 
   llvm::DeleteContainerSeconds(ToolChains);
-  llvm::DeleteContainerSeconds(OffloadToolChains);
 }
 
 void Driver::ParseDriverMode(ArrayRef<const char *> Args) {
@@ -143,10 +141,7 @@ InputArgList Driver::ParseArgStrings(ArrayRef<const char *> ArgStrings) {
     }
 
     // Warn about -mcpu= without an argument.
-    if ((A->getOption().matches(options::OPT_mcpu_EQ) &&
-         A->containsValue("")) ||
-        (A->getOption().matches(options::OPT_fopenmp_targets_EQ) &&
-         !A->getNumValues())) {
+    if (A->getOption().matches(options::OPT_mcpu_EQ) && A->containsValue("")) {
       Diag(clang::diag::warn_drv_empty_joined_argument) << A->getAsString(Args);
     }
   }
@@ -202,258 +197,6 @@ phases::ID Driver::getFinalPhase(const DerivedArgList &DAL,
     *FinalPhaseArg = PhaseArg;
 
   return FinalPhase;
-}
-
-/// \brief Return true if the provided arguments require OpenMP offloading.
-static bool RequiresOpenMPOffloading(ArgList &Args) {
-  if (Args.hasFlag(options::OPT_fopenmp, options::OPT_fopenmp_EQ,
-                   options::OPT_fno_openmp, false)) {
-    StringRef OpenMPRuntimeName(CLANG_DEFAULT_OPENMP_RUNTIME);
-    if (const Arg *A = Args.getLastArg(options::OPT_fopenmp_EQ))
-      OpenMPRuntimeName = A->getValue();
-
-    if (OpenMPRuntimeName == "libomp" || OpenMPRuntimeName == "libiomp5") {
-      auto *A = Args.getLastArg(options::OPT_fopenmp_targets_EQ);
-      return A != nullptr && A->getNumValues();
-    }
-  }
-  return false;
-}
-/// \brief Return true if the provided tool chain require OpenMP offloading.
-static bool RequiresOpenMPOffloading(const ToolChain *TC) {
-  return TC->getOffloadingKind() == ToolChain::OK_OpenMP_Host ||
-         TC->getOffloadingKind() == ToolChain::OK_OpenMP_Device;
-}
-
-/// \brief Dump the job bindings for a given action.
-static void DumpJobBindings(ArrayRef<const ToolChain *> TCs, StringRef ToolName,
-                            ArrayRef<InputInfo> Inputs,
-                            ArrayRef<InputInfo> Outputs) {
-
-  llvm::errs() << "# \"";
-  for (unsigned i = 0, e = TCs.size(); i != e; ++i) {
-    llvm::errs() << TCs[i]->getTripleString();
-    if (i + 1 != e)
-      llvm::errs() << ", ";
-  }
-
-  llvm::errs() << "\" - \"" << ToolName << "\", inputs: [";
-  for (unsigned i = 0, e = Inputs.size(); i != e; ++i) {
-    llvm::errs() << Inputs[i].getAsString();
-    if (i + 1 != e)
-      llvm::errs() << ", ";
-  }
-  llvm::errs() << "], ";
-  llvm::errs() << ((Outputs.size() > 1) ? "outputs: [" : "output: ");
-  for (unsigned i = 0, e = Outputs.size(); i != e; ++i) {
-    llvm::errs() << Outputs[i].getAsString();
-    if (i + 1 != e)
-      llvm::errs() << ", ";
-  }
-  llvm::errs() << ((Outputs.size() > 1) ? "]\n" : "\n");
-  return;
-}
-
-/// \brief Create output for a given action, if any.
-static InputInfo CreateActionResult(Compilation &C, const Action *A,
-                                    const char *BaseInput,
-                                    const char *BoundArch, bool AtTopLevel,
-                                    bool MultipleArchs) {
-  InputInfo Result;
-  const JobAction *JA = cast<JobAction>(A);
-  if (JA->getType() == types::TY_Nothing)
-    Result = InputInfo(A, BaseInput);
-  else
-    Result =
-        InputInfo(A->getType(),
-                  C.getDriver().GetNamedOutputPath(C, *JA, BaseInput, BoundArch,
-                                                   AtTopLevel, MultipleArchs),
-                  BaseInput);
-  return Result;
-}
-
-static const char *CreateOffloadingPseudoArchName(Compilation &C,
-                                                  const ToolChain *TC) {
-  SmallString<128> Name;
-  switch (TC->getOffloadingKind()) {
-  default:
-    llvm_unreachable("Offload information was not specified.");
-    break;
-  case ToolChain::OK_OpenMP_Host:
-    Name = "offload-host-";
-    break;
-  case ToolChain::OK_OpenMP_Device:
-    Name = "offload-device-";
-    break;
-  }
-
-  Name += TC->getTripleString();
-  return C.getArgs().MakeArgString(Name.str());
-}
-
-InputInfo Driver::CreateUnbundledOffloadingResult(
-    Compilation &C, const Action *CurAction, const ToolChain *TC,
-    InputInfo Result, OffloadingHostResultsTy &OffloadingHostResults) const {
-  assert(!OrderedOffloadingToolchains.empty() &&
-         !types::isSrcFile(Result.getType()) &&
-         "Not expecting to create a bundling action!");
-
-  auto *UnbundleAction = cast<OffloadUnbundlingJobAction>(CurAction);
-
-  // If this is an offloading device toolchain, we need to use the results
-  // cached when the host input was processed, except if the input is a source
-  // file.
-  if (TC->getOffloadingKind() == ToolChain::OK_OpenMP_Device) {
-    // If this is not a source file, it had to be part of a bundle. So we need
-    // to checkout the results created by the host when this input was processed
-    // for the host toolchain.
-    auto ILIt = OffloadingHostResults.find(UnbundleAction);
-    assert(ILIt != OffloadingHostResults.end() &&
-           "Offloading inputs do not exist??");
-    InputInfoList &IL = ILIt->getSecond();
-    assert(IL.size() == OrderedOffloadingToolchains.size() + 1 &&
-           "Not all offloading inputs exist??");
-
-    // Get the order of the toolchain and retrieve the input;
-    unsigned Order = 1;
-    for (auto *OffloadTC : OrderedOffloadingToolchains) {
-      if (OffloadTC == TC)
-        break;
-      ++Order;
-    }
-    return IL[Order];
-  }
-
-  // Otherwise, this input is expected to be bundled. Therefore we need to issue
-  // an unbundling command.
-
-  // The bundled file is the input.
-  InputInfo BundledFile = Result;
-
-  // Create the input info for the unbundled files.
-  InputInfoList &UnbundledFiles = OffloadingHostResults[UnbundleAction];
-  {
-    InputInfo HostResult = CreateActionResult(
-        C, UnbundleAction, Result.getBaseInput(),
-        CreateOffloadingPseudoArchName(C, TC), /*AtTopLevel=*/
-        false, /*MultipleArchs=*/false);
-    UnbundledFiles.push_back(HostResult);
-    for (auto *OffloadTC : OrderedOffloadingToolchains) {
-      InputInfo TargetResult = CreateActionResult(
-          C, UnbundleAction, Result.getBaseInput(),
-          CreateOffloadingPseudoArchName(C, OffloadTC), /*AtTopLevel=*/
-          false, /*MultipleArchs=*/false);
-      UnbundledFiles.push_back(TargetResult);
-    }
-  }
-
-  auto OffloadBundlerTool = TC->SelectTool(*UnbundleAction);
-
-  // Emit the command or dump the bindings.
-  if (CCCPrintBindings && !CCGenDiagnostics) {
-    SmallVector<const ToolChain *, 4> AllToolChains;
-    AllToolChains.push_back(TC);
-    AllToolChains.append(OrderedOffloadingToolchains.begin(),
-                         OrderedOffloadingToolchains.end());
-    DumpJobBindings(AllToolChains, OffloadBundlerTool->getName(), BundledFile,
-                    UnbundledFiles);
-  } else {
-    OffloadBundlerTool->ConstructJob(C, *UnbundleAction, BundledFile,
-                                     UnbundledFiles, C.getArgs(), nullptr);
-  }
-
-  // The host result is the first of the unbundled files.
-  return UnbundledFiles.front();
-}
-
-InputInfo Driver::CreateBundledOffloadingResult(Compilation &C,
-                                                const Action *CurAction,
-                                                const ToolChain *TC,
-                                                InputInfoList Results) const {
-  assert(!OrderedOffloadingToolchains.empty() &&
-         "Not expecting to create a bundling action!");
-
-  auto *BundleAction = cast<OffloadBundlingJobAction>(CurAction);
-
-  // Get the result file based on BaseInput file name and the previous host
-  // action.
-  InputInfo BundledFile = CreateActionResult(
-      C, *BundleAction->input_begin(), Results[0].getBaseInput(),
-      /*BoundArch=*/nullptr,
-      /*AtTopLevel=*/true, /*MultipleArchs=*/false);
-
-  // The unbundled files are the previous action result for each target.
-  InputInfoList &UnbundledFiles = Results;
-
-  // Create the bundling command.
-  auto OffloadBundlerTool = TC->SelectTool(*BundleAction);
-
-  // Emit the command or dump the bindings.
-  if (CCCPrintBindings && !CCGenDiagnostics) {
-    SmallVector<const ToolChain *, 4> AllToolChains;
-    AllToolChains.push_back(TC);
-    AllToolChains.append(OrderedOffloadingToolchains.begin(),
-                         OrderedOffloadingToolchains.end());
-    DumpJobBindings(AllToolChains, OffloadBundlerTool->getName(),
-                    UnbundledFiles, BundledFile);
-  } else {
-    OffloadBundlerTool->ConstructJob(C, *BundleAction, BundledFile,
-                                     UnbundledFiles, C.getArgs(), nullptr);
-  }
-
-  return BundledFile;
-}
-
-void Driver::PostProcessOffloadingInputsAndResults(
-    Compilation &C, const JobAction *JA, const ToolChain *TC,
-    InputInfoList &Inputs, InputInfo Result,
-    std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults,
-    OffloadingHostResultsTy &OffloadingHostResults) const {
-
-  // If this driver run requires OpenMP offloading we need to make sure
-  // everything gets combined at link time. Also, all the compile phase results
-  // obtained for the host are used as inputs in the device side.
-  if (RequiresOpenMPOffloading(TC)) {
-
-    if (isa<LinkJobAction>(JA) &&
-        TC->getOffloadingKind() == ToolChain::OK_OpenMP_Host) {
-      // Get link results for all targets.
-      InputInfoList TgtLinkResults(OrderedOffloadingToolchains.size());
-      for (unsigned i = 0; i < OrderedOffloadingToolchains.size(); ++i) {
-        const ToolChain *TgtTC = OrderedOffloadingToolchains[i];
-        TgtLinkResults[i] = BuildJobsForAction(
-            C, JA, TgtTC, CreateOffloadingPseudoArchName(C, TgtTC),
-            /*AtTopLevel=*/false,
-            /*MultipleArchs=*/true, /*LinkingOutput=*/nullptr, CachedResults,
-            OffloadingHostResults);
-      }
-      Inputs.append(TgtLinkResults.begin(), TgtLinkResults.end());
-      return;
-    }
-
-    if (isa<CompileJobAction>(JA) &&
-        TC->getOffloadingKind() == ToolChain::OK_OpenMP_Device) {
-      // Find the host compile result.
-      auto ILIt = OffloadingHostResults.find(JA);
-      assert(ILIt != OffloadingHostResults.end() &&
-             "The OpenMP host side action is expected to be processed before!");
-      InputInfoList &IL = ILIt->getSecond();
-      assert(IL.size() == 1 && "Host compile results should only be one!");
-      Inputs.push_back(IL.front());
-      return;
-    }
-
-    // If this is a host action, make sure it is recorded in the offloading
-    // results cache.
-    if (TC->getOffloadingKind() == ToolChain::OK_OpenMP_Host)
-      OffloadingHostResults[JA].push_back(Result);
-
-    return;
-  }
-
-  //
-  // Add post-processing code for other offloading implementations here.
-  //
 }
 
 static Arg *MakeInputArg(DerivedArgList &Args, OptTable *Opts,
@@ -679,6 +422,32 @@ void Driver::setLTOMode(const llvm::opt::ArgList &Args) {
   }
 }
 
+/// Compute the desired OpenMP runtime from the flags provided.
+Driver::OpenMPRuntimeKind Driver::getOpenMPRuntime(const ArgList &Args) const {
+  StringRef RuntimeName(CLANG_DEFAULT_OPENMP_RUNTIME);
+
+  const Arg *A = Args.getLastArg(options::OPT_fopenmp_EQ);
+  if (A)
+    RuntimeName = A->getValue();
+
+  auto RT = llvm::StringSwitch<OpenMPRuntimeKind>(RuntimeName)
+                .Case("libomp", OMPRT_OMP)
+                .Case("libgomp", OMPRT_GOMP)
+                .Case("libiomp5", OMPRT_IOMP5)
+                .Default(OMPRT_Unknown);
+
+  if (RT == OMPRT_Unknown) {
+    if (A)
+      Diag(diag::err_drv_unsupported_option_argument)
+          << A->getOption().getName() << A->getValue();
+    else
+      // FIXME: We could use a nicer diagnostic here.
+      Diag(diag::err_drv_unsupported_opt) << "-fopenmp";
+  }
+
+  return RT;
+}
+
 void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
                                               InputList &Inputs) {
 
@@ -691,10 +460,65 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
       })) {
     const ToolChain &TC = getToolChain(
         C.getInputArgs(),
-        llvm::Triple(C.getOffloadingHostToolChain()->getTriple().isArch64Bit()
+        llvm::Triple(C.getSingleOffloadToolChain<Action::OFK_Host>()
+                             ->getTriple()
+                             .isArch64Bit()
                          ? "nvptx64-nvidia-cuda"
                          : "nvptx-nvidia-cuda"));
     C.addOffloadDeviceToolChain(&TC, Action::OFK_Cuda);
+  }
+
+  //
+  // OpenMP
+  //
+  // We need to generate an OpenMP toolchain if the user specified targets with
+  // the -fopenmp-targets option.
+  if (Arg *OpenMPTargets =
+          C.getInputArgs().getLastArg(options::OPT_fopenmp_targets_EQ)) {
+    if (OpenMPTargets->getNumValues()) {
+      // We expect that -fopenmp-targets is always used in conjunction with the
+      // option -fopenmp specifying a valid runtime with offloading support,
+      // i.e. libomp or libiomp.
+      bool HasValidOpenMPRuntime = C.getInputArgs().hasFlag(
+          options::OPT_fopenmp, options::OPT_fopenmp_EQ,
+          options::OPT_fno_openmp, false);
+      if (HasValidOpenMPRuntime) {
+        OpenMPRuntimeKind OpenMPKind = getOpenMPRuntime(C.getInputArgs());
+        HasValidOpenMPRuntime =
+            OpenMPKind == OMPRT_OMP || OpenMPKind == OMPRT_IOMP5;
+      }
+
+      if (HasValidOpenMPRuntime) {
+        llvm::StringMap<const char *> FoundNormalizedTriples;
+        for (const char *Val : OpenMPTargets->getValues()) {
+          llvm::Triple TT(Val);
+          std::string NormalizedName = TT.normalize();
+
+          // Make sure we don't have a duplicate triple.
+          auto Duplicate = FoundNormalizedTriples.find(NormalizedName);
+          if (Duplicate != FoundNormalizedTriples.end()) {
+            Diag(clang::diag::warn_drv_omp_offload_target_duplicate)
+                << Val << Duplicate->second;
+            continue;
+          }
+
+          // Store the current triple so that we can check for duplicates in the
+          // following iterations.
+          FoundNormalizedTriples[NormalizedName] = Val;
+
+          // If the specified target is invalid, emit a diagnostic.
+          if (TT.getArch() == llvm::Triple::UnknownArch)
+            Diag(clang::diag::err_drv_invalid_omp_target) << Val;
+          else {
+            const ToolChain &TC = getToolChain(C.getInputArgs(), TT);
+            C.addOffloadDeviceToolChain(&TC, Action::OFK_OpenMP);
+          }
+        }
+      } else
+        Diag(clang::diag::err_drv_expecting_fopenmp_with_fopenmp_targets);
+    } else
+      Diag(clang::diag::warn_drv_empty_joined_argument)
+          << OpenMPTargets->getAsString(C.getInputArgs());
   }
 
   //
@@ -710,8 +534,9 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   // FIXME: Handle environment options which affect driver behavior, somewhere
   // (client?). GCC_EXEC_PREFIX, LPATH, CC_PRINT_OPTIONS.
 
-  if (char *env = ::getenv("COMPILER_PATH")) {
-    StringRef CompilerPath = env;
+  if (Optional<std::string> CompilerPathValue =
+          llvm::sys::Process::GetEnv("COMPILER_PATH")) {
+    StringRef CompilerPath = *CompilerPathValue;
     while (!CompilerPath.empty()) {
       std::pair<StringRef, StringRef> Split =
           CompilerPath.split(llvm::sys::EnvPathSeparator);
@@ -817,44 +642,9 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   // Perform the default argument translations.
   DerivedArgList *TranslatedArgs = TranslateInputArgs(*UArgs);
 
-  // Check if we need offloading support by the toolchains.
-  ToolChain::OffloadingKind HostOffloadingKind = ToolChain::OK_None;
-  ToolChain::OffloadingKind DeviceOffloadingKind = ToolChain::OK_None;
-  // Check if we need OpenMP offloading
-  if (RequiresOpenMPOffloading(*UArgs)) {
-    HostOffloadingKind = ToolChain::OK_OpenMP_Host;
-    DeviceOffloadingKind = ToolChain::OK_OpenMP_Device;
-  }
-
   // Owned by the host.
   const ToolChain &TC = getToolChain(
-      *UArgs, computeTargetTriple(*this, DefaultTargetTriple, *UArgs),
-      HostOffloadingKind);
-
-  // Get the toolchains for the offloading targets if any. We need to read the
-  // offloading toolchains only if we have a compatible runtime library, and
-  // that would be either libomp or libiomp.
-  OrderedOffloadingToolchains.clear();
-
-  if (DeviceOffloadingKind == ToolChain::OK_OpenMP_Device) {
-    Arg *Tgts = UArgs->getLastArg(options::OPT_fopenmp_targets_EQ);
-    assert(Tgts && Tgts->getNumValues() &&
-           "OpenMP offloading has to have targets specified.");
-
-    for (unsigned v = 0; v < Tgts->getNumValues(); ++v) {
-      const char *Val = Tgts->getValue(v);
-      llvm::Triple TT(Val);
-
-      // If the specified target is invalid, emit error
-      if (TT.getArch() == llvm::Triple::UnknownArch)
-        Diag(clang::diag::err_drv_invalid_omp_target) << Val;
-      else {
-        const ToolChain &OffloadTC =
-            getToolChain(*UArgs, TT, DeviceOffloadingKind);
-        OrderedOffloadingToolchains.push_back(&OffloadTC);
-      }
-    }
-  }
+      *UArgs, computeTargetTriple(*this, DefaultTargetTriple, *UArgs));
 
   // The compilation takes ownership of Args.
   Compilation *C = new Compilation(*this, TC, UArgs.release(), TranslatedArgs);
@@ -1313,19 +1103,33 @@ static unsigned PrintActions1(const Compilation &C, Action *A,
   } else if (BindArchAction *BIA = dyn_cast<BindArchAction>(A)) {
     os << '"' << BIA->getArchName() << '"' << ", {"
        << PrintActions1(C, *BIA->input_begin(), Ids) << "}";
-  } else if (CudaDeviceAction *CDA = dyn_cast<CudaDeviceAction>(A)) {
-    CudaArch Arch = CDA->getGpuArch();
-    if (Arch != CudaArch::UNKNOWN)
-      os << "'" << CudaArchToString(Arch) << "', ";
-    os << "{" << PrintActions1(C, *CDA->input_begin(), Ids) << "}";
+  } else if (OffloadAction *OA = dyn_cast<OffloadAction>(A)) {
+    bool IsFirst = true;
+    OA->doOnEachDependence(
+        [&](Action *A, const ToolChain *TC, const char *BoundArch) {
+          // E.g. for two CUDA device dependences whose bound arch is sm_20 and
+          // sm_35 this will generate:
+          // "cuda-device" (nvptx64-nvidia-cuda:sm_20) {#ID}, "cuda-device"
+          // (nvptx64-nvidia-cuda:sm_35) {#ID}
+          if (!IsFirst)
+            os << ", ";
+          os << '"';
+          if (TC)
+            os << A->getOffloadingKindPrefix();
+          else
+            os << "host";
+          os << " (";
+          os << TC->getTriple().normalize();
+
+          if (BoundArch)
+            os << ":" << BoundArch;
+          os << ")";
+          os << '"';
+          os << " {" << PrintActions1(C, A, Ids) << "}";
+          IsFirst = false;
+        });
   } else {
-    const ActionList *AL;
-    if (CudaHostAction *CHA = dyn_cast<CudaHostAction>(A)) {
-      os << "{" << PrintActions1(C, *CHA->input_begin(), Ids) << "}"
-         << ", gpu binaries ";
-      AL = &CHA->getDeviceActions();
-    } else
-      AL = &A->getInputs();
+    const ActionList *AL = &A->getInputs();
 
     if (AL->size()) {
       const char *Prefix = "{";
@@ -1338,10 +1142,24 @@ static unsigned PrintActions1(const Compilation &C, Action *A,
       os << "{}";
   }
 
+  // Append offload info for all options other than the offloading action
+  // itself (e.g. (cuda-device, sm_20) or (cuda-host)).
+  std::string offload_str;
+  llvm::raw_string_ostream offload_os(offload_str);
+  if (!isa<OffloadAction>(A)) {
+    auto S = A->getOffloadingKindPrefix();
+    if (!S.empty()) {
+      offload_os << ", (" << S;
+      if (A->getOffloadingArch())
+        offload_os << ", " << A->getOffloadingArch();
+      offload_os << ")";
+    }
+  }
+
   unsigned Id = Ids.size();
   Ids[A] = Id;
   llvm::errs() << Id << ": " << os.str() << ", "
-               << types::getTypeName(A->getType()) << "\n";
+               << types::getTypeName(A->getType()) << offload_os.str() << "\n";
 
   return Id;
 }
@@ -1649,121 +1467,720 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
   }
 }
 
-// For each unique --cuda-gpu-arch= argument creates a TY_CUDA_DEVICE
-// input action and then wraps each in CudaDeviceAction paired with
-// appropriate GPU arch name. In case of partial (i.e preprocessing
-// only) or device-only compilation, each device action is added to /p
-// Actions and /p Current is released. Otherwise the function creates
-// and returns a new CudaHostAction which wraps /p Current and device
-// side actions.
-static Action *buildCudaActions(Compilation &C, DerivedArgList &Args,
-                                const Arg *InputArg, Action *HostAction,
-                                ActionList &Actions) {
-  Arg *PartialCompilationArg = Args.getLastArg(
-      options::OPT_cuda_host_only, options::OPT_cuda_device_only,
-      options::OPT_cuda_compile_host_device);
-  bool CompileHostOnly =
-      PartialCompilationArg &&
-      PartialCompilationArg->getOption().matches(options::OPT_cuda_host_only);
-  bool CompileDeviceOnly =
-      PartialCompilationArg &&
-      PartialCompilationArg->getOption().matches(options::OPT_cuda_device_only);
+namespace {
+/// Provides a convenient interface for different programming models to generate
+/// the required device actions.
+class OffloadingActionBuilder final {
+  /// Flag used to trace errors in the builder.
+  bool IsValid = false;
 
-  if (CompileHostOnly)
-    return C.MakeAction<CudaHostAction>(HostAction, ActionList());
+  /// The compilation that is using this builder.
+  Compilation &C;
 
-  // Collect all cuda_gpu_arch parameters, removing duplicates.
-  SmallVector<CudaArch, 4> GpuArchList;
-  llvm::SmallSet<CudaArch, 4> GpuArchs;
-  for (Arg *A : Args) {
-    if (!A->getOption().matches(options::OPT_cuda_gpu_arch_EQ))
-      continue;
-    A->claim();
+  /// The derived arguments associated with this builder.
+  DerivedArgList &Args;
 
-    const auto &ArchStr = A->getValue();
-    CudaArch Arch = StringToCudaArch(ArchStr);
-    if (Arch == CudaArch::UNKNOWN)
-      C.getDriver().Diag(clang::diag::err_drv_cuda_bad_gpu_arch) << ArchStr;
-    else if (GpuArchs.insert(Arch).second)
-      GpuArchList.push_back(Arch);
+  /// Map between an input argument and the offload kinds used to process it.
+  std::map<const Arg *, unsigned> InputArgToOffloadKindMap;
+
+  /// Builder interface. It doesn't build anything or keep any state.
+  class DeviceActionBuilder {
+  public:
+    typedef llvm::SmallVector<phases::ID, phases::MaxNumberOfPhases> PhasesTy;
+
+    enum ActionBuilderReturnCode {
+      // The builder acted successfully on the current action.
+      ABRT_Success,
+      // The builder didn't have to act on the current action.
+      ABRT_Inactive,
+      // The builder was successful and requested the host action to not be
+      // generated.
+      ABRT_Ignore_Host,
+    };
+
+  protected:
+    /// Compilation associated with this builder.
+    Compilation &C;
+
+    /// Tool chains associated with this builder. The same programming
+    /// model may have associated one or more tool chains.
+    SmallVector<const ToolChain *, 2> ToolChains;
+
+    /// The derived arguments associated with this builder.
+    DerivedArgList &Args;
+
+    /// The inputs associated with this builder.
+    const Driver::InputList &Inputs;
+
+    /// The associated offload kind.
+    Action::OffloadKind AssociatedOffloadKind = Action::OFK_None;
+
+  public:
+    DeviceActionBuilder(Compilation &C, DerivedArgList &Args,
+                        const Driver::InputList &Inputs,
+                        Action::OffloadKind AssociatedOffloadKind)
+        : C(C), Args(Args), Inputs(Inputs),
+          AssociatedOffloadKind(AssociatedOffloadKind) {}
+    virtual ~DeviceActionBuilder() {}
+
+    /// Fill up the array \a DA with all the device dependences that should be
+    /// added to the provided host action \a HostAction. By default it is
+    /// inactive.
+    virtual ActionBuilderReturnCode
+    getDeviceDepences(OffloadAction::DeviceDependences &DA, phases::ID CurPhase,
+                      phases::ID FinalPhase, PhasesTy &Phases) {
+      return ABRT_Inactive;
+    }
+
+    /// Update the state to include the provided host action \a HostAction as a
+    /// dependency of the current device action. By default it is inactive.
+    virtual ActionBuilderReturnCode addDeviceDepences(Action *HostAction) {
+      return ABRT_Inactive;
+    }
+
+    /// Append top level actions generated by the builder. Return true if errors
+    /// were found.
+    virtual void appendTopLevelActions(ActionList &AL) {}
+
+    /// Append linker actions generated by the builder. Return true if errors
+    /// were found.
+    virtual void appendLinkDependences(OffloadAction::DeviceDependences &DA) {}
+
+    /// Initialize the builder. Return true if any initialization errors are
+    /// found.
+    virtual bool initialize() { return false; }
+
+    /// Return true if the builder can use bundling/unbundling.
+    virtual bool canUseBundlerUnbundler() const { return false; }
+
+    /// Return true if this builder is valid. We have a valid builder if we have
+    /// associated device tool chains.
+    bool isValid() { return !ToolChains.empty(); }
+
+    /// Return the associated offload kind.
+    Action::OffloadKind getAssociatedOffloadKind() {
+      return AssociatedOffloadKind;
+    }
+  };
+
+  /// \brief CUDA action builder. It injects device code in the host backend
+  /// action.
+  class CudaActionBuilder final : public DeviceActionBuilder {
+    /// Flags to signal if the user requested host-only or device-only
+    /// compilation.
+    bool CompileHostOnly = false;
+    bool CompileDeviceOnly = false;
+
+    /// List of GPU architectures to use in this compilation.
+    SmallVector<CudaArch, 4> GpuArchList;
+
+    /// The CUDA actions for the current input.
+    ActionList CudaDeviceActions;
+
+    /// The CUDA fat binary if it was generated for the current input.
+    Action *CudaFatBinary = nullptr;
+
+    /// Flag that is set to true if this builder acted on the current input.
+    bool IsActive = false;
+
+  public:
+    CudaActionBuilder(Compilation &C, DerivedArgList &Args,
+                      const Driver::InputList &Inputs)
+        : DeviceActionBuilder(C, Args, Inputs, Action::OFK_Cuda) {}
+
+    ActionBuilderReturnCode
+    getDeviceDepences(OffloadAction::DeviceDependences &DA, phases::ID CurPhase,
+                      phases::ID FinalPhase, PhasesTy &Phases) override {
+      if (!IsActive)
+        return ABRT_Inactive;
+
+      // If we don't have more CUDA actions, we don't have any dependences to
+      // create for the host.
+      if (CudaDeviceActions.empty())
+        return ABRT_Success;
+
+      assert(CudaDeviceActions.size() == GpuArchList.size() &&
+             "Expecting one action per GPU architecture.");
+      assert(!CompileHostOnly &&
+             "Not expecting CUDA actions in host-only compilation.");
+
+      // If we are generating code for the device or we are in a backend phase,
+      // we attempt to generate the fat binary. We compile each arch to ptx and
+      // assemble to cubin, then feed the cubin *and* the ptx into a device
+      // "link" action, which uses fatbinary to combine these cubins into one
+      // fatbin.  The fatbin is then an input to the host action if not in
+      // device-only mode.
+      if (CompileDeviceOnly || CurPhase == phases::Backend) {
+        ActionList DeviceActions;
+        for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I) {
+          // Produce the device action from the current phase up to the assemble
+          // phase.
+          for (auto Ph : Phases) {
+            // Skip the phases that were already dealt with.
+            if (Ph < CurPhase)
+              continue;
+            // We have to be consistent with the host final phase.
+            if (Ph > FinalPhase)
+              break;
+
+            CudaDeviceActions[I] = C.getDriver().ConstructPhaseAction(
+                C, Args, Ph, CudaDeviceActions[I]);
+
+            if (Ph == phases::Assemble)
+              break;
+          }
+
+          // If we didn't reach the assemble phase, we can't generate the fat
+          // binary.
+          if (!isa<AssembleJobAction>(CudaDeviceActions[I]))
+            continue;
+
+          Action *AssembleAction = CudaDeviceActions[I];
+          assert(AssembleAction->getType() == types::TY_Object);
+          assert(AssembleAction->getInputs().size() == 1);
+
+          Action *BackendAction = AssembleAction->getInputs()[0];
+          assert(BackendAction->getType() == types::TY_PP_Asm);
+
+          for (auto &A : {AssembleAction, BackendAction}) {
+            OffloadAction::DeviceDependences DDep;
+            DDep.add(*A, *ToolChains.front(), CudaArchToString(GpuArchList[I]),
+                     Action::OFK_Cuda);
+            DeviceActions.push_back(
+                C.MakeAction<OffloadAction>(DDep, A->getType()));
+          }
+        }
+
+        // We generate the fat binary if we have device input actions.
+        if (!DeviceActions.empty()) {
+          CudaFatBinary =
+              C.MakeAction<LinkJobAction>(DeviceActions, types::TY_CUDA_FATBIN);
+
+          if (!CompileDeviceOnly) {
+            DA.add(*CudaFatBinary, *ToolChains.front(), /*BoundArch=*/nullptr,
+                   Action::OFK_Cuda);
+            // Clear the fat binary, it is already a dependence to an host
+            // action.
+            CudaFatBinary = nullptr;
+          }
+
+          // Remove the CUDA actions as they are already connected to an host
+          // action or fat binary.
+          CudaDeviceActions.clear();
+        }
+
+        // We avoid creating host action in device-only mode.
+        return CompileDeviceOnly ? ABRT_Ignore_Host : ABRT_Success;
+      }
+
+      assert(CurPhase < phases::Backend && "Generating single CUDA "
+                                           "instructions should only occur "
+                                           "before the backend phase!");
+
+      // By default, we produce an action for each device arch.
+      for (Action *&A : CudaDeviceActions)
+        A = C.getDriver().ConstructPhaseAction(C, Args, CurPhase, A);
+
+      return ABRT_Success;
+    }
+
+    ActionBuilderReturnCode addDeviceDepences(Action *HostAction) override {
+      // While generating code for CUDA, we only depend on the host input action
+      // to trigger the creation of all the CUDA device actions.
+
+      // If we are dealing with an input action, replicate it for each GPU
+      // architecture. If we are in host-only mode we return 'success' so that
+      // the host use the CUDA offload kind.
+      if (auto *IA = dyn_cast<InputAction>(HostAction)) {
+        assert(!GpuArchList.empty() &&
+               "We should have at least one GPU architecture.");
+
+        // If the host input is not CUDA, we don't need to bother about this
+        // input.
+        if (IA->getType() != types::TY_CUDA) {
+          // The builder will ignore this input.
+          IsActive = false;
+          return ABRT_Inactive;
+        }
+
+        // Set the flag to true, so that the builder acts on the current input.
+        IsActive = true;
+
+        if (CompileHostOnly)
+          return ABRT_Success;
+
+        // Replicate inputs for each GPU architecture.
+        for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I)
+          CudaDeviceActions.push_back(C.MakeAction<InputAction>(
+              IA->getInputArg(), types::TY_CUDA_DEVICE));
+
+        return ABRT_Success;
+      }
+
+      return IsActive ? ABRT_Success : ABRT_Inactive;
+    }
+
+    void appendTopLevelActions(ActionList &AL) override {
+      // Utility to append actions to the top level list.
+      auto AddTopLevel = [&](Action *A, CudaArch BoundArch) {
+        OffloadAction::DeviceDependences Dep;
+        Dep.add(*A, *ToolChains.front(), CudaArchToString(BoundArch),
+                Action::OFK_Cuda);
+        AL.push_back(C.MakeAction<OffloadAction>(Dep, A->getType()));
+      };
+
+      // If we have a fat binary, add it to the list.
+      if (CudaFatBinary) {
+        AddTopLevel(CudaFatBinary, CudaArch::UNKNOWN);
+        CudaDeviceActions.clear();
+        CudaFatBinary = nullptr;
+        return;
+      }
+
+      if (CudaDeviceActions.empty())
+        return;
+
+      // If we have CUDA actions at this point, that's because we have a have
+      // partial compilation, so we should have an action for each GPU
+      // architecture.
+      assert(CudaDeviceActions.size() == GpuArchList.size() &&
+             "Expecting one action per GPU architecture.");
+      assert(ToolChains.size() == 1 &&
+             "Expecting to have a sing CUDA toolchain.");
+      for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I)
+        AddTopLevel(CudaDeviceActions[I], GpuArchList[I]);
+
+      CudaDeviceActions.clear();
+    }
+
+    bool initialize() override {
+      // We don't need to support CUDA.
+      if (!C.hasOffloadToolChain<Action::OFK_Cuda>())
+        return false;
+
+      ToolChains.push_back(C.getSingleOffloadToolChain<Action::OFK_Cuda>());
+
+      Arg *PartialCompilationArg = Args.getLastArg(
+          options::OPT_cuda_host_only, options::OPT_cuda_device_only,
+          options::OPT_cuda_compile_host_device);
+      CompileHostOnly = PartialCompilationArg &&
+                        PartialCompilationArg->getOption().matches(
+                            options::OPT_cuda_host_only);
+      CompileDeviceOnly = PartialCompilationArg &&
+                          PartialCompilationArg->getOption().matches(
+                              options::OPT_cuda_device_only);
+
+      // Collect all cuda_gpu_arch parameters, removing duplicates.
+      llvm::SmallSet<CudaArch, 4> GpuArchs;
+      bool Error = false;
+      for (Arg *A : Args) {
+        if (!A->getOption().matches(options::OPT_cuda_gpu_arch_EQ))
+          continue;
+        A->claim();
+
+        const auto &ArchStr = A->getValue();
+        CudaArch Arch = StringToCudaArch(ArchStr);
+        if (Arch == CudaArch::UNKNOWN) {
+          C.getDriver().Diag(clang::diag::err_drv_cuda_bad_gpu_arch) << ArchStr;
+          Error = true;
+        } else if (GpuArchs.insert(Arch).second)
+          GpuArchList.push_back(Arch);
+      }
+
+      // Default to sm_20 which is the lowest common denominator for supported
+      // GPUs.
+      // sm_20 code should work correctly, if suboptimally, on all newer GPUs.
+      if (GpuArchList.empty())
+        GpuArchList.push_back(CudaArch::SM_20);
+
+      return Error;
+    }
+  };
+
+  /// OpenMP action builder. The host bitcode is passed to the device frontend
+  /// and all the device linked images are passed to the host link phase.
+  class OpenMPActionBuilder final : public DeviceActionBuilder {
+    /// The OpenMP actions for the current input.
+    ActionList OpenMPDeviceActions;
+
+    /// The linker inputs obtained for each toolchain.
+    SmallVector<ActionList, 8> DeviceLinkerInputs;
+
+  public:
+    OpenMPActionBuilder(Compilation &C, DerivedArgList &Args,
+                        const Driver::InputList &Inputs)
+        : DeviceActionBuilder(C, Args, Inputs, Action::OFK_OpenMP) {}
+
+    ActionBuilderReturnCode
+    getDeviceDepences(OffloadAction::DeviceDependences &DA, phases::ID CurPhase,
+                      phases::ID FinalPhase, PhasesTy &Phases) override {
+
+      // We should always have an action for each input.
+      assert(OpenMPDeviceActions.size() == ToolChains.size() &&
+             "Number of OpenMP actions and toolchains do not match.");
+
+      // The host only depends on device action in the linking phase, when all
+      // the device images have to be embedded in the host image.
+      if (CurPhase == phases::Link) {
+        assert(ToolChains.size() == DeviceLinkerInputs.size() &&
+               "Toolchains and linker inputs sizes do not match.");
+        auto LI = DeviceLinkerInputs.begin();
+        for (auto *A : OpenMPDeviceActions) {
+          LI->push_back(A);
+          ++LI;
+        }
+
+        // We passed the device action to a host dependence, so we don't need to
+        // do anything else with them.
+        OpenMPDeviceActions.clear();
+        return ABRT_Success;
+      }
+
+      // By default, we produce an action for each device arch.
+      for (Action *&A : OpenMPDeviceActions)
+        A = C.getDriver().ConstructPhaseAction(C, Args, CurPhase, A);
+
+      return ABRT_Success;
+    }
+
+    ActionBuilderReturnCode addDeviceDepences(Action *HostAction) override {
+
+      // If this is an input action replicate it for each OpenMP toolchain.
+      if (auto *IA = dyn_cast<InputAction>(HostAction)) {
+        OpenMPDeviceActions.clear();
+        for (unsigned I = 0; I < ToolChains.size(); ++I)
+          OpenMPDeviceActions.push_back(
+              C.MakeAction<InputAction>(IA->getInputArg(), IA->getType()));
+        return ABRT_Success;
+      }
+
+      // If this is an unbundling action use it as is for each OpenMP toolchain.
+      if (auto *UA = dyn_cast<OffloadUnbundlingJobAction>(HostAction)) {
+        OpenMPDeviceActions.clear();
+        for (unsigned I = 0; I < ToolChains.size(); ++I) {
+          OpenMPDeviceActions.push_back(UA);
+          UA->registerDependingActionInfo(ToolChains[I], /*BoundArch=*/nullptr,
+                                          Action::OFK_OpenMP);
+        }
+        return ABRT_Success;
+      }
+
+      // When generating code for OpenMP we use the host compile phase result as
+      // dependence to the device compile phase so that it can learn what
+      // declaration should be emitted. However, this is not the only use for
+      // the host action, so we have prevent it from being collapsed.
+      if (isa<CompileJobAction>(HostAction)) {
+        HostAction->setCannotBeCollapsedWithDependingAction();
+        assert(ToolChains.size() == OpenMPDeviceActions.size() &&
+               "Toolchains and device action sizes do not match.");
+        OffloadAction::HostDependence HDep(
+            *HostAction, *C.getSingleOffloadToolChain<Action::OFK_Host>(),
+            /*BoundArch=*/nullptr, Action::OFK_OpenMP);
+        auto TC = ToolChains.begin();
+        for (Action *&A : OpenMPDeviceActions) {
+          assert(isa<CompileJobAction>(A));
+          OffloadAction::DeviceDependences DDep;
+          DDep.add(*A, **TC, /*BoundArch=*/nullptr, Action::OFK_OpenMP);
+          A = C.MakeAction<OffloadAction>(HDep, DDep);
+          ++TC;
+        }
+      }
+      return ABRT_Success;
+    }
+
+    void appendTopLevelActions(ActionList &AL) override {
+      if (OpenMPDeviceActions.empty())
+        return;
+
+      // We should always have an action for each input.
+      assert(OpenMPDeviceActions.size() == ToolChains.size() &&
+             "Number of OpenMP actions and toolchains do not match.");
+
+      // Append all device actions followed by the proper offload action.
+      auto TI = ToolChains.begin();
+      for (auto *A : OpenMPDeviceActions) {
+        OffloadAction::DeviceDependences Dep;
+        Dep.add(*A, **TI, /*BoundArch=*/nullptr, Action::OFK_OpenMP);
+        AL.push_back(C.MakeAction<OffloadAction>(Dep, A->getType()));
+        ++TI;
+      }
+      // We no longer need the action stored in this builder.
+      OpenMPDeviceActions.clear();
+    }
+
+    void appendLinkDependences(OffloadAction::DeviceDependences &DA) override {
+      assert(ToolChains.size() == DeviceLinkerInputs.size() &&
+             "Toolchains and linker inputs sizes do not match.");
+
+      // Append a new link action for each device.
+      auto TC = ToolChains.begin();
+      for (auto &LI : DeviceLinkerInputs) {
+        auto *DeviceLinkAction =
+            C.MakeAction<LinkJobAction>(LI, types::TY_Image);
+        DA.add(*DeviceLinkAction, **TC, /*BoundArch=*/nullptr,
+               Action::OFK_OpenMP);
+        ++TC;
+      }
+    }
+
+    bool initialize() override {
+      // Get the OpenMP toolchains. If we don't get any, the action builder will
+      // know there is nothing to do related with OpenMP offloading.
+      auto OpenMPTCRange = C.getOffloadToolChains<Action::OFK_OpenMP>();
+      for (auto TI = OpenMPTCRange.first, TE = OpenMPTCRange.second; TI != TE;
+           ++TI)
+        ToolChains.push_back(TI->second);
+
+      DeviceLinkerInputs.resize(ToolChains.size());
+      return false;
+    }
+
+    bool canUseBundlerUnbundler() const override {
+      // OpenMP should use bundled files whenever possible.
+      return true;
+    }
+  };
+
+  ///
+  /// TODO: Add the implementation for other specialized builders here.
+  ///
+
+  /// Specialized builders being used by this offloading action builder.
+  SmallVector<DeviceActionBuilder *, 4> SpecializedBuilders;
+
+  /// Flag set to true if all valid builders allow file bundling/unbundling.
+  bool CanUseBundler;
+
+public:
+  OffloadingActionBuilder(Compilation &C, DerivedArgList &Args,
+                          const Driver::InputList &Inputs)
+      : C(C), Args(Args) {
+    // Create a specialized builder for each device toolchain.
+
+    IsValid = true;
+
+    // Create a specialized builder for CUDA.
+    SpecializedBuilders.push_back(new CudaActionBuilder(C, Args, Inputs));
+
+    // Create a specialized builder for OpenMP.
+    SpecializedBuilders.push_back(new OpenMPActionBuilder(C, Args, Inputs));
+
+    //
+    // TODO: Build other specialized builders here.
+    //
+
+    // Initialize all the builders, keeping track of errors. If all valid
+    // builders agree that we can use bundling, set the flag to true.
+    unsigned ValidBuilders = 0u;
+    unsigned ValidBuildersSupportingBundling = 0u;
+    for (auto *SB : SpecializedBuilders) {
+      IsValid = IsValid && !SB->initialize();
+
+      // Update the counters if the builder is valid.
+      if (SB->isValid()) {
+        ++ValidBuilders;
+        if (SB->canUseBundlerUnbundler())
+          ++ValidBuildersSupportingBundling;
+      }
+    }
+    CanUseBundler =
+        ValidBuilders && ValidBuilders == ValidBuildersSupportingBundling;
   }
 
-  // Default to sm_20 which is the lowest common denominator for supported GPUs.
-  // sm_20 code should work correctly, if suboptimally, on all newer GPUs.
-  if (GpuArchList.empty())
-    GpuArchList.push_back(CudaArch::SM_20);
+  ~OffloadingActionBuilder() {
+    for (auto *SB : SpecializedBuilders)
+      delete SB;
+  }
 
-  // Replicate inputs for each GPU architecture.
-  Driver::InputList CudaDeviceInputs;
-  for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I)
-    CudaDeviceInputs.push_back(std::make_pair(types::TY_CUDA_DEVICE, InputArg));
+  /// Generate an action that adds device dependences (if any) to a host action.
+  /// If no device dependence actions exist, just return the host action \a
+  /// HostAction. If an error is found or if no builder requires the host action
+  /// to be generated, return nullptr.
+  Action *
+  addDeviceDependencesToHostAction(Action *HostAction, const Arg *InputArg,
+                                   phases::ID CurPhase, phases::ID FinalPhase,
+                                   DeviceActionBuilder::PhasesTy &Phases) {
+    if (!IsValid)
+      return nullptr;
 
-  // Build actions for all device inputs.
-  assert(C.getSingleOffloadToolChain<Action::OFK_Cuda>() &&
-         "Missing toolchain for device-side compilation.");
-  ActionList CudaDeviceActions;
-  C.getDriver().BuildActions(C, Args, CudaDeviceInputs, CudaDeviceActions);
-  assert(GpuArchList.size() == CudaDeviceActions.size() &&
-         "Failed to create actions for all devices");
+    if (SpecializedBuilders.empty())
+      return HostAction;
 
-  // Check whether any of device actions stopped before they could generate PTX.
-  bool PartialCompilation =
-      llvm::any_of(CudaDeviceActions, [](const Action *a) {
-        return a->getKind() != Action::AssembleJobClass;
-      });
+    assert(HostAction && "Invalid host action!");
 
-  // Figure out what to do with device actions -- pass them as inputs to the
-  // host action or run each of them independently.
-  if (PartialCompilation || CompileDeviceOnly) {
-    // In case of partial or device-only compilation results of device actions
-    // are not consumed by the host action device actions have to be added to
-    // top-level actions list with AtTopLevel=true and run independently.
+    OffloadAction::DeviceDependences DDeps;
+    // Check if all the programming models agree we should not emit the host
+    // action. Also, keep track of the offloading kinds employed.
+    auto &OffloadKind = InputArgToOffloadKindMap[InputArg];
+    unsigned InactiveBuilders = 0u;
+    unsigned IgnoringBuilders = 0u;
+    for (auto *SB : SpecializedBuilders) {
+      if (!SB->isValid()) {
+        ++InactiveBuilders;
+        continue;
+      }
 
-    // -o is ambiguous if we have more than one top-level action.
-    if (Args.hasArg(options::OPT_o) &&
-        (!CompileDeviceOnly || GpuArchList.size() > 1)) {
+      auto RetCode = SB->getDeviceDepences(DDeps, CurPhase, FinalPhase, Phases);
+
+      // If the builder explicitly says the host action should be ignored,
+      // we need to increment the variable that tracks the builders that request
+      // the host object to be ignored.
+      if (RetCode == DeviceActionBuilder::ABRT_Ignore_Host)
+        ++IgnoringBuilders;
+
+      // Unless the builder was inactive for this action, we have to record the
+      // offload kind because the host will have to use it.
+      if (RetCode != DeviceActionBuilder::ABRT_Inactive)
+        OffloadKind |= SB->getAssociatedOffloadKind();
+    }
+
+    // If all builders agree that the host object should be ignored, just return
+    // nullptr.
+    if (IgnoringBuilders &&
+        SpecializedBuilders.size() == (InactiveBuilders + IgnoringBuilders))
+      return nullptr;
+
+    if (DDeps.getActions().empty())
+      return HostAction;
+
+    // We have dependences we need to bundle together. We use an offload action
+    // for that.
+    OffloadAction::HostDependence HDep(
+        *HostAction, *C.getSingleOffloadToolChain<Action::OFK_Host>(),
+        /*BoundArch=*/nullptr, DDeps);
+    return C.MakeAction<OffloadAction>(HDep, DDeps);
+  }
+
+  /// Generate an action that adds a host dependence to a device action. The
+  /// results will be kept in this action builder. Return true if an error was
+  /// found.
+  bool addHostDependenceToDeviceActions(Action *&HostAction,
+                                        const Arg *InputArg) {
+    if (!IsValid)
+      return true;
+
+    // If we are supporting bundling/unbundling and the current action is an
+    // input action of non-source file, we replace the host action by the
+    // unbundling action.
+    if (CanUseBundler && isa<InputAction>(HostAction) &&
+        InputArg->getOption().getKind() == llvm::opt::Option::InputClass &&
+        !types::isSrcFile(HostAction->getType())) {
+      auto UnbundlingHostAction =
+          C.MakeAction<OffloadUnbundlingJobAction>(HostAction);
+      UnbundlingHostAction->registerDependingActionInfo(
+          C.getSingleOffloadToolChain<Action::OFK_Host>(),
+          /*BoundArch=*/nullptr, Action::OFK_Host);
+      HostAction = UnbundlingHostAction;
+    }
+
+    assert(HostAction && "Invalid host action!");
+
+    // Register the offload kinds that are used.
+    auto &OffloadKind = InputArgToOffloadKindMap[InputArg];
+    for (auto *SB : SpecializedBuilders) {
+      if (!SB->isValid())
+        continue;
+
+      auto RetCode = SB->addDeviceDepences(HostAction);
+
+      // Host dependences for device actions are not compatible with that same
+      // action being ignored.
+      assert(RetCode != DeviceActionBuilder::ABRT_Ignore_Host &&
+             "Host dependence not expected to be ignored.!");
+
+      // Unless the builder was inactive for this action, we have to record the
+      // offload kind because the host will have to use it.
+      if (RetCode != DeviceActionBuilder::ABRT_Inactive)
+        OffloadKind |= SB->getAssociatedOffloadKind();
+    }
+
+    return false;
+  }
+
+  /// Add the offloading top level actions to the provided action list. This
+  /// function can replace the host action by a bundling action if the
+  /// programming models allow it.
+  bool appendTopLevelActions(ActionList &AL, Action *HostAction,
+                             const Arg *InputArg) {
+    // Get the device actions to be appended.
+    ActionList OffloadAL;
+    for (auto *SB : SpecializedBuilders) {
+      if (!SB->isValid())
+        continue;
+      SB->appendTopLevelActions(OffloadAL);
+    }
+
+    // If we can use the bundler, replace the host action by the bundling one in
+    // the resulting list. Otherwise, just append the device actions.
+    if (CanUseBundler && !OffloadAL.empty()) {
+      // Add the host action to the list in order to create the bundling action.
+      OffloadAL.push_back(HostAction);
+
+      // We expect that the host action was just appended to the action list
+      // before this method was called.
+      assert(HostAction == AL.back() && "Host action not in the list??");
+      HostAction = C.MakeAction<OffloadBundlingJobAction>(OffloadAL);
+      AL.back() = HostAction;
+    } else
+      AL.append(OffloadAL.begin(), OffloadAL.end());
+
+    // Propagate to the current host action (if any) the offload information
+    // associated with the current input.
+    if (HostAction)
+      HostAction->propagateHostOffloadInfo(InputArgToOffloadKindMap[InputArg],
+                                           /*BoundArch=*/nullptr);
+
+    // If any action is added by the builders, -o is ambiguous if we have more
+    // than one top-level action. If a bundler is used, there is no ambiguity.
+    if (!CanUseBundler && !OffloadAL.empty() && Args.hasArg(options::OPT_o) &&
+        AL.size() > 1) {
       C.getDriver().Diag(
           clang::diag::err_drv_output_argument_with_multiple_files);
-      return nullptr;
+      return true;
     }
 
-    for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I)
-      Actions.push_back(C.MakeAction<CudaDeviceAction>(CudaDeviceActions[I],
-                                                       GpuArchList[I],
-                                                       /* AtTopLevel */ true));
-    // Kill host action in case of device-only compilation.
-    if (CompileDeviceOnly)
-      return nullptr;
-    return HostAction;
+    return false;
   }
 
-  // If we're not a partial or device-only compilation, we compile each arch to
-  // ptx and assemble to cubin, then feed the cubin *and* the ptx into a device
-  // "link" action, which uses fatbinary to combine these cubins into one
-  // fatbin.  The fatbin is then an input to the host compilation.
-  ActionList DeviceActions;
-  for (unsigned I = 0, E = GpuArchList.size(); I != E; ++I) {
-    Action* AssembleAction = CudaDeviceActions[I];
-    assert(AssembleAction->getType() == types::TY_Object);
-    assert(AssembleAction->getInputs().size() == 1);
+  /// Processes the host linker action. This currently consists of replacing it
+  /// with an offload action if there are device link objects and propagate to
+  /// the host action all the offload kinds used in the current compilation. The
+  /// resulting action is returned.
+  Action *processHostLinkAction(Action *HostAction) {
+    // Add all the dependences from the device linking actions.
+    OffloadAction::DeviceDependences DDeps;
+    for (auto *SB : SpecializedBuilders) {
+      if (!SB->isValid())
+        continue;
 
-    Action* BackendAction = AssembleAction->getInputs()[0];
-    assert(BackendAction->getType() == types::TY_PP_Asm);
-
-    for (const auto& A : {AssembleAction, BackendAction}) {
-      DeviceActions.push_back(C.MakeAction<CudaDeviceAction>(
-          A, GpuArchList[I], /* AtTopLevel */ false));
+      SB->appendLinkDependences(DDeps);
     }
+
+    // Calculate all the offload kinds used in the current compilation.
+    unsigned ActiveOffloadKinds = 0u;
+    for (auto &I : InputArgToOffloadKindMap)
+      ActiveOffloadKinds |= I.second;
+
+    // If we don't have device dependencies, we don't have to create an offload
+    // action.
+    if (DDeps.getActions().empty()) {
+      // Propagate all the active kinds to host action. Given that it is a link
+      // action it is assumed to depend on all actions generated so far.
+      HostAction->propagateHostOffloadInfo(ActiveOffloadKinds,
+                                           /*BoundArch=*/nullptr);
+      return HostAction;
+    }
+
+    // Create the offload action with all dependences. When an offload action
+    // is created the kinds are propagated to the host action, so we don't have
+    // to do that explicitly here.
+    OffloadAction::HostDependence HDep(
+        *HostAction, *C.getSingleOffloadToolChain<Action::OFK_Host>(),
+        /*BoundArch*/ nullptr, ActiveOffloadKinds);
+    return C.MakeAction<OffloadAction>(HDep, DDeps);
   }
-  auto FatbinAction = C.MakeAction<CudaDeviceAction>(
-      C.MakeAction<LinkJobAction>(DeviceActions, types::TY_CUDA_FATBIN),
-      CudaArch::UNKNOWN,
-      /* AtTopLevel = */ false);
-  // Return a new host action that incorporates original host action and all
-  // device actions.
-  return C.MakeAction<CudaHostAction>(std::move(HostAction),
-                                      ActionList({FatbinAction}));
-}
+};
+} // anonymous namespace.
 
 void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
                           const InputList &Inputs, ActionList &Actions) const {
@@ -1871,6 +2288,9 @@ void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
     YcArg = YuArg = nullptr;
   }
 
+  // Builder to be used to build offloading actions.
+  OffloadingActionBuilder OffloadBuilder(C, Args, Inputs);
+
   // Construct the actions to perform.
   ActionList LinkerInputs;
 
@@ -1933,22 +2353,13 @@ void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
       }
     }
 
-    phases::ID CudaInjectionPhase =
-        (phases::Compile < FinalPhase &&
-         llvm::find(PL, phases::Compile) != PL.end())
-            ? phases::Compile
-            : FinalPhase;
-
     // Build the pipeline for this file.
     Action *Current = C.MakeAction<InputAction>(*InputArg, InputType);
 
-    // If we need to support offloading, run an unbundling job before each input
-    // to make sure that bundled files get unbundled. If the input is a source
-    // file that is not required.
-    if (!OrderedOffloadingToolchains.empty() &&
-        InputArg->getOption().getKind() == llvm::opt::Option::InputClass &&
-        !types::isSrcFile(InputType))
-      Current = new OffloadUnbundlingJobAction(Current);
+    // Use the current host action in any of the offloading actions, if
+    // required.
+    if (OffloadBuilder.addHostDependenceToDeviceActions(Current, InputArg))
+      break;
 
     for (SmallVectorImpl<phases::ID>::iterator i = PL.begin(), e = PL.end();
          i != e; ++i) {
@@ -1956,6 +2367,12 @@ void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
 
       // We are done if this step is past what the user requested.
       if (Phase > FinalPhase)
+        break;
+
+      // Add any offload action the host action depends on.
+      Current = OffloadBuilder.addDeviceDependencesToHostAction(
+          Current, InputArg, Phase, FinalPhase, PL);
+      if (!Current)
         break;
 
       // Queue linker inputs.
@@ -1966,41 +2383,38 @@ void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
         break;
       }
 
-      // Some types skip the assembler phase (e.g., llvm-bc), but we can't
-      // encode this in the steps because the intermediate type depends on
-      // arguments. Just special case here.
-      if (Phase == phases::Assemble && Current->getType() != types::TY_PP_Asm)
+      // Otherwise construct the appropriate action.
+      auto *NewCurrent = ConstructPhaseAction(C, Args, Phase, Current);
+
+      // We didn't create a new action, so we will just move to the next phase.
+      if (NewCurrent == Current)
         continue;
 
-      // Otherwise construct the appropriate action.
-      Current = ConstructPhaseAction(C, Args, Phase, Current);
+      Current = NewCurrent;
 
-      if (InputType == types::TY_CUDA && Phase == CudaInjectionPhase) {
-        Current = buildCudaActions(C, Args, InputArg, Current, Actions);
-        if (!Current)
-          break;
-      }
+      // Use the current host action in any of the offloading actions, if
+      // required.
+      if (OffloadBuilder.addHostDependenceToDeviceActions(Current, InputArg))
+        break;
 
       if (Current->getType() == types::TY_Nothing)
         break;
     }
 
     // If we ended with something, add to the output list.
-    if (Current) {
-      // If we need to support offloading, run a bundling job for each output
-      // that is not a linker action. Linker actions is when device images are
-      // usually embedded into the host to form a fat binary.
-      if (!OrderedOffloadingToolchains.empty())
-        Current = new OffloadBundlingJobAction(Current);
-
+    if (Current)
       Actions.push_back(Current);
-    }
+
+    // Add any top level actions generated for offloading.
+    OffloadBuilder.appendTopLevelActions(Actions, Current, InputArg);
   }
 
   // Add a link action if necessary.
-  if (!LinkerInputs.empty())
-    Actions.push_back(
-        C.MakeAction<LinkJobAction>(LinkerInputs, types::TY_Image));
+  if (!LinkerInputs.empty()) {
+    Action *LA = C.MakeAction<LinkJobAction>(LinkerInputs, types::TY_Image);
+    LA = OffloadBuilder.processHostLinkAction(LA);
+    Actions.push_back(LA);
+  }
 
   // If we are linking, claim any options which are obviously only used for
   // compilation.
@@ -2021,6 +2435,13 @@ void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
 Action *Driver::ConstructPhaseAction(Compilation &C, const ArgList &Args,
                                      phases::ID Phase, Action *Input) const {
   llvm::PrettyStackTraceString CrashInfo("Constructing phase actions");
+
+  // Some types skip the assembler phase (e.g., llvm-bc), but we can't
+  // encode this in the steps because the intermediate type depends on
+  // arguments. Just special case here.
+  if (Phase == phases::Assemble && Input->getType() != types::TY_PP_Asm)
+    return Input;
+
   // Build the appropriate action.
   switch (Phase) {
   case phases::Link:
@@ -2115,10 +2536,6 @@ void Driver::BuildJobs(Compilation &C) const {
       if (A->getOption().matches(options::OPT_arch))
         ArchNames.insert(A->getValue());
 
-  // Cleanup the offloading host cache so that cached results of previous runs
-  // are not used. This is required for when clang is used as library.
-  OffloadingHostResultsTy OffloadingHostResults;
-
   // Set of (Action, canonical ToolChain triple) pairs we've built jobs for.
   std::map<std::pair<const Action *, std::string>, InputInfo> CachedResults;
   for (Action *A : C.getActions()) {
@@ -2136,13 +2553,12 @@ void Driver::BuildJobs(Compilation &C) const {
         LinkingOutput = getDefaultImageName();
     }
 
-    InputInfo II;
     BuildJobsForAction(C, A, &C.getDefaultToolChain(),
                        /*BoundArch*/ nullptr,
                        /*AtTopLevel*/ true,
                        /*MultipleArchs*/ ArchNames.size() > 1,
                        /*LinkingOutput*/ LinkingOutput, CachedResults,
-                       OffloadingHostResults);
+                       /*TargetDeviceOffloadKind*/ Action::OFK_None);
   }
 
   // If the user passed -Qunused-arguments or there were errors, don't warn
@@ -2192,137 +2608,326 @@ void Driver::BuildJobs(Compilation &C) const {
   }
 }
 
-// Returns a Tool for a given JobAction.  In case the action and its
-// predecessors can be combined, updates Inputs with the inputs of the
-// first combined action. If one of the collapsed actions is a
-// CudaHostAction, updates CollapsedCHA with the pointer to it so the
-// caller can deal with extra handling such action requires.
-static const Tool *selectToolForJob(Compilation &C, bool SaveTemps,
-                                    bool EmbedBitcode, const ToolChain *TC,
-                                    const JobAction *JA,
-                                    const ActionList *&Inputs,
-                                    const CudaHostAction *&CollapsedCHA) {
-  const Tool *ToolForJob = nullptr;
-  CollapsedCHA = nullptr;
+namespace {
+/// Utility class to control the collapse of dependent actions and select the
+/// tools accordingly.
+class ToolSelector final {
+  /// The tool chain this selector refers to.
+  const ToolChain &TC;
 
-  // See if we should look for a compiler with an integrated assembler. We match
-  // bottom up, so what we are actually looking for is an assembler job with a
-  // compiler input. If the toolchain requires some other toolchain to do the
-  // job for the input action, it cannot be combined.
+  /// The compilation this selector refers to.
+  const Compilation &C;
 
-  if (TC->useIntegratedAs() && !SaveTemps &&
-      !C.getArgs().hasArg(options::OPT_via_file_asm) &&
-      !C.getArgs().hasArg(options::OPT__SLASH_FA) &&
-      !C.getArgs().hasArg(options::OPT__SLASH_Fa) &&
-      isa<AssembleJobAction>(JA) && Inputs->size() == 1 &&
-      isa<BackendJobAction>(*Inputs->begin()) &&
-      !TC->RequiresHostToolChainForOffloadingAction(*Inputs->begin())) {
-    // A BackendJob is always preceded by a CompileJob, and without -save-temps
-    // or -fembed-bitcode, they will always get combined together, so instead of
-    // checking the backend tool, check if the tool for the CompileJob has an
-    // integrated assembler. For -fembed-bitcode, CompileJob is still used to
-    // look up tools for BackendJob, but they need to match before we can split
-    // them. If OpenMP offloading is required backend and compile jobs have to
-    // be kept separate and an integrated of the backend job will be queried
-    // instead.
-    const ActionList *BackendInputs = &(*Inputs)[0]->getInputs();
-    // Compile job may be wrapped in CudaHostAction, extract it if
-    // that's the case and update CollapsedCHA if we combine phases.
-    CudaHostAction *CHA = dyn_cast<CudaHostAction>(*BackendInputs->begin());
-    JobAction *CompileJA = cast<CompileJobAction>(
-        CHA ? *CHA->input_begin() : *BackendInputs->begin());
-    assert(CompileJA && "Backend job is not preceeded by compile job.");
-    const Tool *Compiler = TC->SelectTool(*CompileJA);
-    if (!Compiler)
+  /// The base action this selector refers to.
+  const JobAction *BaseAction;
+
+  /// Set to true if the current toolchain refers to host actions.
+  bool IsHostSelector;
+
+  /// Set to true if save-temps and embed-bitcode functionalities are active.
+  bool SaveTemps;
+  bool EmbedBitcode;
+
+  /// Get dependence action or null if that does not exist. If \a CanBeCollapsed
+  /// is false, that action must be legal to collapse or null will be returned.
+  const JobAction *getDependenceAction(const ActionList &Inputs,
+                                       ActionList &SavedOffloadAction,
+                                       bool CanBeCollapsed = true) {
+    // An option can be collapsed only if it has a single input.
+    if (Inputs.size() != 1)
       return nullptr;
+
+    Action *CurAction = *Inputs.begin();
+    if (!CurAction->isCollapsingWithDependingActionLegal() && CanBeCollapsed)
+      return nullptr;
+
+    // If the input action is an offload action. Look through it and save any
+    // offload action that can be dropped in the event of a collapse.
+    if (auto *OA = dyn_cast<OffloadAction>(CurAction)) {
+      // If the depending action is a device action, we will attempt to collapse
+      // only with other device actions. Otherwise, we would do the same but
+      // with host actions only.
+      if (!IsHostSelector) {
+        if (OA->hasSingleDeviceDependence(/*DoNotConsiderHostActions=*/true)) {
+          CurAction =
+              OA->getSingleDeviceDependence(/*DoNotConsiderHostActions=*/true);
+          if (!CurAction->isCollapsingWithDependingActionLegal() &&
+              CanBeCollapsed)
+            return nullptr;
+          SavedOffloadAction.push_back(OA);
+          return dyn_cast<JobAction>(CurAction);
+        }
+      } else if (OA->hasHostDependence()) {
+        CurAction = OA->getHostDependence();
+        if (!CurAction->isCollapsingWithDependingActionLegal() &&
+            CanBeCollapsed)
+          return nullptr;
+        SavedOffloadAction.push_back(OA);
+        return dyn_cast<JobAction>(CurAction);
+      }
+      return nullptr;
+    }
+
+    return dyn_cast<JobAction>(CurAction);
+  }
+
+  /// Return true if an assemble action can be collapsed.
+  bool canCollapseAssembleAction() const {
+    return TC.useIntegratedAs() && !SaveTemps &&
+           !C.getArgs().hasArg(options::OPT_via_file_asm) &&
+           !C.getArgs().hasArg(options::OPT__SLASH_FA) &&
+           !C.getArgs().hasArg(options::OPT__SLASH_Fa);
+  }
+
+  /// Return true if a preprocessor action can be collapsed.
+  bool canCollapsePreprocessorAction() const {
+    return !C.getArgs().hasArg(options::OPT_no_integrated_cpp) &&
+           !C.getArgs().hasArg(options::OPT_traditional_cpp) && !SaveTemps &&
+           !C.getArgs().hasArg(options::OPT_rewrite_objc);
+  }
+
+  /// Struct that relates an action with the offload actions that would be
+  /// collapsed with it.
+  struct JobActionInfoTy final {
+    /// The action this info refers to.
+    const JobAction *JA = nullptr;
+    /// The offload actions we need to take care off if this action is
+    /// collapsed.
+    ActionList SavedOffloadAction;
+  };
+
+  /// Append collapsed offload actions from the give nnumber of elements in the
+  /// action info array.
+  static void
+  AppendCollapsedOffloadAction(ActionList &CollapsedOffloadAction,
+                               ArrayRef<JobActionInfoTy> &ActionInfo,
+                               unsigned ElementNum) {
+    assert(ElementNum <= ActionInfo.size() && "Invalid number of elements.");
+    for (unsigned I = 0; I < ElementNum; ++I)
+      CollapsedOffloadAction.append(ActionInfo[I].SavedOffloadAction.begin(),
+                                    ActionInfo[I].SavedOffloadAction.end());
+  }
+
+  /// Functions that attempt to perform the combining. They detect if that is
+  /// legal, and if so they update the inputs \a Inputs and the offload action
+  /// that were collapsed in \a CollapsedOffloadAction. A tool that deals with
+  /// the combined action is returned. If the combining is not legal or if the
+  /// tool does not exist, null is returned.
+  /// Currently three kinds of collapsing are supported:
+  ///  - Assemble + Backend + Compile;
+  ///  - Assemble + Backend ;
+  ///  - Backend + Compile.
+  const Tool *
+  attemptCombineAssembleBackendCompile(ArrayRef<JobActionInfoTy> ActionInfo,
+                                       const ActionList *&Inputs,
+                                       ActionList &CollapsedOffloadAction) {
+    if (ActionInfo.size() < 3 || !canCollapseAssembleAction())
+      return nullptr;
+    auto *AJ = dyn_cast<AssembleJobAction>(ActionInfo[0].JA);
+    auto *BJ = dyn_cast<BackendJobAction>(ActionInfo[1].JA);
+    auto *CJ = dyn_cast<CompileJobAction>(ActionInfo[2].JA);
+    if (!AJ || !BJ || !CJ)
+      return nullptr;
+
+    // Get compiler tool.
+    const Tool *T = TC.SelectTool(*CJ);
+    if (!T)
+      return nullptr;
+
     // When using -fembed-bitcode, it is required to have the same tool (clang)
     // for both CompilerJA and BackendJA. Otherwise, combine two stages.
     if (EmbedBitcode) {
-      JobAction *InputJA = cast<JobAction>(*Inputs->begin());
-      const Tool *BackendTool = TC->SelectTool(*InputJA);
-      if (BackendTool == Compiler)
-        CompileJA = InputJA;
+      const Tool *BT = TC.SelectTool(*BJ);
+      if (BT == T)
+        return nullptr;
     }
-    // If we are supporting OpenMP offloading we have to split backend and
-    // compile jobs.
-    if (RequiresOpenMPOffloading(TC)) {
-      JobAction *InputJA = cast<JobAction>(*Inputs->begin());
-      const Tool *BackendTool = TC->SelectTool(*InputJA);
-      if (BackendTool == Compiler)
-        CompileJA = InputJA;
-    }
-    if (Compiler->hasIntegratedAssembler()) {
-      Inputs = &CompileJA->getInputs();
-      ToolForJob = Compiler;
-      CollapsedCHA = CHA;
-    }
-  }
 
-  // A backend job should always be combined with the preceding compile job
-  // unless OPT_save_temps or OPT_fembed_bitcode is enabled and the compiler is
-  // capable of emitting LLVM IR as an intermediate output. The OpenMP
-  // offloading implementation also requires the Compile and Backend jobs to be
-  // separate.
-  if (isa<BackendJobAction>(JA) && !RequiresOpenMPOffloading(TC) &&
-      !TC->RequiresHostToolChainForOffloadingAction(*Inputs->begin())) {
-    // Check if the compiler supports emitting LLVM IR.
-    assert(Inputs->size() == 1);
-    // Compile job may be wrapped in CudaHostAction, extract it if
-    // that's the case and update CollapsedCHA if we combine phases.
-    CudaHostAction *CHA = dyn_cast<CudaHostAction>(*Inputs->begin());
-    JobAction *CompileJA =
-        cast<CompileJobAction>(CHA ? *CHA->input_begin() : *Inputs->begin());
-    assert(CompileJA && "Backend job is not preceeded by compile job.");
-    const Tool *Compiler = TC->SelectTool(*CompileJA);
-    if (!Compiler)
+    if (!T->hasIntegratedAssembler())
       return nullptr;
-    if (!Compiler->canEmitIR() ||
-        (!SaveTemps && !EmbedBitcode)) {
-      Inputs = &CompileJA->getInputs();
-      ToolForJob = Compiler;
-      CollapsedCHA = CHA;
-    }
+
+    Inputs = &CJ->getInputs();
+    AppendCollapsedOffloadAction(CollapsedOffloadAction, ActionInfo,
+                                 /*NumElements=*/3);
+    return T;
+  }
+  const Tool *
+  attemptCombineAssembleBackend(ArrayRef<JobActionInfoTy> ActionInfo,
+                                const ActionList *&Inputs,
+                                ActionList &CollapsedOffloadAction) {
+    if (ActionInfo.size() < 2 || !canCollapseAssembleAction())
+      return nullptr;
+    auto *AJ = dyn_cast<AssembleJobAction>(ActionInfo[0].JA);
+    auto *BJ = dyn_cast<BackendJobAction>(ActionInfo[1].JA);
+    if (!AJ || !BJ)
+      return nullptr;
+
+    // Retrieve the compile job, backend action must always be preceded by one.
+    ActionList CompileJobOffloadActions;
+    auto *CJ = getDependenceAction(BJ->getInputs(), CompileJobOffloadActions,
+                                   /*CanBeCollapsed=*/false);
+    if (!AJ || !BJ || !CJ)
+      return nullptr;
+
+    assert(isa<CompileJobAction>(CJ) &&
+           "Expecting compile job preceding backend job.");
+
+    // Get compiler tool.
+    const Tool *T = TC.SelectTool(*CJ);
+    if (!T)
+      return nullptr;
+
+    if (!T->hasIntegratedAssembler())
+      return nullptr;
+
+    Inputs = &BJ->getInputs();
+    AppendCollapsedOffloadAction(CollapsedOffloadAction, ActionInfo,
+                                 /*NumElements=*/2);
+    return T;
+  }
+  const Tool *attemptCombineBackendCompile(ArrayRef<JobActionInfoTy> ActionInfo,
+                                           const ActionList *&Inputs,
+                                           ActionList &CollapsedOffloadAction) {
+    if (ActionInfo.size() < 2 || !canCollapsePreprocessorAction())
+      return nullptr;
+    auto *BJ = dyn_cast<BackendJobAction>(ActionInfo[0].JA);
+    auto *CJ = dyn_cast<CompileJobAction>(ActionInfo[1].JA);
+    if (!BJ || !CJ)
+      return nullptr;
+
+    // Get compiler tool.
+    const Tool *T = TC.SelectTool(*CJ);
+    if (!T)
+      return nullptr;
+
+    if (T->canEmitIR() && (SaveTemps || EmbedBitcode))
+      return nullptr;
+
+    Inputs = &CJ->getInputs();
+    AppendCollapsedOffloadAction(CollapsedOffloadAction, ActionInfo,
+                                 /*NumElements=*/2);
+    return T;
   }
 
-  // Otherwise use the tool for the current job.
-  if (!ToolForJob)
-    ToolForJob = TC->SelectTool(*JA);
+  /// Updates the inputs if the obtained tool supports combining with
+  /// preprocessor action, and the current input is indeed a preprocessor
+  /// action. If combining results in the collapse of offloading actions, those
+  /// are appended to \a CollapsedOffloadAction.
+  void attemptCombineWithPreprocess(const Tool *T, const ActionList *&Inputs,
+                                    ActionList &CollapsedOffloadAction) {
+    if (!T || !canCollapsePreprocessorAction() || !T->hasIntegratedCPP())
+      return;
 
-  // See if we should use an integrated preprocessor. We do so when we have
-  // exactly one input, since this is the only use case we care about
-  // (irrelevant since we don't support combine yet).
-  if (Inputs->size() == 1 && isa<PreprocessJobAction>(*Inputs->begin()) &&
-      !TC->RequiresHostToolChainForOffloadingAction(*Inputs->begin()) &&
-      !C.getArgs().hasArg(options::OPT_no_integrated_cpp) &&
-      !C.getArgs().hasArg(options::OPT_traditional_cpp) && !SaveTemps &&
-      !C.getArgs().hasArg(options::OPT_rewrite_objc) &&
-      ToolForJob->hasIntegratedCPP())
-    Inputs = &(*Inputs)[0]->getInputs();
+    // Attempt to get a preprocessor action dependence.
+    ActionList PreprocessJobOffloadActions;
+    auto *PJ = getDependenceAction(*Inputs, PreprocessJobOffloadActions);
+    if (!PJ || !isa<PreprocessJobAction>(PJ))
+      return;
 
-  return ToolForJob;
+    // This is legal to combine. Append any offload action we found and set the
+    // current inputs to preprocessor inputs.
+    CollapsedOffloadAction.append(PreprocessJobOffloadActions.begin(),
+                                  PreprocessJobOffloadActions.end());
+    Inputs = &PJ->getInputs();
+  }
+
+public:
+  ToolSelector(const JobAction *BaseAction, const ToolChain &TC,
+               const Compilation &C, bool SaveTemps, bool EmbedBitcode)
+      : TC(TC), C(C), BaseAction(BaseAction), SaveTemps(SaveTemps),
+        EmbedBitcode(EmbedBitcode) {
+    assert(BaseAction && "Invalid base action.");
+    IsHostSelector = BaseAction->getOffloadingDeviceKind() == Action::OFK_None;
+  }
+
+  /// Check if a chain of action can be combined and return the tool that can
+  /// handle the combination of actions. The pointer to the current inputs \a
+  /// Inputs and the list of offload actions \a CollapsedOffloadActions
+  /// connected to collapsed actions are updated accordingly. The latter enables
+  /// the caller of the selector to process them afterwards instead of just
+  /// dropping them. If no suitable tool is found, null will be returned.
+  const Tool *getTool(const ActionList *&Inputs,
+                      ActionList &CollapsedOffloadAction) {
+    //
+    // Get the largest chain of actions that we could combine.
+    //
+
+    SmallVector<JobActionInfoTy, 5> ActionChain(1);
+    ActionChain.back().JA = BaseAction;
+    while (ActionChain.back().JA) {
+      const Action *CurAction = ActionChain.back().JA;
+
+      // Grow the chain by one element.
+      ActionChain.resize(ActionChain.size() + 1);
+      JobActionInfoTy &AI = ActionChain.back();
+
+      // Attempt to fill it with the
+      AI.JA =
+          getDependenceAction(CurAction->getInputs(), AI.SavedOffloadAction);
+    }
+
+    // Pop the last action info as it could not be filled.
+    ActionChain.pop_back();
+
+    //
+    // Attempt to combine actions. If all combining attempts failed, just return
+    // the tool of the provided action. At the end we attempt to combine the
+    // action with any preprocessor action it may depend on.
+    //
+
+    const Tool *T = nullptr;
+
+    if (!T)
+      T = attemptCombineAssembleBackendCompile(ActionChain, Inputs,
+                                               CollapsedOffloadAction);
+    if (!T)
+      T = attemptCombineAssembleBackend(ActionChain, Inputs,
+                                        CollapsedOffloadAction);
+    if (!T)
+      T = attemptCombineBackendCompile(ActionChain, Inputs,
+                                       CollapsedOffloadAction);
+    if (!T) {
+      Inputs = &BaseAction->getInputs();
+      T = TC.SelectTool(*BaseAction);
+    }
+
+    attemptCombineWithPreprocess(T, Inputs, CollapsedOffloadAction);
+    return T;
+  }
+};
+}
+
+/// Return a string that uniquely identifies the result of a job. The bound arch
+/// is not necessarily represented in the toolchain's triple -- for example,
+/// armv7 and armv7s both map to the same triple -- so we need both in our map.
+/// Also, we need to add the offloading device kind, as the same tool chain can
+/// be used for host and device for some programming models, e.g. OpenMP.
+static std::string GetTriplePlusArchString(const ToolChain *TC,
+                                           const char *BoundArch,
+                                           Action::OffloadKind OffloadKind) {
+  std::string TriplePlusArch = TC->getTriple().normalize();
+  if (BoundArch) {
+    TriplePlusArch += "-";
+    TriplePlusArch += BoundArch;
+  }
+  TriplePlusArch += "-";
+  TriplePlusArch += Action::GetOffloadKindName(OffloadKind);
+  return TriplePlusArch;
 }
 
 InputInfo Driver::BuildJobsForAction(
     Compilation &C, const Action *A, const ToolChain *TC, const char *BoundArch,
     bool AtTopLevel, bool MultipleArchs, const char *LinkingOutput,
     std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults,
-    OffloadingHostResultsTy &OffloadingHostResults) const {
-  // The bound arch is not necessarily represented in the toolchain's triple --
-  // for example, armv7 and armv7s both map to the same triple -- so we need
-  // both in our map.
-  std::string TriplePlusArch = TC->getTriple().normalize();
-  if (BoundArch) {
-    TriplePlusArch += "-";
-    TriplePlusArch += BoundArch;
-  }
-  std::pair<const Action *, std::string> ActionTC = {A, TriplePlusArch};
+    Action::OffloadKind TargetDeviceOffloadKind) const {
+  std::pair<const Action *, std::string> ActionTC = {
+      A, GetTriplePlusArchString(TC, BoundArch, TargetDeviceOffloadKind)};
   auto CachedResult = CachedResults.find(ActionTC);
   if (CachedResult != CachedResults.end()) {
     return CachedResult->second;
   }
   InputInfo Result = BuildJobsForActionNoCache(
       C, A, TC, BoundArch, AtTopLevel, MultipleArchs, LinkingOutput,
-      CachedResults, OffloadingHostResults);
+      CachedResults, TargetDeviceOffloadKind);
   CachedResults[ActionTC] = Result;
   return Result;
 }
@@ -2331,52 +2936,64 @@ InputInfo Driver::BuildJobsForActionNoCache(
     Compilation &C, const Action *A, const ToolChain *TC, const char *BoundArch,
     bool AtTopLevel, bool MultipleArchs, const char *LinkingOutput,
     std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults,
-    OffloadingHostResultsTy &OffloadingHostResults) const {
+    Action::OffloadKind TargetDeviceOffloadKind) const {
   llvm::PrettyStackTraceString CrashInfo("Building compilation jobs");
 
-  InputInfoList CudaDeviceInputInfos;
-  if (const CudaHostAction *CHA = dyn_cast<CudaHostAction>(A)) {
-    // Append outputs of device jobs to the input list.
-    for (const Action *DA : CHA->getDeviceActions()) {
-      CudaDeviceInputInfos.push_back(
-          BuildJobsForAction(C, DA, TC, nullptr, AtTopLevel,
-                             /*MultipleArchs*/ false, LinkingOutput,
-                             CachedResults, OffloadingHostResults));
-    }
-    // Override current action with a real host compile action and continue
-    // processing it.
-    A = *CHA->input_begin();
-  }
+  InputInfoList OffloadDependencesInputInfo;
+  bool BuildingForOffloadDevice = TargetDeviceOffloadKind != Action::OFK_None;
+  if (const OffloadAction *OA = dyn_cast<OffloadAction>(A)) {
+    // The offload action is expected to be used in four different situations.
+    //
+    // a) Set a toolchain/architecture/kind for a host action:
+    //    Host Action 1 -> OffloadAction -> Host Action 2
+    //
+    // b) Set a toolchain/architecture/kind for a device action;
+    //    Device Action 1 -> OffloadAction -> Device Action 2
+    //
+    // c) Specify a device dependences to a host action;
+    //    Device Action 1  _
+    //                      \
+    //      Host Action 1  ---> OffloadAction -> Host Action 2
+    //
+    // d) Specify a host dependence to a device action.
+    //      Host Action 1  _
+    //                      \
+    //    Device Action 1  ---> OffloadAction -> Device Action 2
+    //
+    // For a) and b), we just return the job generated for the dependence. For
+    // c) and d) we override the current action with the host/device dependence
+    // if the current toolchain is host/device and set the offload dependences
+    // info with the jobs obtained from the device/host dependence(s).
 
-  if (const OffloadUnbundlingJobAction *OUA =
-          dyn_cast<OffloadUnbundlingJobAction>(A)) {
-    // The input of the unbundling job has to be a single input non-source file,
-    // so we do not consider it having multiple architectures. We just use the
-    // naming that a regular host input file would have.
-    auto Result =
-        BuildJobsForAction(C, *OUA->input_begin(), TC, BoundArch, AtTopLevel,
-                           /*MultipleArchs=*/false, LinkingOutput,
-                           CachedResults, OffloadingHostResults);
-    return CreateUnbundledOffloadingResult(C, OUA, TC, Result,
-                                           OffloadingHostResults);
-  }
-
-  if (const OffloadBundlingJobAction *OBA =
-          dyn_cast<OffloadBundlingJobAction>(A)) {
-    // Compute the input action for all devices and emit a bundling command.
-    InputInfoList Results(OrderedOffloadingToolchains.size() + 1);
-    for (unsigned i = 0; i < Results.size(); ++i) {
-      const ToolChain *CurTC = i ? OrderedOffloadingToolchains[i - 1] : TC;
-      // The input job of the bundling action is meant for multiple targets and
-      // is not a top level job - the bundling job is the top level for the
-      // current output.
-      Results[i] = BuildJobsForAction(C, *OBA->input_begin(), CurTC,
-                                      CreateOffloadingPseudoArchName(C, CurTC),
-                                      /*AtTopLevel=*/false,
-                                      /*MultipleArchs=*/true, LinkingOutput,
-                                      CachedResults, OffloadingHostResults);
+    // If there is a single device option, just generate the job for it.
+    if (OA->hasSingleDeviceDependence()) {
+      InputInfo DevA;
+      OA->doOnEachDeviceDependence([&](Action *DepA, const ToolChain *DepTC,
+                                       const char *DepBoundArch) {
+        DevA =
+            BuildJobsForAction(C, DepA, DepTC, DepBoundArch, AtTopLevel,
+                               /*MultipleArchs*/ !!DepBoundArch, LinkingOutput,
+                               CachedResults, DepA->getOffloadingDeviceKind());
+      });
+      return DevA;
     }
-    return CreateBundledOffloadingResult(C, OBA, TC, Results);
+
+    // If 'Action 2' is host, we generate jobs for the device dependences and
+    // override the current action with the host dependence. Otherwise, we
+    // generate the host dependences and override the action with the device
+    // dependence. The dependences can't therefore be a top-level action.
+    OA->doOnEachDependence(
+        /*IsHostDependence=*/BuildingForOffloadDevice,
+        [&](Action *DepA, const ToolChain *DepTC, const char *DepBoundArch) {
+          OffloadDependencesInputInfo.push_back(BuildJobsForAction(
+              C, DepA, DepTC, DepBoundArch, /*AtTopLevel=*/false,
+              /*MultipleArchs*/ !!DepBoundArch, LinkingOutput, CachedResults,
+              DepA->getOffloadingDeviceKind()));
+        });
+
+    A = BuildingForOffloadDevice
+            ? OA->getSingleDeviceDependence(/*DoNotConsiderHostActions=*/true)
+            : OA->getHostDependence();
   }
 
   if (const InputAction *IA = dyn_cast<InputAction>(A)) {
@@ -2404,47 +3021,32 @@ InputInfo Driver::BuildJobsForActionNoCache(
 
     return BuildJobsForAction(C, *BAA->input_begin(), TC, ArchName, AtTopLevel,
                               MultipleArchs, LinkingOutput, CachedResults,
-                              OffloadingHostResults);
+                              TargetDeviceOffloadKind);
   }
 
-  if (const CudaDeviceAction *CDA = dyn_cast<CudaDeviceAction>(A)) {
-    // Initial processing of CudaDeviceAction carries host params.
-    // Call BuildJobsForAction() again, now with correct device parameters.
-    InputInfo II = BuildJobsForAction(
-        C, *CDA->input_begin(), C.getSingleOffloadToolChain<Action::OFK_Cuda>(),
-        CudaArchToString(CDA->getGpuArch()), CDA->isAtTopLevel(), 
-        /*MultipleArchs=*/true, LinkingOutput, CachedResults,
-				OffloadingHostResults);
-    // Currently II's Action is *CDA->input_begin().  Set it to CDA instead, so
-    // that one can retrieve II's GPU arch.
-    II.setAction(A);
-    return II;
-  }
 
   const ActionList *Inputs = &A->getInputs();
 
   const JobAction *JA = cast<JobAction>(A);
-  const CudaHostAction *CollapsedCHA = nullptr;
+  ActionList CollapsedOffloadActions;
 
-  if (TC->RequiresHostToolChainForOffloadingAction(JA))
-    TC = &C.getDefaultToolChain();
+  ToolSelector TS(JA, *TC, C, isSaveTempsEnabled(), embedBitcodeEnabled());
+  const Tool *T = TS.getTool(Inputs, CollapsedOffloadActions);
 
-  const Tool *T =
-      selectToolForJob(C, isSaveTempsEnabled(), embedBitcodeEnabled(), TC, JA,
-                       Inputs, CollapsedCHA);
   if (!T)
     return InputInfo();
 
-  // If we've collapsed action list that contained CudaHostAction we
-  // need to build jobs for device-side inputs it may have held.
-  if (CollapsedCHA) {
-    for (const Action *DA : CollapsedCHA->getDeviceActions()) {
-      CudaDeviceInputInfos.push_back(
-          BuildJobsForAction(C, DA, TC, "", AtTopLevel,
-                             /*MultipleArchs*/ false, LinkingOutput,
-                             CachedResults, OffloadingHostResults));
-    }
-  }
+  // If we've collapsed action list that contained OffloadAction we
+  // need to build jobs for host/device-side inputs it may have held.
+  for (const auto *OA : CollapsedOffloadActions)
+    cast<OffloadAction>(OA)->doOnEachDependence(
+        /*IsHostDependence=*/BuildingForOffloadDevice,
+        [&](Action *DepA, const ToolChain *DepTC, const char *DepBoundArch) {
+          OffloadDependencesInputInfo.push_back(BuildJobsForAction(
+              C, DepA, DepTC, DepBoundArch, AtTopLevel,
+              /*MultipleArchs=*/!!DepBoundArch, LinkingOutput, CachedResults,
+              DepA->getOffloadingDeviceKind()));
+        });
 
   // Only use pipes when there is exactly one input.
   InputInfoList InputInfos;
@@ -2456,7 +3058,7 @@ InputInfo Driver::BuildJobsForActionNoCache(
         AtTopLevel && (isa<DsymutilJobAction>(A) || isa<VerifyJobAction>(A));
     InputInfos.push_back(BuildJobsForAction(
         C, Input, TC, BoundArch, SubJobAtTopLevel, MultipleArchs, LinkingOutput,
-        CachedResults, OffloadingHostResults));
+        CachedResults, A->getOffloadingDeviceKind()));
   }
 
   // Always use the first input as the base input.
@@ -2467,25 +3069,112 @@ InputInfo Driver::BuildJobsForActionNoCache(
   if (JA->getType() == types::TY_dSYM)
     BaseInput = InputInfos[0].getFilename();
 
-  // Append outputs of cuda device jobs to the input list
-  if (CudaDeviceInputInfos.size())
-    InputInfos.append(CudaDeviceInputInfos.begin(), CudaDeviceInputInfos.end());
+  // Append outputs of offload device jobs to the input list
+  if (!OffloadDependencesInputInfo.empty())
+    InputInfos.append(OffloadDependencesInputInfo.begin(),
+                      OffloadDependencesInputInfo.end());
+
+  // Set the effective triple of the toolchain for the duration of this job.
+  llvm::Triple EffectiveTriple;
+  const ToolChain &ToolTC = T->getToolChain();
+  const ArgList &Args =
+      C.getArgsForToolChain(TC, BoundArch, A->getOffloadingDeviceKind());
+  if (InputInfos.size() != 1) {
+    EffectiveTriple = llvm::Triple(ToolTC.ComputeEffectiveClangTriple(Args));
+  } else {
+    // Pass along the input type if it can be unambiguously determined.
+    EffectiveTriple = llvm::Triple(
+        ToolTC.ComputeEffectiveClangTriple(Args, InputInfos[0].getType()));
+  }
+  RegisterEffectiveTriple TripleRAII(ToolTC, EffectiveTriple);
 
   // Determine the place to write output to, if any.
   InputInfo Result;
-  Result =
-      CreateActionResult(C, A, BaseInput, BoundArch, AtTopLevel, MultipleArchs);
+  InputInfoList UnbundlingResults;
+  if (auto *UA = dyn_cast<OffloadUnbundlingJobAction>(JA)) {
+    // If we have an unbundling job, we need to create results for all the
+    // outputs. We also update the results cache so that other actions using
+    // this unbundling action can get the right results.
+    for (auto &UI : UA->getDependingActionsInfo()) {
+      assert(UI.DependingOffloadKind != Action::OFK_None &&
+             "Unbundling with no offloading??");
 
-  // Post-process inputs and results to suit the needs of the offloading
-  // implementations.
-  PostProcessOffloadingInputsAndResults(C, JA, TC, InputInfos, Result,
-                                        CachedResults, OffloadingHostResults);
+      // Unbundling actions are never at the top level. When we generate the
+      // offloading prefix, we also do that for the host file because the
+      // unbundling action does not change the type of the output which can
+      // cause a overwrite.
+      std::string OffloadingPrefix = Action::GetOffloadingFileNamePrefix(
+          UI.DependingOffloadKind,
+          UI.DependingToolChain->getTriple().normalize(),
+          /*CreatePrefixForHost=*/true);
+      auto CurI = InputInfo(
+          UA, GetNamedOutputPath(C, *UA, BaseInput, UI.DependingBoundArch,
+                                 /*AtTopLevel=*/false, MultipleArchs,
+                                 OffloadingPrefix),
+          BaseInput);
+      // Save the unbundling result.
+      UnbundlingResults.push_back(CurI);
 
-  if (CCCPrintBindings && !CCGenDiagnostics)
-    DumpJobBindings(&T->getToolChain(), T->getName(), InputInfos, Result);
-  else
-    T->ConstructJob(C, *JA, Result, InputInfos,
-                    C.getArgsForToolChain(TC, BoundArch), LinkingOutput);
+      // Get the unique string identifier for this dependence and cache the
+      // result.
+      CachedResults[{A, GetTriplePlusArchString(
+                            UI.DependingToolChain, UI.DependingBoundArch,
+                            UI.DependingOffloadKind)}] = CurI;
+    }
+
+    // Now that we have all the results generated, select the one that should be
+    // returned for the current depending action.
+    std::pair<const Action *, std::string> ActionTC = {
+        A, GetTriplePlusArchString(TC, BoundArch, TargetDeviceOffloadKind)};
+    assert(CachedResults.find(ActionTC) != CachedResults.end() &&
+           "Result does not exist??");
+    Result = CachedResults[ActionTC];
+  } else if (JA->getType() == types::TY_Nothing)
+    Result = InputInfo(A, BaseInput);
+  else {
+    // We only have to generate a prefix for the host if this is not a top-level
+    // action.
+    std::string OffloadingPrefix = Action::GetOffloadingFileNamePrefix(
+        A->getOffloadingDeviceKind(), TC->getTriple().normalize(),
+        /*CreatePrefixForHost=*/!!A->getOffloadingHostActiveKinds() &&
+            !AtTopLevel);
+    Result = InputInfo(A, GetNamedOutputPath(C, *JA, BaseInput, BoundArch,
+                                             AtTopLevel, MultipleArchs,
+                                             OffloadingPrefix),
+                       BaseInput);
+  }
+
+  if (CCCPrintBindings && !CCGenDiagnostics) {
+    llvm::errs() << "# \"" << T->getToolChain().getTripleString() << '"'
+                 << " - \"" << T->getName() << "\", inputs: [";
+    for (unsigned i = 0, e = InputInfos.size(); i != e; ++i) {
+      llvm::errs() << InputInfos[i].getAsString();
+      if (i + 1 != e)
+        llvm::errs() << ", ";
+    }
+    if (UnbundlingResults.empty())
+      llvm::errs() << "], output: " << Result.getAsString() << "\n";
+    else {
+      llvm::errs() << "], outputs: [";
+      for (unsigned i = 0, e = UnbundlingResults.size(); i != e; ++i) {
+        llvm::errs() << UnbundlingResults[i].getAsString();
+        if (i + 1 != e)
+          llvm::errs() << ", ";
+      }
+      llvm::errs() << "] \n";
+    }
+  } else {
+    if (UnbundlingResults.empty())
+      T->ConstructJob(
+          C, *JA, Result, InputInfos,
+          C.getArgsForToolChain(TC, BoundArch, JA->getOffloadingDeviceKind()),
+          LinkingOutput);
+    else
+      T->ConstructJob(
+          C, *JA, UnbundlingResults, InputInfos,
+          C.getArgsForToolChain(TC, BoundArch, JA->getOffloadingDeviceKind()),
+          LinkingOutput);
+  }
   return Result;
 }
 
@@ -2530,7 +3219,8 @@ static const char *MakeCLOutputFilename(const ArgList &Args, StringRef ArgValue,
 const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
                                        const char *BaseInput,
                                        const char *BoundArch, bool AtTopLevel,
-                                       bool MultipleArchs) const {
+                                       bool MultipleArchs,
+                                       StringRef OffloadingPrefix) const {
   llvm::PrettyStackTraceString CrashInfo("Computing output path");
   // Output to a user requested destination?
   if (AtTopLevel && !isa<DsymutilJobAction>(JA) && !isa<VerifyJobAction>(JA)) {
@@ -2614,13 +3304,14 @@ const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
       // clang-cl uses BaseName for the executable name.
       NamedOutput =
           MakeCLOutputFilename(C.getArgs(), "", BaseName, types::TY_Image);
-    } else if (MultipleArchs && BoundArch) {
-      SmallString<128> Output(getDefaultImageName());
-      Output += "-";
-      Output.append(BoundArch);
-      NamedOutput = C.getArgs().MakeArgString(Output.c_str());
     } else {
-      NamedOutput = getDefaultImageName();
+      SmallString<128> Output(getDefaultImageName());
+      Output += OffloadingPrefix;
+      if (MultipleArchs && BoundArch) {
+        Output += "-";
+        Output.append(BoundArch);
+      }
+      NamedOutput = C.getArgs().MakeArgString(Output.c_str());
     }
   } else if (JA.getType() == types::TY_PCH && IsCLMode()) {
     NamedOutput = C.getArgs().MakeArgString(GetClPchPath(C, BaseName).c_str());
@@ -2632,6 +3323,7 @@ const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
     if (!types::appendSuffixForType(JA.getType()))
       End = BaseName.rfind('.');
     SmallString<128> Suffixed(BaseName.substr(0, End));
+    Suffixed += OffloadingPrefix;
     if (MultipleArchs && BoundArch) {
       Suffixed += "-";
       Suffixed.append(BoundArch);
@@ -2808,14 +3500,10 @@ std::string Driver::GetClPchPath(Compilation &C, StringRef BaseName) const {
   return Output.str();
 }
 
-const ToolChain &
-Driver::getToolChain(const ArgList &Args, const llvm::Triple &Target,
-                     ToolChain::OffloadingKind OffloadingKind) const {
-  // If this is an offload toolchain we need to try to get it from the right
-  // cache.
-  bool IsOffloadingDevice = (OffloadingKind == ToolChain::OK_OpenMP_Device);
-  ToolChain *&TC = *((IsOffloadingDevice) ? &OffloadToolChains[Target.str()]
-                                          : &ToolChains[Target.str()]);
+const ToolChain &Driver::getToolChain(const ArgList &Args,
+                                      const llvm::Triple &Target) const {
+
+  ToolChain *&TC = ToolChains[Target.str()];
   if (!TC) {
     switch (Target.getOS()) {
     case llvm::Triple::Haiku:
@@ -2928,8 +3616,6 @@ Driver::getToolChain(const ArgList &Args, const llvm::Triple &Target,
       }
     }
   }
-  // Set the offloading kind for this toolchain.
-  TC->setOffloadingKind(OffloadingKind);
   return *TC;
 }
 
