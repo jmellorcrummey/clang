@@ -1766,7 +1766,13 @@ static void emitDeviceOMPSimdDirective(CodeGenFunction &CGF,
 void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
                                       bool OutlinedSimd) {
   auto &&CodeGen = [&S, OutlinedSimd](CodeGenFunction &CGF, PrePostActionTy &) {
-    OMPLoopScope PreInitScope(CGF, S);
+    // In the case where the SIMD region is part of a combined construct
+    // like distribute simd, and if the SIMD region is not outlined,
+    // this generates a duplicate delcaration since a similar
+    // invocation may occur for the previous directive.
+    if (!requiresAdditionalIterationVar(S.getDirectiveKind())){
+      OMPLoopScope PreInitScope(CGF, S);
+    }
     // if (PreCond) {
     //   for (IV in 0..LastIteration) BODY;
     //   <Final counter/linear vars updates>;
@@ -1837,14 +1843,15 @@ void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
       OMPPrivateScope LoopScope(CGF);
       CGF.EmitOMPPrivateLoopCounters(S, LoopScope);
       CGF.EmitOMPLinearClause(S, LoopScope);
-      bool lastprivateAlreadyEmitted = false;
-      //     requiresAdditionalIterationVar(S.getDirectiveKind());
+      bool lastprivateAlreadyEmitted =
+        requiresAdditionalIterationVar(S.getDirectiveKind());
       if (!lastprivateAlreadyEmitted)
         CGF.EmitOMPPrivateClause(S, LoopScope);
       CGF.EmitOMPReductionClauseInit(S, LoopScope);
       bool HasLastprivateClause = false;
       if (!lastprivateAlreadyEmitted)
-        HasLastprivateClause = CGF.EmitOMPLastprivateClauseInit(S, LoopScope);
+        HasLastprivateClause =
+            CGF.EmitOMPLastprivateClauseInit(S, LoopScope);
       (void)LoopScope.Privatize();
       CGF.EmitOMPInnerLoop(S, LoopScope.requiresCleanups(), S.getCond(),
                            S.getInc(),
@@ -3046,13 +3053,9 @@ void CodeGenFunction::EmitOMPDistributeLoop(
             *this, S.getLocStart(), OMPD_unknown, /*EmitChecks=*/false,
             /*ForceSimpleCall=*/true);
       }
-      bool lastprivateAlreadyEmitted =
-        requiresAdditionalIterationVar(S.getDirectiveKind());
-      if (!lastprivateAlreadyEmitted)
-        EmitOMPPrivateClause(S, LoopScope);
-      bool HasLastprivateClause = false;
-      if (!lastprivateAlreadyEmitted)
-        HasLastprivateClause = EmitOMPLastprivateClauseInit(S, LoopScope);
+      EmitOMPPrivateClause(S, LoopScope);
+      bool HasLastprivateClause =
+          EmitOMPLastprivateClauseInit(S, LoopScope);
       EmitOMPPrivateLoopCounters(S, LoopScope);
       (void)LoopScope.Privatize();
 
