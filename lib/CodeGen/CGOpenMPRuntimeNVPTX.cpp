@@ -633,6 +633,9 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createKernelInitializerFunction(
   InitFn->setLinkage(llvm::GlobalValue::InternalLinkage);
 
   CodeGenFunction CGF(CGM, /*suppressNewContext=*/true);
+  // We don't need debug information in this function as nothing here refers to
+  // user code.
+  CGF.disableDebugInfo();
   CGF.StartFunction(GlobalDecl(), RetQTy, InitFn, CGFI, {});
 
   auto &Bld = CGF.Builder;
@@ -695,6 +698,7 @@ void CGOpenMPRuntimeNVPTX::emitWorkerFunction(WorkerFunctionState &WST) {
   auto &Ctx = CGM.getContext();
 
   CodeGenFunction CGF(CGM, /*suppressNewContext=*/true);
+  CGF.disableDebugInfo();
   CGF.StartFunction(GlobalDecl(), Ctx.VoidTy, WST.WorkerFn, *WST.CGFI, {});
   emitWorkerLoop(CGF, WST);
   CGF.FinishFunction();
