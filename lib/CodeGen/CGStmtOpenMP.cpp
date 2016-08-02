@@ -1766,10 +1766,8 @@ static void emitDeviceOMPSimdDirective(CodeGenFunction &CGF,
 void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
                                       bool OutlinedSimd) {
   auto &&CodeGen = [&S, OutlinedSimd](CodeGenFunction &CGF, PrePostActionTy &) {
-    // In the case where the SIMD region is part of a combined construct
-    // like distribute simd, and if the SIMD region is not outlined,
-    // this generates a duplicate delcaration since a similar
-    // invocation may occur for the previous directive.
+    // Do not emit this code if it was already emitted before
+    // in the same scope.
     if (!requiresAdditionalIterationVar(S.getDirectiveKind())){
       OMPLoopScope PreInitScope(CGF, S);
     }
