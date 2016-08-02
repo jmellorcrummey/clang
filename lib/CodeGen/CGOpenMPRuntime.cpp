@@ -3181,13 +3181,14 @@ void CGOpenMPRuntime::createOffloadEntry(llvm::Constant *ID,
   Str->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   llvm::Constant *StrPtr = llvm::ConstantExpr::getBitCast(Str, CGM.Int8PtrTy);
 
-  // Create the entry struct.
+  // Create the entry struct. Its name has to be unique, so we append the name
+  // of the related function or global to make sure that happen.
   llvm::Constant *EntryInit = llvm::ConstantStruct::get(
       TgtOffloadEntryType, AddrPtr, StrPtr,
       llvm::ConstantInt::get(CGM.SizeTy, Size), nullptr);
   llvm::GlobalVariable *Entry = new llvm::GlobalVariable(
       M, TgtOffloadEntryType, true, llvm::GlobalValue::ExternalLinkage,
-      EntryInit, ".omp_offloading.entry");
+      EntryInit, Twine(".omp_offloading.entry.") + Name);
 
   // The entry has to be created in the section the linker expects it to be.
   Entry->setSection(".omp_offloading.entries");
