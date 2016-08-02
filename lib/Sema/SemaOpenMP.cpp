@@ -6163,8 +6163,9 @@ static unsigned CheckOpenMPLoop(
   ExprResult DistCond, DistInc, PrevEUB;
   if (isOpenMPLoopBoundSharingDirective(DKind)) {
     DistCond =
-        CoalescedSchedule && (DKind == OMPD_target_teams_distribute_parallel_for ||
-            DKind == OMPD_target_teams_distribute_parallel_for_simd)
+        CoalescedSchedule &&
+                (DKind == OMPD_target_teams_distribute_parallel_for ||
+                 DKind == OMPD_target_teams_distribute_parallel_for_simd)
             ? SemaRef.BuildBinOp(CurScope, CondLoc, BO_LT, IV.get(),
                                  NumIterations.get())
             : SemaRef.BuildBinOp(CurScope, CondLoc, BO_LE, IV.get(), UB.get());
@@ -8373,7 +8374,8 @@ StmtResult Sema::ActOnOpenMPTargetTeamsDistributeParallelForSimdDirective(
   // In presence of clause 'collapse' with number of loops, it will
   // define the nested loops number.
   unsigned NestedLoopCount = CheckOpenMPLoop(
-      OMPD_target_teams_distribute_parallel_for_simd, getCollapseNumberExpr(Clauses),
+      OMPD_target_teams_distribute_parallel_for_simd,
+      getCollapseNumberExpr(Clauses),
       nullptr /*ordered not a clause on distribute*/, AStmt, *this, *DSAStack,
       VarsWithImplicitDSA, B, CoalescedSchedule);
   if (NestedLoopCount == 0)
