@@ -866,6 +866,20 @@ public:
                                    llvm::Value *LB, llvm::Value *UB,
                                    llvm::Value *Chunk = nullptr);
 
+  /// Call the appropriate runtime routine to notify that we finished
+  /// iteration of the dynamic loop.
+  ///
+  /// \param CGF Reference to current CodeGenFunction.
+  /// \param OpenMP Directive.
+  /// \param Loc Clang source location.
+  /// \param IVSize Size of the iteration variable in bits.
+  /// \param IVSigned Sign of the interation variable.
+  ///
+  virtual void emitForDispatchFinish(CodeGenFunction &CGF,
+                                     const OMPLoopDirective &S,
+                                     SourceLocation Loc, unsigned IVSize,
+                                     bool IVSigned);
+
   /// \brief Call the appropriate runtime routine to initialize it before start
   /// of loop.
   ///

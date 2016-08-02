@@ -1851,12 +1851,11 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
   }
 }
 
-void CodeGenFunction::EmitOMPOuterLoop(bool DynamicOrOrdered, bool IsMonotonic,
-                                       bool IsDistribute,
-                                       const OMPLoopDirective &S,
-                                       OMPPrivateScope &LoopScope, bool Ordered,
-                                       Address LB, Address UB, Address ST,
-                                       Address IL, llvm::Value *Chunk) {
+void CodeGenFunction::EmitOMPOuterLoop(
+    bool DynamicOrOrdered, bool IsMonotonic, bool IsDistribute,
+    const OMPLoopDirective &S, OMPPrivateScope &LoopScope, bool Ordered,
+    Address LB, Address UB, Address ST, Address IL, llvm::Value *Chunk,
+    const RegionCodeGenTy &CodeGenDistributeLoopContent) {
   auto &RT = CGM.getOpenMPRuntime();
 
   const Expr *IVExpr = S.getIterationVariable();
@@ -1949,22 +1948,30 @@ void CodeGenFunction::EmitOMPOuterLoop(bool DynamicOrOrdered, bool IsMonotonic,
     EmitOMPSimdInit(S, IsMonotonic);
 
   SourceLocation Loc = S.getLocStart();
-  EmitOMPInnerLoop(S, LoopScope.requiresCleanups(),
-                   (isOpenMPLoopBoundSharingDirective(S.getDirectiveKind()) &&
-                    IsDistribute)
-                       ? S.getDistCond()
-                       : S.getCond(),
-                   S.getInc(),
-                   [&S, LoopExit](CodeGenFunction &CGF) {
-                     CGF.EmitOMPLoopBody(S, LoopExit);
-                     CGF.EmitStopPoint(&S);
-                   },
-                   [Ordered, IVSize, IVSigned, Loc](CodeGenFunction &CGF) {
-                     if (Ordered) {
-                       CGF.CGM.getOpenMPRuntime().emitForOrderedIterationEnd(
-                           CGF, Loc, IVSize, IVSigned);
-                     }
-                   });
+  EmitOMPInnerLoop(
+      S, LoopScope.requiresCleanups(),
+      (isOpenMPLoopBoundSharingDirective(S.getDirectiveKind()) && IsDistribute)
+          ? S.getDistCond()
+          : S.getCond(),
+      (isOpenMPLoopBoundSharingDirective(S.getDirectiveKind()) && IsDistribute)
+          ? S.getDistInc()
+          : S.getInc(),
+      [&S, IsDistribute, &CodeGenDistributeLoopContent,
+       LoopExit](CodeGenFunction &CGF) {
+        if (isOpenMPLoopBoundSharingDirective(S.getDirectiveKind()) &&
+            IsDistribute) {
+          CodeGenDistributeLoopContent(CGF);
+        } else {
+          CGF.EmitOMPLoopBody(S, LoopExit);
+          CGF.EmitStopPoint(&S);
+        }
+      },
+      [Ordered, IVSize, IVSigned, Loc](CodeGenFunction &CGF) {
+        if (Ordered) {
+          CGF.CGM.getOpenMPRuntime().emitForOrderedIterationEnd(
+              CGF, Loc, IVSize, IVSigned);
+        }
+      });
 
   EmitBlock(Continue.getBlock());
   BreakContinueStack.pop_back();
@@ -1980,9 +1987,10 @@ void CodeGenFunction::EmitOMPOuterLoop(bool DynamicOrOrdered, bool IsMonotonic,
   EmitBlock(LoopExit.getBlock());
 
   // Tell the runtime we are done.
-  if (!DynamicOrOrdered)
+  if (DynamicOrOrdered)
+    RT.emitForDispatchFinish(*this, S, S.getLocEnd(), IVSize, IVSigned);
+  else /* !DynamicOrOrdered */
     RT.emitForStaticFinish(*this, S.getLocEnd());
-
 }
 
 void CodeGenFunction::EmitOMPForOuterLoop(
@@ -2102,13 +2110,14 @@ void CodeGenFunction::EmitOMPForOuterLoop(
   }
 
   EmitOMPOuterLoop(DynamicOrOrdered, IsMonotonic, /* IsDistribute =*/false, S,
-                   LoopScope, Ordered, LB, UB, ST, IL, Chunk);
+                   LoopScope, Ordered, LB, UB, ST, IL, Chunk,
+                   [](CodeGenFunction &, PrePostActionTy &) {});
 }
 
 void CodeGenFunction::EmitOMPDistributeOuterLoop(
     OpenMPDistScheduleClauseKind ScheduleKind, const OMPLoopDirective &S,
     OMPPrivateScope &LoopScope, Address LB, Address UB, Address ST, Address IL,
-    llvm::Value *Chunk) {
+    llvm::Value *Chunk, const RegionCodeGenTy &CodeGenDistributeLoopContent) {
 
   auto &RT = CGM.getOpenMPRuntime();
 
@@ -2127,7 +2136,8 @@ void CodeGenFunction::EmitOMPDistributeOuterLoop(
 
   EmitOMPOuterLoop(/* DynamicOrOrdered = */ false, /* IsMonotonic = */ false,
                    /* IsDistribute = */ true, S, LoopScope,
-                   /* Ordered = */ false, LB, UB, ST, IL, Chunk);
+                   /* Ordered = */ false, LB, UB, ST, IL, Chunk,
+                   CodeGenDistributeLoopContent);
 }
 
 void CodeGenFunction::EmitOMPDistributeParallelForSimdDirective(
@@ -3144,7 +3154,8 @@ void CodeGenFunction::EmitOMPDistributeLoop(
         // runtime and runs the inner loop to process it.
         EmitOMPDistributeOuterLoop(DistScheduleKind, S, LoopScope,
                                    LB.getAddress(), UB.getAddress(),
-                                   ST.getAddress(), IL.getAddress(), DistChunk);
+                                   ST.getAddress(), IL.getAddress(), DistChunk,
+                                   CodeGenDistributeLoopContent);
       }
 
       // Emit final copy of the lastprivate variables if IsLastIter != 0.

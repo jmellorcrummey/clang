@@ -1238,18 +1238,64 @@ void CGOpenMPRuntimeNVPTX::createOffloadEntry(llvm::Constant *ID,
 }
 
 namespace {
-CGOpenMPRuntimeNVPTX::ExecutionMode
-getExecutionMode(CodeGenModule &CGM, OpenMPDirectiveKind DirectiveKind) {
+/// discard all CompoundStmts intervening between two constructs
+static const Stmt *ignoreCompoundStmts(const Stmt *Body) {
+  while (auto *CS = dyn_cast_or_null<CompoundStmt>(Body))
+    Body = CS->body_front();
+
+  return Body;
+}
+
+// check for inner (nested) SPMD teams construct, if any
+static bool hasNestedTeamsSPMDDirective(const OMPExecutableDirective &D) {
+  const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
+
+  if (auto *NestedDir = dyn_cast_or_null<OMPExecutableDirective>(
+          ignoreCompoundStmts(CS.getCapturedStmt()))) {
+    OpenMPDirectiveKind DirectiveKind = NestedDir->getDirectiveKind();
+    return isOpenMPTeamsDirective(DirectiveKind) &&
+           isOpenMPParallelDirective(DirectiveKind);
+  }
+
+  return false;
+}
+
+// check for inner (nested) SPMD teams construct, if any
+static const OMPExecutableDirective *
+getNestedTeamsSPMDDirective(const OMPExecutableDirective &D) {
+  const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
+
+  if (auto *NestedDir = dyn_cast_or_null<OMPExecutableDirective>(
+          ignoreCompoundStmts(CS.getCapturedStmt()))) {
+    OpenMPDirectiveKind DirectiveKind = NestedDir->getDirectiveKind();
+    if (isOpenMPTeamsDirective(DirectiveKind) &&
+        isOpenMPParallelDirective(DirectiveKind))
+      return NestedDir;
+  }
+
+  return nullptr;
+}
+
+static CGOpenMPRuntimeNVPTX::ExecutionMode
+GetExecutionMode(CodeGenModule &CGM, const OMPExecutableDirective &D) {
+  if (CGM.getLangOpts().OpenMPNoSPMD)
+    return CGOpenMPRuntimeNVPTX::ExecutionMode::GENERIC;
+
+  OpenMPDirectiveKind DirectiveKind = D.getDirectiveKind();
   switch (DirectiveKind) {
-  case OMPD_target:
+  case OMPD_target: {
+    // If the target region as a nested 'teams distribute parallel for',
+    // the specifications guarantee that there can be no serial region.
+    return hasNestedTeamsSPMDDirective(D)
+               ? CGOpenMPRuntimeNVPTX::ExecutionMode::SPMD
+               : CGOpenMPRuntimeNVPTX::ExecutionMode::GENERIC;
+  }
   case OMPD_target_teams:
     return CGOpenMPRuntimeNVPTX::ExecutionMode::GENERIC;
   case OMPD_target_parallel:
   case OMPD_target_parallel_for:
   case OMPD_target_teams_distribute_parallel_for:
-    return CGM.getLangOpts().OpenMPNoSPMD
-               ? CGOpenMPRuntimeNVPTX::ExecutionMode::GENERIC
-               : CGOpenMPRuntimeNVPTX::ExecutionMode::SPMD;
+    return CGOpenMPRuntimeNVPTX::ExecutionMode::SPMD;
   default:
     llvm_unreachable(
         "Unknown programming model for OpenMP directive on NVPTX target.");
@@ -1371,23 +1417,43 @@ public:
 };
 };
 
+static const OMPExecutableDirective *
+getSPMDDirective(const OMPExecutableDirective &D) {
+  switch (D.getDirectiveKind()) {
+  case OMPD_target: {
+    const OMPExecutableDirective *NestedDir = getNestedTeamsSPMDDirective(D);
+    assert(NestedDir && "Failed to find nested teams SPMD directive.");
+    return NestedDir;
+  }
+  case OMPD_target_parallel:
+  case OMPD_target_parallel_for:
+  case OMPD_target_teams_distribute_parallel_for:
+    return &D;
+  default:
+    llvm_unreachable("Unknown directive on NVPTX target.");
+  }
+
+  return nullptr;
+}
+
 // Check the target region to determine if it needs the OpenMP runtime.
 // In SPMD codegen mode we may not need the OMP runtime, in which case
 // we can avoid initializing it.  This reduces runtime overhead.
 void CGOpenMPRuntimeNVPTX::EntryFunctionState::setRequiresOMPRuntime(
-    const OMPExecutableDirective &D) {
+    const OMPExecutableDirective &TD) {
+  const OMPExecutableDirective &D = *getSPMDDirective(TD);
+
   // Does the target directive require the OMP runtime?
   // Schedule types dynamic, guided, runtime require the runtime.
   // An ordered schedule requires the runtime.
   OpenMPScheduleClauseKind ScheduleKind = OMPC_SCHEDULE_unknown;
   if (auto *C = D.getSingleClause<OMPScheduleClause>())
     ScheduleKind = C->getScheduleKind();
-  if (D.getSingleClause<OMPOrderedClause>() != nullptr ||
-      ScheduleKind == OMPC_SCHEDULE_dynamic ||
-      ScheduleKind == OMPC_SCHEDULE_guided ||
-      ScheduleKind == OMPC_SCHEDULE_runtime) {
-    RequiresOMPRuntime = true;
-  } else {
+  RequiresOMPRuntime = (D.getSingleClause<OMPOrderedClause>() != nullptr ||
+                        ScheduleKind == OMPC_SCHEDULE_dynamic ||
+                        ScheduleKind == OMPC_SCHEDULE_guided ||
+                        ScheduleKind == OMPC_SCHEDULE_runtime);
+  if (!RequiresOMPRuntime) {
     // If this target region can never call into the OMP runtime, don't setup
     // the runtime.
     OpenMPFinder Finder;
@@ -1439,9 +1505,7 @@ void CGOpenMPRuntimeNVPTX::emitTargetOutlinedFunction(
 
   assert(!ParentName.empty() && "Invalid target region parent name!");
 
-  OpenMPDirectiveKind DirectiveKind = D.getDirectiveKind();
-  CGOpenMPRuntimeNVPTX::ExecutionMode Mode =
-      getExecutionMode(CGM, DirectiveKind);
+  CGOpenMPRuntimeNVPTX::ExecutionMode Mode = GetExecutionMode(CGM, D);
   switch (Mode) {
   case CGOpenMPRuntimeNVPTX::ExecutionMode::GENERIC:
     emitGenericKernel(D, ParentName, OutlinedFn, OutlinedFnID, IsOffloadEntry,
@@ -1473,6 +1537,49 @@ void CGOpenMPRuntimeNVPTX::emitProcBindClause(CodeGenFunction &CGF,
   if (!isSPMDExecutionMode()) {
     CGOpenMPRuntime::emitProcBindClause(CGF, ProcBind, Loc);
   }
+}
+
+void CGOpenMPRuntimeNVPTX::emitForDispatchFinish(CodeGenFunction &CGF,
+                                                 const OMPLoopDirective &S,
+                                                 SourceLocation Loc,
+                                                 unsigned IVSize,
+                                                 bool IVSigned) {
+  if (!CGF.HaveInsertPoint())
+    return;
+
+  //
+  // On the NVPTX device a set of threads executing a loop scheduled with a
+  // dynamic schedule must complete before starting execution of the next
+  // loop with a dynamic schedule.
+  //
+  // In SPMD mode for directives that combine schedule(dynamic) with
+  // dist_schedule(static,chunk) this requirement may not hold as different
+  // chunks of the distribute'd loop may be executed simultaneously by
+  // parallel threads.
+  //
+  // NOTES:
+  // 1. The NVPTX runtime cannot synchronize threads in dispatch_next
+  // because it cannot guarantee convergence.
+  // 2. Explicit synchronization is not required in a standard non-SPMD
+  // 'parallel for schedule(dynamic)' construct because there is a
+  // barrier after the parallel region. In an SPMD construct such as
+  // 'target teams distribute parallel for' the barrier after the
+  // parallel region is elided.
+  // 3. Explicit synchronization is not required for nested parallel
+  // constructs since threads are maximally convergent.
+  //
+
+  OpenMPDirectiveKind Kind = S.getDirectiveKind();
+  bool DistChunked = false;
+  if (auto *C = S.getSingleClause<OMPDistScheduleClause>())
+    DistChunked = C->getChunkSize() != nullptr;
+
+  if (isSPMDExecutionMode() && DistChunked &&
+      // TODO: add target_teams_distribute_parallel_for_simd and
+      // teams_distribute_parallel_for_simd.
+      (Kind == OMPD_target_teams_distribute_parallel_for ||
+       Kind == OMPD_teams_distribute_parallel_for))
+    SyncCTAThreads(CGF);
 }
 
 namespace {
