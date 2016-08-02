@@ -7674,9 +7674,9 @@ TreeTransform<Derived>::TransformOMPTargetTeamsDistributeParallelForDirective(
 }
 
 template <typename Derived>
-StmtResult
-TreeTransform<Derived>::TransformOMPTargetTeamsDistributeParallelForSimdDirective(
-    OMPTargetTeamsDistributeParallelForSimdDirective *D) {
+StmtResult TreeTransform<Derived>::
+    TransformOMPTargetTeamsDistributeParallelForSimdDirective(
+        OMPTargetTeamsDistributeParallelForSimdDirective *D) {
   DeclarationNameInfo DirName;
   getDerived().getSema().StartOpenMPDSABlock(
       OMPD_target_teams_distribute_parallel_for_simd, DirName, nullptr,

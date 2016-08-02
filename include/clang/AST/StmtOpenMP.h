@@ -878,7 +878,7 @@ public:
            T->getStmtClass() ==
                OMPTargetTeamsDistributeParallelForDirectiveClass ||
            T->getStmtClass() ==
-                 OMPTargetTeamsDistributeParallelForSimdDirectiveClass;
+               OMPTargetTeamsDistributeParallelForSimdDirectiveClass;
   }
 };
 
@@ -3469,10 +3469,12 @@ public:
 /// \code
 /// #pragma omp target teams distribute parallel for simd private(a,b)
 /// \endcode
-/// In this example directive '#pragma omp target teams distribute parallel for simd'
+/// In this example directive '#pragma omp target teams distribute parallel for
+/// simd'
 /// has clause 'private' with the variables 'a' and 'b'
 ///
-class OMPTargetTeamsDistributeParallelForSimdDirective : public OMPLoopDirective {
+class OMPTargetTeamsDistributeParallelForSimdDirective
+    : public OMPLoopDirective {
   friend class ASTStmtReader;
 
   /// Build directive with the given start and end location.
@@ -3483,21 +3485,21 @@ class OMPTargetTeamsDistributeParallelForSimdDirective : public OMPLoopDirective
   /// \param NumClauses Number of clauses.
   ///
   OMPTargetTeamsDistributeParallelForSimdDirective(SourceLocation StartLoc,
-                                               SourceLocation EndLoc,
-                                               unsigned CollapsedNum,
-                                               unsigned NumClauses)
+                                                   SourceLocation EndLoc,
+                                                   unsigned CollapsedNum,
+                                                   unsigned NumClauses)
       : OMPLoopDirective(this,
                          OMPTargetTeamsDistributeParallelForSimdDirectiveClass,
-                         OMPD_target_teams_distribute_parallel_for_simd, StartLoc,
-                         EndLoc, CollapsedNum, NumClauses) {}
+                         OMPD_target_teams_distribute_parallel_for_simd,
+                         StartLoc, EndLoc, CollapsedNum, NumClauses) {}
 
   /// Build an empty directive.
   ///
   /// \param CollapsedNum Number of collapsed nested loops.
   /// \param NumClauses Number of clauses.
   ///
-  explicit OMPTargetTeamsDistributeParallelForSimdDirective(unsigned CollapsedNum,
-                                                        unsigned NumClauses)
+  explicit OMPTargetTeamsDistributeParallelForSimdDirective(
+      unsigned CollapsedNum, unsigned NumClauses)
       : OMPLoopDirective(
             this, OMPTargetTeamsDistributeParallelForSimdDirectiveClass,
             OMPD_target_teams_distribute_parallel_for_simd, SourceLocation(),

@@ -1593,10 +1593,9 @@ OMPTargetTeamsDistributeParallelForSimdDirective::Create(
 }
 
 OMPTargetTeamsDistributeParallelForSimdDirective *
-OMPTargetTeamsDistributeParallelForSimdDirective::CreateEmpty(const ASTContext &C,
-                                                          unsigned NumClauses,
-                                                          unsigned CollapsedNum,
-                                                          EmptyShell) {
+OMPTargetTeamsDistributeParallelForSimdDirective::CreateEmpty(
+    const ASTContext &C, unsigned NumClauses, unsigned CollapsedNum,
+    EmptyShell) {
   unsigned Size =
       llvm::alignTo(sizeof(OMPTargetTeamsDistributeParallelForSimdDirective),
                     llvm::alignOf<OMPClause *>());
@@ -1605,6 +1604,6 @@ OMPTargetTeamsDistributeParallelForSimdDirective::CreateEmpty(const ASTContext &
       sizeof(Stmt *) *
           numLoopChildren(CollapsedNum,
                           OMPD_target_teams_distribute_parallel_for_simd));
-  return new (Mem)
-      OMPTargetTeamsDistributeParallelForSimdDirective(CollapsedNum, NumClauses);
+  return new (Mem) OMPTargetTeamsDistributeParallelForSimdDirective(
+      CollapsedNum, NumClauses);
 }
