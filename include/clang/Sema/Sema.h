@@ -16,6 +16,7 @@
 #define LLVM_CLANG_SEMA_SEMA_H
 
 #include "clang/AST/Attr.h"
+#include "clang/AST/Availability.h"
 #include "clang/AST/DeclarationName.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprObjC.h"
@@ -73,6 +74,7 @@ namespace clang {
   class ASTWriter;
   class ArrayType;
   class AttributeList;
+  class BindingDecl;
   class BlockDecl;
   class CapturedDecl;
   class CXXBasePath;
@@ -1390,8 +1392,14 @@ private:
   bool RequireCompleteTypeImpl(SourceLocation Loc, QualType T,
                                TypeDiagnoser *Diagnoser);
 
+  struct ModuleScope {
+    clang::Module *Module;
+    VisibleModuleSet OuterVisibleModules;
+  };
+  /// The modules we're currently parsing.
+  llvm::SmallVector<ModuleScope, 16> ModuleScopes;
+
   VisibleModuleSet VisibleModules;
-  llvm::SmallVector<VisibleModuleSet, 16> VisibleModulesStack;
 
   Module *CachedFakeTopLevelModule;
 
@@ -1713,7 +1721,11 @@ public:
                                      TypeSourceInfo *TInfo,
                                      LookupResult &Previous,
                                      MultiTemplateParamsArg TemplateParamLists,
-                                     bool &AddToScope);
+                                     bool &AddToScope,
+                                     ArrayRef<BindingDecl *> Bindings = None);
+  NamedDecl *
+  ActOnDecompositionDeclarator(Scope *S, Declarator &D,
+                               MultiTemplateParamsArg TemplateParamLists);
   // Returns true if the variable declaration is a redeclaration
   bool CheckVariableDeclaration(VarDecl *NewVD, LookupResult &Previous);
   void CheckVariableDeclarationType(VarDecl *NewVD);
@@ -4739,6 +4751,10 @@ public:
 
   /// ActOnObjCBoolLiteral - Parse {__objc_yes,__objc_no} literals.
   ExprResult ActOnObjCBoolLiteral(SourceLocation OpLoc, tok::TokenKind Kind);
+
+  ExprResult
+  ActOnObjCAvailabilityCheckExpr(llvm::ArrayRef<AvailabilitySpec> AvailSpecs,
+                                 SourceLocation AtLoc, SourceLocation RParen);
 
   /// ActOnCXXNullPtrLiteral - Parse 'nullptr'.
   ExprResult ActOnCXXNullPtrLiteral(SourceLocation Loc);
@@ -8233,6 +8249,12 @@ public:
       ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
       SourceLocation EndLoc,
       llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA);
+  /// \brief Called on well-formed '\#pragma omp target simd' after parsing of
+  /// the associated statement.
+  StmtResult ActOnOpenMPTargetSimdDirective(
+      ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
+      SourceLocation EndLoc,
+      llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA);
   /// \brief Called on well-formed '\#pragma omp target teams' after parsing of
   /// the associated statement.
   StmtResult ActOnOpenMPTargetTeamsDirective(ArrayRef<OMPClause *> Clauses,
@@ -8248,6 +8270,12 @@ public:
   /// \brief Called on well-formed '\#pragma omp target teams distribute
   /// parallel for' after parsing of the associated statement.
   StmtResult ActOnOpenMPTargetTeamsDistributeParallelForDirective(
+      ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
+      SourceLocation EndLoc,
+      llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA);
+  /// \brief Called on well-formed '\#pragma omp target teams distribute
+  /// parallel for simd' after parsing of the associated statement.
+  StmtResult ActOnOpenMPTargetTeamsDistributeParallelForSimdDirective(
       ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
       SourceLocation EndLoc,
       llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA);
@@ -9596,7 +9624,12 @@ public:
   }
 
   AvailabilityResult getCurContextAvailability() const;
-  
+
+  /// \brief Get the verison that this context implies.
+  /// For instance, a method in an interface that is annotated with an
+  /// availability attribuite effectively has the availability of the interface.
+  VersionTuple getVersionForDecl(const Decl *Ctx) const;
+
   const DeclContext *getCurObjCLexicalContext() const {
     const DeclContext *DC = getCurLexicalContext();
     // A category implicitly has the attribute of the interface.

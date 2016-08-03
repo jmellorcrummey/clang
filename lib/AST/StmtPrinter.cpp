@@ -497,6 +497,11 @@ void StmtPrinter::VisitObjCAtThrowStmt(ObjCAtThrowStmt *Node) {
   OS << ";\n";
 }
 
+void StmtPrinter::VisitObjCAvailabilityCheckExpr(
+    ObjCAvailabilityCheckExpr *Node) {
+  OS << "@available(...)";
+}
+
 void StmtPrinter::VisitObjCAtSynchronizedStmt(ObjCAtSynchronizedStmt *Node) {
   Indent() << "@synchronized (";
   PrintExpr(Node->getSynchExpr());
@@ -1193,6 +1198,11 @@ void StmtPrinter::VisitOMPTargetParallelForSimdDirective(
   PrintOMPExecutableDirective(Node);
 }
 
+void StmtPrinter::VisitOMPTargetSimdDirective(OMPTargetSimdDirective *Node) {
+  Indent() << "#pragma omp target simd ";
+  PrintOMPExecutableDirective(Node);
+}
+
 void StmtPrinter::VisitOMPTargetTeamsDirective(OMPTargetTeamsDirective *Node) {
   Indent() << "#pragma omp target teams ";
   PrintOMPExecutableDirective(Node);
@@ -1207,6 +1217,12 @@ void StmtPrinter::VisitOMPTeamsDistributeParallelForDirective(
 void StmtPrinter::VisitOMPTargetTeamsDistributeParallelForDirective(
     OMPTargetTeamsDistributeParallelForDirective *Node) {
   Indent() << "#pragma omp target teams distribute parallel for ";
+  PrintOMPExecutableDirective(Node);
+}
+
+void StmtPrinter::VisitOMPTargetTeamsDistributeParallelForSimdDirective(
+    OMPTargetTeamsDistributeParallelForSimdDirective *Node) {
+  Indent() << "#pragma omp target teams distribute parallel for simd ";
   PrintOMPExecutableDirective(Node);
 }
 

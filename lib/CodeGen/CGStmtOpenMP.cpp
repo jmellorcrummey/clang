@@ -367,7 +367,17 @@ llvm::Function *CodeGenFunction::GenerateOpenMPCapturedStmtFunction(
     // If we are capturing a pointer by copy we don't need to do anything, just
     // use the value that we get from the arguments.
     if (I->capturesVariableByCopy() && FD->getType()->isAnyPointerType()) {
-      setAddrOfLocalVar(I->getCapturedVar(), GetAddrOfLocalVar(Args[Cnt]));
+      const VarDecl *CurVD = I->getCapturedVar();
+      Address LocalAddr = GetAddrOfLocalVar(Args[Cnt]);
+      // If the variable is a reference we need to materialize it here.
+      if (CurVD->getType()->isReferenceType()) {
+        Address RefAddr = CreateMemTemp(CurVD->getType(), getPointerAlign(),
+                                        ".materialized_ref");
+        EmitStoreOfScalar(LocalAddr.getPointer(), RefAddr, /*Volatile=*/false,
+                          CurVD->getType());
+        LocalAddr = RefAddr;
+      }
+      setAddrOfLocalVar(CurVD, LocalAddr);
       ++Cnt;
       ++I;
       continue;
@@ -1714,13 +1724,23 @@ void CodeGenFunction::EmitOMPSimdFinal(
     EmitBlock(DoneBB, /*IsFinished=*/true);
 }
 
-static void emitCommonOMPSimdDirective(CodeGenFunction &CGF,
+/// \brief Emit a helper variable and return corresponding lvalue.
+static LValue EmitOMPHelperVar(CodeGenFunction &CGF,
+                               const DeclRefExpr *Helper) {
+  auto VDecl = cast<VarDecl>(Helper->getDecl());
+  CGF.EmitVarDecl(*VDecl);
+  return CGF.EmitLValue(Helper);
+}
+
+static void emitDeviceOMPSimdDirective(CodeGenFunction &CGF,
                                        const OMPExecutableDirective &S,
                                        OpenMPDirectiveKind InnermostKind,
                                        const RegionCodeGenTy &CodeGen) {
   CGF.CGM.getOpenMPRuntime().registerParallelContext(CGF, S);
   auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
   llvm::SmallVector<llvm::Value *, 16> CapturedVars;
+
+  // Capture any implicit OpenMP variables
   CGF.GenerateOpenMPCapturedVars(*CS, CapturedVars);
   auto *LaneId = CS->getCapturedDecl()->param_begin();
   auto *NumLanes = std::next(LaneId);
@@ -1743,9 +1763,8 @@ static void emitCommonOMPSimdDirective(CodeGenFunction &CGF,
                                           CapturedVars);
 }
 
-void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
-  bool OutlinedSimd =
-      CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX();
+void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
+                                      bool OutlinedSimd) {
   auto &&CodeGen = [&S, OutlinedSimd](CodeGenFunction &CGF, PrePostActionTy &) {
     OMPLoopScope PreInitScope(CGF, S);
     // if (PreCond) {
@@ -1791,9 +1810,14 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
     }
 
     // Emit the loop iteration variable.
-    const Expr *IVExpr = S.getIterationVariable();
+    const Expr *IVExpr =
+        requiresAdditionalIterationVar(S.getDirectiveKind()) && !OutlinedSimd
+            ? S.getInnermostIterationVariable()
+            : S.getIterationVariable();
     const VarDecl *IVDecl = cast<VarDecl>(cast<DeclRefExpr>(IVExpr)->getDecl());
     CGF.EmitVarDecl(*IVDecl);
+
+    // Emit Iteration variable initialization
     CGF.EmitIgnoredExpr(S.getInit());
 
     // Emit the iterations count variable.
@@ -1843,12 +1867,18 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
     }
   };
 
-  if (OutlinedSimd) {
-    emitCommonOMPSimdDirective(*this, S, OMPD_simd, CodeGen);
-  } else {
+  if (OutlinedSimd)
+    emitDeviceOMPSimdDirective(*this, S, OMPD_simd, CodeGen);
+  else {
     OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
     CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_simd, CodeGen);
   }
+}
+
+void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
+  bool OutlinedSimd =
+      CGM.getLangOpts().OpenMPIsDevice && CGM.getTriple().isNVPTX();
+  EmitOMPSimdLoop(S, OutlinedSimd);
 }
 
 void CodeGenFunction::EmitOMPOuterLoop(
@@ -2142,26 +2172,32 @@ void CodeGenFunction::EmitOMPDistributeOuterLoop(
 
 void CodeGenFunction::EmitOMPDistributeParallelForSimdDirective(
     const OMPDistributeParallelForSimdDirective &S) {
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+    auto &&CGParallelFor = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+      auto &&CGInlinedWorksharingLoop = [&S](CodeGenFunction &CGF,
+                                             PrePostActionTy &) {
+        CGF.EmitOMPWorksharingLoop(S);
+      };
+      emitCommonOMPParallelDirective(CGF, S, OMPD_simd, CGInlinedWorksharingLoop);
+    };
+    CGF.EmitOMPDistributeLoop(S, CGParallelFor);
+  };
   OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
-  CGM.getOpenMPRuntime().emitInlinedDirective(
-      *this, OMPD_distribute_parallel_for_simd,
-      [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-        OMPLoopScope PreInitScope(CGF, S);
-        CGF.EmitStmt(
-            cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
-      });
+  CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_distribute, CodeGen,
+                                              false);
 }
 
 void CodeGenFunction::EmitOMPDistributeSimdDirective(
     const OMPDistributeSimdDirective &S) {
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+    auto &&CGSimd = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+      CGF.EmitOMPSimdLoop(S, false);
+    };
+    CGF.EmitOMPDistributeLoop(S, CGSimd);
+  };
   OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
-  CGM.getOpenMPRuntime().emitInlinedDirective(
-      *this, OMPD_distribute_simd,
-      [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-        OMPLoopScope PreInitScope(CGF, S);
-        CGF.EmitStmt(
-            cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
-      });
+  CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_distribute, CodeGen,
+                                              false);
 }
 
 void CodeGenFunction::EmitOMPTargetParallelForSimdDirective(
@@ -2176,12 +2212,15 @@ void CodeGenFunction::EmitOMPTargetParallelForSimdDirective(
       });
 }
 
-/// \brief Emit a helper variable and return corresponding lvalue.
-static LValue EmitOMPHelperVar(CodeGenFunction &CGF,
-                               const DeclRefExpr *Helper) {
-  auto VDecl = cast<VarDecl>(Helper->getDecl());
-  CGF.EmitVarDecl(*VDecl);
-  return CGF.EmitLValue(Helper);
+void CodeGenFunction::EmitOMPTargetSimdDirective(
+    const OMPTargetSimdDirective &S) {
+  OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
+  CGM.getOpenMPRuntime().emitInlinedDirective(
+      *this, OMPD_target_simd, [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+        OMPLoopScope PreInitScope(CGF, S);
+        CGF.EmitStmt(
+            cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
+      });
 }
 
 namespace {
@@ -2763,10 +2802,8 @@ void CodeGenFunction::EmitOMPTaskBasedDirective(const OMPExecutableDirective &S,
   }
   // Check if the task has 'priority' clause.
   if (const auto *Clause = S.getSingleClause<OMPPriorityClause>()) {
-    // Runtime currently does not support codegen for priority clause argument.
-    // TODO: Add codegen for priority clause arg when runtime lib support it.
     auto *Prio = Clause->getPriority();
-    Data.Priority.setInt(Prio);
+    Data.Priority.setInt(/*IntVal=*/true);
     Data.Priority.setPointer(EmitScalarConversion(
         EmitScalarExpr(Prio), Prio->getType(),
         getContext().getIntTypeForBitwidth(/*DestWidth=*/32, /*Signed=*/1),
@@ -3949,6 +3986,11 @@ void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForDirective(
       *this, S, OMPD_target_teams_distribute_parallel_for, CodeGen);
 }
 
+void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForSimdDirective(
+    const OMPTargetTeamsDistributeParallelForSimdDirective &S) {
+  // empty codegen
+}
+
 void CodeGenFunction::EmitOMPTeamsDirective(const OMPTeamsDirective &S) {
   // Emit parallel region as a standalone region.
   auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
@@ -4010,22 +4052,137 @@ CodeGenFunction::getOMPCancelDestination(OpenMPDirectiveKind Kind) {
   return BreakContinueStack.back().BreakBlock;
 }
 
+void CodeGenFunction::EmitOMPUseDevicePtrClause(
+    const OMPClause &NC, OMPPrivateScope &PrivateScope,
+    const llvm::DenseMap<const ValueDecl *, Address> &CaptureDeviceAddrMap) {
+  const auto &C = cast<OMPUseDevicePtrClause>(NC);
+  auto OrigVarIt = C.varlist_begin();
+  auto InitIt = C.inits().begin();
+  for (auto PvtVarIt : C.private_copies()) {
+    auto *OrigVD = cast<VarDecl>(cast<DeclRefExpr>(*OrigVarIt)->getDecl());
+    auto *InitVD = cast<VarDecl>(cast<DeclRefExpr>(*InitIt)->getDecl());
+    auto *PvtVD = cast<VarDecl>(cast<DeclRefExpr>(PvtVarIt)->getDecl());
+
+    // In order to identify the right initializer we need to match the
+    // declaration used by the mapping logic. In some cases we may get
+    // OMPCapturedExprDecl that refers to the original declaration.
+    const ValueDecl *MatchingVD = OrigVD;
+    if (auto *OED = dyn_cast<OMPCapturedExprDecl>(MatchingVD)) {
+      // OMPCapturedExprDecl are used to privative fields of the current
+      // structure.
+      auto *ME = cast<MemberExpr>(OED->getInit());
+      assert(isa<CXXThisExpr>(ME->getBase()) &&
+             "Base should be the current struct!");
+      MatchingVD = ME->getMemberDecl();
+    }
+
+    // If we don't have information about the current list item, move on to
+    // the next one.
+    auto InitAddrIt = CaptureDeviceAddrMap.find(MatchingVD);
+    if (InitAddrIt == CaptureDeviceAddrMap.end())
+      continue;
+
+    bool IsRegistered = PrivateScope.addPrivate(OrigVD, [&]() -> Address {
+      // Initialize the temporary initialization variable with the address we
+      // get from the runtime library. We have to cast the source address
+      // because it is always a void *. References are materialized in the
+      // privatization scope, so the initialization here disregards the fact
+      // the original variable is a reference.
+      QualType AddrQTy =
+          getContext().getPointerType(OrigVD->getType().getNonReferenceType());
+      llvm::Type *AddrTy = ConvertTypeForMem(AddrQTy);
+      Address InitAddr = Builder.CreateBitCast(InitAddrIt->second, AddrTy);
+      setAddrOfLocalVar(InitVD, InitAddr);
+
+      // Emit private declaration, it will be initialized by the value we
+      // declaration we just added to the local declarations map.
+      EmitDecl(*PvtVD);
+
+      // The initialization variables reached its purpose in the emission
+      // ofthe previous declaration, so we don't need it anymore.
+      LocalDeclMap.erase(InitVD);
+
+      // Return the address of the private variable.
+      return GetAddrOfLocalVar(PvtVD);
+    });
+    assert(IsRegistered && "firstprivate var already registered as private");
+    // Silence the warning about unused variable.
+    (void)IsRegistered;
+
+    ++OrigVarIt;
+    ++InitIt;
+  }
+}
+
 // Generate the instructions for '#pragma omp target data' directive.
 void CodeGenFunction::EmitOMPTargetDataDirective(
     const OMPTargetDataDirective &S) {
-  // The target data enclosed region is implemented just by emitting the
-  // statement.
-  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-    CGF.EmitStmt(cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
+  CGOpenMPRuntime::TargetDataInfo Info(/*RequiresDevicePointerInfo=*/true);
+
+  // Create a pre/post action to signal the privatization of the device pointer.
+  // This action can be replaced by the OpenMP runtime code generation to
+  // deactivate privatization.
+  bool PrivatizeDevicePointers = false;
+  class DevicePointerPrivActionTy : public PrePostActionTy {
+    bool &PrivatizeDevicePointers;
+
+  public:
+    explicit DevicePointerPrivActionTy(bool &PrivatizeDevicePointers)
+        : PrePostActionTy(), PrivatizeDevicePointers(PrivatizeDevicePointers) {}
+    void Enter(CodeGenFunction &CGF) override {
+      PrivatizeDevicePointers = true;
+    }
   };
+  DevicePointerPrivActionTy PrivAction(PrivatizeDevicePointers);
+
+  auto &&CodeGen = [&S, &Info, &PrivatizeDevicePointers](
+      CodeGenFunction &CGF, PrePostActionTy &Action) {
+    auto &&InnermostCodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+      CGF.EmitStmt(
+          cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
+    };
+
+    // Codegen that selects wheather to generate the privatization code or not.
+    auto &&PrivCodeGen = [&S, &Info, &PrivatizeDevicePointers,
+                          &InnermostCodeGen](CodeGenFunction &CGF,
+                                             PrePostActionTy &Action) {
+      RegionCodeGenTy RCG(InnermostCodeGen);
+      PrivatizeDevicePointers = false;
+
+      // Call the pre-action to change the status of PrivatizeDevicePointers if
+      // needed.
+      Action.Enter(CGF);
+
+      if (PrivatizeDevicePointers) {
+        OMPPrivateScope PrivateScope(CGF);
+        // Emit all instances of the use_device_ptr clause.
+        for (const auto *C : S.getClausesOfKind<OMPUseDevicePtrClause>())
+          CGF.EmitOMPUseDevicePtrClause(*C, PrivateScope,
+                                        Info.CaptureDeviceAddrMap);
+        (void)PrivateScope.Privatize();
+        RCG(CGF);
+      } else
+        RCG(CGF);
+    };
+
+    // Forward the provided action to the privatization codegen.
+    RegionCodeGenTy PrivRCG(PrivCodeGen);
+    PrivRCG.setAction(Action);
+
+    // Notwithstanding the body of the region is emitted as inlined directive,
+    // we don't use an inline scope as changes in the references inside the
+    // region are expected to be visible outside, so we do not privative them.
+    OMPLexicalScope Scope(CGF, S);
+    CGF.CGM.getOpenMPRuntime().emitInlinedDirective(CGF, OMPD_target_data,
+                                                    PrivRCG);
+  };
+
+  RegionCodeGenTy RCG(CodeGen);
 
   // If we don't have target devices, don't bother emitting the data mapping
   // code.
   if (CGM.getLangOpts().OMPTargetTriples.empty()) {
-    OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
-
-    CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_target_data,
-                                                CodeGen);
+    RCG(*this);
     return;
   }
 
@@ -4039,7 +4196,12 @@ void CodeGenFunction::EmitOMPTargetDataDirective(
   if (auto *C = S.getSingleClause<OMPDeviceClause>())
     Device = C->getDevice();
 
-  CGM.getOpenMPRuntime().emitTargetDataCalls(*this, S, IfCond, Device, CodeGen);
+  // Set the action to signal privatization of device pointers.
+  RCG.setAction(PrivAction);
+
+  // Emit region code.
+  CGM.getOpenMPRuntime().emitTargetDataCalls(*this, S, IfCond, Device, RCG,
+                                             Info);
 }
 
 void CodeGenFunction::EmitOMPTargetEnterDataDirective(

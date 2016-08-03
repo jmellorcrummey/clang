@@ -2395,6 +2395,9 @@ public:
                                  OMPPrivateScope &PrivateScope);
   void EmitOMPPrivateClause(const OMPExecutableDirective &D,
                             OMPPrivateScope &PrivateScope);
+  void EmitOMPUseDevicePtrClause(
+      const OMPClause &C, OMPPrivateScope &PrivateScope,
+      const llvm::DenseMap<const ValueDecl *, Address> &CaptureDeviceAddrMap);
   /// \brief Emit code for copyin clause in \a D directive. The next code is
   /// generated at the start of outlined functions for directives:
   /// \code
@@ -2503,6 +2506,7 @@ public:
   void EmitOMPTaskLoopDirective(const OMPTaskLoopDirective &S);
   void EmitOMPTaskLoopSimdDirective(const OMPTaskLoopSimdDirective &S);
   void EmitOMPDistributeDirective(const OMPDistributeDirective &S);
+  void EmitOMPSimdLoop(const OMPLoopDirective &S, bool OutlinedSimd);
   void
   EmitOMPDistributeLoop(const OMPLoopDirective &S,
                         const RegionCodeGenTy &CodeGenDistributeLoopContent);
@@ -2513,11 +2517,14 @@ public:
   void EmitOMPDistributeSimdDirective(const OMPDistributeSimdDirective &S);
   void EmitOMPTargetParallelForSimdDirective(
       const OMPTargetParallelForSimdDirective &S);
+  void EmitOMPTargetSimdDirective(const OMPTargetSimdDirective &S);
   void EmitOMPTargetTeamsDirective(const OMPTargetTeamsDirective &S);
   void EmitOMPTeamsDistributeParallelForDirective(
       const OMPTeamsDistributeParallelForDirective &S);
   void EmitOMPTargetTeamsDistributeParallelForDirective(
       const OMPTargetTeamsDistributeParallelForDirective &S);
+  void EmitOMPTargetTeamsDistributeParallelForSimdDirective(
+      const OMPTargetTeamsDistributeParallelForSimdDirective &S);
 
   /// Emit device code for the target directive.
   static void EmitOMPTargetDeviceFunction(CodeGenModule &CGM,

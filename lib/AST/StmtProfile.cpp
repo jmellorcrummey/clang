@@ -729,6 +729,11 @@ void StmtProfiler::VisitOMPTargetParallelForSimdDirective(
   VisitOMPLoopDirective(S);
 }
 
+void StmtProfiler::VisitOMPTargetSimdDirective(
+    const OMPTargetSimdDirective *S) {
+  VisitOMPLoopDirective(S);
+}
+
 void StmtProfiler::VisitOMPTargetTeamsDirective(
     const OMPTargetTeamsDirective *S) {
   VisitOMPExecutableDirective(S);
@@ -741,6 +746,11 @@ void StmtProfiler::VisitOMPTeamsDistributeParallelForDirective(
 
 void StmtProfiler::VisitOMPTargetTeamsDistributeParallelForDirective(
     const OMPTargetTeamsDistributeParallelForDirective *S) {
+  VisitOMPLoopDirective(S);
+}
+
+void StmtProfiler::VisitOMPTargetTeamsDistributeParallelForSimdDirective(
+    const OMPTargetTeamsDistributeParallelForSimdDirective *S) {
   VisitOMPLoopDirective(S);
 }
 
@@ -1647,6 +1657,11 @@ void StmtProfiler::VisitObjCIndirectCopyRestoreExpr(
 void StmtProfiler::VisitObjCBridgedCastExpr(const ObjCBridgedCastExpr *S) {
   VisitExplicitCastExpr(S);
   ID.AddBoolean(S->getBridgeKind());
+}
+
+void StmtProfiler::VisitObjCAvailabilityCheckExpr(
+    const ObjCAvailabilityCheckExpr *S) {
+  VisitExpr(S);
 }
 
 void StmtProfiler::VisitDecl(const Decl *D) {

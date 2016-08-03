@@ -453,6 +453,16 @@ public:
                     llvm::Value *OutlinedFn,
                     ArrayRef<llvm::Value *> CapturedVars) override;
 
+  /// \brief Emits a critical region.
+  /// \param CriticalName Name of the critical region.
+  /// \param CriticalOpGen Generator for the statement associated with the given
+  /// critical region.
+  /// \param Hint Value of the 'hint' clause (optional).
+  void emitCriticalRegion(CodeGenFunction &CGF, StringRef CriticalName,
+                          const RegionCodeGenTy &CriticalOpGen,
+                          SourceLocation Loc,
+                          const Expr *Hint = nullptr) override;
+
   /// \brief Check if we should generate code as if \a ScheduleKind is static
   /// with a chunk size of 1.
   /// \param ScheduleKind Schedule Kind specified in the 'schedule' clause.

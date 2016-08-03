@@ -447,7 +447,11 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
   case Stmt::ObjCBoolLiteralExprClass:
     K = CXCursor_ObjCBoolLiteralExpr;
     break;
-      
+
+  case Stmt::ObjCAvailabilityCheckExprClass:
+    K = CXCursor_ObjCAvailabilityCheckExpr;
+    break;
+
   case Stmt::ObjCBridgedCastExprClass:
     K = CXCursor_ObjCBridgedCastExpr;
     break;
@@ -646,6 +650,9 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
   case Stmt::OMPTargetParallelForSimdDirectiveClass:
     K = CXCursor_OMPTargetParallelForSimdDirective;
     break;
+  case Stmt::OMPTargetSimdDirectiveClass:
+    K = CXCursor_OMPTargetSimdDirective;
+    break;
   case Stmt::OMPTargetTeamsDirectiveClass:
     K = CXCursor_OMPTargetTeamsDirective;
     break;
@@ -654,6 +661,9 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
     break;
   case Stmt::OMPTargetTeamsDistributeParallelForDirectiveClass:
     K = CXCursor_OMPTargetTeamsDistributeParallelForDirective;
+    break;
+  case Stmt::OMPTargetTeamsDistributeParallelForSimdDirectiveClass:
+    K = CXCursor_OMPTargetTeamsDistributeParallelForSimdDirective;
     break;
   }
 

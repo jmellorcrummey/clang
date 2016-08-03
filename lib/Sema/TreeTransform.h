@@ -3351,8 +3351,6 @@ bool TreeTransform<Derived>::TransformExprs(Expr *const *Inputs,
         if (Out.isInvalid())
           return true;
 
-        // FIXME: Can this happen? We should not try to expand the pack
-        // in this case.
         if (Out.get()->containsUnexpandedParameterPack()) {
           Out = getDerived().RebuildPackExpansion(
               Out.get(), Expansion->getEllipsisLoc(), OrigNumExpansions);
@@ -7629,6 +7627,17 @@ StmtResult TreeTransform<Derived>::TransformOMPTargetParallelForSimdDirective(
 }
 
 template <typename Derived>
+StmtResult TreeTransform<Derived>::TransformOMPTargetSimdDirective(
+    OMPTargetSimdDirective *D) {
+  DeclarationNameInfo DirName;
+  getDerived().getSema().StartOpenMPDSABlock(OMPD_target_simd, DirName, nullptr,
+                                             D->getLocStart());
+  StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
+  getDerived().getSema().EndOpenMPDSABlock(Res.get());
+  return Res;
+}
+
+template <typename Derived>
 StmtResult TreeTransform<Derived>::TransformOMPTargetTeamsDirective(
     OMPTargetTeamsDirective *D) {
   DeclarationNameInfo DirName;
@@ -7658,6 +7667,19 @@ TreeTransform<Derived>::TransformOMPTargetTeamsDistributeParallelForDirective(
   DeclarationNameInfo DirName;
   getDerived().getSema().StartOpenMPDSABlock(
       OMPD_target_teams_distribute_parallel_for, DirName, nullptr,
+      D->getLocStart());
+  StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
+  getDerived().getSema().EndOpenMPDSABlock(Res.get());
+  return Res;
+}
+
+template <typename Derived>
+StmtResult TreeTransform<Derived>::
+    TransformOMPTargetTeamsDistributeParallelForSimdDirective(
+        OMPTargetTeamsDistributeParallelForSimdDirective *D) {
+  DeclarationNameInfo DirName;
+  getDerived().getSema().StartOpenMPDSABlock(
+      OMPD_target_teams_distribute_parallel_for_simd, DirName, nullptr,
       D->getLocStart());
   StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
   getDerived().getSema().EndOpenMPDSABlock(Res.get());
@@ -11148,6 +11170,12 @@ TransformObjCBridgedCastExpr(ObjCBridgedCastExpr *E) {
   return SemaRef.BuildObjCBridgedCast(E->getLParenLoc(), E->getBridgeKind(),
                                       E->getBridgeKeywordLoc(), TSInfo,
                                       Result.get());
+}
+
+template <typename Derived>
+ExprResult TreeTransform<Derived>::TransformObjCAvailabilityCheckExpr(
+    ObjCAvailabilityCheckExpr *E) {
+  return E;
 }
 
 template<typename Derived>
