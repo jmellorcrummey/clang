@@ -1832,9 +1832,7 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
          "thread id variable must be of type kmp_int32 *");
 
   llvm::Function *OutlinedFun = nullptr;
-  if (isa<OMPTeamsDirective>(D)) {
-    // no outlining happening for teams
-  } else if (isSPMDExecutionMode()) {
+  if (isOpenMPTeamsDirective(D.getDirectiveKind()) || isSPMDExecutionMode()) {
     // Simplified code generation if in SPMD mode.
     return CGOpenMPRuntime::emitParallelOrTeamsOutlinedFunction(
         D, ThreadIDVar, InnermostKind, CodeGen, CaptureLevel,
@@ -3227,32 +3225,17 @@ void CGOpenMPRuntimeNVPTX::emitTeamsCall(CodeGenFunction &CGF,
                                          SourceLocation Loc,
                                          llvm::Value *OutlinedFn,
                                          ArrayRef<llvm::Value *> CapturedVars) {
-  if (isSPMDExecutionMode()) {
-    // OutlinedFn(&GTid, &zero, CapturedStruct);
-    auto ThreadIDAddr = emitThreadIDAddress(CGF, Loc);
-    Address ZeroAddr =
-        CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
-                             /*Name*/ ".zero.addr");
-    CGF.InitTempAlloca(ZeroAddr, CGF.Builder.getInt32(/*C*/ 0));
-    llvm::SmallVector<llvm::Value *, 16> OutlinedFnArgs;
-    OutlinedFnArgs.push_back(ThreadIDAddr.getPointer());
-    OutlinedFnArgs.push_back(ZeroAddr.getPointer());
-    OutlinedFnArgs.append(CapturedVars.begin(), CapturedVars.end());
-    CGF.EmitCallOrInvoke(OutlinedFn, OutlinedFnArgs);
-  } else {
-    // just emit the statements in the teams region inlined
-    auto &&CodeGen = [&D](CodeGenFunction &CGF, PrePostActionTy &) {
-      CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
-      (void)CGF.EmitOMPFirstprivateClause(D, PrivateScope);
-      CGF.EmitOMPPrivateClause(D, PrivateScope);
-      (void)PrivateScope.Privatize();
-
-      CGF.EmitStmt(
-          cast<CapturedStmt>(D.getAssociatedStmt())->getCapturedStmt());
-    };
-
-    emitInlinedDirective(CGF, OMPD_teams, CodeGen);
-  }
+  // OutlinedFn(&GTid, &zero, CapturedStruct);
+  auto ThreadIDAddr = emitThreadIDAddress(CGF, Loc);
+  Address ZeroAddr =
+      CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
+                           /*Name*/ ".zero.addr");
+  CGF.InitTempAlloca(ZeroAddr, CGF.Builder.getInt32(/*C*/ 0));
+  llvm::SmallVector<llvm::Value *, 16> OutlinedFnArgs;
+  OutlinedFnArgs.push_back(ThreadIDAddr.getPointer());
+  OutlinedFnArgs.push_back(ZeroAddr.getPointer());
+  OutlinedFnArgs.append(CapturedVars.begin(), CapturedVars.end());
+  CGF.EmitCallOrInvoke(OutlinedFn, OutlinedFnArgs);
 }
 
 llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
