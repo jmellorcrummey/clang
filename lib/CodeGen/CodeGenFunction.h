@@ -2525,6 +2525,8 @@ public:
       const OMPTargetTeamsDistributeParallelForDirective &S);
   void EmitOMPTargetTeamsDistributeParallelForSimdDirective(
       const OMPTargetTeamsDistributeParallelForSimdDirective &S);
+  void EmitOMPTeamsDistributeSimdDirective(
+      const OMPTeamsDistributeSimdDirective &S);
 
   /// Emit device code for the target directive.
   static void EmitOMPTargetDeviceFunction(CodeGenModule &CGM,
