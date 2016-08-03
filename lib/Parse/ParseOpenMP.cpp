@@ -699,10 +699,11 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
         else
           TPA.Commit();
       }
-      // Save the declaration so that we can create the declare target group
+      // Save the declarations so that we can create the declare target group
       // later on.
       if (Ptr)
-        Decls.push_back(Ptr.get().getSingleDecl());
+        for (auto *V : Ptr.get())
+          Decls.push_back(V);
     }
 
     if (DKind == OMPD_end_declare_target) {
@@ -725,8 +726,13 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
 
     // If we have decls generate the group so that code can be generated for it
     // later on.
-    if (!Decls.empty())
+    if (!Decls.empty()) {
+      for (auto *V : Decls) {
+        llvm::errs() << "Declare target var:\n";
+        V->dump();
+      }
       return Actions.BuildDeclaratorGroup(Decls, /*TypeMayContainAuto=*/false);
+    }
 
     return DeclGroupPtrTy();
   }
