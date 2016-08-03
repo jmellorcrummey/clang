@@ -8565,7 +8565,8 @@ OMPClause *Sema::ActOnOpenMPIfClause(OpenMPDirectiveKind NameModifier,
     ValExpr = MakeFullExpr(Val.get()).get();
 
     OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
-    if ((DKind == OMPD_teams_distribute_parallel_for || isOpenMPTargetExecutionDirective(DKind)) &&
+    if ((DKind == OMPD_teams_distribute_parallel_for ||
+         isOpenMPTargetExecutionDirective(DKind)) &&
         !CurContext->isDependentContext()) {
       llvm::MapVector<Expr *, DeclRefExpr *> Captures;
       unsigned CaptureLevel = getOpenMPCaptureLevel(DKind, OMPC_if);
@@ -8681,7 +8682,8 @@ OMPClause *Sema::ActOnOpenMPNumThreadsClause(Expr *NumThreads,
     return nullptr;
 
   OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
-  if ((DKind == OMPD_teams_distribute_parallel_for || isOpenMPTargetExecutionDirective(DKind)) &&
+  if ((DKind == OMPD_teams_distribute_parallel_for ||
+       isOpenMPTargetExecutionDirective(DKind)) &&
       !CurContext->isDependentContext()) {
     llvm::MapVector<Expr *, DeclRefExpr *> Captures;
     unsigned CaptureLevel = getOpenMPCaptureLevel(DKind, OMPC_num_threads);

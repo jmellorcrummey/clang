@@ -5353,6 +5353,19 @@ emitThreadLimitClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
               TeamsDir->getSingleClause<OMPNumThreadsClause>()) {
         CGOpenMPInnerExprInfo CGInfo(CGF, CS);
         CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
+        if (auto *CPI = OMPClauseWithPreInit::get(NumThreadsClause)) {
+          if (auto *PreInit = cast_or_null<DeclStmt>(CPI->getPreInitStmt())) {
+            for (const auto *I : PreInit->decls()) {
+              if (!I->hasAttr<OMPCaptureNoInitAttr>())
+                CGF.EmitVarDecl(cast<VarDecl>(*I));
+              else {
+                CodeGenFunction::AutoVarEmission Emission =
+                    CGF.EmitAutoVarAlloca(cast<VarDecl>(*I));
+                CGF.EmitAutoVarCleanups(Emission);
+              }
+            }
+          }
+        }
         auto NumThreads = CGF.EmitScalarExpr(NumThreadsClause->getNumThreads(),
                                              /*IgnoreResultAssign*/ true);
         NumThreadsVal =
@@ -5360,11 +5373,25 @@ emitThreadLimitClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
       }
 
       if (isOpenMPParallelDirective(TeamsDir->getDirectiveKind())) {
-        for (const auto *C : TeamsDir->getClausesOfKind<OMPIfClause>()) {
-          if (C->getNameModifier() == OMPD_parallel) {
+        for (const auto *IfClause : TeamsDir->getClausesOfKind<OMPIfClause>()) {
+          if (IfClause->getNameModifier() == OMPD_parallel) {
             CGOpenMPInnerExprInfo CGInfo(CGF, CS);
             CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
-            const Expr *IfCond = C->getCondition();
+            if (auto *CPI = OMPClauseWithPreInit::get(IfClause)) {
+              if (auto *PreInit =
+                      cast_or_null<DeclStmt>(CPI->getPreInitStmt())) {
+                for (const auto *I : PreInit->decls()) {
+                  if (!I->hasAttr<OMPCaptureNoInitAttr>())
+                    CGF.EmitVarDecl(cast<VarDecl>(*I));
+                  else {
+                    CodeGenFunction::AutoVarEmission Emission =
+                        CGF.EmitAutoVarAlloca(cast<VarDecl>(*I));
+                    CGF.EmitAutoVarCleanups(Emission);
+                  }
+                }
+              }
+            }
+            const Expr *IfCond = IfClause->getCondition();
             IfCondVal = CGF.EvaluateExprAsBool(IfCond);
             break;
           }
