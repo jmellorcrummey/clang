@@ -3522,25 +3522,6 @@ StringRef CGOpenMPRuntimeNVPTX::RenameStandardFunction(StringRef name) {
   return name;
 }
 
-std::string CGOpenMPRuntimeNVPTX::sanitizeIdentifier(const llvm::Twine &Name) {
-  std::string Buffer;
-  llvm::raw_string_ostream Out(Buffer);
-  Out << Name;
-  auto InName = Out.str();
-  std::string ValidName;
-  llvm::raw_string_ostream ValidNameStream(ValidName);
-  for (unsigned I = 0, E = InName.size(); I != E; ++I) {
-    char C = InName[I];
-    if (C == '.' || C == '@') {
-      ValidNameStream << "_$_";
-    } else {
-      ValidNameStream << C;
-    }
-  }
-
-  return ValidNameStream.str();
-}
-
 static llvm::Value *EmitInterWarpCopyFunction(CodeGenModule &CGM,
                                               ArrayRef<const Expr *> Privates,
                                               QualType ReductionArrayTy) {

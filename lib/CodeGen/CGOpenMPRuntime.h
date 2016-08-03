@@ -183,10 +183,6 @@ public:
   ///
   virtual llvm::Value *getNumLanes(CodeGenFunction &CGF, SourceLocation Loc);
 
-  // \brief Sanitize identifiers for NVPTX backend.
-  //
-  virtual std::string sanitizeIdentifier(const llvm::Twine &Name);
-
 private:
   /// \brief Default const ident_t object used for initialization of all other
   /// ident_t objects.

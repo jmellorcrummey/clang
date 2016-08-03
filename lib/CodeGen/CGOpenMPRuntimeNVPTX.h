@@ -541,10 +541,6 @@ public:
   /// supports RTTI.
   bool requiresRTTIDescriptor() override { return false; }
 
-  // \brief Sanitize identifiers for NVPTX backend.
-  //
-  virtual std::string sanitizeIdentifier(const llvm::Twine &Name) override;
-
   virtual void emitReduction(CodeGenFunction &CGF, SourceLocation Loc,
                              ArrayRef<const Expr *> Privates,
                              ArrayRef<const Expr *> LHSExprs,
