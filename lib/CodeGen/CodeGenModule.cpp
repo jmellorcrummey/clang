@@ -1526,8 +1526,8 @@ ConstantAddress CodeGenModule::GetWeakRefReference(const ValueDecl *VD) {
 void CodeGenModule::EmitGlobal(GlobalDecl GD) {
   const auto *Global = cast<ValueDecl>(GD.getDecl());
 
-  llvm::errs() << "Emitting " << Global->getName() << "\n";
-  llvm::errs() << "Is " << (Global->hasAttr<OMPDeclareTargetDeclAttr>() ? "" : "NOT") << " declare target.\n";
+  //llvm::errs() << "Emitting " << Global->getName() << "\n";
+  //llvm::errs() << "Is " << (Global->hasAttr<OMPDeclareTargetDeclAttr>() ? "" : "NOT") << " declare target.\n";
 
   // Weak references don't produce any output by themselves.
   if (Global->hasAttr<WeakRefAttr>())

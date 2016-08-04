@@ -643,6 +643,22 @@ private:
   /// device codegen.
   llvm::StringMap<GlobalDecl> TrackedDecls;
 
+  /// Struct that keeps information about the emitted definitions and ctors/dtors so that it can be revisited when emitting declare target entries.
+  struct DeclareTargetEntryInfo {
+    /// The variable the current information refers to, or null if this does not related with a variable.
+    GlobalDecl Variable;
+    /// Address of the variable or null if there is no variable.
+    llvm::Constant *VariableAddr = nullptr;
+    /// The function that implements the device Ctor/Dtor launching.
+    const CGFunctionInfo *CtorDtorFunctionInfo = nullptr;
+    llvm::Function *CtorDtorFunction = nullptr;
+    /// True if the variable associated with this information required initialization.
+    bool PerformInitialization = false;
+  };
+
+  /// Map between a declaration and its declare target information.
+  llvm::DenseMap<const Decl*, DeclareTargetEntryInfo> DeclareTargetEntryInfoMap;
+
 public:
   explicit CGOpenMPRuntime(CodeGenModule &CGM);
   virtual ~CGOpenMPRuntime() {}
