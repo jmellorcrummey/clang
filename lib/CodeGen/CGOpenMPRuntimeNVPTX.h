@@ -345,6 +345,20 @@ private:
                                   OpenMPProcBindClauseKind ProcBind,
                                   SourceLocation Loc) override;
 
+  /// Call the appropriate runtime routine to notify that we finished
+  /// iteration of the dynamic loop.
+  ///
+  /// \param CGF Reference to current CodeGenFunction.
+  /// \param OpenMP Directive.
+  /// \param Loc Clang source location.
+  /// \param IVSize Size of the iteration variable in bits.
+  /// \param IVSigned Sign of the interation variable.
+  ///
+  virtual void emitForDispatchFinish(CodeGenFunction &CGF,
+                                     const OMPLoopDirective &S,
+                                     SourceLocation Loc, unsigned IVSize,
+                                     bool IVSigned) override;
+
   /// \brief Emit the code that each thread requires to execute when it
   /// encounters one of the three possible parallelism level. This also emits
   /// the required data sharing code for each level.
@@ -536,10 +550,6 @@ public:
   /// Return false for the current NVPTX OpenMP implementation as it does NOT
   /// supports RTTI.
   bool requiresRTTIDescriptor() override { return false; }
-
-  // \brief Sanitize identifiers for NVPTX backend.
-  //
-  virtual std::string sanitizeIdentifier(const llvm::Twine &Name) override;
 
   virtual void emitReduction(CodeGenFunction &CGF, SourceLocation Loc,
                              ArrayRef<const Expr *> Privates,

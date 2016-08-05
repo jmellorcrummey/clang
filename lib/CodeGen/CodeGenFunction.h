@@ -2582,17 +2582,18 @@ private:
   void EmitOMPOuterLoop(bool IsMonotonic, bool DynamicOrOrdered,
                         bool IsDistribute, const OMPLoopDirective &S,
                         OMPPrivateScope &LoopScope, bool Ordered, Address LB,
-                        Address UB, Address ST, Address IL, llvm::Value *Chunk);
+                        Address UB, Address ST, Address IL, llvm::Value *Chunk,
+                        const RegionCodeGenTy &CodeGenDistributeLoopContent);
   void EmitOMPForOuterLoop(const OpenMPScheduleTy &ScheduleKind,
                            bool IsMonotonic, const OMPLoopDirective &S,
                            OMPPrivateScope &LoopScope, bool Ordered, Address LB,
                            Address UB, Address ST, Address IL,
                            llvm::Value *Chunk);
-  void EmitOMPDistributeOuterLoop(OpenMPDistScheduleClauseKind ScheduleKind,
-                                  const OMPLoopDirective &S,
-                                  OMPPrivateScope &LoopScope, Address LB,
-                                  Address UB, Address ST, Address IL,
-                                  llvm::Value *Chunk);
+  void EmitOMPDistributeOuterLoop(
+      OpenMPDistScheduleClauseKind ScheduleKind, const OMPLoopDirective &S,
+      OMPPrivateScope &LoopScope, Address LB, Address UB, Address ST,
+      Address IL, llvm::Value *Chunk,
+      const RegionCodeGenTy &CodeGenDistributeLoopContent);
 
   /// \brief Emit code for sections directive.
   void EmitSections(const OMPExecutableDirective &S);

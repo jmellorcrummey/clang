@@ -5813,7 +5813,8 @@ static unsigned CheckOpenMPLoop(
     OpenMPDirectiveKind DKind, Expr *CollapseLoopCountExpr,
     Expr *OrderedLoopCountExpr, Stmt *AStmt, Sema &SemaRef, DSAStackTy &DSA,
     llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA,
-    OMPLoopDirective::HelperExprs &Built, bool CoalescedSchedule = false) {
+    OMPLoopDirective::HelperExprs &Built, bool CoalescedSchedule = false,
+    bool CoalescedDistSchedule = false) {
   unsigned NestedLoopCount = 1;
   if (CollapseLoopCountExpr) {
     // Found 'collapse' clause - calculate collapse number.
@@ -6163,9 +6164,7 @@ static unsigned CheckOpenMPLoop(
   ExprResult DistCond, DistInc, PrevEUB;
   if (isOpenMPLoopBoundSharingDirective(DKind)) {
     DistCond =
-        CoalescedSchedule &&
-                (DKind == OMPD_target_teams_distribute_parallel_for ||
-                 DKind == OMPD_target_teams_distribute_parallel_for_simd)
+        CoalescedDistSchedule
             ? SemaRef.BuildBinOp(CurScope, CondLoc, BO_LT, IV.get(),
                                  NumIterations.get())
             : SemaRef.BuildBinOp(CurScope, CondLoc, BO_LE, IV.get(), UB.get());
@@ -6366,8 +6365,8 @@ static unsigned CheckOpenMPLoop(
   return NestedLoopCount;
 }
 
-static bool generateCoalescedSchedule(Sema &SemaRef,
-                                      ArrayRef<OMPClause *> Clauses) {
+static std::pair<bool, bool>
+generateCoalescedSchedule(Sema &SemaRef, ArrayRef<OMPClause *> Clauses) {
   bool CoalescedSchedule = false;
   bool CoalescedDistSchedule = false;
   if (SemaRef.getLangOpts().OpenMPIsDevice &&
@@ -6389,20 +6388,18 @@ static bool generateCoalescedSchedule(Sema &SemaRef,
         OMPExecutableDirective::getClausesOfKind<OMPOrderedClause>(Clauses);
     bool Ordered = OrderedClause.begin() != OrderedClause.end();
 
-    auto DistScheduleClause =
-        OMPExecutableDirective::getClausesOfKind<OMPDistScheduleClause>(
-            Clauses);
-    bool DistChunked = false;
-    if (DistScheduleClause.begin() != DistScheduleClause.end())
-      DistChunked = (*DistScheduleClause.begin())->getChunkSize() != nullptr;
-
     CoalescedSchedule =
         (!Ordered && (ScheduleKind == OMPC_SCHEDULE_unknown ||
                       ScheduleKind == OMPC_SCHEDULE_auto ||
                       (ScheduleKind == OMPC_SCHEDULE_static && ChunkSizeOne)));
-    CoalescedDistSchedule = !DistChunked;
+
+    auto DistScheduleClause =
+        OMPExecutableDirective::getClausesOfKind<OMPDistScheduleClause>(
+            Clauses);
+    CoalescedDistSchedule =
+        DistScheduleClause.begin() == DistScheduleClause.end();
   }
-  return CoalescedSchedule && CoalescedDistSchedule;
+  return std::make_pair(CoalescedSchedule, CoalescedDistSchedule);
 }
 
 static Expr *getCollapseNumberExpr(ArrayRef<OMPClause *> Clauses) {
@@ -6510,13 +6507,17 @@ StmtResult Sema::ActOnOpenMPForDirective(
     return StmtError();
 
   assert(isa<CapturedStmt>(AStmt) && "Captured statement expected");
-  bool CoalescedSchedule = generateCoalescedSchedule(*this, Clauses);
+  bool CoalescedSchedule;
+  bool CoalescedDistSchedule;
+  std::tie(CoalescedSchedule, CoalescedDistSchedule) =
+      generateCoalescedSchedule(*this, Clauses);
   OMPLoopDirective::HelperExprs B;
   // In presence of clause 'collapse' or 'ordered' with number of loops, it will
   // define the nested loops number.
   unsigned NestedLoopCount = CheckOpenMPLoop(
       OMPD_for, getCollapseNumberExpr(Clauses), getOrderedNumberExpr(Clauses),
-      AStmt, *this, *DSAStack, VarsWithImplicitDSA, B, CoalescedSchedule);
+      AStmt, *this, *DSAStack, VarsWithImplicitDSA, B, CoalescedSchedule,
+      CoalescedDistSchedule);
   if (NestedLoopCount == 0)
     return StmtError();
 
@@ -6547,14 +6548,17 @@ StmtResult Sema::ActOnOpenMPForSimdDirective(
     return StmtError();
 
   assert(isa<CapturedStmt>(AStmt) && "Captured statement expected");
-  bool CoalescedSchedule = generateCoalescedSchedule(*this, Clauses);
+  bool CoalescedSchedule;
+  bool CoalescedDistSchedule;
+  std::tie(CoalescedSchedule, CoalescedDistSchedule) =
+      generateCoalescedSchedule(*this, Clauses);
   OMPLoopDirective::HelperExprs B;
   // In presence of clause 'collapse' or 'ordered' with number of loops, it will
   // define the nested loops number.
-  unsigned NestedLoopCount =
-      CheckOpenMPLoop(OMPD_for_simd, getCollapseNumberExpr(Clauses),
-                      getOrderedNumberExpr(Clauses), AStmt, *this, *DSAStack,
-                      VarsWithImplicitDSA, B, CoalescedSchedule);
+  unsigned NestedLoopCount = CheckOpenMPLoop(
+      OMPD_for_simd, getCollapseNumberExpr(Clauses),
+      getOrderedNumberExpr(Clauses), AStmt, *this, *DSAStack,
+      VarsWithImplicitDSA, B, CoalescedSchedule, CoalescedDistSchedule);
   if (NestedLoopCount == 0)
     return StmtError();
 
@@ -6750,14 +6754,17 @@ StmtResult Sema::ActOnOpenMPParallelForDirective(
   // longjmp() and throw() must not violate the entry/exit criteria.
   CS->getCapturedDecl()->setNothrow();
 
-  bool CoalescedSchedule = generateCoalescedSchedule(*this, Clauses);
+  bool CoalescedSchedule;
+  bool CoalescedDistSchedule;
+  std::tie(CoalescedSchedule, CoalescedDistSchedule) =
+      generateCoalescedSchedule(*this, Clauses);
   OMPLoopDirective::HelperExprs B;
   // In presence of clause 'collapse' or 'ordered' with number of loops, it will
   // define the nested loops number.
-  unsigned NestedLoopCount =
-      CheckOpenMPLoop(OMPD_parallel_for, getCollapseNumberExpr(Clauses),
-                      getOrderedNumberExpr(Clauses), AStmt, *this, *DSAStack,
-                      VarsWithImplicitDSA, B, CoalescedSchedule);
+  unsigned NestedLoopCount = CheckOpenMPLoop(
+      OMPD_parallel_for, getCollapseNumberExpr(Clauses),
+      getOrderedNumberExpr(Clauses), AStmt, *this, *DSAStack,
+      VarsWithImplicitDSA, B, CoalescedSchedule, CoalescedDistSchedule);
   if (NestedLoopCount == 0)
     return StmtError();
 
@@ -6796,14 +6803,17 @@ StmtResult Sema::ActOnOpenMPParallelForSimdDirective(
   // longjmp() and throw() must not violate the entry/exit criteria.
   CS->getCapturedDecl()->setNothrow();
 
-  bool CoalescedSchedule = generateCoalescedSchedule(*this, Clauses);
+  bool CoalescedSchedule;
+  bool CoalescedDistSchedule;
+  std::tie(CoalescedSchedule, CoalescedDistSchedule) =
+      generateCoalescedSchedule(*this, Clauses);
   OMPLoopDirective::HelperExprs B;
   // In presence of clause 'collapse' or 'ordered' with number of loops, it will
   // define the nested loops number.
-  unsigned NestedLoopCount =
-      CheckOpenMPLoop(OMPD_parallel_for_simd, getCollapseNumberExpr(Clauses),
-                      getOrderedNumberExpr(Clauses), AStmt, *this, *DSAStack,
-                      VarsWithImplicitDSA, B, CoalescedSchedule);
+  unsigned NestedLoopCount = CheckOpenMPLoop(
+      OMPD_parallel_for_simd, getCollapseNumberExpr(Clauses),
+      getOrderedNumberExpr(Clauses), AStmt, *this, *DSAStack,
+      VarsWithImplicitDSA, B, CoalescedSchedule, CoalescedDistSchedule);
   if (NestedLoopCount == 0)
     return StmtError();
 
@@ -7764,14 +7774,17 @@ StmtResult Sema::ActOnOpenMPTargetParallelForDirective(
   // longjmp() and throw() must not violate the entry/exit criteria.
   CS->getCapturedDecl()->setNothrow();
 
-  bool CoalescedSchedule = generateCoalescedSchedule(*this, Clauses);
+  bool CoalescedSchedule;
+  bool CoalescedDistSchedule;
+  std::tie(CoalescedSchedule, CoalescedDistSchedule) =
+      generateCoalescedSchedule(*this, Clauses);
   OMPLoopDirective::HelperExprs B;
   // In presence of clause 'collapse' or 'ordered' with number of loops, it will
   // define the nested loops number.
-  unsigned NestedLoopCount =
-      CheckOpenMPLoop(OMPD_target_parallel_for, getCollapseNumberExpr(Clauses),
-                      getOrderedNumberExpr(Clauses), AStmt, *this, *DSAStack,
-                      VarsWithImplicitDSA, B, CoalescedSchedule);
+  unsigned NestedLoopCount = CheckOpenMPLoop(
+      OMPD_target_parallel_for, getCollapseNumberExpr(Clauses),
+      getOrderedNumberExpr(Clauses), AStmt, *this, *DSAStack,
+      VarsWithImplicitDSA, B, CoalescedSchedule, CoalescedDistSchedule);
   if (NestedLoopCount == 0)
     return StmtError();
 
@@ -8080,14 +8093,20 @@ StmtResult Sema::ActOnOpenMPDistributeParallelForDirective(
   // longjmp() and throw() must not violate the entry/exit criteria.
   CS->getCapturedDecl()->setNothrow();
 
-  bool CoalescedSchedule = generateCoalescedSchedule(*this, Clauses);
+  bool CoalescedSchedule;
+  bool CoalescedDistSchedule;
+  std::tie(CoalescedSchedule, CoalescedDistSchedule) =
+      generateCoalescedSchedule(*this, Clauses);
+  // FIXME: 'distribute parallel for' does not support coalescing on the
+  // distribute clause.
+  CoalescedDistSchedule = false;
   OMPLoopDirective::HelperExprs B;
   // In presence of clause 'collapse' with number of loops, it will
   // define the nested loops number.
   unsigned NestedLoopCount = CheckOpenMPLoop(
       OMPD_distribute_parallel_for, getCollapseNumberExpr(Clauses),
       nullptr /*ordered not a clause on distribute*/, AStmt, *this, *DSAStack,
-      VarsWithImplicitDSA, B, CoalescedSchedule);
+      VarsWithImplicitDSA, B, CoalescedSchedule, CoalescedDistSchedule);
   if (NestedLoopCount == 0)
     return StmtError();
 
@@ -8114,14 +8133,17 @@ StmtResult Sema::ActOnOpenMPDistributeParallelForSimdDirective(
   // longjmp() and throw() must not violate the entry/exit criteria.
   CS->getCapturedDecl()->setNothrow();
 
-  bool CoalescedSchedule = generateCoalescedSchedule(*this, Clauses);
+  bool CoalescedSchedule;
+  bool CoalescedDistSchedule;
+  std::tie(CoalescedSchedule, CoalescedDistSchedule) =
+      generateCoalescedSchedule(*this, Clauses);
   OMPLoopDirective::HelperExprs B;
   // In presence of clause 'collapse' with number of loops, it will
   // define the nested loops number.
   unsigned NestedLoopCount = CheckOpenMPLoop(
       OMPD_distribute_parallel_for_simd, getCollapseNumberExpr(Clauses),
       nullptr /*ordered not a clause on distribute*/, AStmt, *this, *DSAStack,
-      VarsWithImplicitDSA, B, CoalescedSchedule);
+      VarsWithImplicitDSA, B, CoalescedSchedule, CoalescedDistSchedule);
   if (NestedLoopCount == 0)
     return StmtError();
 
@@ -8312,14 +8334,17 @@ StmtResult Sema::ActOnOpenMPTeamsDistributeParallelForDirective(
   // longjmp() and throw() must not violate the entry/exit criteria.
   CS->getCapturedDecl()->setNothrow();
 
-  bool CoalescedSchedule = generateCoalescedSchedule(*this, Clauses);
+  bool CoalescedSchedule;
+  bool CoalescedDistSchedule;
+  std::tie(CoalescedSchedule, CoalescedDistSchedule) =
+      generateCoalescedSchedule(*this, Clauses);
   OMPLoopDirective::HelperExprs B;
   // In presence of clause 'collapse' with number of loops, it will
   // define the nested loops number.
   unsigned NestedLoopCount = CheckOpenMPLoop(
       OMPD_teams_distribute_parallel_for, getCollapseNumberExpr(Clauses),
       nullptr /*ordered not a clause on distribute*/, AStmt, *this, *DSAStack,
-      VarsWithImplicitDSA, B, CoalescedSchedule);
+      VarsWithImplicitDSA, B, CoalescedSchedule, CoalescedDistSchedule);
   if (NestedLoopCount == 0)
     return StmtError();
 
@@ -8346,14 +8371,17 @@ StmtResult Sema::ActOnOpenMPTargetTeamsDistributeParallelForDirective(
   // longjmp() and throw() must not violate the entry/exit criteria.
   CS->getCapturedDecl()->setNothrow();
 
-  bool CoalescedSchedule = generateCoalescedSchedule(*this, Clauses);
+  bool CoalescedSchedule;
+  bool CoalescedDistSchedule;
+  std::tie(CoalescedSchedule, CoalescedDistSchedule) =
+      generateCoalescedSchedule(*this, Clauses);
   OMPLoopDirective::HelperExprs B;
   // In presence of clause 'collapse' with number of loops, it will
   // define the nested loops number.
   unsigned NestedLoopCount = CheckOpenMPLoop(
       OMPD_target_teams_distribute_parallel_for, getCollapseNumberExpr(Clauses),
       nullptr /*ordered not a clause on distribute*/, AStmt, *this, *DSAStack,
-      VarsWithImplicitDSA, B, CoalescedSchedule);
+      VarsWithImplicitDSA, B, CoalescedSchedule, CoalescedDistSchedule);
   if (NestedLoopCount == 0)
     return StmtError();
 
@@ -8380,7 +8408,10 @@ StmtResult Sema::ActOnOpenMPTargetTeamsDistributeParallelForSimdDirective(
   // longjmp() and throw() must not violate the entry/exit criteria.
   CS->getCapturedDecl()->setNothrow();
 
-  bool CoalescedSchedule = generateCoalescedSchedule(*this, Clauses);
+  bool CoalescedSchedule;
+  bool CoalescedDistSchedule;
+  std::tie(CoalescedSchedule, CoalescedDistSchedule) =
+      generateCoalescedSchedule(*this, Clauses);
   OMPLoopDirective::HelperExprs B;
   // In presence of clause 'collapse' with number of loops, it will
   // define the nested loops number.
@@ -8388,7 +8419,7 @@ StmtResult Sema::ActOnOpenMPTargetTeamsDistributeParallelForSimdDirective(
       OMPD_target_teams_distribute_parallel_for_simd,
       getCollapseNumberExpr(Clauses),
       nullptr /*ordered not a clause on distribute*/, AStmt, *this, *DSAStack,
-      VarsWithImplicitDSA, B, CoalescedSchedule);
+      VarsWithImplicitDSA, B, CoalescedSchedule, CoalescedDistSchedule);
   if (NestedLoopCount == 0)
     return StmtError();
 
@@ -8545,7 +8576,7 @@ OMPClause *Sema::ActOnOpenMPIfClause(OpenMPDirectiveKind NameModifier,
     ValExpr = MakeFullExpr(Val.get()).get();
 
     OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
-    if (isOpenMPTargetExecutionDirective(DKind) &&
+    if ((DKind == OMPD_teams_distribute_parallel_for || isOpenMPTargetExecutionDirective(DKind)) &&
         !CurContext->isDependentContext()) {
       llvm::MapVector<Expr *, DeclRefExpr *> Captures;
       unsigned CaptureLevel = getOpenMPCaptureLevel(DKind, OMPC_if);
@@ -8661,7 +8692,7 @@ OMPClause *Sema::ActOnOpenMPNumThreadsClause(Expr *NumThreads,
     return nullptr;
 
   OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
-  if (isOpenMPTargetExecutionDirective(DKind) &&
+  if ((DKind == OMPD_teams_distribute_parallel_for || isOpenMPTargetExecutionDirective(DKind)) &&
       !CurContext->isDependentContext()) {
     llvm::MapVector<Expr *, DeclRefExpr *> Captures;
     unsigned CaptureLevel = getOpenMPCaptureLevel(DKind, OMPC_num_threads);
