@@ -660,16 +660,16 @@ bool clang::isAllowedClauseForDirective(OpenMPDirectiveKind DKind,
       break;
     }
     break;
-    case OMPD_teams_distribute_simd:
-      switch (CKind) {
+  case OMPD_teams_distribute_simd:
+    switch (CKind) {
 #define OPENMP_TEAMS_DISTRIBUTE_SIMD_CLAUSE(Name)                              \
-    case OMPC_##Name:                                                          \
-      return true;
+  case OMPC_##Name:                                                            \
+    return true;
 #include "clang/Basic/OpenMPKinds.def"
-      default:
-        break;
-      }
+    default:
       break;
+    }
+    break;
   case OMPD_declare_target:
   case OMPD_end_declare_target:
   case OMPD_unknown:
@@ -699,7 +699,7 @@ bool clang::isOpenMPLoopDirective(OpenMPDirectiveKind DKind) {
          DKind == OMPD_teams_distribute_parallel_for ||
          DKind == OMPD_target_teams_distribute_parallel_for ||
          DKind == OMPD_target_teams_distribute_parallel_for_simd |
-         DKind == OMPD_teams_distribute_simd;
+             DKind == OMPD_teams_distribute_simd;
   // TODO add next directives.
 }
 

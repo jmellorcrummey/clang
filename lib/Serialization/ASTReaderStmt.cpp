@@ -3650,7 +3650,7 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       unsigned NumClauses = Record[ASTStmtReader::NumStmtFields];
       unsigned CollapsedNum = Record[ASTStmtReader::NumStmtFields + 1];
       S = OMPTeamsDistributeSimdDirective::CreateEmpty(Context, NumClauses,
-                                                  CollapsedNum, Empty);
+                                                       CollapsedNum, Empty);
       break;
     }
 

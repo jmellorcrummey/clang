@@ -3547,8 +3547,7 @@ public:
 /// In this example directive '#pragma omp teams distribute simd'
 /// has clause 'private' with the variables 'a' and 'b'
 ///
-class OMPTeamsDistributeSimdDirective
-    : public OMPLoopDirective {
+class OMPTeamsDistributeSimdDirective : public OMPLoopDirective {
   friend class ASTStmtReader;
 
   /// Build directive with the given start and end location.
@@ -3559,25 +3558,22 @@ class OMPTeamsDistributeSimdDirective
   /// \param NumClauses Number of clauses.
   ///
   OMPTeamsDistributeSimdDirective(SourceLocation StartLoc,
-                                                   SourceLocation EndLoc,
-                                                   unsigned CollapsedNum,
-                                                   unsigned NumClauses)
-      : OMPLoopDirective(this,
-                         OMPTeamsDistributeSimdDirectiveClass,
-                         OMPD_teams_distribute_simd,
-                         StartLoc, EndLoc, CollapsedNum, NumClauses) {}
+                                  SourceLocation EndLoc, unsigned CollapsedNum,
+                                  unsigned NumClauses)
+      : OMPLoopDirective(this, OMPTeamsDistributeSimdDirectiveClass,
+                         OMPD_teams_distribute_simd, StartLoc, EndLoc,
+                         CollapsedNum, NumClauses) {}
 
   /// Build an empty directive.
   ///
   /// \param CollapsedNum Number of collapsed nested loops.
   /// \param NumClauses Number of clauses.
   ///
-  explicit OMPTeamsDistributeSimdDirective(
-      unsigned CollapsedNum, unsigned NumClauses)
-      : OMPLoopDirective(
-            this, OMPTeamsDistributeSimdDirectiveClass,
-            OMPD_teams_distribute_simd, SourceLocation(),
-            SourceLocation(), CollapsedNum, NumClauses) {}
+  explicit OMPTeamsDistributeSimdDirective(unsigned CollapsedNum,
+                                           unsigned NumClauses)
+      : OMPLoopDirective(this, OMPTeamsDistributeSimdDirectiveClass,
+                         OMPD_teams_distribute_simd, SourceLocation(),
+                         SourceLocation(), CollapsedNum, NumClauses) {}
 
 public:
   /// Creates directive with a list of \a Clauses.
@@ -3602,13 +3598,13 @@ public:
   /// \param CollapsedNum Number of collapsed nested loops.
   /// \param NumClauses Number of clauses.
   ///
-  static OMPTeamsDistributeSimdDirective *
-  CreateEmpty(const ASTContext &C, unsigned NumClauses, unsigned CollapsedNum,
-              EmptyShell);
+  static OMPTeamsDistributeSimdDirective *CreateEmpty(const ASTContext &C,
+                                                      unsigned NumClauses,
+                                                      unsigned CollapsedNum,
+                                                      EmptyShell);
 
   static bool classof(const Stmt *T) {
-    return T->getStmtClass() ==
-           OMPTeamsDistributeSimdDirectiveClass;
+    return T->getStmtClass() == OMPTeamsDistributeSimdDirectiveClass;
   }
 };
 
