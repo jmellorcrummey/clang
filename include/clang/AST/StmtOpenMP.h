@@ -3564,7 +3564,7 @@ class OMPTeamsDistributeSimdDirective
                                                    unsigned NumClauses)
       : OMPLoopDirective(this,
                          OMPTeamsDistributeSimdDirectiveClass,
-                         OMPD_target_teams_distribute_parallel_for_simd,
+                         OMPD_teams_distribute_simd,
                          StartLoc, EndLoc, CollapsedNum, NumClauses) {}
 
   /// Build an empty directive.

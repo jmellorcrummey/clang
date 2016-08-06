@@ -8551,15 +8551,18 @@ StmtResult Sema::ActOnOpenMPTeamsDistributeSimdDirective(
   // longjmp() and throw() must not violate the entry/exit criteria.
   CS->getCapturedDecl()->setNothrow();
 
-  bool CoalescedSchedule = generateCoalescedSchedule(*this, Clauses);
+  bool CoalescedSchedule;
+  bool CoalescedDistSchedule;
+  std::tie(CoalescedSchedule, CoalescedDistSchedule) =
+      generateCoalescedSchedule(*this, Clauses);
   OMPLoopDirective::HelperExprs B;
   // In presence of clause 'collapse' with number of loops, it will
   // define the nested loops number.
   unsigned NestedLoopCount = CheckOpenMPLoop(
-      OMPD_teams_distribute_simd,
-      getCollapseNumberExpr(Clauses),
+      OMPD_teams_distribute_simd, getCollapseNumberExpr(Clauses),
       nullptr /*ordered not a clause on distribute*/, AStmt, *this, *DSAStack,
-      VarsWithImplicitDSA, B, CoalescedSchedule);
+      VarsWithImplicitDSA, B, CoalescedSchedule, CoalescedDistSchedule);
+
   if (NestedLoopCount == 0)
     return StmtError();
 
