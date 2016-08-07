@@ -228,6 +228,12 @@ void CodeGenModule::applyReplacements() {
       }
     }
 
+    // Tell the OpenMP runtime we are replacing a global that can potentially be
+    // marked "declare target".
+    if (OpenMPRuntime)
+      if (auto *NewGV = dyn_cast<llvm::GlobalValue>(Replacement))
+        OpenMPRuntime->registerGlobalReplacement(MangledName, NewGV);
+
     // Replace old with new, but keep the old order.
     OldF->replaceAllUsesWith(Replacement);
     if (NewF) {
@@ -250,6 +256,12 @@ void CodeGenModule::applyGlobalValReplacements() {
 
     GV->replaceAllUsesWith(C);
     GV->eraseFromParent();
+
+    // Tell the OpenMP runtime we are replacing a global that can potentially be
+    // marked "declare target".
+    if (OpenMPRuntime)
+      if (auto *NewGV = dyn_cast<llvm::GlobalValue>(C))
+        OpenMPRuntime->registerGlobalReplacement(GV->getName(), NewGV);
   }
 }
 
@@ -1525,9 +1537,6 @@ ConstantAddress CodeGenModule::GetWeakRefReference(const ValueDecl *VD) {
 
 void CodeGenModule::EmitGlobal(GlobalDecl GD) {
   const auto *Global = cast<ValueDecl>(GD.getDecl());
-
-  //llvm::errs() << "Emitting " << Global->getName() << "\n";
-  //llvm::errs() << "Is " << (Global->hasAttr<OMPDeclareTargetDeclAttr>() ? "" : "NOT") << " declare target.\n";
 
   // Weak references don't produce any output by themselves.
   if (Global->hasAttr<WeakRefAttr>())

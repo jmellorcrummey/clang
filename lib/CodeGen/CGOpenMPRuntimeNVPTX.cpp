@@ -1823,6 +1823,19 @@ bool CGOpenMPRuntimeNVPTX::isSPMDExecutionMode() const {
   return CurrMode == CGOpenMPRuntimeNVPTX::ExecutionMode::SPMD;
 }
 
+void CGOpenMPRuntimeNVPTX::registerCtorDtorEntry(unsigned DeviceID,
+                                                 unsigned FileID,
+                                                 StringRef RegionName,
+                                                 unsigned Line,
+                                                 llvm::Function *Fn) {
+  // On top of the default registration we create a new global to force the
+  // region to be executed as SPMD.
+  SetPropertyExecutionMode(CGM, Fn->getName(), SPMD);
+
+  CGOpenMPRuntime::registerCtorDtorEntry(DeviceID, FileID, RegionName, Line,
+                                         Fn);
+}
+
 bool CGOpenMPRuntimeNVPTX::IndeterminateLevel() { return IsOrphaned; }
 
 // \brief Obtain the data sharing info for the current context.

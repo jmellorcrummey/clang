@@ -726,13 +726,8 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
 
     // If we have decls generate the group so that code can be generated for it
     // later on.
-    if (!Decls.empty()) {
-      //for (auto *V : Decls) {
-      //  llvm::errs() << "Declare target var:\n";
-      //  V->dump();
-      //}
+    if (!Decls.empty())
       return Actions.BuildDeclaratorGroup(Decls, /*TypeMayContainAuto=*/false);
-    }
 
     return DeclGroupPtrTy();
   }
