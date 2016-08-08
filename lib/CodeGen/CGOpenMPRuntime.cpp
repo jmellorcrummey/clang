@@ -814,13 +814,6 @@ void CGOpenMPRuntime::clear() {
   InternalVars.clear();
 }
 
-std::string CGOpenMPRuntime::sanitizeIdentifier(const llvm::Twine &Name) {
-  std::string ValidName;
-  llvm::raw_string_ostream ValidNameStream(ValidName);
-  ValidNameStream << Name;
-  return ValidNameStream.str();
-}
-
 static llvm::Function *
 emitCombinerOrInitializer(CodeGenModule &CGM, QualType Ty,
                           const Expr *CombinerInitializer, const VarDecl *In,
@@ -2171,8 +2164,7 @@ CGOpenMPRuntime::getOrCreateInternalVariable(llvm::Type *Ty,
 
 llvm::Value *CGOpenMPRuntime::getCriticalRegionLock(StringRef CriticalName) {
   llvm::Twine Name(".gomp_critical_user_", CriticalName);
-  return getOrCreateInternalVariable(KmpCriticalNameTy,
-                                     sanitizeIdentifier(Name.concat(".var")));
+  return getOrCreateInternalVariable(KmpCriticalNameTy, Name.concat(".var"));
 }
 
 namespace {
@@ -2639,6 +2631,13 @@ void CGOpenMPRuntime::emitForDispatchInit(CodeGenFunction &CGF,
   };
   // CGF.Builder.getIntN(IVSize, 0),
   CGF.EmitRuntimeCall(createDispatchInitFunction(IVSize, IVSigned), Args);
+}
+
+void CGOpenMPRuntime::emitForDispatchFinish(CodeGenFunction &CGF,
+                                            const OMPLoopDirective &S,
+                                            SourceLocation Loc, unsigned IVSize,
+                                            bool IVSigned) {
+  // Nothing to do here.
 }
 
 static void emitForStaticInitCall(
@@ -5193,6 +5192,19 @@ static const Stmt *ignoreCompoundStmts(const Stmt *Body) {
   return Body;
 }
 
+/// get an inner (nested) teams construct, if any
+static const OMPExecutableDirective *
+GetNestedTeamsDirectiveOrNull(const OMPExecutableDirective &D) {
+  const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
+
+  if (auto *NestedDir = dyn_cast_or_null<OMPExecutableDirective>(
+          ignoreCompoundStmts(CS.getCapturedStmt())))
+    if (isOpenMPTeamsDirective(NestedDir->getDirectiveKind()))
+      return NestedDir;
+
+  return nullptr;
+}
+
 /// \brief Emit the num_teams clause of an enclosed teams directive at the
 /// target region scope. If there is no teams directive associated with the
 /// target directive, or if there is no num_teams clause associated with the
@@ -5235,11 +5247,7 @@ emitNumTeamsClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
   // teams directive is not combined with target.
 
   const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
-
-  // FIXME: Accommodate other combined directives with teams when they become
-  // available.
-  if (auto *TeamsDir = dyn_cast_or_null<OMPTeamsDirective>(
-          ignoreCompoundStmts(CS.getCapturedStmt()))) {
+  if (auto *TeamsDir = GetNestedTeamsDirectiveOrNull(D)) {
     if (auto *NTE = TeamsDir->getSingleClause<OMPNumTeamsClause>()) {
       CGOpenMPInnerExprInfo CGInfo(CGF, CS);
       CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
@@ -5272,6 +5280,7 @@ emitThreadLimitClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
 
   auto &Bld = CGF.Builder;
 
+  //
   // If the target directive is combined with a teams directive:
   //   Return the value in the thread_limit clause, if any.
   //
@@ -5282,16 +5291,25 @@ emitThreadLimitClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
   //
   // If neither teams or parallel combined directives set the number of threads
   // in a team, return 0 to denote the runtime default.
+  //
+  // If this is not a teams directive return nullptr.
+  //
+
+  llvm::Value *DefaultThreadLimitVal = nullptr;
+  llvm::Value *ThreadLimitVal = nullptr;
+  llvm::Value *NumThreadsVal = nullptr;
+  llvm::Value *IfCondVal = nullptr;
   if (isOpenMPTeamsDirective(D.getDirectiveKind()) ||
       isOpenMPParallelDirective(D.getDirectiveKind())) {
-    llvm::Value *ThreadLimitExpr = nullptr;
+    DefaultThreadLimitVal = Bld.getInt32(0);
+
     if (const auto *ThreadLimitClause =
             D.getSingleClause<OMPThreadLimitClause>()) {
       CodeGenFunction::RunCleanupsScope ThreadLimitScope(CGF);
       auto ThreadLimit = CGF.EmitScalarExpr(ThreadLimitClause->getThreadLimit(),
                                             /*IgnoreResultAssign*/ true);
-      ThreadLimitExpr = Bld.CreateIntCast(ThreadLimit, CGF.Int32Ty,
-                                          /*IsSigned=*/true);
+      ThreadLimitVal = Bld.CreateIntCast(ThreadLimit, CGF.Int32Ty,
+                                         /*IsSigned=*/true);
     }
 
     if (const auto *NumThreadsClause =
@@ -5299,63 +5317,85 @@ emitThreadLimitClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
       CodeGenFunction::RunCleanupsScope NumThreadsScope(CGF);
       auto NumThreads = CGF.EmitScalarExpr(NumThreadsClause->getNumThreads(),
                                            /*IgnoreResultAssign*/ true);
-      llvm::Value *NumThreadsExpr =
+      NumThreadsVal =
           Bld.CreateIntCast(NumThreads, CGF.Int32Ty, /*IsSigned=*/true);
-      ThreadLimitExpr =
-          ThreadLimitExpr
-              ? Bld.CreateSelect(
-                    Bld.CreateICmpSLT(NumThreadsExpr, ThreadLimitExpr),
-                    NumThreadsExpr, ThreadLimitExpr)
-              : NumThreadsExpr;
     }
 
-    // If we are executing a serialized parallel in a target region, clamp the
-    // thread limit expression to 1.
     if (isOpenMPParallelDirective(D.getDirectiveKind())) {
       for (const auto *C : D.getClausesOfKind<OMPIfClause>()) {
         if (C->getNameModifier() == OMPD_parallel) {
           const Expr *IfCond = C->getCondition();
-          ThreadLimitExpr =
-              ThreadLimitExpr
-                  ? Bld.CreateSelect(CGF.EvaluateExprAsBool(IfCond),
-                                     ThreadLimitExpr, Bld.getInt32(1))
-                  : Bld.getInt32(1);
+          IfCondVal = CGF.EvaluateExprAsBool(IfCond);
           break;
         }
       }
     }
+  } else {
+    // If the current target region has a teams region enclosed, we need to get
+    // the thread limit to pass to the runtime function call. This is done
+    // by generating the expression in a inlined region. This is required
+    // because the expression is captured in the enclosing target environment
+    // when the teams directive is not combined with target.
+    const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
 
-    // The default value is 0.
-    return ThreadLimitExpr ? ThreadLimitExpr : Bld.getInt32(0);
-  }
+    if (auto *TeamsDir = GetNestedTeamsDirectiveOrNull(D)) {
+      DefaultThreadLimitVal = Bld.getInt32(0);
 
-  // If the current target region has a teams region enclosed, we need to get
-  // the thread limit to pass to the runtime function call. This is done
-  // by generating the expression in a inlined region. This is required because
-  // the expression is captured in the enclosing target environment when the
-  // teams directive is not combined with target.
+      if (auto *TLE = TeamsDir->getSingleClause<OMPThreadLimitClause>()) {
+        CGOpenMPInnerExprInfo CGInfo(CGF, CS);
+        CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
+        llvm::Value *ThreadLimit = CGF.EmitScalarExpr(TLE->getThreadLimit());
+        ThreadLimitVal = CGF.Builder.CreateIntCast(ThreadLimit, CGF.Int32Ty,
+                                                   /*IsSigned=*/true);
+      }
 
-  const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
+      if (const auto *NumThreadsClause =
+              TeamsDir->getSingleClause<OMPNumThreadsClause>()) {
+        CGOpenMPInnerExprInfo CGInfo(CGF, CS);
+        CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
+        auto NumThreads = CGF.EmitScalarExpr(NumThreadsClause->getNumThreads(),
+                                             /*IgnoreResultAssign*/ true);
+        NumThreadsVal =
+            Bld.CreateIntCast(NumThreads, CGF.Int32Ty, /*IsSigned=*/true);
+      }
 
-  // FIXME: Accommodate other combined directives with teams when they become
-  // available.
-  if (auto *TeamsDir = dyn_cast_or_null<OMPTeamsDirective>(
-          ignoreCompoundStmts(CS.getCapturedStmt()))) {
-    if (auto *TLE = TeamsDir->getSingleClause<OMPThreadLimitClause>()) {
-      CGOpenMPInnerExprInfo CGInfo(CGF, CS);
-      CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
-      llvm::Value *ThreadLimit = CGF.EmitScalarExpr(TLE->getThreadLimit());
-      return CGF.Builder.CreateIntCast(ThreadLimit, CGF.Int32Ty,
-                                       /*IsSigned=*/true);
+      if (isOpenMPParallelDirective(TeamsDir->getDirectiveKind())) {
+        for (const auto *C : TeamsDir->getClausesOfKind<OMPIfClause>()) {
+          if (C->getNameModifier() == OMPD_parallel) {
+            CGOpenMPInnerExprInfo CGInfo(CGF, CS);
+            CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
+            const Expr *IfCond = C->getCondition();
+            IfCondVal = CGF.EvaluateExprAsBool(IfCond);
+            break;
+          }
+        }
+      }
     }
-
-    // If we have an enclosed teams directive but no thread_limit clause we use
-    // the default value 0.
-    return CGF.Builder.getInt32(0);
   }
 
-  // No teams associated with the directive.
-  return nullptr;
+  // Select the lesser of thread_limit and num_threads.
+  if (NumThreadsVal)
+    ThreadLimitVal =
+        ThreadLimitVal
+            ? Bld.CreateSelect(Bld.CreateICmpSLT(NumThreadsVal, ThreadLimitVal),
+                               NumThreadsVal, ThreadLimitVal)
+            : NumThreadsVal;
+
+  // Set default value passed to the runtime if teams directive is found but
+  // no clause is specified.
+  if (!ThreadLimitVal)
+    ThreadLimitVal = DefaultThreadLimitVal;
+
+  // If we are executing a serialized parallel in a target region, clamp the
+  // thread limit expression to 1.
+  if (IfCondVal)
+    ThreadLimitVal = Bld.CreateSelect(IfCondVal,
+                                      // Parallel mode.
+                                      ThreadLimitVal,
+                                      // Serial mode, just 1 thread.
+                                      Bld.getInt32(1));
+
+  return ThreadLimitVal;
 }
 
 namespace {
