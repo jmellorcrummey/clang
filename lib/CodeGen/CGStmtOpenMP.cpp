@@ -3991,6 +3991,11 @@ void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForSimdDirective(
   // empty codegen
 }
 
+void CodeGenFunction::EmitOMPTeamsDistributeSimdDirective(
+    const OMPTeamsDistributeSimdDirective &S) {
+  // empty codegen
+}
+
 void CodeGenFunction::EmitOMPTeamsDirective(const OMPTeamsDirective &S) {
   // Emit parallel region as a standalone region.
   auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
