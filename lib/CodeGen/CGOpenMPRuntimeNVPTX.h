@@ -423,6 +423,19 @@ private:
   // mode.
   bool isSPMDExecutionMode() const;
 
+  /// Register target region related with the launching of Ctor/Dtors entry. On
+  /// top of the default registration, an extra global is registered to make
+  /// sure SPMD mode is used in the execution of the Ctor/Dtor.
+  /// \param DeviceID The device ID of the target region in the system.
+  /// \param FileID The file ID of the target region in the system.
+  /// \param RegionName The name of the region.
+  /// \param Line Line where the declaration the target egion refers to is
+  /// defined.
+  /// \param Fn The function that implements the target region.
+  virtual void registerCtorDtorEntry(unsigned DeviceID, unsigned FileID,
+                                     StringRef RegionName, unsigned Line,
+                                     llvm::Function *Fn) override;
+
 public:
   explicit CGOpenMPRuntimeNVPTX(CodeGenModule &CGM);
 

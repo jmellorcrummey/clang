@@ -6656,14 +6656,31 @@ bool CGOpenMPRuntime::MustBeEmittedForDevice(GlobalDecl GD) {
 /// the declaration itself or its template declaration have the 'declare target'
 /// attribute.
 static bool IsDeclareTargetDeclaration(const ValueDecl *VD) {
-  if (VD->hasAttr<OMPDeclareTargetDeclAttr>())
-    return true;
+  const Decl *RelevantDecl = VD;
+
+  // Try to get the original template if any.
   if (auto *FD = dyn_cast<FunctionDecl>(VD)) {
-    auto *Tmpl = FD->getPrimaryTemplate();
-    if (Tmpl && Tmpl->hasAttr<OMPDeclareTargetDeclAttr>())
-      return true;
+    if (auto *Tmpl = FD->getPrimaryTemplate())
+      RelevantDecl = Tmpl;
   }
+
+  // Check if the declaration or any of its redeclarations have a declare target
+  // attribute.
+  if (RelevantDecl->hasAttr<OMPDeclareTargetDeclAttr>())
+    return true;
+
+  for (const Decl *RD : RelevantDecl->redecls())
+    if (RD->hasAttr<OMPDeclareTargetDeclAttr>())
+      return true;
+
   return false;
+}
+
+void CGOpenMPRuntime::registerCtorDtorEntry(unsigned DeviceID, unsigned FileID,
+                                            StringRef RegionName, unsigned Line,
+                                            llvm::Function *Fn) {
+  OffloadEntriesInfoManager.registerTargetRegionEntryInfo(
+      DeviceID, FileID, RegionName, Line, Fn, Fn);
 }
 
 bool CGOpenMPRuntime::emitDeviceCtorDtor(const VarDecl &D,
@@ -6673,10 +6690,6 @@ bool CGOpenMPRuntime::emitDeviceCtorDtor(const VarDecl &D,
   if (!CGM.getLangOpts().OpenMPIsDevice)
     return false;
 
-  // If this is not a declare target variable, don't have to do anything.
-  // However, we return true so that no default initialization is emitted.
-  if (!IsDeclareTargetDeclaration(&D))
-    return true;
 
   // Produce the unique prefix to identify the new target regions. We use the
   // source location of the variable declaration which we know to not conflict
@@ -6691,8 +6704,8 @@ bool CGOpenMPRuntime::emitDeviceCtorDtor(const VarDecl &D,
   // name is the name of the declaration with suffix _dtor and/or _init if that
   // is a destructor or initializer target region.
   SmallString<128> ParentNameDtor;
+  ParentNameDtor += "__omp_offloading_dtor_";
   ParentNameDtor += D.getName();
-  ParentNameDtor += "_dtor";
 
   // If we don't have a Dtor specified by the host, we don't have anything to
   // do, but we return true to prevent the default initializer codegen.
@@ -6712,8 +6725,8 @@ bool CGOpenMPRuntime::emitDeviceCtorDtor(const VarDecl &D,
   // calls the initializer as entry point.
   if (PerformInit) {
     SmallString<128> ParentNameInit;
+    ParentNameInit += "__omp_offloading_init_";
     ParentNameInit += D.getName();
-    ParentNameInit += "_init";
 
     assert(OffloadEntriesInfoManager.hasTargetRegionEntryInfo(
                DeviceID, FileID, ParentNameInit, Line) &&
@@ -6731,8 +6744,7 @@ bool CGOpenMPRuntime::emitDeviceCtorDtor(const VarDecl &D,
 
     // Register the information for the entry associated with this target
     // region.
-    OffloadEntriesInfoManager.registerTargetRegionEntryInfo(
-        DeviceID, FileID, ParentNameInit, Line, Fn, Fn);
+    registerCtorDtorEntry(DeviceID, FileID, ParentNameInit, Line, Fn);
   }
 
   // Create the target region for the destructor.
@@ -6747,8 +6759,7 @@ bool CGOpenMPRuntime::emitDeviceCtorDtor(const VarDecl &D,
       Fn, &D, Addr, PerformInit, /*emitInitOnly=*/false, /*emitDtorOnly=*/true);
 
   // Register the information for the entry associated with this target region.
-  OffloadEntriesInfoManager.registerTargetRegionEntryInfo(
-      DeviceID, FileID, ParentNameDtor, Line, Fn, Fn);
+  registerCtorDtorEntry(DeviceID, FileID, ParentNameDtor, Line, Fn);
 
   // We successfully generated the target regions to initialize and destroy the
   // global.
@@ -6765,110 +6776,30 @@ void CGOpenMPRuntime::emitDeviceCtorDtorLaunching(CodeGenFunction &CGF,
       CGM.getLangOpts().OMPTargetTriples.empty())
     return;
 
-  // If the declaration is not declare target, don't bother launching any
-  // Ctors/Dtors on the device.
-  if (!IsDeclareTargetDeclaration(&D))
-    return;
+  auto &Ctx = CGM.getContext();
 
-  // Produce the unique prefix to identify the new target regions. We use the
-  // source location of the variable declaration which we know to not conflict
-  // with any target region.
-  unsigned DeviceID;
-  unsigned FileID;
-  unsigned Line;
-  getTargetEntryUniqueInfo(CGM.getContext(), D.getLocStart(), DeviceID, FileID,
-                           Line);
-  SmallString<64> PrefixName;
-  {
-    llvm::raw_svector_ostream OS(PrefixName);
-    OS << "__omp_offloading" << llvm::format("_%x", DeviceID)
-       << llvm::format("_%x_", FileID) << D.getName() << "_l" << Line;
-  }
+  // Create a placeholder function to emit potential declare target Ctors and
+  // Dtors.
+  auto &FnInfo =
+      CGM.getTypes().arrangeBuiltinFunctionDeclaration(Ctx.VoidTy, None);
+  auto *FnTy = CGM.getTypes().GetFunctionType(FnInfo);
+  auto *Fn =
+      llvm::Function::Create(FnTy, llvm::GlobalValue::InternalLinkage,
+                             ".omp_offloading.initializer", &CGM.getModule());
+  CGM.SetLLVMFunctionAttributes(/*D=*/nullptr, FnInfo, Fn);
 
-  // If we have to perform an initialization, create a target region to launch
-  // that on the device.
-  if (PerformInit) {
-    // Produce an ID whose address uniquely identifies the target region.
-    auto ID = new llvm::GlobalVariable(
-        CGM.getModule(), CGM.Int8Ty, /*isConstant=*/true,
-        llvm::GlobalValue::PrivateLinkage,
-        llvm::Constant::getNullValue(CGM.Int8Ty), Twine(PrefixName) + "_init");
+  // Create a call to the placeholder in the original initializer function.
+  CGF.Builder.CreateCall(Fn, None);
 
-    // Invoke a target region with the obtained ID and no arguments and a single
-    // thread.
-    llvm::Value *Args[] = {
-        CGF.Builder.getInt32(OMP_DEVICEID_CTOR),
-        ID,
-        llvm::Constant::getNullValue(CGM.Int32Ty),
-        llvm::Constant::getNullValue(CGM.VoidPtrPtrTy),
-        llvm::Constant::getNullValue(CGM.VoidPtrPtrTy),
-        llvm::Constant::getNullValue(CGM.SizeTy->getPointerTo()),
-        llvm::Constant::getNullValue(CGM.Int32Ty->getPointerTo()),
-        CGF.Builder.getInt32(1),
-        CGF.Builder.getInt32(1)};
+  // Save the information in the declare target info map.
+  auto &Info = DeclareTargetEntryInfoMap[CGM.getMangledName(GlobalDecl(&D))];
+  Info.CtorDtorFunction = Fn;
+  Info.CtorDtorFunctionInfo = &FnInfo;
+  Info.VariableAddr = Addr;
+  Info.Variable = &D;
+  Info.PerformInitialization = PerformInit;
 
-    // We don't have to check the return code of the function given that there
-    // is nothing on the host to run instead.
-    (void)CGF.EmitRuntimeCall(createRuntimeFunction(OMPRTL__tgt_target_teams),
-                              Args);
-
-    // We define the parent name of this target region as the name of the global
-    // followed by the suffix _init. This suffix is what distinguishes a
-    // initializer from the destructor.
-    SmallString<128> ParentName;
-    ParentName += D.getName();
-    ParentName += "_init";
-
-    // Register the information for the entry associated with this target
-    // region.
-    OffloadEntriesInfoManager.registerTargetRegionEntryInfo(
-        DeviceID, FileID, ParentName, Line, ID, ID);
-  }
-
-  // Create a helper function to register the destructor.
-  auto *DtorFn = createOffloadingHelperFunction(
-      CGM, ".omp_offloading_dtor_helper",
-      [&](CodeGenFunction &CGF, PrePostActionTy &) {
-        // Produce an ID whose address uniquely identifies the target region.
-        auto ID = new llvm::GlobalVariable(
-            CGM.getModule(), CGM.Int8Ty, /*isConstant=*/true,
-            llvm::GlobalValue::PrivateLinkage,
-            llvm::Constant::getNullValue(CGM.Int8Ty),
-            Twine(PrefixName) + "_dtor");
-
-        // Invoke a target region with the obtained ID and no arguments and a
-        // single thread.
-        llvm::Value *Args[] = {
-            CGF.Builder.getInt32(OMP_DEVICEID_DTOR),
-            ID,
-            llvm::Constant::getNullValue(CGM.Int32Ty),
-            llvm::Constant::getNullValue(CGM.VoidPtrPtrTy),
-            llvm::Constant::getNullValue(CGM.VoidPtrPtrTy),
-            llvm::Constant::getNullValue(CGM.SizeTy->getPointerTo()),
-            llvm::Constant::getNullValue(CGM.Int32Ty->getPointerTo()),
-            CGF.Builder.getInt32(1),
-            CGF.Builder.getInt32(1)};
-
-        // We don't have to check the return code of the function given that
-        // there is nothing on the host to run instead.
-        (void)CGF.EmitRuntimeCall(
-            createRuntimeFunction(OMPRTL__tgt_target_teams), Args);
-
-        // We define the parent name of this target region as the name of the
-        // global followed by the suffix _dtor. This suffix is what
-        // distinguishes a initializer from the destructor.
-        SmallString<128> ParentName;
-        ParentName += D.getName();
-        ParentName += "_dtor";
-
-        // Register the information for the entry associated with this target
-        // region.
-        OffloadEntriesInfoManager.registerTargetRegionEntryInfo(
-            DeviceID, FileID, ParentName, Line, ID, ID);
-      });
-
-  // Register the destructor.
-  CGM.getCXXABI().registerGlobalDtor(CGF, D, DtorFn, Addr);
+  return;
 }
 
 void CGOpenMPRuntime::registerTargetFunctionDefinition(GlobalDecl GD) {
@@ -6879,11 +6810,8 @@ void CGOpenMPRuntime::registerTargetFunctionDefinition(GlobalDecl GD) {
     return;
 
   if (auto *FD = dyn_cast<FunctionDecl>(GD.getDecl())) {
-    // Only declare target functions are registered.
-    if (!IsDeclareTargetDeclaration(FD))
-      return;
-    OffloadEntriesInfoManager.registerDeviceFunctionEntryInfo(
-        CGM.getMangledName(GD));
+    auto &Info = DeclareTargetEntryInfoMap[CGM.getMangledName(GD)];
+    Info.Variable = FD;
   }
 }
 
@@ -6897,15 +6825,205 @@ void CGOpenMPRuntime::registerTargetVariableDefinition(const VarDecl *D,
 
   assert(D && Addr && "Invalid variable information!");
 
-  // Only declare target functions are registered.
-  if (!IsDeclareTargetDeclaration(D))
+  auto &Info = DeclareTargetEntryInfoMap[CGM.getMangledName(GlobalDecl(D))];
+  Info.Variable = D;
+  Info.VariableAddr = Addr;
+}
+
+void CGOpenMPRuntime::registerGlobalReplacement(StringRef MangledName,
+                                                llvm::GlobalValue *NewVal) {
+  // We don't have to register anything if compiling for the host with no target
+  // devices specified.
+  if (!CGM.getLangOpts().OpenMPIsDevice &&
+      CGM.getLangOpts().OMPTargetTriples.empty())
     return;
 
-  OffloadEntriesInfoManager.registerDeviceGlobalVarEntryInfo(
-      CGM.getMangledName(GlobalDecl(D)), Addr, D->getType());
+  assert(MangledName != NewVal->getName() &&
+         "Replacing global with the same name??");
+
+  // If the existing global is registered, make sure the new global also is.
+  auto It = DeclareTargetEntryInfoMap.find(MangledName);
+  if (It == DeclareTargetEntryInfoMap.end())
+    return;
+
+  // Register the global. Copy the existing declare target record, but use the
+  // new address.
+  auto &Info = DeclareTargetEntryInfoMap[NewVal->getName()];
+  Info = It->second;
+  Info.VariableAddr = NewVal;
 }
 
 llvm::Function *CGOpenMPRuntime::emitRegistrationFunction() {
+  auto &Ctx = CGM.getContext();
+
+  // Figure out all the declare target data that should be registered as such.
+  for (auto II = DeclareTargetEntryInfoMap.begin(),
+            IE = DeclareTargetEntryInfoMap.end();
+       II != IE; ++II) {
+    DeclareTargetEntryInfo &Info = II->second;
+
+    // Utility function to emit the Ctors/Dtors launching.
+    auto &&EmitCtorDtor = [&Info, &Ctx, this]() {
+      CodeGenFunction CGF(CGM);
+      FunctionArgList ArgList;
+      CGF.disableDebugInfo();
+      CGF.StartFunction(GlobalDecl(), Ctx.VoidTy, Info.CtorDtorFunction,
+                        *Info.CtorDtorFunctionInfo, ArgList);
+
+      const VarDecl &D = *cast<VarDecl>(Info.Variable);
+      llvm::Constant *Addr = Info.VariableAddr;
+      assert(Addr && "declaration address is not defined??");
+
+      // Produce the unique prefix to identify the new target regions. We use
+      // the
+      // source location of the variable declaration which we know to not
+      // conflict
+      // with any target region.
+      unsigned DeviceID;
+      unsigned FileID;
+      unsigned Line;
+      getTargetEntryUniqueInfo(CGM.getContext(), D.getLocStart(), DeviceID,
+                               FileID, Line);
+      SmallString<64> PrefixName;
+      {
+        llvm::raw_svector_ostream OS(PrefixName);
+        OS << "__omp_offloading" << llvm::format("_%x", DeviceID)
+           << llvm::format("_%x_", FileID) << D.getName() << "_l" << Line;
+      }
+
+      // If we have to perform an initialization, create a target region to
+      // launch
+      // that on the device.
+      if (Info.PerformInitialization) {
+        // Produce an ID whose address uniquely identifies the target region.
+        auto ID = new llvm::GlobalVariable(
+            CGM.getModule(), CGM.Int8Ty, /*isConstant=*/true,
+            llvm::GlobalValue::PrivateLinkage,
+            llvm::Constant::getNullValue(CGM.Int8Ty),
+            Twine(PrefixName) + "_init");
+
+        // Invoke a target region with the obtained ID and no arguments and a
+        // single
+        // thread.
+        llvm::Value *Args[] = {
+            CGF.Builder.getInt32(OMP_DEVICEID_CTOR),
+            ID,
+            llvm::Constant::getNullValue(CGM.Int32Ty),
+            llvm::Constant::getNullValue(CGM.VoidPtrPtrTy),
+            llvm::Constant::getNullValue(CGM.VoidPtrPtrTy),
+            llvm::Constant::getNullValue(CGM.SizeTy->getPointerTo()),
+            llvm::Constant::getNullValue(CGM.Int32Ty->getPointerTo()),
+            CGF.Builder.getInt32(1),
+            CGF.Builder.getInt32(1)};
+
+        // We don't have to check the return code of the function given that
+        // there
+        // is nothing on the host to run instead.
+        (void)CGF.EmitRuntimeCall(
+            createRuntimeFunction(OMPRTL__tgt_target_teams), Args);
+
+        // We define the parent name of this target region as the name of the
+        // global
+        // followed by the suffix _init. This suffix is what distinguishes a
+        // initializer from the destructor.
+        SmallString<128> ParentName;
+        ParentName += "__omp_offloading_init_";
+        ParentName += D.getName();
+
+        // Register the information for the entry associated with this target
+        // region.
+        OffloadEntriesInfoManager.registerTargetRegionEntryInfo(
+            DeviceID, FileID, ParentName, Line, ID, ID);
+      }
+
+      // Create a helper function to register the destructor.
+      auto *DtorFn = createOffloadingHelperFunction(
+          CGM, ".omp_offloading_dtor_helper",
+          [&](CodeGenFunction &CGF, PrePostActionTy &) {
+            // Produce an ID whose address uniquely identifies the target
+            // region.
+            auto ID = new llvm::GlobalVariable(
+                CGM.getModule(), CGM.Int8Ty, /*isConstant=*/true,
+                llvm::GlobalValue::PrivateLinkage,
+                llvm::Constant::getNullValue(CGM.Int8Ty),
+                Twine(PrefixName) + "_dtor");
+
+            // Invoke a target region with the obtained ID and no arguments and
+            // a
+            // single thread.
+            llvm::Value *Args[] = {
+                CGF.Builder.getInt32(OMP_DEVICEID_DTOR),
+                ID,
+                llvm::Constant::getNullValue(CGM.Int32Ty),
+                llvm::Constant::getNullValue(CGM.VoidPtrPtrTy),
+                llvm::Constant::getNullValue(CGM.VoidPtrPtrTy),
+                llvm::Constant::getNullValue(CGM.SizeTy->getPointerTo()),
+                llvm::Constant::getNullValue(CGM.Int32Ty->getPointerTo()),
+                CGF.Builder.getInt32(1),
+                CGF.Builder.getInt32(1)};
+
+            // We don't have to check the return code of the function given that
+            // there is nothing on the host to run instead.
+            (void)CGF.EmitRuntimeCall(
+                createRuntimeFunction(OMPRTL__tgt_target_teams), Args);
+
+            // We define the parent name of this target region as the name of
+            // the
+            // global followed by the suffix _dtor. This suffix is what
+            // distinguishes a initializer from the destructor.
+            SmallString<128> ParentName;
+            ParentName += "__omp_offloading_dtor_";
+            ParentName += D.getName();
+
+            // Register the information for the entry associated with this
+            // target
+            // region.
+            OffloadEntriesInfoManager.registerTargetRegionEntryInfo(
+                DeviceID, FileID, ParentName, Line, ID, ID);
+          });
+
+      // Register the destructor.
+      CGM.getCXXABI().registerGlobalDtor(CGF, D, DtorFn, Addr);
+      CGF.FinishFunction();
+    };
+
+    // Utility function to emit the Ctors/Dtors launching.
+    auto &&EmitEmptyInitializer = [&Info, &Ctx, this]() {
+      CodeGenFunction CGF(CGM);
+      FunctionArgList ArgList;
+      CGF.disableDebugInfo();
+      CGF.StartFunction(GlobalDecl(), Ctx.VoidTy, Info.CtorDtorFunction,
+                        *Info.CtorDtorFunctionInfo, ArgList);
+      CGF.FinishFunction();
+    };
+
+    // If we have a variable, register it and emit any ctors/dtors launching.
+    if (auto *D = dyn_cast<VarDecl>(Info.Variable)) {
+      assert(Info.VariableAddr && "No variable address defined??");
+
+      if (IsDeclareTargetDeclaration(D)) {
+        // Register the variable as declare target.
+        OffloadEntriesInfoManager.registerDeviceGlobalVarEntryInfo(
+            II->first(), Info.VariableAddr, D->getType());
+
+        // Emit the ctor/dtor launching if required.
+        if (Info.CtorDtorFunction)
+          EmitCtorDtor();
+      } else if (Info.CtorDtorFunction) {
+        // Emit an empty device initializer if required.
+        EmitEmptyInitializer();
+      }
+      continue;
+    }
+
+    const FunctionDecl *FD = cast<FunctionDecl>(Info.Variable);
+    // Only declare target functions are registered.
+    if (!IsDeclareTargetDeclaration(FD))
+      continue;
+
+    OffloadEntriesInfoManager.registerDeviceFunctionEntryInfo(II->first());
+  }
+
   // If we have offloading in the current module, we need to emit the entries
   // now and register the offloading descriptor.
   createOffloadEntriesAndInfoMetadata();

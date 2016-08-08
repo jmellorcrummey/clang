@@ -172,6 +172,17 @@ protected:
                                    const DeclRefExpr *LHS,
                                    const DeclRefExpr *RHS);
 
+  /// Register target region related with the launching of Ctor/Dtors entry.
+  /// \param DeviceID The device ID of the target region in the system.
+  /// \param FileID The file ID of the target region in the system.
+  /// \param RegionName The name of the region.
+  /// \param Line Line where the declaration the target egion refers to is
+  /// defined.
+  /// \param Fn The function that implements the target region.
+  virtual void registerCtorDtorEntry(unsigned DeviceID, unsigned FileID,
+                                     StringRef RegionName, unsigned Line,
+                                     llvm::Function *Fn);
+
 public:
   virtual StringRef RenameStandardFunction(StringRef name);
 
@@ -638,6 +649,25 @@ private:
   /// declare target, deferred decl is emitted during Codegen::Release for
   /// device codegen.
   llvm::StringMap<GlobalDecl> TrackedDecls;
+
+  /// Struct that keeps information about the emitted definitions and
+  /// ctors/dtors so that it can be revisited when emitting declare target
+  /// entries.
+  struct DeclareTargetEntryInfo {
+    /// The declaration associated with this information.
+    const Decl *Variable;
+    /// Address of the variable or null if there is no variable.
+    llvm::Constant *VariableAddr = nullptr;
+    /// The function that implements the device Ctor/Dtor launching.
+    const CGFunctionInfo *CtorDtorFunctionInfo = nullptr;
+    llvm::Function *CtorDtorFunction = nullptr;
+    /// True if the variable associated with this information required
+    /// initialization.
+    bool PerformInitialization = false;
+  };
+
+  /// Map between a declaration name and its declare target information.
+  llvm::StringMap<DeclareTargetEntryInfo> DeclareTargetEntryInfoMap;
 
 public:
   explicit CGOpenMPRuntime(CodeGenModule &CGM);
@@ -1262,6 +1292,13 @@ public:
   /// \param Addr Address of the global.
   virtual void registerTargetVariableDefinition(const VarDecl *D,
                                                 llvm::Constant *Addr);
+
+  /// \brief Register a global that is replacing some other. If the global being
+  /// declare has a declare target attribute, the new one is registered as such.
+  /// \param MangledName Name of the global being replaced.
+  /// \param NewVal Global that is used to replace.
+  virtual void registerGlobalReplacement(StringRef MangledName,
+                                         llvm::GlobalValue *NewVal);
 
   /// \brief Creates the offloading descriptor in the event any target region
   /// was emitted in the current module and return the function that registers
