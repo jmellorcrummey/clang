@@ -3061,8 +3061,7 @@ void CodeGenFunction::EmitOMPDistributeLoop(
             /*ForceSimpleCall=*/true);
       }
       EmitOMPPrivateClause(S, LoopScope);
-      bool HasLastprivateClause =
-          EmitOMPLastprivateClauseInit(S, LoopScope);
+      bool HasLastprivateClause = EmitOMPLastprivateClauseInit(S, LoopScope);
       EmitOMPPrivateLoopCounters(S, LoopScope);
       (void)LoopScope.Privatize();
 
