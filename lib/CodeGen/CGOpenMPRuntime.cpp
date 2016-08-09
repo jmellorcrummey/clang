@@ -6687,6 +6687,9 @@ IsDeclareTargetDeclaration(const ValueDecl *VD) {
   if (auto *Attr = RelevantDecl->getAttr<OMPDeclareTargetDeclAttr>())
     return Attr;
 
+  if (auto *Attr = VD->getAttr<OMPDeclareTargetDeclAttr>())
+	  return Attr;
+
   for (const Decl *RD : RelevantDecl->redecls())
     if (auto *Attr = RD->getAttr<OMPDeclareTargetDeclAttr>())
       return Attr;
