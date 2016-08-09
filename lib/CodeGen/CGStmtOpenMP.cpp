@@ -4003,11 +4003,6 @@ void CodeGenFunction::EmitOMPTeamsDirective(const OMPTeamsDirective &S) {
   emitCommonOMPTeamsDirective(*this, S, OMPD_teams, CodeGen);
 }
 
-void TargetTeamsCodegen(CodeGenFunction &CGF, PrePostActionTy &Action,
-                        const OMPTargetTeamsDirective &S,
-                        const RegionCodeGenTy &CodeGen) {
-}
-
 void CodeGenFunction::EmitOMPTargetTeamsDeviceFunction(
     CodeGenModule &CGM, StringRef ParentName,
     const OMPTargetTeamsDirective &S) {
