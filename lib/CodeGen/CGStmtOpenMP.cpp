@@ -3828,15 +3828,11 @@ static void emitCommonOMPTargetDirective(CodeGenFunction &CGF,
 }
 
 void TargetCodegen(CodeGenFunction &CGF, PrePostActionTy &Action,
-                   const OMPExecutableDirective &S,
+                   const OMPTargetDirective &S,
                    const RegionCodeGenTy &CodeGen) {
   CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
-
-  // taken care of by 'teams' in case of 'target teams'
-  if (!(S.getDirectiveKind() == OMPD_target_teams)) {
-    (void)CGF.EmitOMPFirstprivateClause(S, PrivateScope);
-    CGF.EmitOMPPrivateClause(S, PrivateScope);
-  }
+  (void)CGF.EmitOMPFirstprivateClause(S, PrivateScope);
+  CGF.EmitOMPPrivateClause(S, PrivateScope);
   (void)PrivateScope.Privatize();
 
   Action.Enter(CGF);
@@ -4016,6 +4012,14 @@ void CodeGenFunction::EmitOMPTeamsDirective(const OMPTeamsDirective &S) {
   emitCommonOMPTeamsDirective(*this, S, OMPD_teams, CodeGen);
 }
 
+void TargetTeamsCodegen(CodeGenFunction &CGF, PrePostActionTy &Action,
+                       const OMPTargetTeamsDirective &S,
+                       const RegionCodeGenTy &CodeGen) {
+  Action.Enter(CGF);
+  CodeGen(CGF);
+}
+
+
 void CodeGenFunction::EmitOMPTargetTeamsDeviceFunction(
     CodeGenModule &CGM, StringRef ParentName,
     const OMPTargetTeamsDirective &S) {
@@ -4032,7 +4036,7 @@ void CodeGenFunction::EmitOMPTargetTeamsDeviceFunction(
       emitCommonOMPTeamsDirective(CGF, S, OMPD_teams, CodeGen);
     };
 
-    TargetCodegen(CGF, Action, S, TeamsCG);
+    TargetTeamsCodegen(CGF, Action, S, TeamsCG);
   };
   llvm::Function *Fn;
   llvm::Constant *Addr;
@@ -4056,7 +4060,7 @@ void CodeGenFunction::EmitOMPTargetTeamsDirective(
       };
       emitCommonOMPTeamsDirective(CGF, S, OMPD_teams, CodeGen);
     };
-    TargetCodegen(CGF, Action, S, TeamsCG);
+    TargetTeamsCodegen(CGF, Action, S, TeamsCG);
   };
   emitCommonOMPTargetDirective(*this, S, OMPD_target, CodeGen);
 }
