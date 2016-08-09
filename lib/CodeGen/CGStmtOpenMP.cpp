@@ -4046,7 +4046,6 @@ void CodeGenFunction::EmitOMPTargetTeamsDirective(
       auto &&TeamsCG = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
         auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
           OMPPrivateScope PrivateScope(CGF);
-          // taken care of by 'teams'
           (void)CGF.EmitOMPFirstprivateClause(S, PrivateScope);
           CGF.EmitOMPPrivateClause(S, PrivateScope);
           (void)PrivateScope.Privatize();
