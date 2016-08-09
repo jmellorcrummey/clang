@@ -2943,14 +2943,15 @@ void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::
   assert(CGM.getLangOpts().OpenMPIsDevice && "Initialization of entries is "
                                              "only required for the device "
                                              "code generation.");
-  OffloadEntriesDeviceGlobalVar[MangledName] =
-      OffloadEntryInfoDeviceGlobalVar(Order, /*Addr=*/nullptr, QualType());
+  OffloadEntriesDeviceGlobalVar[MangledName] = OffloadEntryInfoDeviceGlobalVar(
+      Order, /*Addr=*/nullptr, QualType(), /*Flags=*/nullptr);
   ++OffloadingOrderedEntriesNum;
 }
 
 void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::
     registerDeviceGlobalVarEntryInfo(StringRef MangledName,
-                                     llvm::Constant *Addr, QualType Ty) {
+                                     llvm::Constant *Addr, QualType Ty,
+                                     llvm::ConstantInt *Flags) {
   // If we are emitting code for a target, the entry is already initialized,
   // only has to be registered.
   if (CGM.getLangOpts().OpenMPIsDevice) {
@@ -2959,10 +2960,11 @@ void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::
     assert(Entry.isValid() && "Entry not initialized!");
     Entry.setAddress(Addr);
     Entry.setType(Ty);
+    Entry.setFlags(Flags);
     return;
   } else {
     OffloadEntryInfoDeviceGlobalVar Entry(OffloadingOrderedEntriesNum++, Addr,
-                                          Ty);
+                                          Ty, Flags);
     OffloadEntriesDeviceGlobalVar[MangledName] = Entry;
   }
 }
@@ -3160,7 +3162,8 @@ CGOpenMPRuntime::createOffloadingBinaryDescriptorRegistration() {
 }
 
 void CGOpenMPRuntime::createOffloadEntry(llvm::Constant *ID,
-                                         llvm::Constant *Addr, uint64_t Size) {
+                                         llvm::Constant *Addr, uint64_t Size,
+                                         llvm::ConstantInt *Flags) {
   StringRef Name = Addr->getName();
   auto *TgtOffloadEntryType = cast<llvm::StructType>(
       CGM.getTypes().ConvertTypeForMem(getTgtOffloadEntryQTy()));
@@ -3184,7 +3187,9 @@ void CGOpenMPRuntime::createOffloadEntry(llvm::Constant *ID,
   // of the related function or global to make sure that happen.
   llvm::Constant *EntryInit = llvm::ConstantStruct::get(
       TgtOffloadEntryType, AddrPtr, StrPtr,
-      llvm::ConstantInt::get(CGM.SizeTy, Size), nullptr);
+      llvm::ConstantInt::get(CGM.SizeTy, Size),
+      Flags ? Flags : llvm::Constant::getNullValue(CGM.Int32Ty),
+      llvm::Constant::getNullValue(CGM.Int32Ty), nullptr);
   llvm::GlobalVariable *Entry = new llvm::GlobalVariable(
       M, TgtOffloadEntryType, true, llvm::GlobalValue::ExternalLinkage,
       EntryInit, Twine(".omp_offloading.entry.") + Name);
@@ -3315,7 +3320,8 @@ void CGOpenMPRuntime::createOffloadEntriesAndInfoMetadata() {
       // The global address can be used as ID.
       createOffloadEntry(
           CE->getAddress(), CE->getAddress(),
-          CGM.getContext().getTypeSizeInChars(CE->getType()).getQuantity());
+          CGM.getContext().getTypeSizeInChars(CE->getType()).getQuantity(),
+          CE->getFlags());
     } else
       llvm_unreachable("Unsupported ordered entry kind.");
   }
@@ -3419,6 +3425,8 @@ QualType CGOpenMPRuntime::getTgtOffloadEntryQTy() {
   //                          // (function or global)
   //   char      *name;       // Name of the function or global.
   //   size_t     size;       // Size of the entry info (0 if it a function).
+  //   int32_t    flags;      // Flags associated with the entry, e.g. 'link'.
+  //   int32_t    reserved;   // Reserved, to use by the runtime library.
   // };
   if (TgtOffloadEntryQTy.isNull()) {
     ASTContext &C = CGM.getContext();
@@ -3427,6 +3435,10 @@ QualType CGOpenMPRuntime::getTgtOffloadEntryQTy() {
     addFieldToRecordDecl(C, RD, C.VoidPtrTy);
     addFieldToRecordDecl(C, RD, C.getPointerType(C.CharTy));
     addFieldToRecordDecl(C, RD, C.getSizeType());
+    addFieldToRecordDecl(
+        C, RD, C.getIntTypeForBitwidth(/*DestWidth=*/32, /*Signed=*/true));
+    addFieldToRecordDecl(
+        C, RD, C.getIntTypeForBitwidth(/*DestWidth=*/32, /*Signed=*/true));
     RD->completeDefinition();
     TgtOffloadEntryQTy = C.getRecordType(RD);
   }
@@ -6652,10 +6664,11 @@ bool CGOpenMPRuntime::MustBeEmittedForDevice(GlobalDecl GD) {
       CGM.getMangledName(GD));
 }
 
-/// \brief Return true if the declaration is marked as 'declare target', i.e.
-/// the declaration itself or its template declaration have the 'declare target'
-/// attribute.
-static bool IsDeclareTargetDeclaration(const ValueDecl *VD) {
+/// \brief Return the declare target attribute if the declaration is marked as
+// 'declare target', i.e. the declaration itself, its template declaration, or
+/// any of its redeclarations have the 'declare target' attribute.
+static OMPDeclareTargetDeclAttr *
+IsDeclareTargetDeclaration(const ValueDecl *VD) {
   const Decl *RelevantDecl = VD;
 
   // Try to get the original template if any.
@@ -6666,14 +6679,17 @@ static bool IsDeclareTargetDeclaration(const ValueDecl *VD) {
 
   // Check if the declaration or any of its redeclarations have a declare target
   // attribute.
-  if (RelevantDecl->hasAttr<OMPDeclareTargetDeclAttr>())
-    return true;
+  if (auto *Attr = RelevantDecl->getAttr<OMPDeclareTargetDeclAttr>())
+    return Attr;
+
+  if (auto *Attr = VD->getAttr<OMPDeclareTargetDeclAttr>())
+	  return Attr;
 
   for (const Decl *RD : RelevantDecl->redecls())
-    if (RD->hasAttr<OMPDeclareTargetDeclAttr>())
-      return true;
+    if (auto *Attr = RD->getAttr<OMPDeclareTargetDeclAttr>())
+      return Attr;
 
-  return false;
+  return nullptr;
 }
 
 void CGOpenMPRuntime::registerCtorDtorEntry(unsigned DeviceID, unsigned FileID,
@@ -6997,14 +7013,25 @@ llvm::Function *CGOpenMPRuntime::emitRegistrationFunction() {
       CGF.FinishFunction();
     };
 
+    enum OpenMPOffloadingDeclareTargetFlags {
+      /// \brief Mark the entry has having a 'link' attribute.
+      OMP_DECLARE_TARGET_LINK = 0x01,
+    };
+
     // If we have a variable, register it and emit any ctors/dtors launching.
     if (auto *D = dyn_cast<VarDecl>(Info.Variable)) {
       assert(Info.VariableAddr && "No variable address defined??");
 
-      if (IsDeclareTargetDeclaration(D)) {
+      if (auto *Attr = IsDeclareTargetDeclaration(D)) {
+        // If we have a link attribute we need to set the link flag.
+        int64_t Flags = 0;
+        if (Attr->getMapType() == OMPDeclareTargetDeclAttr::MT_Link)
+          Flags |= OMP_DECLARE_TARGET_LINK;
+
         // Register the variable as declare target.
         OffloadEntriesInfoManager.registerDeviceGlobalVarEntryInfo(
-            II->first(), Info.VariableAddr, D->getType());
+            II->first(), Info.VariableAddr, D->getType(),
+            llvm::ConstantInt::get(CGM.Int32Ty, Flags));
 
         // Emit the ctor/dtor launching if required.
         if (Info.CtorDtorFunction)
