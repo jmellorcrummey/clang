@@ -6666,7 +6666,8 @@ static bool IsDeclareTargetDeclaration(const ValueDecl *VD) {
 
   // Check if the declaration or any of its redeclarations have a declare target
   // attribute.
-  if (RelevantDecl->hasAttr<OMPDeclareTargetDeclAttr>())
+  if (RelevantDecl->hasAttr<OMPDeclareTargetDeclAttr>() ||
+      VD->hasAttr<OMPDeclareTargetDeclAttr>())
     return true;
 
   for (const Decl *RD : RelevantDecl->redecls())
