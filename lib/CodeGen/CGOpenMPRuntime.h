@@ -113,7 +113,8 @@ protected:
   /// \brief Creates offloading entry for the provided entry ID \a ID,
   /// address \a Addr and size \a Size.
   virtual void createOffloadEntry(llvm::Constant *ID, llvm::Constant *Addr,
-                                  uint64_t Size);
+                                  uint64_t Size,
+                                  llvm::ConstantInt *Flags = nullptr);
 
   /// \brief Helper to emit outlined function for 'target' directive.
   /// \param D Directive to emit.
@@ -413,16 +414,19 @@ private:
       llvm::Constant *Addr;
       // \brief Type of the global variable.
       QualType Ty;
+      // \brief Flags associated the device global.
+      llvm::ConstantInt *Flags;
 
     public:
       OffloadEntryInfoDeviceGlobalVar()
           : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_GLOBAL_VAR, ~0u),
-            Addr(nullptr) {}
+            Addr(nullptr), Flags(nullptr) {}
       explicit OffloadEntryInfoDeviceGlobalVar(unsigned Order,
                                                llvm::Constant *Addr,
-                                               QualType Ty)
+                                               QualType Ty,
+                                               llvm::ConstantInt *Flags)
           : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_GLOBAL_VAR, Order),
-            Addr(Addr), Ty(Ty) {}
+            Addr(Addr), Ty(Ty), Flags(Flags) {}
 
       llvm::Constant *getAddress() const { return Addr; }
       void setAddress(llvm::Constant *V) {
@@ -431,6 +435,8 @@ private:
       }
       QualType getType() const { return Ty; }
       void setType(QualType QTy) { Ty = QTy; }
+      llvm::ConstantInt *getFlags() const { return Flags; }
+      void setFlags(llvm::ConstantInt *NewFlags) { Flags = NewFlags; }
       static bool classof(const OffloadEntryInfo *Info) {
         return Info->getKind() == OFFLOAD_ENTRY_INFO_DEVICE_GLOBAL_VAR;
       }
@@ -440,7 +446,8 @@ private:
                                             unsigned Order);
     /// \brief Register device global variable entry.
     void registerDeviceGlobalVarEntryInfo(StringRef MangledName,
-                                          llvm::Constant *Addr, QualType Ty);
+                                          llvm::Constant *Addr, QualType Ty,
+                                          llvm::ConstantInt *Flags);
     /// \brief Return true if a device global variable entry with the provided
     /// information exists.
     bool hasDeviceGlobalVarEntryInfo(StringRef MangledName) const;

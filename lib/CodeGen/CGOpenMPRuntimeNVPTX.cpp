@@ -1221,7 +1221,8 @@ void CGOpenMPRuntimeNVPTX::registerParallelContext(
 
 void CGOpenMPRuntimeNVPTX::createOffloadEntry(llvm::Constant *ID,
                                               llvm::Constant *Addr,
-                                              uint64_t Size) {
+                                              uint64_t Size,
+                                              llvm::ConstantInt *Flags) {
   auto *F = dyn_cast<llvm::Function>(Addr);
   // TODO: Add support for global variables on the device after declare target
   // support.
