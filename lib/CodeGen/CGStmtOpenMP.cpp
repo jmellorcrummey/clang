@@ -2208,18 +2208,6 @@ void CodeGenFunction::EmitOMPDistributeSimdDirective(
                                               false);
 }
 
-void CodeGenFunction::EmitOMPTargetParallelForSimdDirective(
-    const OMPTargetParallelForSimdDirective &S) {
-  OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
-  CGM.getOpenMPRuntime().emitInlinedDirective(
-      *this, OMPD_target_parallel_for_simd,
-      [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-        OMPLoopScope PreInitScope(CGF, S);
-        CGF.EmitStmt(
-            cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
-      });
-}
-
 void CodeGenFunction::EmitOMPTargetSimdDirective(
     const OMPTargetSimdDirective &S) {
   OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
@@ -3946,6 +3934,42 @@ void CodeGenFunction::EmitOMPTargetParallelForDirective(
     TargetParallelForCodegen(CGF, Action, S);
   };
   emitCommonOMPTargetDirective(*this, S, OMPD_target_parallel_for, CodeGen);
+}
+
+static void TargetParallelForSimdCodegen(CodeGenFunction &CGF,
+                                         PrePostActionTy &Action,
+                                         const OMPTargetParallelForSimdDirective &S) {
+  Action.Enter(CGF);
+  // Emit directive as a combined directive that consists of two implicit
+  // directives: 'parallel' with 'for' directive.
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+    CGF.EmitOMPWorksharingLoop(S);
+  };
+  emitCommonOMPParallelDirective(CGF, S, OMPD_parallel_for_simd, CodeGen,
+                                 /*CaptureLevel=*/2);
+}
+
+void CodeGenFunction::EmitOMPTargetParallelForSimdDeviceFunction(
+    CodeGenModule &CGM, StringRef ParentName,
+    const OMPTargetParallelForSimdDirective &S) {
+  // Emit SPMD target parallel for region as a standalone region.
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
+    TargetParallelForSimdCodegen(CGF, Action, S);
+  };
+  llvm::Function *Fn;
+  llvm::Constant *Addr;
+  // Emit target region as a standalone region.
+  CGM.getOpenMPRuntime().emitTargetOutlinedFunction(
+      S, ParentName, Fn, Addr, /*IsOffloadEntry=*/true, CodeGen);
+  assert(Fn && Addr && "Target device function emission failed.");
+}
+
+void CodeGenFunction::EmitOMPTargetParallelForSimdDirective(
+    const OMPTargetParallelForSimdDirective &S) {
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
+    TargetParallelForSimdCodegen(CGF, Action, S);
+  };
+  emitCommonOMPTargetDirective(*this, S, OMPD_target_parallel_for_simd, CodeGen);
 }
 
 static void TargetTeamsDistributeParallelForCodegen(

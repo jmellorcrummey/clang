@@ -1718,6 +1718,7 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
   case OMPD_teams:
   case OMPD_target_parallel:
   case OMPD_target_parallel_for:
+  case OMPD_target_parallel_for_simd:
   case OMPD_target_teams: {
     QualType KmpInt32Ty = Context.getIntTypeForBitwidth(32, 1);
     QualType KmpInt32PtrTy =
@@ -1757,7 +1758,6 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
   case OMPD_atomic:
   case OMPD_target_data:
   case OMPD_target:
-  case OMPD_target_parallel_for_simd:
   case OMPD_target_simd: {
     Sema::CapturedParamNameType Params[] = {
         std::make_pair(StringRef(), QualType()) // __context with shared vars
@@ -8374,13 +8374,17 @@ StmtResult Sema::ActOnOpenMPTargetParallelForSimdDirective(
   // longjmp() and throw() must not violate the entry/exit criteria.
   CS->getCapturedDecl()->setNothrow();
 
+  bool CoalescedSchedule;
+  bool CoalescedDistSchedule;
+  std::tie(CoalescedSchedule, CoalescedDistSchedule) =
+      generateCoalescedSchedule(*this, Clauses);
   OMPLoopDirective::HelperExprs B;
   // In presence of clause 'collapse' or 'ordered' with number of loops, it will
   // define the nested loops number.
   unsigned NestedLoopCount = CheckOpenMPLoop(
       OMPD_target_parallel_for_simd, getCollapseNumberExpr(Clauses),
       getOrderedNumberExpr(Clauses), AStmt, *this, *DSAStack,
-      VarsWithImplicitDSA, B);
+      VarsWithImplicitDSA, B, CoalescedSchedule, CoalescedDistSchedule);
   if (NestedLoopCount == 0)
     return StmtError();
 
@@ -8401,8 +8405,9 @@ StmtResult Sema::ActOnOpenMPTargetParallelForSimdDirective(
     return StmtError();
 
   getCurFunction()->setHasBranchProtectedScope();
-  return OMPTargetParallelForSimdDirective::Create(
-      Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
+  return OMPTargetParallelForSimdDirective::Create(Context, StartLoc, EndLoc,
+                                                   NestedLoopCount, Clauses, AStmt,
+                                                   B/*, DSAStack->isCancelRegion()*/);
 }
 
 StmtResult Sema::ActOnOpenMPTargetSimdDirective(
@@ -8755,6 +8760,7 @@ static unsigned getOpenMPCaptureLevel(OpenMPDirectiveKind DKind,
     case OMPD_target_teams_distribute_parallel_for_simd:
       return 3;
     case OMPD_target_parallel_for:
+    case OMPD_target_parallel_for_simd:
       return 2;
     default:
       return 1;
