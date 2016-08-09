@@ -282,9 +282,10 @@ private:
   //
 
   /// \brief Creates offloading entry for the provided entry ID \a ID,
-  /// address \a Addr and size \a Size.
+  /// address \a Addr and size \a Size with flags \a Flags.
   void createOffloadEntry(llvm::Constant *ID, llvm::Constant *Addr,
-                          uint64_t Size) override;
+                          uint64_t Size,
+                          llvm::ConstantInt *Flags = nullptr) override;
 
   /// \brief Emit outlined function specialized for the Fork-Join
   /// programming model for applicable target directives on the NVPTX device.
@@ -422,6 +423,19 @@ private:
   // \brief Test if we are codegen'ing a target construct in generic or spmd
   // mode.
   bool isSPMDExecutionMode() const;
+
+  /// Register target region related with the launching of Ctor/Dtors entry. On
+  /// top of the default registration, an extra global is registered to make
+  /// sure SPMD mode is used in the execution of the Ctor/Dtor.
+  /// \param DeviceID The device ID of the target region in the system.
+  /// \param FileID The file ID of the target region in the system.
+  /// \param RegionName The name of the region.
+  /// \param Line Line where the declaration the target egion refers to is
+  /// defined.
+  /// \param Fn The function that implements the target region.
+  virtual void registerCtorDtorEntry(unsigned DeviceID, unsigned FileID,
+                                     StringRef RegionName, unsigned Line,
+                                     llvm::Function *Fn) override;
 
 public:
   explicit CGOpenMPRuntimeNVPTX(CodeGenModule &CGM);

@@ -1221,7 +1221,8 @@ void CGOpenMPRuntimeNVPTX::registerParallelContext(
 
 void CGOpenMPRuntimeNVPTX::createOffloadEntry(llvm::Constant *ID,
                                               llvm::Constant *Addr,
-                                              uint64_t Size) {
+                                              uint64_t Size,
+                                              llvm::ConstantInt *Flags) {
   auto *F = dyn_cast<llvm::Function>(Addr);
   // TODO: Add support for global variables on the device after declare target
   // support.
@@ -1928,6 +1929,19 @@ bool CGOpenMPRuntimeNVPTX::InL1Plus() {
 
 bool CGOpenMPRuntimeNVPTX::isSPMDExecutionMode() const {
   return CurrMode == CGOpenMPRuntimeNVPTX::ExecutionMode::SPMD;
+}
+
+void CGOpenMPRuntimeNVPTX::registerCtorDtorEntry(unsigned DeviceID,
+                                                 unsigned FileID,
+                                                 StringRef RegionName,
+                                                 unsigned Line,
+                                                 llvm::Function *Fn) {
+  // On top of the default registration we create a new global to force the
+  // region to be executed as SPMD.
+  SetPropertyExecutionMode(CGM, Fn->getName(), SPMD);
+
+  CGOpenMPRuntime::registerCtorDtorEntry(DeviceID, FileID, RegionName, Line,
+                                         Fn);
 }
 
 bool CGOpenMPRuntimeNVPTX::IndeterminateLevel() { return IsOrphaned; }

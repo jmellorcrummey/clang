@@ -113,7 +113,8 @@ protected:
   /// \brief Creates offloading entry for the provided entry ID \a ID,
   /// address \a Addr and size \a Size.
   virtual void createOffloadEntry(llvm::Constant *ID, llvm::Constant *Addr,
-                                  uint64_t Size);
+                                  uint64_t Size,
+                                  llvm::ConstantInt *Flags = nullptr);
 
   /// \brief Helper to emit outlined function for 'target' directive.
   /// \param D Directive to emit.
@@ -171,6 +172,17 @@ protected:
                                    const Expr *PrivateRef,
                                    const DeclRefExpr *LHS,
                                    const DeclRefExpr *RHS);
+
+  /// Register target region related with the launching of Ctor/Dtors entry.
+  /// \param DeviceID The device ID of the target region in the system.
+  /// \param FileID The file ID of the target region in the system.
+  /// \param RegionName The name of the region.
+  /// \param Line Line where the declaration the target egion refers to is
+  /// defined.
+  /// \param Fn The function that implements the target region.
+  virtual void registerCtorDtorEntry(unsigned DeviceID, unsigned FileID,
+                                     StringRef RegionName, unsigned Line,
+                                     llvm::Function *Fn);
 
 public:
   virtual StringRef RenameStandardFunction(StringRef name);
@@ -402,16 +414,19 @@ private:
       llvm::Constant *Addr;
       // \brief Type of the global variable.
       QualType Ty;
+      // \brief Flags associated the device global.
+      llvm::ConstantInt *Flags;
 
     public:
       OffloadEntryInfoDeviceGlobalVar()
           : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_GLOBAL_VAR, ~0u),
-            Addr(nullptr) {}
+            Addr(nullptr), Flags(nullptr) {}
       explicit OffloadEntryInfoDeviceGlobalVar(unsigned Order,
                                                llvm::Constant *Addr,
-                                               QualType Ty)
+                                               QualType Ty,
+                                               llvm::ConstantInt *Flags)
           : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_GLOBAL_VAR, Order),
-            Addr(Addr), Ty(Ty) {}
+            Addr(Addr), Ty(Ty), Flags(Flags) {}
 
       llvm::Constant *getAddress() const { return Addr; }
       void setAddress(llvm::Constant *V) {
@@ -420,6 +435,8 @@ private:
       }
       QualType getType() const { return Ty; }
       void setType(QualType QTy) { Ty = QTy; }
+      llvm::ConstantInt *getFlags() const { return Flags; }
+      void setFlags(llvm::ConstantInt *NewFlags) { Flags = NewFlags; }
       static bool classof(const OffloadEntryInfo *Info) {
         return Info->getKind() == OFFLOAD_ENTRY_INFO_DEVICE_GLOBAL_VAR;
       }
@@ -429,7 +446,8 @@ private:
                                             unsigned Order);
     /// \brief Register device global variable entry.
     void registerDeviceGlobalVarEntryInfo(StringRef MangledName,
-                                          llvm::Constant *Addr, QualType Ty);
+                                          llvm::Constant *Addr, QualType Ty,
+                                          llvm::ConstantInt *Flags);
     /// \brief Return true if a device global variable entry with the provided
     /// information exists.
     bool hasDeviceGlobalVarEntryInfo(StringRef MangledName) const;
@@ -638,6 +656,25 @@ private:
   /// declare target, deferred decl is emitted during Codegen::Release for
   /// device codegen.
   llvm::StringMap<GlobalDecl> TrackedDecls;
+
+  /// Struct that keeps information about the emitted definitions and
+  /// ctors/dtors so that it can be revisited when emitting declare target
+  /// entries.
+  struct DeclareTargetEntryInfo {
+    /// The declaration associated with this information.
+    const Decl *Variable;
+    /// Address of the variable or null if there is no variable.
+    llvm::Constant *VariableAddr = nullptr;
+    /// The function that implements the device Ctor/Dtor launching.
+    const CGFunctionInfo *CtorDtorFunctionInfo = nullptr;
+    llvm::Function *CtorDtorFunction = nullptr;
+    /// True if the variable associated with this information required
+    /// initialization.
+    bool PerformInitialization = false;
+  };
+
+  /// Map between a declaration name and its declare target information.
+  llvm::StringMap<DeclareTargetEntryInfo> DeclareTargetEntryInfoMap;
 
 public:
   explicit CGOpenMPRuntime(CodeGenModule &CGM);
@@ -1262,6 +1299,13 @@ public:
   /// \param Addr Address of the global.
   virtual void registerTargetVariableDefinition(const VarDecl *D,
                                                 llvm::Constant *Addr);
+
+  /// \brief Register a global that is replacing some other. If the global being
+  /// declare has a declare target attribute, the new one is registered as such.
+  /// \param MangledName Name of the global being replaced.
+  /// \param NewVal Global that is used to replace.
+  virtual void registerGlobalReplacement(StringRef MangledName,
+                                         llvm::GlobalValue *NewVal);
 
   /// \brief Creates the offloading descriptor in the event any target region
   /// was emitted in the current module and return the function that registers
