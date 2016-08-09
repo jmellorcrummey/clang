@@ -2532,6 +2532,9 @@ public:
   static void EmitOMPTargetDeviceFunction(CodeGenModule &CGM,
                                           StringRef ParentName,
                                           const OMPTargetDirective &S);
+  static void EmitOMPTargetTeamsDeviceFunction(CodeGenModule &CGM,
+                                               StringRef ParentName,
+                                               const OMPTargetTeamsDirective &S);
   /// Emit device code for the target parallel directive.
   static void
   EmitOMPTargetParallelDeviceFunction(CodeGenModule &CGM, StringRef ParentName,

@@ -1832,7 +1832,7 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
          "thread id variable must be of type kmp_int32 *");
 
   llvm::Function *OutlinedFun = nullptr;
-  if (isa<OMPTeamsDirective>(D)) {
+  if (!isOpenMPParallelDirective(D.getDirectiveKind())) {
     // no outlining happening for teams
   } else if (isSPMDExecutionMode()) {
     // Simplified code generation if in SPMD mode.
