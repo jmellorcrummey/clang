@@ -4020,9 +4020,8 @@ void CodeGenFunction::EmitOMPTargetTeamsDeviceFunction(CodeGenModule &CGM,
     auto &&TeamsCG = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
       auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
         OMPPrivateScope PrivateScope(CGF);
-// firstprivate and private are already implemented by target, avoid duplication
-        //        (void)CGF.EmitOMPFirstprivateClause(S, PrivateScope);
-//        CGF.EmitOMPPrivateClause(S, PrivateScope);
+        (void)CGF.EmitOMPFirstprivateClause(S, PrivateScope);
+        CGF.EmitOMPPrivateClause(S, PrivateScope);
         (void)PrivateScope.Privatize();
         CGF.EmitStmt(cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
       };
