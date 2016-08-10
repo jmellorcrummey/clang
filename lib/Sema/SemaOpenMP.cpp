@@ -8406,8 +8406,8 @@ StmtResult Sema::ActOnOpenMPTargetParallelForSimdDirective(
 
   getCurFunction()->setHasBranchProtectedScope();
   return OMPTargetParallelForSimdDirective::Create(Context, StartLoc, EndLoc,
-                                                   NestedLoopCount, Clauses, AStmt,
-                                                   B/*, DSAStack->isCancelRegion()*/);
+                                                   NestedLoopCount, Clauses,
+                                                   AStmt, B);
 }
 
 StmtResult Sema::ActOnOpenMPTargetSimdDirective(
