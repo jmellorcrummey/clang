@@ -1766,7 +1766,10 @@ static void emitDeviceOMPSimdDirective(CodeGenFunction &CGF,
 void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
                                       bool OutlinedSimd) {
   auto &&CodeGen = [&S, OutlinedSimd](CodeGenFunction &CGF, PrePostActionTy &) {
-    OMPLoopScope PreInitScope(CGF, S);
+    // Do not emit this code if it was already emitted before
+    // in the same scope.
+    if (!requiresAdditionalIterationVar(S.getDirectiveKind()))
+      OMPLoopScope PreInitScope(CGF, S);
     // if (PreCond) {
     //   for (IV in 0..LastIteration) BODY;
     //   <Final counter/linear vars updates>;
@@ -1837,10 +1840,15 @@ void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
       OMPPrivateScope LoopScope(CGF);
       CGF.EmitOMPPrivateLoopCounters(S, LoopScope);
       CGF.EmitOMPLinearClause(S, LoopScope);
-      CGF.EmitOMPPrivateClause(S, LoopScope);
+      bool LastprivateAlreadyEmitted =
+        requiresAdditionalIterationVar(S.getDirectiveKind());
+      if (!LastprivateAlreadyEmitted)
+        CGF.EmitOMPPrivateClause(S, LoopScope);
       CGF.EmitOMPReductionClauseInit(S, LoopScope);
-      bool HasLastprivateClause =
-          CGF.EmitOMPLastprivateClauseInit(S, LoopScope);
+      bool HasLastprivateClause = false;
+      if (!LastprivateAlreadyEmitted)
+        HasLastprivateClause =
+            CGF.EmitOMPLastprivateClauseInit(S, LoopScope);
       (void)LoopScope.Privatize();
       CGF.EmitOMPInnerLoop(S, LoopScope.requiresCleanups(), S.getCond(),
                            S.getInc(),
