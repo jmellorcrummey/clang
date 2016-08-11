@@ -777,7 +777,8 @@ bool clang::isOpenMPSimdDirective(OpenMPDirectiveKind DKind) {
          DKind == OMPD_parallel_for_simd || DKind == OMPD_taskloop_simd ||
          DKind == OMPD_distribute_parallel_for_simd ||
          DKind == OMPD_distribute_simd || DKind == OMPD_target_simd ||
-         DKind == OMPD_teams_distribute_simd;
+         DKind == OMPD_teams_distribute_simd ||
+         DKind == OMPD_target_parallel_for_simd;
   // TODO add next directives.
 }
 
