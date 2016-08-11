@@ -1826,6 +1826,7 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
   case OMPD_distribute_parallel_for_simd:
   case OMPD_distribute_simd:
   case OMPD_distribute_parallel_for:
+  case OMPD_teams_distribute:
   case OMPD_teams_distribute_parallel_for:
   case OMPD_target_teams_distribute_parallel_for:
   case OMPD_target_teams_distribute_parallel_for_simd:

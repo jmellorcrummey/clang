@@ -881,7 +881,6 @@ public:
            T->getStmtClass() ==
                OMPTargetTeamsDistributeParallelForSimdDirectiveClass;
   }
-  }
 };
 
 /// \brief This represents '#pragma omp simd' directive.

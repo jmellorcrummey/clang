@@ -2333,8 +2333,6 @@ enum CXCursorKind {
    */
   CXCursor_OMPTeamsDistributeDirective = 271,
 
-  CXCursor_LastStmt = CXCursor_OMPTeamsDistributeDirective,
-
   /** \brief OpenMP target teams directive.
    */
   CXCursor_OMPTargetTeamsDirective = 272,

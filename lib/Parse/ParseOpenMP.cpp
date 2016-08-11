@@ -40,7 +40,6 @@ enum OpenMPDirectiveKindEx {
   OMPD_target_exit,
   OMPD_update,
   OMPD_distribute_parallel,
-  OMPD_teams_distribute,
   OMPD_teams_distribute_parallel,
   OMPD_target_teams_distribute,
   OMPD_target_teams_distribute_parallel,
