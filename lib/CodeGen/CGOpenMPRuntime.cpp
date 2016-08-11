@@ -5914,9 +5914,13 @@ public:
         RPK_MemberReference,
       };
       OMPClauseMappableExprCommon::MappableExprComponentListRef Components;
-      OpenMPMapClauseKind MapType = OMPC_MAP_unknown;
-      OpenMPMapClauseKind MapTypeModifier = OMPC_MAP_unknown;
-      ReturnPointerKind ReturnDevicePointer = RPK_None;
+      OpenMPMapClauseKind MapType;
+      OpenMPMapClauseKind MapTypeModifier;
+      ReturnPointerKind ReturnDevicePointer;
+
+      MapInfo()
+          : MapType(OMPC_MAP_unknown), MapTypeModifier(OMPC_MAP_unknown),
+            ReturnDevicePointer(RPK_None) {}
       MapInfo(
           OMPClauseMappableExprCommon::MappableExprComponentListRef Components,
           OpenMPMapClauseKind MapType, OpenMPMapClauseKind MapTypeModifier,
@@ -5943,6 +5947,7 @@ public:
       Info[VD].push_back({L, MapType, MapModifier, ReturnDevicePointer});
     };
 
+    // FIXME: MSVC 2013 seems to require this-> to find member CurDir.
     for (auto *C : this->CurDir.getClausesOfKind<OMPMapClause>())
       for (auto L : C->component_lists())
         InfoGen(L.first, L.second, C->getMapType(), C->getMapTypeModifier(),
@@ -5960,6 +5965,7 @@ public:
     // entries as such. If there is no map information for an entry in the
     // use_device_ptr list, we create one with map type 'alloc' and zero size
     // section. It is the user fault if that was not mapped before.
+    // FIXME: MSVC 2013 seems to require this-> to find member CurDir.
     for (auto *C : this->CurDir.getClausesOfKind<OMPUseDevicePtrClause>())
       for (auto L : C->component_lists()) {
         assert(!L.second.empty() && "Not expecting empty list of components!");
@@ -5992,6 +5998,7 @@ public:
 
         // We didn't find any match in our map information - generate a zero
         // size array section.
+        // FIXME: MSVC 2013 seems to require this-> to find member CGF.
         llvm::Value *Ptr =
             this->CGF
                 .EmitLoadOfLValue(this->CGF.EmitLValue(IE), SourceLocation())
@@ -6012,6 +6019,7 @@ public:
 
         // Remember the current base pointer index.
         unsigned CurrentBasePointersIdx = BasePointers.size();
+        // FIXME: MSVC 2013 seems to require this-> to find the member method.
         this->generateInfoForComponentList(L.MapType, L.MapTypeModifier,
                                            L.Components, BasePointers, Pointers,
                                            Sizes, Types, IsFirstComponentList);
@@ -6091,6 +6099,7 @@ public:
       return;
     }
 
+    // FIXME: MSVC 2013 seems to require this-> to find member CurDir.
     for (auto *C : this->CurDir.getClausesOfKind<OMPMapClause>())
       for (auto L : C->decl_component_lists(VD)) {
         assert(L.first == VD &&
