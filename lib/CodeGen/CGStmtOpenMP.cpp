@@ -3270,11 +3270,6 @@ void CodeGenFunction::EmitOMPOrderedDirective(const OMPOrderedDirective &S) {
   CGM.getOpenMPRuntime().emitOrderedRegion(*this, CodeGen, S.getLocStart(), !C);
 }
 
-void CodeGenFunction::EmitOMPTargetTeamsDirective(
-    const OMPTargetTeamsDirective &S) {
-  // TODO: codegen for target teams
-}
-
 static llvm::Value *convertToScalarValue(CodeGenFunction &CGF, RValue Val,
                                          QualType SrcType, QualType DestType,
                                          SourceLocation Loc) {
@@ -4038,6 +4033,46 @@ void CodeGenFunction::EmitOMPTeamsDirective(const OMPTeamsDirective &S) {
     CGF.EmitStmt(cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
   };
   emitCommonOMPTeamsDirective(*this, S, OMPD_teams, CodeGen);
+}
+
+void CodeGenFunction::EmitOMPTargetTeamsDeviceFunction(
+    CodeGenModule &CGM, StringRef ParentName,
+    const OMPTargetTeamsDirective &S) {
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
+    auto &&TeamsBodyCG = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+      OMPPrivateScope PrivateScope(CGF);
+      (void)CGF.EmitOMPFirstprivateClause(S, PrivateScope);
+      CGF.EmitOMPPrivateClause(S, PrivateScope);
+      (void)PrivateScope.Privatize();
+      CGF.EmitStmt(
+          cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
+    };
+    Action.Enter(CGF);
+    emitCommonOMPTeamsDirective(CGF, S, OMPD_teams, TeamsBodyCG);
+  };
+  llvm::Function *Fn;
+  llvm::Constant *Addr;
+  // Emit target region as a standalone region.
+  CGM.getOpenMPRuntime().emitTargetOutlinedFunction(
+      S, ParentName, Fn, Addr, /*IsOffloadEntry=*/true, CodeGen);
+  assert(Fn && Addr && "Target device function emission failed.");
+}
+
+void CodeGenFunction::EmitOMPTargetTeamsDirective(
+    const OMPTargetTeamsDirective &S) {
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
+    auto &&TeamBodyCG = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+      OMPPrivateScope PrivateScope(CGF);
+      (void)CGF.EmitOMPFirstprivateClause(S, PrivateScope);
+      CGF.EmitOMPPrivateClause(S, PrivateScope);
+      (void)PrivateScope.Privatize();
+      CGF.EmitStmt(
+          cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
+    };
+    Action.Enter(CGF);
+    emitCommonOMPTeamsDirective(CGF, S, OMPD_teams, TeamBodyCG);
+  };
+  emitCommonOMPTargetDirective(*this, S, OMPD_target, CodeGen);
 }
 
 void CodeGenFunction::EmitOMPTeamsDistributeParallelForDirective(

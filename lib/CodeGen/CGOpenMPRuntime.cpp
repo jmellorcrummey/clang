@@ -5162,7 +5162,8 @@ void CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
 
   bool UseCapturedArgumentsOnly =
-      isOpenMPParallelDirective(D.getDirectiveKind());
+      isOpenMPParallelDirective(D.getDirectiveKind()) ||
+      isOpenMPTeamsDirective(D.getDirectiveKind());
   OutlinedFn =
       CGF.GenerateOpenMPCapturedStmtFunction(CS, UseCapturedArgumentsOnly);
 
@@ -6557,6 +6558,10 @@ void CGOpenMPRuntime::scanForTargetRegionsFunctions(const Stmt *S,
     case Stmt::OMPTargetDirectiveClass:
       CodeGenFunction::EmitOMPTargetDeviceFunction(
           CGM, ParentName, cast<OMPTargetDirective>(*S));
+      break;
+    case Stmt::OMPTargetTeamsDirectiveClass:
+      CodeGenFunction::EmitOMPTargetTeamsDeviceFunction(
+          CGM, ParentName, cast<OMPTargetTeamsDirective>(*S));
       break;
     case Stmt::OMPTargetParallelDirectiveClass:
       CodeGenFunction::EmitOMPTargetParallelDeviceFunction(
