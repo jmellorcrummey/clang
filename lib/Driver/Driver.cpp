@@ -1676,6 +1676,16 @@ class OffloadingActionBuilder final {
       if (!C.hasOffloadToolChain<Action::OFK_Cuda>())
         return false;
 
+      const ToolChain *HostTC = C.getSingleOffloadToolChain<Action::OFK_Host>();
+      assert(HostTC && "No toolchain for host compilation.");
+      if (HostTC->getTriple().isNVPTX()) {
+        // We do not support targeting NVPTX for host compilation. Throw
+        // an error and abort pipeline construction early so we don't trip
+        // asserts that assume device-side compilation.
+        C.getDriver().Diag(diag::err_drv_cuda_nvptx_host);
+        return true;
+      }
+
       ToolChains.push_back(C.getSingleOffloadToolChain<Action::OFK_Cuda>());
 
       Arg *PartialCompilationArg = Args.getLastArg(
