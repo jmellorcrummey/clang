@@ -1841,7 +1841,8 @@ void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
       CGF.EmitOMPPrivateLoopCounters(S, LoopScope);
       CGF.EmitOMPLinearClause(S, LoopScope);
       bool LastprivateAlreadyEmitted =
-        requiresAdditionalIterationVar(S.getDirectiveKind());
+        requiresAdditionalIterationVar(S.getDirectiveKind()) ||
+        S.getDirectiveKind() == OMPD_target_simd;
       if (!LastprivateAlreadyEmitted)
         CGF.EmitOMPPrivateClause(S, LoopScope);
       CGF.EmitOMPReductionClauseInit(S, LoopScope);
@@ -3898,11 +3899,12 @@ void CodeGenFunction::EmitOMPTargetParallelDirective(
 
 static void TargetSimdCodegen(CodeGenFunction &CGF, PrePostActionTy &Action,
                               const OMPTargetSimdDirective &S) {
-  Action.Enter(CGF);
   CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
   (void)CGF.EmitOMPFirstprivateClause(S, PrivateScope);
   CGF.EmitOMPPrivateClause(S, PrivateScope);
   (void)PrivateScope.Privatize();
+
+  Action.Enter(CGF);
   CGF.EmitOMPSimdLoop(S, false);
 }
 
