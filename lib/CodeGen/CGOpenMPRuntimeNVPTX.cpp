@@ -2059,14 +2059,18 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
           OrigVD = cast<VarDecl>(
               cast<DeclRefExpr>(OD->getInit()->IgnoreImpCasts())->getDecl());
 
-        // If we have an alloca for this variable, then we need to share the
-        // storage too, not only the reference.
-        auto *Val =
-            cast<llvm::Instruction>(CGF.GetAddrOfLocalVar(OrigVD).getPointer());
-        if (isa<llvm::LoadInst>(Val))
+        // If the variable does not have local storage it is always a reference.
+        if (!OrigVD->hasLocalStorage()) {
           DST = DataSharingInfo::DST_Ref;
-        else if (isa<llvm::BitCastInst>(Val))
-          DST = DataSharingInfo::DST_Cast;
+        } else {
+          // If we have an alloca for this variable, then we need to share the
+          // storage too, not only the reference.
+          auto *Val = cast<llvm::Instruction>(CGF.GetAddrOfLocalVar(OrigVD).getPointer());
+          if (isa<llvm::LoadInst>(Val))
+            DST = DataSharingInfo::DST_Ref;
+          else if (isa<llvm::BitCastInst>(Val))
+            DST = DataSharingInfo::DST_Cast;
+        }
       }
 
       // Do not insert the same declaration twice.
