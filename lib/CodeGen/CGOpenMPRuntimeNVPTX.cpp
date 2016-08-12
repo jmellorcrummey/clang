@@ -1288,6 +1288,7 @@ GetExecutionMode(CodeGenModule &CGM, const OMPExecutableDirective &D) {
 
   OpenMPDirectiveKind DirectiveKind = D.getDirectiveKind();
   switch (DirectiveKind) {
+  case OMPD_target_simd:
   case OMPD_target: {
     // If the target region as a nested 'teams distribute parallel for',
     // the specifications guarantee that there can be no serial region.
@@ -1426,7 +1427,8 @@ public:
 static const OMPExecutableDirective *
 getSPMDDirective(const OMPExecutableDirective &D) {
   switch (D.getDirectiveKind()) {
-  case OMPD_target: {
+  case OMPD_target:
+  case OMPD_target_simd: {
     const OMPExecutableDirective *NestedDir = getNestedTeamsSPMDDirective(D);
     assert(NestedDir && "Failed to find nested teams SPMD directive.");
     return NestedDir;

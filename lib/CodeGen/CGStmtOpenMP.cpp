@@ -2208,17 +2208,6 @@ void CodeGenFunction::EmitOMPDistributeSimdDirective(
                                               false);
 }
 
-void CodeGenFunction::EmitOMPTargetSimdDirective(
-    const OMPTargetSimdDirective &S) {
-  OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
-  CGM.getOpenMPRuntime().emitInlinedDirective(
-      *this, OMPD_target_simd, [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-        OMPLoopScope PreInitScope(CGF, S);
-        CGF.EmitStmt(
-            cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
-      });
-}
-
 void CodeGenFunction::EmitOMPTeamsDistributeDirective(
     const OMPTeamsDistributeDirective &S) {
   OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
@@ -3905,6 +3894,38 @@ void CodeGenFunction::EmitOMPTargetParallelDirective(
     TargetParallelCodegen(CGF, Action, S);
   };
   emitCommonOMPTargetDirective(*this, S, OMPD_target_parallel, CodeGen);
+}
+
+static void TargetSimdCodegen(CodeGenFunction &CGF, PrePostActionTy &Action,
+                              const OMPTargetSimdDirective &S) {
+  Action.Enter(CGF);
+  CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
+  (void)CGF.EmitOMPFirstprivateClause(S, PrivateScope);
+  CGF.EmitOMPPrivateClause(S, PrivateScope);
+  (void)PrivateScope.Privatize();
+  CGF.EmitOMPSimdLoop(S, false);
+}
+
+void CodeGenFunction::EmitOMPTargetSimdDirective(
+    const OMPTargetSimdDirective &S) {
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
+    TargetSimdCodegen(CGF, Action, S);
+  };
+  emitCommonOMPTargetDirective(*this, S, OMPD_target_simd, CodeGen);
+}
+
+void CodeGenFunction::EmitOMPTargetSimdDeviceFunction(
+    CodeGenModule &CGM, StringRef ParentName,
+    const OMPTargetSimdDirective &S) {
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
+    TargetSimdCodegen(CGF, Action, S);
+  };
+  llvm::Function *Fn;
+  llvm::Constant *Addr;
+  // Emit target region as a standalone region.
+  CGM.getOpenMPRuntime().emitTargetOutlinedFunction(
+      S, ParentName, Fn, Addr, /*IsOffloadEntry=*/true, CodeGen);
+  assert(Fn && Addr && "Target device function emission failed.");
 }
 
 static void TargetParallelForCodegen(CodeGenFunction &CGF,

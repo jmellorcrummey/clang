@@ -6568,6 +6568,10 @@ void CGOpenMPRuntime::scanForTargetRegionsFunctions(const Stmt *S,
       CodeGenFunction::EmitOMPTargetDeviceFunction(
           CGM, ParentName, cast<OMPTargetDirective>(*S));
       break;
+    case Stmt::OMPTargetSimdDirectiveClass:
+      CodeGenFunction::EmitOMPTargetSimdDeviceFunction(
+          CGM, ParentName, cast<OMPTargetSimdDirective>(*S));
+      break;
     case Stmt::OMPTargetTeamsDirectiveClass:
       CodeGenFunction::EmitOMPTargetTeamsDeviceFunction(
           CGM, ParentName, cast<OMPTargetTeamsDirective>(*S));
