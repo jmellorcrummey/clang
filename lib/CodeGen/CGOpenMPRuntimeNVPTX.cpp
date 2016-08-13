@@ -1221,7 +1221,8 @@ void CGOpenMPRuntimeNVPTX::registerParallelContext(
 
 void CGOpenMPRuntimeNVPTX::createOffloadEntry(llvm::Constant *ID,
                                               llvm::Constant *Addr,
-                                              uint64_t Size) {
+                                              uint64_t Size,
+                                              llvm::ConstantInt *Flags) {
   auto *F = dyn_cast<llvm::Function>(Addr);
   // TODO: Add support for global variables on the device after declare target
   // support.
@@ -1298,6 +1299,7 @@ GetExecutionMode(CodeGenModule &CGM, const OMPExecutableDirective &D) {
     return CGOpenMPRuntimeNVPTX::ExecutionMode::GENERIC;
   case OMPD_target_parallel:
   case OMPD_target_parallel_for:
+  case OMPD_target_parallel_for_simd:
   case OMPD_target_teams_distribute_parallel_for:
     return CGOpenMPRuntimeNVPTX::ExecutionMode::SPMD;
   default:
@@ -1431,6 +1433,7 @@ getSPMDDirective(const OMPExecutableDirective &D) {
   }
   case OMPD_target_parallel:
   case OMPD_target_parallel_for:
+  case OMPD_target_parallel_for_simd:
   case OMPD_target_teams_distribute_parallel_for:
     return &D;
   default:
@@ -1832,7 +1835,9 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
          "thread id variable must be of type kmp_int32 *");
 
   llvm::Function *OutlinedFun = nullptr;
-  if (isOpenMPTeamsDirective(D.getDirectiveKind()) || isSPMDExecutionMode()) {
+  if (!isOpenMPParallelDirective(D.getDirectiveKind())) {
+    // no outlining happening for teams
+  } else if (isSPMDExecutionMode()) {
     // Simplified code generation if in SPMD mode.
     return CGOpenMPRuntime::emitParallelOrTeamsOutlinedFunction(
         D, ThreadIDVar, InnermostKind, CodeGen, CaptureLevel,
@@ -1926,6 +1931,19 @@ bool CGOpenMPRuntimeNVPTX::InL1Plus() {
 
 bool CGOpenMPRuntimeNVPTX::isSPMDExecutionMode() const {
   return CurrMode == CGOpenMPRuntimeNVPTX::ExecutionMode::SPMD;
+}
+
+void CGOpenMPRuntimeNVPTX::registerCtorDtorEntry(unsigned DeviceID,
+                                                 unsigned FileID,
+                                                 StringRef RegionName,
+                                                 unsigned Line,
+                                                 llvm::Function *Fn) {
+  // On top of the default registration we create a new global to force the
+  // region to be executed as SPMD.
+  SetPropertyExecutionMode(CGM, Fn->getName(), SPMD);
+
+  CGOpenMPRuntime::registerCtorDtorEntry(DeviceID, FileID, RegionName, Line,
+                                         Fn);
 }
 
 bool CGOpenMPRuntimeNVPTX::IndeterminateLevel() { return IsOrphaned; }
