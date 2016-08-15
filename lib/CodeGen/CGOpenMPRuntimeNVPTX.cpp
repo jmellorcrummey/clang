@@ -2067,7 +2067,8 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
         } else {
           // If we have an alloca for this variable, then we need to share the
           // storage too, not only the reference.
-          auto *Val = cast<llvm::Instruction>(CGF.GetAddrOfLocalVar(OrigVD).getPointer());
+          auto *Val = cast<llvm::Instruction>(
+              CGF.GetAddrOfLocalVar(OrigVD).getPointer());
           if (isa<llvm::LoadInst>(Val))
             DST = DataSharingInfo::DST_Ref;
           else if (isa<llvm::BitCastInst>(Val))
@@ -3450,13 +3451,17 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
       // Check if there is some address space mismatch.
       llvm::PointerType *FArgTy = dyn_cast<llvm::PointerType>(FArg->getType());
       llvm::PointerType *ArgTy = dyn_cast<llvm::PointerType>(Arg->getType());
-      if (FArgTy && ArgTy && FArgTy->getElementType() == ArgTy->getElementType() && FArgTy->getAddressSpace() != ArgTy->getAddressSpace()) {
-        Arg = llvm::CastInst::Create(llvm::CastInst::AddrSpaceCast, Arg,FArgTy,".data_share_addrspace_cast", InsertPtr);
+      if (FArgTy && ArgTy &&
+          FArgTy->getElementType() == ArgTy->getElementType() &&
+          FArgTy->getAddressSpace() != ArgTy->getAddressSpace()) {
+        Arg = llvm::CastInst::Create(llvm::CastInst::AddrSpaceCast, Arg, FArgTy,
+                                     ".data_share_addrspace_cast", InsertPtr);
         ++FArg;
         continue;
       }
 
-      llvm_unreachable("Unexpected type in data sharing initialization arguments.");
+      llvm_unreachable(
+          "Unexpected type in data sharing initialization arguments.");
     }
 
     (void)llvm::CallInst::Create(DSI.InitializationFunction, InitArgs, "",
