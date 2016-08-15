@@ -419,7 +419,7 @@ public:
     // section.
     //
     // TODO: Instead of copying the input file as is, deactivate the section
-    // that are no longer needed.
+    // that is no longer needed.
 
     StringRef Content;
     CurrentSection->getContents(Content);
@@ -428,8 +428,6 @@ public:
       OS.write(Input.getBufferStart(), Input.getBufferSize());
     else
       OS.write(Content.data(), Content.size());
-
-    return;
   }
 
   void WriteHeader(raw_fd_ostream &OS,
