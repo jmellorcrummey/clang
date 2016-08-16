@@ -640,9 +640,10 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createKernelInitializerFunction(
 
   auto &Bld = CGF.Builder;
 
-  llvm::BasicBlock *WorkerBB = CGF.createBasicBlock(".worker");
-  llvm::BasicBlock *MasterCheckBB = CGF.createBasicBlock(".ismaster");
   llvm::BasicBlock *MasterBB = CGF.createBasicBlock(".master");
+  llvm::BasicBlock *SyncBB = CGF.createBasicBlock(".sync.after.master");
+  llvm::BasicBlock *WorkerCheckBB = CGF.createBasicBlock(".isworker");
+  llvm::BasicBlock *WorkerBB = CGF.createBasicBlock(".worker");
   llvm::BasicBlock *ExitBB = CGF.createBasicBlock(".exit");
 
   auto *RetTy = CGM.Int32Ty;
@@ -650,23 +651,32 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createKernelInitializerFunction(
   auto *Zero = llvm::ConstantInt::get(RetTy, 0);
   CGF.EmitStoreOfScalar(One, CGF.ReturnValue, /*Volatile=*/false, RetQTy);
 
+  auto *IsMaster =
+      Bld.CreateICmpEQ(GetNVPTXThreadID(CGF), GetMasterThreadID(CGF));
+  Bld.CreateCondBr(IsMaster, MasterBB, SyncBB);
+
+  CGF.EmitBlock(MasterBB);
+  // First action in sequential region:
+  // Initialize the state of the OpenMP runtime library on the GPU.
+  llvm::Value *Args[] = {GetThreadLimit(CGF, isSPMDExecutionMode())};
+  CGF.EmitRuntimeCall(
+      createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_init), Args);
+  initializeDataSharing(CGF, /*IsMaster=*/true);
+  CGF.EmitStoreOfScalar(Zero, CGF.ReturnValue, /*Volatile=*/false, RetQTy);
+  CGF.EmitBranch(SyncBB);
+
+  CGF.EmitBlock(SyncBB);
+  SyncCTAThreads(CGF);
+  CGF.EmitBranch(WorkerCheckBB);
+
+  CGF.EmitBlock(WorkerCheckBB);
   auto *IsWorker = Bld.CreateICmpULT(
       GetNVPTXThreadID(CGF), GetThreadLimit(CGF, isSPMDExecutionMode()));
-  Bld.CreateCondBr(IsWorker, WorkerBB, MasterCheckBB);
+  Bld.CreateCondBr(IsWorker, WorkerBB, ExitBB);
 
   CGF.EmitBlock(WorkerBB);
   initializeDataSharing(CGF, /*IsMaster=*/false);
   Bld.CreateCall(WorkerFunction);
-  CGF.EmitBranch(ExitBB);
-
-  CGF.EmitBlock(MasterCheckBB);
-  auto *IsMaster =
-      Bld.CreateICmpEQ(GetNVPTXThreadID(CGF), GetMasterThreadID(CGF));
-  Bld.CreateCondBr(IsMaster, MasterBB, ExitBB);
-
-  CGF.EmitBlock(MasterBB);
-  initializeDataSharing(CGF, /*IsMaster=*/true);
-  CGF.EmitStoreOfScalar(Zero, CGF.ReturnValue, /*Volatile=*/false, RetQTy);
   CGF.EmitBranch(ExitBB);
 
   CGF.EmitBlock(ExitBB);
@@ -855,12 +865,6 @@ void CGOpenMPRuntimeNVPTX::emitGenericEntryHeader(CodeGenFunction &CGF,
   DataSharingFunctionInfoMap[CGF.CurFn].IsEntryPoint = true;
   DataSharingFunctionInfoMap[CGF.CurFn].EntryWorkerFunction = WST.WorkerFn;
   DataSharingFunctionInfoMap[CGF.CurFn].EntryExitBlock = EST.ExitBB;
-
-  // First action in sequential region:
-  // Initialize the state of the OpenMP runtime library on the GPU.
-  llvm::Value *Args[] = {GetThreadLimit(CGF, isSPMDExecutionMode())};
-  CGF.EmitRuntimeCall(
-      createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_init), Args);
 }
 
 void CGOpenMPRuntimeNVPTX::emitGenericEntryFooter(CodeGenFunction &CGF,
