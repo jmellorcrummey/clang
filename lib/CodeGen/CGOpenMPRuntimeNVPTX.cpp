@@ -1366,6 +1366,7 @@ GetExecutionMode(CodeGenModule &CGM, const OMPExecutableDirective &D) {
   case OMPD_target_parallel_for:
   case OMPD_target_parallel_for_simd:
   case OMPD_target_teams_distribute_parallel_for:
+  case OMPD_target_teams_distribute_parallel_for_simd:
     return CGOpenMPRuntimeNVPTX::ExecutionMode::SPMD;
   default:
     llvm_unreachable(
@@ -1501,6 +1502,7 @@ getSPMDDirective(const OMPExecutableDirective &D) {
   case OMPD_target_parallel_for:
   case OMPD_target_parallel_for_simd:
   case OMPD_target_teams_distribute_parallel_for:
+  case OMPD_target_teams_distribute_parallel_for_simd:
     return &D;
   default:
     llvm_unreachable("Unknown directive on NVPTX target.");
@@ -1651,7 +1653,8 @@ void CGOpenMPRuntimeNVPTX::emitForDispatchFinish(CodeGenFunction &CGF,
       // TODO: add target_teams_distribute_parallel_for_simd and
       // teams_distribute_parallel_for_simd.
       (Kind == OMPD_target_teams_distribute_parallel_for ||
-       Kind == OMPD_teams_distribute_parallel_for))
+       Kind == OMPD_teams_distribute_parallel_for ||
+       Kind == OMPD_target_teams_distribute_parallel_for_simd))
     SyncCTAThreads(CGF);
 }
 
