@@ -120,7 +120,7 @@ public:
   /// file
   virtual void ReadHeader(MemoryBuffer &Input) = 0;
   /// Read the marker of the next bundled to be read in the file. The triple of
-  /// the target associated with that bundled is returned. An empty string is
+  /// the target associated with that bundle is returned. An empty string is
   /// returned if there are no more bundles to be read.
   virtual StringRef ReadBundleStart(MemoryBuffer &Input) = 0;
   /// Read the marker that closes the current bundle.
@@ -168,7 +168,7 @@ public:
 /// ...
 /// BundleN
 
-/// Read 8-byte integers to/from a buffer in little-endian format.
+/// Read 8-byte integers from a buffer in little-endian format.
 static uint64_t Read8byteIntegerFromBuffer(StringRef Buffer, size_t pos) {
   uint64_t Res = 0;
   const char *Data = Buffer.data();
@@ -181,7 +181,7 @@ static uint64_t Read8byteIntegerFromBuffer(StringRef Buffer, size_t pos) {
   return Res;
 }
 
-/// Write and write 8-byte integers to/from a buffer in little-endian format.
+/// Write 8-byte integers to a buffer in little-endian format.
 static void Write8byteIntegerToBuffer(raw_fd_ostream &OS, uint64_t Val) {
 
   for (unsigned i = 0; i < 8; ++i) {
@@ -419,7 +419,7 @@ public:
     // section.
     //
     // TODO: Instead of copying the input file as is, deactivate the section
-    // that are no longer needed.
+    // that is no longer needed.
 
     StringRef Content;
     CurrentSection->getContents(Content);
@@ -428,8 +428,6 @@ public:
       OS.write(Input.getBufferStart(), Input.getBufferSize());
     else
       OS.write(Content.data(), Content.size());
-
-    return;
   }
 
   void WriteHeader(raw_fd_ostream &OS,
@@ -851,7 +849,7 @@ static bool UnbundleFiles() {
 
   // If we found elements, we emit an error if none of those were for the host.
   if (!FoundHostBundle) {
-    llvm::errs() << "error: Can't find bundles for all requested targets\n";
+    llvm::errs() << "error: Can't find bundle for the host target\n";
     return true;
   }
 
