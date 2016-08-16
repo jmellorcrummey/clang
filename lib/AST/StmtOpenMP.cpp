@@ -1724,22 +1724,19 @@ OMPTeamsDistributeSimdDirective *OMPTeamsDistributeSimdDirective::CreateEmpty(
   return new (Mem) OMPTeamsDistributeSimdDirective(CollapsedNum, NumClauses);
 }
 
-OMPTargetTeamsDistributeDirective *
-OMPTargetTeamsDistributeDirective::Create(
+OMPTargetTeamsDistributeDirective *OMPTargetTeamsDistributeDirective::Create(
     const ASTContext &C, SourceLocation StartLoc, SourceLocation EndLoc,
     unsigned CollapsedNum, ArrayRef<OMPClause *> Clauses, Stmt *AssociatedStmt,
     const HelperExprs &Exprs) {
-  unsigned Size =
-      llvm::alignTo(sizeof(OMPTargetTeamsDistributeDirective),
-                    llvm::alignOf<OMPClause *>());
+  unsigned Size = llvm::alignTo(sizeof(OMPTargetTeamsDistributeDirective),
+                                llvm::alignOf<OMPClause *>());
   void *Mem = C.Allocate(
       Size + sizeof(OMPClause *) * Clauses.size() +
       sizeof(Stmt *) *
-          numLoopChildren(CollapsedNum,
-                          OMPD_target_teams_distribute));
+          numLoopChildren(CollapsedNum, OMPD_target_teams_distribute));
   OMPTargetTeamsDistributeDirective *Dir =
-      new (Mem) OMPTargetTeamsDistributeDirective(
-          StartLoc, EndLoc, CollapsedNum, Clauses.size());
+      new (Mem) OMPTargetTeamsDistributeDirective(StartLoc, EndLoc,
+                                                  CollapsedNum, Clauses.size());
   Dir->setClauses(Clauses);
   Dir->setAssociatedStmt(AssociatedStmt);
   Dir->setIterationVariable(Exprs.IterationVarRef);
@@ -1776,17 +1773,14 @@ OMPTargetTeamsDistributeDirective::Create(
 
 OMPTargetTeamsDistributeDirective *
 OMPTargetTeamsDistributeDirective::CreateEmpty(const ASTContext &C,
-                                                          unsigned NumClauses,
-                                                          unsigned CollapsedNum,
-                                                          EmptyShell) {
-  unsigned Size =
-      llvm::alignTo(sizeof(OMPTargetTeamsDistributeDirective),
-                    llvm::alignOf<OMPClause *>());
+                                               unsigned NumClauses,
+                                               unsigned CollapsedNum,
+                                               EmptyShell) {
+  unsigned Size = llvm::alignTo(sizeof(OMPTargetTeamsDistributeDirective),
+                                llvm::alignOf<OMPClause *>());
   void *Mem = C.Allocate(
       Size + sizeof(OMPClause *) * NumClauses +
       sizeof(Stmt *) *
-          numLoopChildren(CollapsedNum,
-                          OMPD_target_teams_distribute));
-  return new (Mem)
-      OMPTargetTeamsDistributeDirective(CollapsedNum, NumClauses);
+          numLoopChildren(CollapsedNum, OMPD_target_teams_distribute));
+  return new (Mem) OMPTargetTeamsDistributeDirective(CollapsedNum, NumClauses);
 }
