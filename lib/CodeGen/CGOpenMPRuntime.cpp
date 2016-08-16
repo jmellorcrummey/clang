@@ -4587,6 +4587,9 @@ llvm::Value *CGOpenMPRuntime::emitReductionFunction(
       ".omp.reduction.reduction_func", &CGM.getModule());
   CGM.SetInternalFunctionAttributes(/*D=*/nullptr, Fn, CGFI);
   CodeGenFunction CGF(CGM);
+  // We don't need debug information in this function as nothing here refers to
+  // user code.
+  CGF.disableDebugInfo();
   CGF.StartFunction(GlobalDecl(), C.VoidTy, Fn, CGFI, Args);
 
   // Dst = (void*[n])(LHSArg);
@@ -4672,11 +4675,13 @@ void CGOpenMPRuntime::emitSingleReductionCombiner(CodeGenFunction &CGF,
     emitReductionCombiner(CGF, ReductionOp);
 }
 
-void CGOpenMPRuntime::emitReduction(
-    CodeGenFunction &CGF, SourceLocation Loc, ArrayRef<const Expr *> Privates,
-    ArrayRef<const Expr *> LHSExprs, ArrayRef<const Expr *> RHSExprs,
-    ArrayRef<const Expr *> ReductionOps, bool WithNowait, bool SimpleReduction,
-    bool ParallelReduction, bool SimdReduction, bool TeamsReduction) {
+void CGOpenMPRuntime::emitReduction(CodeGenFunction &CGF, SourceLocation Loc,
+                                    ArrayRef<const Expr *> Privates,
+                                    ArrayRef<const Expr *> LHSExprs,
+                                    ArrayRef<const Expr *> RHSExprs,
+                                    ArrayRef<const Expr *> ReductionOps,
+                                    bool WithNowait, bool SimpleReduction,
+                                    OpenMPDirectiveKind ReductionKind) {
   if (!CGF.HaveInsertPoint())
     return;
   // Next code should be emitted for reduction:
@@ -5366,6 +5371,19 @@ emitThreadLimitClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
               TeamsDir->getSingleClause<OMPNumThreadsClause>()) {
         CGOpenMPInnerExprInfo CGInfo(CGF, CS);
         CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
+        if (auto *CPI = OMPClauseWithPreInit::get(NumThreadsClause)) {
+          if (auto *PreInit = cast_or_null<DeclStmt>(CPI->getPreInitStmt())) {
+            for (const auto *I : PreInit->decls()) {
+              if (!I->hasAttr<OMPCaptureNoInitAttr>())
+                CGF.EmitVarDecl(cast<VarDecl>(*I));
+              else {
+                CodeGenFunction::AutoVarEmission Emission =
+                    CGF.EmitAutoVarAlloca(cast<VarDecl>(*I));
+                CGF.EmitAutoVarCleanups(Emission);
+              }
+            }
+          }
+        }
         auto NumThreads = CGF.EmitScalarExpr(NumThreadsClause->getNumThreads(),
                                              /*IgnoreResultAssign*/ true);
         NumThreadsVal =
@@ -5373,11 +5391,25 @@ emitThreadLimitClauseForTargetDirective(CGOpenMPRuntime &OMPRuntime,
       }
 
       if (isOpenMPParallelDirective(TeamsDir->getDirectiveKind())) {
-        for (const auto *C : TeamsDir->getClausesOfKind<OMPIfClause>()) {
-          if (C->getNameModifier() == OMPD_parallel) {
+        for (const auto *IfClause : TeamsDir->getClausesOfKind<OMPIfClause>()) {
+          if (IfClause->getNameModifier() == OMPD_parallel) {
             CGOpenMPInnerExprInfo CGInfo(CGF, CS);
             CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
-            const Expr *IfCond = C->getCondition();
+            if (auto *CPI = OMPClauseWithPreInit::get(IfClause)) {
+              if (auto *PreInit =
+                      cast_or_null<DeclStmt>(CPI->getPreInitStmt())) {
+                for (const auto *I : PreInit->decls()) {
+                  if (!I->hasAttr<OMPCaptureNoInitAttr>())
+                    CGF.EmitVarDecl(cast<VarDecl>(*I));
+                  else {
+                    CodeGenFunction::AutoVarEmission Emission =
+                        CGF.EmitAutoVarAlloca(cast<VarDecl>(*I));
+                    CGF.EmitAutoVarCleanups(Emission);
+                  }
+                }
+              }
+            }
+            const Expr *IfCond = IfClause->getCondition();
             IfCondVal = CGF.EvaluateExprAsBool(IfCond);
             break;
           }
@@ -6592,6 +6624,12 @@ void CGOpenMPRuntime::scanForTargetRegionsFunctions(const Stmt *S,
       CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForDeviceFunction(
           CGM, ParentName,
           cast<OMPTargetTeamsDistributeParallelForDirective>(*S));
+      break;
+    case Stmt::OMPTargetTeamsDistributeParallelForSimdDirectiveClass:
+      CodeGenFunction::
+          EmitOMPTargetTeamsDistributeParallelForSimdDeviceFunction(
+              CGM, ParentName,
+              cast<OMPTargetTeamsDistributeParallelForSimdDirective>(*S));
       break;
     default:
       llvm_unreachable("Unknown target directive for OpenMP device codegen.");

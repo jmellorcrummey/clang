@@ -150,7 +150,7 @@ private:
     llvm::Function *EntryWorkerFunction;
     llvm::BasicBlock *EntryExitBlock;
     llvm::Function *InitializationFunction;
-    SmallVector<llvm::Value *, 16> ValuesToBeReplaced;
+    SmallVector<std::pair<llvm::Value *, bool>, 16> ValuesToBeReplaced;
     DataSharingFunctionInfo()
         : IsEntryPoint(false), EntryWorkerFunction(nullptr),
           EntryExitBlock(nullptr), InitializationFunction(nullptr) {}
@@ -571,8 +571,7 @@ public:
                              ArrayRef<const Expr *> RHSExprs,
                              ArrayRef<const Expr *> ReductionOps,
                              bool WithNowait, bool SimpleReduction,
-                             bool ParallelReduction, bool SimdReduction,
-                             bool TeamsReduction) override;
+                             OpenMPDirectiveKind ReductionKind) override;
 };
 
 } // CodeGen namespace.

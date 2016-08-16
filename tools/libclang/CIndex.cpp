@@ -1984,6 +1984,8 @@ public:
   void VisitOMPTargetTeamsDistributeParallelForDirective(
         const OMPTargetTeamsDistributeParallelForDirective *D);
   void VisitOMPTeamsDistributeSimdDirective(const OMPTeamsDistributeSimdDirective *D);
+  void VisitOMPTargetTeamsDistributeDirective(
+        const OMPTargetTeamsDistributeDirective *D);
 
 private:
   void AddDeclarationNameInfo(const Stmt *S);
@@ -2797,6 +2799,11 @@ void EnqueueVisitor::VisitOMPTargetTeamsDistributeParallelForDirective(
 
 void EnqueueVisitor::VisitOMPTeamsDistributeSimdDirective(
     const OMPTeamsDistributeSimdDirective *D) {
+  VisitOMPLoopDirective(D);
+}
+
+void EnqueueVisitor::VisitOMPTargetTeamsDistributeDirective(
+    const OMPTargetTeamsDistributeDirective *D) {
   VisitOMPLoopDirective(D);
 }
 
@@ -4939,6 +4946,8 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
         "OMPTargetTeamsDistributeParallelForSimdDirective");
   case CXCursor_OMPTeamsDistributeSimdDirective:
     return cxstring::createRef("OMPTeamsDistributeSimdDirective");
+  case CXCursor_OMPTargetTeamsDistributeDirective:
+    return cxstring::createRef("OMPTargetTeamsDistributeDirective");
   case CXCursor_OverloadCandidate:
       return cxstring::createRef("OverloadCandidate");
   case CXCursor_TypeAliasTemplateDecl:

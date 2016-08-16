@@ -1395,6 +1395,10 @@ static LinkageInfo getLVForDecl(const NamedDecl *D,
   return clang::LinkageComputer::getLVForDecl(D, computation);
 }
 
+void NamedDecl::printName(raw_ostream &os) const {
+  os << Name;
+}
+
 std::string NamedDecl::getQualifiedNameAsString() const {
   std::string QualName;
   llvm::raw_string_ostream OS(QualName);
@@ -1481,7 +1485,7 @@ void NamedDecl::printQualifiedName(raw_ostream &OS,
     OS << "::";
   }
 
-  if (getDeclName())
+  if (getDeclName() || isa<DecompositionDecl>(this))
     OS << *this;
   else
     OS << "(anonymous)";
@@ -3440,6 +3444,20 @@ unsigned FunctionDecl::getMemoryFunctionKind() const {
     break;
   }
   return 0;
+}
+
+void FunctionDecl::addDeferredDiag(PartialDiagnosticAt PD) {
+  getASTContext().getDeferredDiags()[this].push_back(std::move(PD));
+}
+
+std::vector<PartialDiagnosticAt> FunctionDecl::takeDeferredDiags() const {
+  auto &DD = getASTContext().getDeferredDiags();
+  auto It = DD.find(this);
+  if (It == DD.end())
+    return {};
+  auto Ret = std::move(It->second);
+  DD.erase(It);
+  return Ret;
 }
 
 //===----------------------------------------------------------------------===//

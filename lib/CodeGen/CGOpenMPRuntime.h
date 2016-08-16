@@ -1191,8 +1191,7 @@ public:
                              ArrayRef<const Expr *> RHSExprs,
                              ArrayRef<const Expr *> ReductionOps,
                              bool WithNowait, bool SimpleReduction,
-                             bool ParallelReduction, bool SimdReduction,
-                             bool TeamsReduction);
+                             OpenMPDirectiveKind ReductionKind);
 
   /// \brief Emit code for 'taskwait' directive.
   virtual void emitTaskwaitCall(CodeGenFunction &CGF, SourceLocation Loc);
