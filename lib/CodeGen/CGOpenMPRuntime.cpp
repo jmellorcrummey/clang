@@ -4587,6 +4587,9 @@ llvm::Value *CGOpenMPRuntime::emitReductionFunction(
       ".omp.reduction.reduction_func", &CGM.getModule());
   CGM.SetInternalFunctionAttributes(/*D=*/nullptr, Fn, CGFI);
   CodeGenFunction CGF(CGM);
+  // We don't need debug information in this function as nothing here refers to
+  // user code.
+  CGF.disableDebugInfo();
   CGF.StartFunction(GlobalDecl(), C.VoidTy, Fn, CGFI, Args);
 
   // Dst = (void*[n])(LHSArg);
@@ -4672,11 +4675,13 @@ void CGOpenMPRuntime::emitSingleReductionCombiner(CodeGenFunction &CGF,
     emitReductionCombiner(CGF, ReductionOp);
 }
 
-void CGOpenMPRuntime::emitReduction(
-    CodeGenFunction &CGF, SourceLocation Loc, ArrayRef<const Expr *> Privates,
-    ArrayRef<const Expr *> LHSExprs, ArrayRef<const Expr *> RHSExprs,
-    ArrayRef<const Expr *> ReductionOps, bool WithNowait, bool SimpleReduction,
-    bool ParallelReduction, bool SimdReduction, bool TeamsReduction) {
+void CGOpenMPRuntime::emitReduction(CodeGenFunction &CGF, SourceLocation Loc,
+                                    ArrayRef<const Expr *> Privates,
+                                    ArrayRef<const Expr *> LHSExprs,
+                                    ArrayRef<const Expr *> RHSExprs,
+                                    ArrayRef<const Expr *> ReductionOps,
+                                    bool WithNowait, bool SimpleReduction,
+                                    OpenMPDirectiveKind ReductionKind) {
   if (!CGF.HaveInsertPoint())
     return;
   // Next code should be emitted for reduction:

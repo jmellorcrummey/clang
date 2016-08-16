@@ -88,6 +88,16 @@ enum OpenMPRTLFunctionNVPTX {
   /// lane_offset, int16_t shortCircuit),
   /// void (*kmp_InterWarpCopyFctPtr)(void* src, int warp_num));
   OMPRTL_NVPTX__kmpc_simd_reduce_nowait,
+  /// \brief Call to __kmpc_nvptx_teams_reduce_nowait(int32_t global_tid,
+  /// int32_t num_vars, size_t reduce_size, void *reduce_data,
+  /// void (*kmp_ShuffleReductFctPtr)(void *rhsData, int16_t lane_id, int16_t
+  /// lane_offset, int16_t shortCircuit),
+  /// void (*kmp_InterWarpCopyFctPtr)(void* src, int warp_num),
+  /// void (*kmp_CopyToScratchpadFctPtr)(void *reduceData, void * scratchpad,
+  /// int32_t index, int32_t width),
+  /// void (*kmp_LoadReduceFctPtr)(void *reduceData, void * scratchpad, int32_t
+  /// index, int32_t width, int32_t reduce))
+  OMPRTL_NVPTX__kmpc_teams_reduce_nowait,
   /// \brief Call to __kmpc_nvptx_end_reduce_nowait(int32_t global_tid);
   OMPRTL_NVPTX__kmpc_end_reduce,
   /// \brief Call to __kmpc_nvptx_end_reduce(int32_t global_tid);
@@ -128,6 +138,17 @@ enum DATA_SHARING_SIZES {
   DS_Worker_Warp_Slot_Size = DS_Max_Worker_Warp_Size * DS_Slot_Size,
   // the maximum number of teams.
   DS_Max_Teams = 1024
+};
+
+enum COPY_DIRECTION {
+  // Global memory to a ReduceData structure
+  Global_To_ReduceData,
+  // ReduceData structure to Global memory
+  ReduceData_To_Global,
+  // ReduceData structure to another ReduceData structure
+  ReduceData_To_ReduceData,
+  // Shuffle instruction result to ReduceData
+  Shuffle_To_ReduceData,
 };
 
 /// Common pre(post)-action for different OpenMP constructs.
@@ -1165,6 +1186,49 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
         llvm::FunctionType::get(CGM.Int32Ty, TypeParams, /*isVarArg=*/false);
     RTLFn = CGM.CreateRuntimeFunction(
         FnTy, /*Name=*/"__kmpc_nvptx_simd_reduce_nowait");
+    break;
+  }
+  case OMPRTL_NVPTX__kmpc_teams_reduce_nowait: {
+    /// Build int32_t __kmpc_nvptx_teams_reduce_nowait(int32_t global_tid,
+    /// int32_t num_vars, size_t reduce_size, void *reduce_data,
+    /// void (*kmp_ShuffleReductFctPtr)(void *rhsData, int16_t lane_id, int16_t
+    /// lane_offset, int16_t shortCircuit),
+    /// void (*kmp_InterWarpCopyFctPtr)(void* src, int warp_num),
+    /// void (*kmp_CopyToScratchpadFctPtr)(void *reduceData, void * scratchpad,
+    /// int32_t index, int32_t width),
+    /// void (*kmp_LoadReduceFctPtr)(void *reduceData, void * scratchpad,
+    /// int32_t index, int32_t width, int32_t reduce))
+    llvm::Type *ShuffleReduceTypeParams[] = {CGM.VoidPtrTy, CGM.Int16Ty,
+                                             CGM.Int16Ty, CGM.Int16Ty};
+    auto *ShuffleReduceFnTy =
+        llvm::FunctionType::get(CGM.VoidTy, ShuffleReduceTypeParams,
+                                /*isVarArg=*/false);
+    llvm::Type *InterWarpCopyTypeParams[] = {CGM.VoidPtrTy, CGM.Int32Ty};
+    auto *InterWarpCopyFnTy =
+        llvm::FunctionType::get(CGM.VoidTy, InterWarpCopyTypeParams,
+                                /*isVarArg=*/false);
+    llvm::Type *CopyToScratchpadTypeParams[] = {CGM.VoidPtrTy, CGM.VoidPtrTy,
+                                                CGM.Int32Ty, CGM.Int32Ty};
+    auto *CopyToScratchpadFnTy =
+        llvm::FunctionType::get(CGM.VoidTy, CopyToScratchpadTypeParams,
+                                /*isVarArg=*/false);
+    llvm::Type *LoadReduceTypeParams[] = {
+        CGM.VoidPtrTy, CGM.VoidPtrTy, CGM.Int32Ty, CGM.Int32Ty, CGM.Int32Ty};
+    auto *LoadReduceFnTy =
+        llvm::FunctionType::get(CGM.VoidTy, LoadReduceTypeParams,
+                                /*isVarArg=*/false);
+    llvm::Type *TypeParams[] = {CGM.Int32Ty,
+                                CGM.Int32Ty,
+                                CGM.SizeTy,
+                                CGM.VoidPtrTy,
+                                ShuffleReduceFnTy->getPointerTo(),
+                                InterWarpCopyFnTy->getPointerTo(),
+                                CopyToScratchpadFnTy->getPointerTo(),
+                                LoadReduceFnTy->getPointerTo()};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.Int32Ty, TypeParams, /*isVarArg=*/false);
+    RTLFn = CGM.CreateRuntimeFunction(
+        FnTy, /*Name=*/"__kmpc_nvptx_teams_reduce_nowait");
     break;
   }
   case OMPRTL_NVPTX__kmpc_end_reduce: {
@@ -3676,6 +3740,509 @@ StringRef CGOpenMPRuntimeNVPTX::RenameStandardFunction(StringRef name) {
   return name;
 }
 
+/// This function creates calls to one of two shuffle functions to copy
+/// registers between lanes in a warp.
+static llvm::Value *CreateRuntimeShuffleFunction(CodeGenFunction &CGF,
+                                                 QualType ShuffleTy,
+                                                 llvm::Value *Elem,
+                                                 llvm::Value *Offset) {
+  auto &CGM = CGF.CGM;
+  auto &C = CGM.getContext();
+  auto &Bld = CGF.Builder;
+
+  unsigned Size = C.getTypeSizeInChars(ShuffleTy).getQuantity();
+  assert(Size <= 8 && "Unsupported bitwidth in shuffle instruction.");
+
+  llvm::Constant *RTLFn = nullptr;
+  if (Size <= 4) {
+    // Build int32 __kmpc_shuffle_long(int32 elem, int16 offset, int16
+    // num_participants);
+    llvm::Type *TypeParams[] = {CGM.Int32Ty, CGM.Int16Ty, CGM.Int16Ty};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.Int32Ty, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_shuffle_int32");
+  } else {
+    // Build double __kmpc_shuffle_long_long(int64 elem, int16 offset, int16
+    // num_participants);
+    llvm::Type *TypeParams[] = {CGM.Int64Ty, CGM.Int16Ty, CGM.Int16Ty};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.Int64Ty, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_shuffle_int64");
+  }
+
+  // Cast all types to 32 or 64-bit values before calling shuffle routines.
+  auto CastTy = Size <= 4 ? llvm::Type::getInt32Ty(CGM.getLLVMContext())
+                          : llvm::Type::getInt64Ty(CGM.getLLVMContext());
+  Elem = Bld.CreateSExtOrBitCast(Elem, CastTy);
+
+  llvm::SmallVector<llvm::Value *, 3> FnArgs;
+  FnArgs.push_back(Elem);
+  FnArgs.push_back(Offset);
+  FnArgs.push_back(Bld.getInt16(DS_Max_Worker_Warp_Size));
+
+  return CGF.EmitCallOrInvoke(RTLFn, FnArgs).getInstruction();
+}
+
+static void EmitDirectionSpecializedReduceDataCopy(
+    COPY_DIRECTION Direction, CodeGenFunction &CGF, QualType ReductionArrayTy,
+    ArrayRef<const Expr *> Privates, Address SrcBase, Address DestBase,
+    llvm::Value *OffsetVal = nullptr, llvm::Value *IndexVal = nullptr,
+    llvm::Value *WidthVal = nullptr) {
+
+  auto &CGM = CGF.CGM;
+  auto &C = CGM.getContext();
+  auto &Bld = CGF.Builder;
+
+  // In this section, we distinguish between two concepts, ReduceData Element
+  // and ReduceData Subelement:
+  // 1. ReduceData Element refers to an object directly referenced by a field
+  // in ReduceData, this could be a built-in type such as int32 or a constant
+  // length array type [4 x int32]
+  // 2. ReduceData Subelement refers to an object of built-in type with
+  // maximum bit size of 64. It could be an array element of a
+  // constant-length-array-typed ReduceData Element.
+
+  // This loop iterates through the list of reduce elements and copies element
+  // by element from a remote lane to the local variable remote_red_list.
+  unsigned Idx = 0;
+  for (auto &Private : Privates) {
+    Address SrcElementAddr = Address::invalid();
+    Address DestElementAddr = Address::invalid();
+    Address DestElementPtrAddr = Address::invalid();
+
+    unsigned ElementSizeInChars = 0;
+    switch (Direction) {
+    case Shuffle_To_ReduceData: {
+      // Step 1.1 get the address for src element.
+      Address SrcElementPtrAddr =
+          Bld.CreateConstArrayGEP(SrcBase, Idx, CGF.getPointerSize());
+      llvm::Value *SrcElementPtrPtr = CGF.EmitLoadOfScalar(
+          SrcElementPtrAddr, /*Volatile=*/false, C.VoidPtrTy, SourceLocation());
+      SrcElementAddr =
+          Address(SrcElementPtrPtr, C.getTypeAlignInChars(Private->getType()));
+
+      // Step 1.2 get the address for dest element this is a temporary memory
+      // element.
+      DestElementPtrAddr =
+          Bld.CreateConstArrayGEP(DestBase, Idx, CGF.getPointerSize());
+      DestElementAddr =
+          CGF.CreateMemTemp(Private->getType(), ".omp.reduction.element");
+      break;
+    }
+    case ReduceData_To_ReduceData: {
+      // Step 1.1 get the address for src element.
+      Address SrcElementPtrAddr =
+          Bld.CreateConstArrayGEP(SrcBase, Idx, CGF.getPointerSize());
+      llvm::Value *SrcElementPtrPtr = CGF.EmitLoadOfScalar(
+          SrcElementPtrAddr, /*Volatile=*/false, C.VoidPtrTy, SourceLocation());
+      SrcElementAddr =
+          Address(SrcElementPtrPtr, C.getTypeAlignInChars(Private->getType()));
+
+      // Step 1.2 get the address for dest element.
+      DestElementPtrAddr =
+          Bld.CreateConstArrayGEP(DestBase, Idx, CGF.getPointerSize());
+      llvm::Value *DestElementPtr =
+          CGF.EmitLoadOfScalar(DestElementPtrAddr, /*Volatile=*/false,
+                               C.VoidPtrTy, SourceLocation());
+      Address DestElemAddr =
+          Address(DestElementPtr, C.getTypeAlignInChars(Private->getType()));
+      DestElementAddr = Bld.CreateElementBitCast(
+          DestElemAddr, CGF.ConvertTypeForMem(Private->getType()));
+      break;
+    }
+    case ReduceData_To_Global: {
+      // Step 1.1 get the address for src element.
+      Address SrcElementPtrAddr =
+          Bld.CreateConstArrayGEP(SrcBase, Idx, CGF.getPointerSize());
+      llvm::Value *SrcElementPtrPtr = CGF.EmitLoadOfScalar(
+          SrcElementPtrAddr, /*Volatile=*/false, C.VoidPtrTy, SourceLocation());
+      SrcElementAddr =
+          Address(SrcElementPtrPtr, C.getTypeAlignInChars(Private->getType()));
+
+// Step 1.2 get the address for dest element by
+// address = base + index * ElementSizeInChars.
+#if 0
+      unsigned BitSize =
+          CGF.ConvertTypeForMem(Private->getType())->getPrimitiveSizeInBits();
+      if (!BitSize)
+        BitSize = getArrayTypeSize(CGF.ConvertTypeForMem(Private->getType()));
+      ElementSizeInChars = BitSize / 8;
+#endif
+      ElementSizeInChars =
+          C.getTypeSizeInChars(Private->getType()).getQuantity();
+      auto *CurrentOffset =
+          Bld.CreateMul(Bld.getInt32(ElementSizeInChars), IndexVal);
+      CurrentOffset = Bld.CreateSExt(CurrentOffset, CGF.Int64Ty);
+      auto *ScratchPadElemAbsolutePtrVal =
+          Bld.CreateAdd(DestBase.getPointer(), CurrentOffset);
+      ScratchPadElemAbsolutePtrVal =
+          Bld.CreateIntToPtr(ScratchPadElemAbsolutePtrVal, CGF.VoidPtrTy);
+      Address ScratchpadPtr =
+          Address(ScratchPadElemAbsolutePtrVal,
+                  C.getTypeAlignInChars(Private->getType()));
+      DestElementAddr = Bld.CreateElementBitCast(
+          ScratchpadPtr, CGF.ConvertTypeForMem(Private->getType()));
+      break;
+    }
+    case Global_To_ReduceData: {
+// Step 1.1 get the address for src element address by
+// address = base + index * ElementSizeInChars.
+#if 0
+      unsigned BitSize =
+          CGF.ConvertTypeForMem(Private->getType())->getPrimitiveSizeInBits();
+      if (!BitSize)
+        BitSize = getArrayTypeSize(CGF.ConvertTypeForMem(Private->getType()));
+      ElementSizeInChars = BitSize / 8;
+#endif
+      ElementSizeInChars =
+          C.getTypeSizeInChars(Private->getType()).getQuantity();
+      auto *CurrentOffset =
+          Bld.CreateMul(Bld.getInt32(ElementSizeInChars), IndexVal);
+      CurrentOffset = Bld.CreateSExt(CurrentOffset, CGF.Int64Ty);
+      auto *ScratchPadElemAbsolutePtrVal =
+          Bld.CreateAdd(SrcBase.getPointer(), CurrentOffset);
+      ScratchPadElemAbsolutePtrVal =
+          Bld.CreateIntToPtr(ScratchPadElemAbsolutePtrVal, CGF.VoidPtrTy);
+      SrcElementAddr = Address(ScratchPadElemAbsolutePtrVal,
+                               C.getTypeAlignInChars(Private->getType()));
+
+      // Step 1.2 get the address for dest element this is a temporary memory
+      // element.
+      DestElementPtrAddr =
+          Bld.CreateConstArrayGEP(DestBase, Idx, CGF.getPointerSize());
+      DestElementAddr =
+          CGF.CreateMemTemp(Private->getType(), ".omp.reduction.element");
+      break;
+    }
+    }
+
+    // Regardless of src and dest of memory copy, we emit the load of src
+    // element as this is required in all directions
+    SrcElementAddr = Bld.CreateElementBitCast(
+        SrcElementAddr, CGF.ConvertTypeForMem(Private->getType()));
+    llvm::Value *Elem =
+        CGF.EmitLoadOfScalar(SrcElementAddr, /*Volatile=*/false,
+                             Private->getType(), SourceLocation());
+
+// Step 2.1 create individual load (potentially with shuffle) and stores
+// for each ReduceData Element and ReduceData subelement.
+
+#if 0
+    // If we have an array, it must be a constant length array.
+    if (llvm::ArrayType *ElemArrayType =
+            dyn_cast<llvm::ArrayType>(Elem->getType())) {
+      // FIXME: Emit loop
+      for (uint64_t ArrayIndex = 0;
+           ArrayIndex < ElemArrayType->getNumElements(); ArrayIndex++) {
+        // Get the pointer to src and dest subelement.
+        auto RemoteArrayCopyBaseAddr = DestElementAddr;
+        auto LocalArrayBaseAddr = SrcElementAddr;
+        auto RemoteArrayCopyAddrVal = Bld.CreateInBoundsGEP(
+            RemoteArrayCopyBaseAddr.getPointer(),
+            {Bld.getInt64(0), Bld.getInt64(ArrayIndex)});
+        auto LocalArrayAddrVal = Bld.CreateInBoundsGEP(
+            LocalArrayBaseAddr.getPointer(),
+            {Bld.getInt64(0), Bld.getInt64(ArrayIndex)});
+        Address RemoteArrayCopyAddr = Address(
+            RemoteArrayCopyAddrVal, C.getTypeAlignInChars(Private->getType()));
+        Address LocalArrayAddr = Address(
+            LocalArrayAddrVal, C.getTypeAlignInChars(Private->getType()));
+
+        // load src sub element
+        llvm::Value *SubElem = Bld.CreateLoad(LocalArrayAddr);
+
+        // We have to shuffle SubElem to get the actual data we want for
+        // Shuffle_To_ReduceData Direction
+        if (Direction == Shuffle_To_ReduceData) {
+          llvm::Value *ShuffledVal = CreateRuntimeShuffleFunction(
+              CGF, ElemArrayType->getElementType(), SubElem, OffsetVal);
+          SubElem = Bld.CreateTruncOrBitCast(
+              ShuffledVal, ElemArrayType->getElementType());
+        }
+
+        // Store to dest subelement address.
+        Bld.CreateStore(SubElem, RemoteArrayCopyAddr);
+      }
+      // Else we don't have an array-typed element.
+    } else {
+#endif
+    if (Direction == Shuffle_To_ReduceData) {
+      llvm::Value *ShuffledVal = CreateRuntimeShuffleFunction(
+          CGF, Private->getType(), Elem, OffsetVal);
+      Elem = Bld.CreateTruncOrBitCast(
+          ShuffledVal, CGF.ConvertTypeForMem(Private->getType()));
+    }
+
+    // Just store the element value we have already obtained to dest element
+    // address.
+    CGF.EmitStoreOfScalar(Elem, DestElementAddr, /*Volatile=*/false,
+                          Private->getType());
+#if 0
+    }
+#endif
+
+    // Step 3.1 modify reference in Dest ReduceData as needed.
+    if (Direction == Shuffle_To_ReduceData ||
+        Direction == Global_To_ReduceData) {
+      // Here we are modifying the reference directly in ReduceData because
+      // we are creating a local temporary copy of remote ReduceData.
+      // The variable is only alive in the current function scope and the
+      // scope of functions it invokes (i.e., reduce_function)
+      // RemoteReduceData[i] = (void*)&RemoteElem
+      CGF.EmitStoreOfScalar(Bld.CreatePointerBitCastOrAddrSpaceCast(
+                                DestElementAddr.getPointer(), CGF.VoidPtrTy),
+                            DestElementPtrAddr, /*Volatile=*/false,
+                            C.VoidPtrTy);
+    }
+
+    if (Direction == ReduceData_To_Global ||
+        Direction == Global_To_ReduceData) {
+      // Step 4.1 increment SrcBase/DestBase so that it points to the starting
+      // address of the next element in scratchpad memory. Memory alignment is
+      // also taken care of in this step.
+      llvm::Value *DestOrSrcBasePtrVal = Direction == ReduceData_To_Global
+                                             ? DestBase.getPointer()
+                                             : SrcBase.getPointer();
+      DestOrSrcBasePtrVal = Bld.CreateAdd(
+          DestOrSrcBasePtrVal,
+          Bld.CreateMul(WidthVal, Bld.getInt64(ElementSizeInChars)));
+
+      // Take care of 256 byte alignment
+      DestOrSrcBasePtrVal = Bld.CreateSub(DestOrSrcBasePtrVal, Bld.getInt64(1));
+      DestOrSrcBasePtrVal =
+          Bld.CreateSDiv(DestOrSrcBasePtrVal, Bld.getInt64(256));
+      DestOrSrcBasePtrVal = Bld.CreateAdd(DestOrSrcBasePtrVal, Bld.getInt64(1));
+      DestOrSrcBasePtrVal =
+          Bld.CreateMul(DestOrSrcBasePtrVal, Bld.getInt64(256));
+
+      if (Direction == ReduceData_To_Global)
+        DestBase = Address(DestOrSrcBasePtrVal, CGF.getPointerAlign());
+      else /* Direction == Global_To_ReduceData */
+        SrcBase = Address(DestOrSrcBasePtrVal, CGF.getPointerAlign());
+    }
+
+    Idx++;
+  }
+}
+
+llvm::Value *EmitCopyToScratchpad(CodeGenModule &CGM,
+                                  ArrayRef<const Expr *> Privates,
+                                  QualType ReductionArrayTy) {
+
+  //
+  //  for elem in ReduceData:
+  //    scratchpad[elem_id][index] = ReduceData.elem
+  //
+  auto &C = CGM.getContext();
+
+  FunctionArgList Args;
+
+  // ReduceData- this is the source of the copy.
+  ImplicitParamDecl ReduceDataArg(C, /*DC=*/nullptr, SourceLocation(),
+                                  /*Id=*/nullptr, C.VoidPtrTy);
+  // This is the pointer to the scratchpad array, with each element
+  // storing ReduceData.
+  ImplicitParamDecl ScratchPadArg(C, /*DC=*/nullptr, SourceLocation(),
+                                  /*Id=*/nullptr, C.VoidPtrTy);
+  // This argument specifies the index into the scratchpad array,
+  // typically the TeamId.
+  ImplicitParamDecl IndexArg(C, /*DC=*/nullptr, SourceLocation(),
+                             /*Id=*/nullptr, C.IntTy);
+  // This argument specifies the row width of an element, typically
+  // the number of teams.
+  ImplicitParamDecl WidthArg(C, /*DC=*/nullptr, SourceLocation(),
+                             /*Id=*/nullptr, C.IntTy);
+  Args.push_back(&ReduceDataArg);
+  Args.push_back(&ScratchPadArg);
+  Args.push_back(&IndexArg);
+  Args.push_back(&WidthArg);
+
+  auto &CGFI = CGM.getTypes().arrangeBuiltinFunctionDeclaration(C.VoidTy, Args);
+  auto *Fn = llvm::Function::Create(
+      CGM.getTypes().GetFunctionType(CGFI), llvm::GlobalValue::InternalLinkage,
+      ".omp.reduction.copy_to_scratchpad", &CGM.getModule());
+  CGM.SetInternalFunctionAttributes(/*DC=*/nullptr, Fn, CGFI);
+  CodeGenFunction CGF(CGM);
+  // We don't need debug information in this function as nothing here refers to
+  // user code.
+  CGF.disableDebugInfo();
+  CGF.StartFunction(GlobalDecl(), C.VoidTy, Fn, CGFI, Args);
+
+  auto &Bld = CGF.Builder;
+
+  // Get ReduceData as a function parameter.
+  Address AddrReduceDataArg = CGF.GetAddrOfLocalVar(&ReduceDataArg);
+  Address SrcDataAddr(
+      Bld.CreatePointerBitCastOrAddrSpaceCast(
+          CGF.EmitLoadOfScalar(AddrReduceDataArg, /*Volatile=*/false,
+                               C.VoidPtrTy, SourceLocation()),
+          CGF.ConvertTypeForMem(ReductionArrayTy)->getPointerTo()),
+      CGF.getPointerAlign());
+
+  // Get ScratchPad pointer.
+  Address AddrScratchPadArg = CGF.GetAddrOfLocalVar(&ScratchPadArg);
+  llvm::Value *ScratchPadVal = CGF.EmitLoadOfScalar(
+      AddrScratchPadArg, /*Volatile=*/false, C.VoidPtrTy, SourceLocation());
+
+  // Get Index value
+  Address AddrIndexArg = CGF.GetAddrOfLocalVar(&IndexArg);
+  llvm::Value *IndexVal = CGF.EmitLoadOfScalar(AddrIndexArg, /*Volatile=*/false,
+                                               C.IntTy, SourceLocation());
+
+  // Get Width of the scratchpad array (number of teams)
+  Address AddrWidthArg = CGF.GetAddrOfLocalVar(&WidthArg);
+  llvm::Value *WidthVal =
+      Bld.CreateSExt(CGF.EmitLoadOfScalar(AddrWidthArg, /*Volatile=*/false,
+                                          C.IntTy, SourceLocation()),
+                     CGF.Int64Ty);
+
+  // The absolute ptr address to the base addr of the next element to copy
+  // CumulativeElemBasePtr = &Scratchpad[some element][0]
+  // convert to 64 bit int for pointer calculation
+  llvm::Value *CumulativeElemBasePtr =
+      Bld.CreatePtrToInt(ScratchPadVal, CGM.Int64Ty);
+  Address DestDataAddr(CumulativeElemBasePtr, CGF.getPointerAlign());
+
+  EmitDirectionSpecializedReduceDataCopy(
+      ReduceData_To_Global, CGF, ReductionArrayTy, Privates, SrcDataAddr,
+      DestDataAddr, nullptr, IndexVal, WidthVal);
+
+  CGF.FinishFunction();
+  return Fn;
+}
+
+llvm::Value *EmitReduceScratchpadFunction(CodeGenModule &CGM,
+                                          ArrayRef<const Expr *> Privates,
+                                          QualType ReductionArrayTy,
+                                          llvm::Value *ReduceFn) {
+  auto &C = CGM.getContext();
+  //
+  //  load_and_reduce(local, scratchpad, index, width, reduce)
+  //  ReduceData remote;
+  //  for elem in ReduceData:
+  //    remote.elem = Scratchpad[elem_id][index]
+  //  if (reduce)
+  //    local = local @ remote
+  //  else
+  //    local = remote
+  //
+  FunctionArgList Args;
+
+  // This is the pointer that points to ReduceData.
+  ImplicitParamDecl ReduceDataArg(C, /*DC=*/nullptr, SourceLocation(),
+                                  /*Id=*/nullptr, C.VoidPtrTy);
+  // Pointer to the scratchpad.
+  ImplicitParamDecl ScratchPadArg(C, /*DC=*/nullptr, SourceLocation(),
+                                  /*Id=*/nullptr, C.VoidPtrTy);
+  // This argument specifies the index of the ReduceData in the
+  // scratchpad.
+  ImplicitParamDecl IndexArg(C, /*DC=*/nullptr, SourceLocation(),
+                             /*Id=*/nullptr, C.IntTy);
+  // This argument specifies the row width of an element.
+  ImplicitParamDecl WidthArg(C, /*DC=*/nullptr, SourceLocation(),
+                             /*Id=*/nullptr, C.IntTy);
+  // If should_reduce == 1, then it's load AND reduce,
+  // If should_reduce == 0 (or otherwise), then it only loads (+ copy).
+  ImplicitParamDecl ShouldReduceArg(C, /*DC=*/nullptr, SourceLocation(),
+                                    /*Id=*/nullptr, C.IntTy);
+
+  Args.push_back(&ReduceDataArg);
+  Args.push_back(&ScratchPadArg);
+  Args.push_back(&IndexArg);
+  Args.push_back(&WidthArg);
+  Args.push_back(&ShouldReduceArg);
+
+  auto &CGFI = CGM.getTypes().arrangeBuiltinFunctionDeclaration(C.VoidTy, Args);
+  auto *Fn = llvm::Function::Create(
+      CGM.getTypes().GetFunctionType(CGFI), llvm::GlobalValue::InternalLinkage,
+      ".omp.reduction.load_and_reduce", &CGM.getModule());
+  CGM.SetInternalFunctionAttributes(/*DC=*/nullptr, Fn, CGFI);
+  CodeGenFunction CGF(CGM);
+  // We don't need debug information in this function as nothing here refers to
+  // user code.
+  CGF.disableDebugInfo();
+  CGF.StartFunction(GlobalDecl(), C.VoidTy, Fn, CGFI, Args);
+
+  auto &Bld = CGF.Builder;
+
+  // Get local ReduceData pointer.
+  Address AddrReduceDataArg = CGF.GetAddrOfLocalVar(&ReduceDataArg);
+  Address ReduceDataAddr(
+      Bld.CreatePointerBitCastOrAddrSpaceCast(
+          CGF.EmitLoadOfScalar(AddrReduceDataArg, /*Volatile=*/false,
+                               C.VoidPtrTy, SourceLocation()),
+          CGF.ConvertTypeForMem(ReductionArrayTy)->getPointerTo()),
+      CGF.getPointerAlign());
+  // Get ScratchPad pointer.
+  Address AddrScratchPadArg = CGF.GetAddrOfLocalVar(&ScratchPadArg);
+  llvm::Value *ScratchPadVal = CGF.EmitLoadOfScalar(
+      AddrScratchPadArg, /*Volatile=*/false, C.VoidPtrTy, SourceLocation());
+  // Get Index value
+  Address AddrIndexArg = CGF.GetAddrOfLocalVar(&IndexArg);
+  llvm::Value *IndexVal = CGF.EmitLoadOfScalar(AddrIndexArg, /*Volatile=*/false,
+                                               C.IntTy, SourceLocation());
+  // Get Width of the scratchpad array (number of teams)
+  Address AddrWidthArg = CGF.GetAddrOfLocalVar(&WidthArg);
+  llvm::Value *WidthVal =
+      Bld.CreateSExt(CGF.EmitLoadOfScalar(AddrWidthArg, /*Volatile=*/false,
+                                          C.IntTy, SourceLocation()),
+                     CGF.Int64Ty);
+  // Get whether-to-reduce flag
+  Address AddrShouldReduceArg = CGF.GetAddrOfLocalVar(&ShouldReduceArg);
+  llvm::Value *ShouldReduceVal = CGF.EmitLoadOfScalar(
+      AddrShouldReduceArg, /*Volatile=*/false, C.IntTy, SourceLocation());
+
+  // The absolute ptr address to the base addr of the next element to copy
+  // CumulativeElemBasePtr = &Scratchpad[some element][0]
+  // convert to 64 bit int for pointer calculation
+  llvm::Value *CumulativeElemBasePtr =
+      Bld.CreatePtrToInt(ScratchPadVal, CGM.Int64Ty);
+  Address SrcDataAddr(CumulativeElemBasePtr, CGF.getPointerAlign());
+
+  // create remote ReduceData pointer
+  Address RemoteReduceData =
+      CGF.CreateMemTemp(ReductionArrayTy, ".omp.reduction.remote_red_list");
+
+  // Assemble RemoteReduceData.
+  EmitDirectionSpecializedReduceDataCopy(
+      Global_To_ReduceData, CGF, ReductionArrayTy, Privates, SrcDataAddr,
+      RemoteReduceData, nullptr, IndexVal, WidthVal);
+
+  llvm::BasicBlock *ThenBB = CGF.createBasicBlock("then");
+  llvm::BasicBlock *ElseBB = CGF.createBasicBlock("else");
+  llvm::BasicBlock *MergeBB = CGF.createBasicBlock("ifcont");
+
+  // Do we want to reduce?
+  auto CondReduce = Bld.CreateICmpEQ(ShouldReduceVal, Bld.getInt32(1));
+  Bld.CreateCondBr(CondReduce, ThenBB, ElseBB);
+
+  CGF.EmitBlock(ThenBB);
+  // If yes, we want to reduce, do the reduce
+  // by calling ReduceFn
+  llvm::SmallVector<llvm::Value *, 2> FnArgs;
+  llvm::Value *LocalDataPtr = Bld.CreatePointerBitCastOrAddrSpaceCast(
+      ReduceDataAddr.getPointer(), CGF.VoidPtrTy);
+  FnArgs.push_back(LocalDataPtr);
+  llvm::Value *RemoteDataPtr = Bld.CreatePointerBitCastOrAddrSpaceCast(
+      RemoteReduceData.getPointer(), CGF.VoidPtrTy);
+  FnArgs.push_back(RemoteDataPtr);
+  CGF.EmitCallOrInvoke(ReduceFn, FnArgs);
+  Bld.CreateBr(MergeBB);
+
+  // Else no, just copy
+  // localReduceData = RemoteReduceData.
+  CGF.EmitBlock(ElseBB);
+  EmitDirectionSpecializedReduceDataCopy(ReduceData_To_ReduceData, CGF,
+                                         ReductionArrayTy, Privates,
+                                         RemoteReduceData, ReduceDataAddr);
+  Bld.CreateBr(MergeBB);
+
+  // endif
+  CGF.EmitBlock(MergeBB);
+  CGF.FinishFunction();
+  return Fn;
+}
+
 static llvm::Value *EmitInterWarpCopyFunction(CodeGenModule &CGM,
                                               ArrayRef<const Expr *> Privates,
                                               QualType ReductionArrayTy) {
@@ -3715,6 +4282,9 @@ static llvm::Value *EmitInterWarpCopyFunction(CodeGenModule &CGM,
       ".omp.reduction.inter_warp_copy_func", &CGM.getModule());
   CGM.SetInternalFunctionAttributes(/*DC=*/nullptr, Fn, CGFI);
   CodeGenFunction CGF(CGM);
+  // We don't need debug information in this function as nothing here refers to
+  // user code.
+  CGF.disableDebugInfo();
   CGF.StartFunction(GlobalDecl(), C.VoidTy, Fn, CGFI, Args);
 
   auto &Bld = CGF.Builder;
@@ -3752,7 +4322,7 @@ static llvm::Value *EmitInterWarpCopyFunction(CodeGenModule &CGM,
           CGF.ConvertTypeForMem(ReductionArrayTy)->getPointerTo()),
       CGF.getPointerAlign());
 
-  int Idx = 0;
+  unsigned Idx = 0;
   for (auto &Private : Privates) {
     llvm::BasicBlock *ThenBB = CGF.createBasicBlock("then");
     llvm::BasicBlock *ElseBB = CGF.createBasicBlock("else");
@@ -3859,49 +4429,6 @@ static llvm::Value *EmitInterWarpCopyFunction(CodeGenModule &CGM,
   return Fn;
 }
 
-/// This function creates calls to one of two shuffle functions to copy
-/// registers between lanes in a warp.
-static llvm::Value *createRuntimeShuffleFunction(CodeGenFunction &CGF,
-                                                 QualType ShuffleTy,
-                                                 llvm::Value *Elem,
-                                                 llvm::Value *Offset) {
-  auto &CGM = CGF.CGM;
-  auto &C = CGM.getContext();
-  auto &Bld = CGF.Builder;
-
-  unsigned Size = C.getTypeSizeInChars(ShuffleTy).getQuantity();
-  assert(Size <= 8 && "Unsupported bitwidth in shuffle instruction.");
-
-  llvm::Constant *RTLFn = nullptr;
-  if (Size <= 4) {
-    // Build int32 __kmpc_shuffle_long(int32 elem, int16 offset, int16
-    // num_participants);
-    llvm::Type *TypeParams[] = {CGM.Int32Ty, CGM.Int16Ty, CGM.Int16Ty};
-    llvm::FunctionType *FnTy =
-        llvm::FunctionType::get(CGM.Int32Ty, TypeParams, /*isVarArg*/ false);
-    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_shuffle_int32");
-  } else {
-    // Build double __kmpc_shuffle_long_long(int64 elem, int16 offset, int16
-    // num_participants);
-    llvm::Type *TypeParams[] = {CGM.Int64Ty, CGM.Int16Ty, CGM.Int16Ty};
-    llvm::FunctionType *FnTy =
-        llvm::FunctionType::get(CGM.Int64Ty, TypeParams, /*isVarArg*/ false);
-    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_shuffle_int64");
-  }
-
-  // Cast all types to 32 or 64-bit values before calling shuffle routines.
-  auto CastTy = Size <= 4 ? llvm::Type::getInt32Ty(CGM.getLLVMContext())
-                          : llvm::Type::getInt64Ty(CGM.getLLVMContext());
-  Elem = Bld.CreateSExtOrBitCast(Elem, CastTy);
-
-  llvm::SmallVector<llvm::Value *, 3> FnArgs;
-  FnArgs.push_back(Elem);
-  FnArgs.push_back(Offset);
-  FnArgs.push_back(Bld.getInt16(DS_Max_Worker_Warp_Size));
-
-  return CGF.EmitCallOrInvoke(RTLFn, FnArgs).getInstruction();
-}
-
 static llvm::Value *
 EmitShuffleAndReduceFunction(CodeGenModule &CGM,
                              ArrayRef<const Expr *> Privates,
@@ -3999,6 +4526,9 @@ EmitShuffleAndReduceFunction(CodeGenModule &CGM,
       ".omp.reduction.shuffle_and_reduce_func", &CGM.getModule());
   CGM.SetInternalFunctionAttributes(/*D=*/nullptr, Fn, CGFI);
   CodeGenFunction CGF(CGM);
+  // We don't need debug information in this function as nothing here refers to
+  // user code.
+  CGF.disableDebugInfo();
   CGF.StartFunction(GlobalDecl(), C.VoidTy, Fn, CGFI, Args);
 
   auto &Bld = CGF.Builder;
@@ -4029,43 +4559,11 @@ EmitShuffleAndReduceFunction(CodeGenModule &CGM,
   Address RemoteReduceData =
       CGF.CreateMemTemp(ReductionArrayTy, ".omp.reduction.remote_reduce_list");
 
-  // This loop iterates through the list of reduce elements
-  // and copies element by element from a remote lane to the
-  // local variable remote_red_list.
-  unsigned Idx = 0;
-  for (auto &Private : Privates) {
-    // Elem = *((type[i]*)LocalReduceData[i])
-    // RemoteElem = (type[i])shuffle_down(Elem, Offset, /*participating
-    // lanes=*/32)
-    Address ElemPtrPtrAddr =
-        Bld.CreateConstArrayGEP(LocalReduceData, Idx, CGF.getPointerSize());
-    llvm::Value *ElemPtrPtr = CGF.EmitLoadOfScalar(
-        ElemPtrPtrAddr, /*Volatile=*/false, C.VoidPtrTy, SourceLocation());
-
-    Address ElemPtr =
-        Address(ElemPtrPtr, C.getTypeAlignInChars(Private->getType()));
-    ElemPtr = Bld.CreateElementBitCast(
-        ElemPtr, CGF.ConvertTypeForMem(Private->getType()));
-    llvm::Value *Elem = CGF.EmitLoadOfScalar(
-        ElemPtr, /*Volatile=*/false, Private->getType(), SourceLocation());
-
-    auto *ShuffledElem = createRuntimeShuffleFunction(CGF, Private->getType(),
-                                                      Elem, OffsetArgVal);
-    ShuffledElem = Bld.CreateTruncOrBitCast(
-        ShuffledElem, CGF.ConvertTypeForMem(Private->getType()));
-
-    Address ReductionElement = CGF.CreateMemTemp(Private->getType());
-    CGF.EmitStoreOfScalar(ShuffledElem, ReductionElement, /*Volatile=*/false,
-                          Private->getType());
-
-    Address RemoteElementPtr =
-        Bld.CreateConstArrayGEP(RemoteReduceData, Idx, CGF.getPointerSize());
-    // RemoteReduceData[i] = (void*)&RemoteElem
-    CGF.EmitStoreOfScalar(Bld.CreatePointerBitCastOrAddrSpaceCast(
-                              ReductionElement.getPointer(), CGF.VoidPtrTy),
-                          RemoteElementPtr, /*Volatile=*/false, C.VoidPtrTy);
-    Idx++;
-  }
+  // This loop iterates through the list of reduce elements and copies element
+  // by element from a remote lane to the local variable remote_red_list.
+  EmitDirectionSpecializedReduceDataCopy(
+      Shuffle_To_ReduceData, CGF, ReductionArrayTy, Privates, LocalReduceData,
+      RemoteReduceData, OffsetArgVal);
 
   // The actions to be performed on the remote reduce data is dependent
   // upon the algorithm version.
@@ -4141,34 +4639,9 @@ EmitShuffleAndReduceFunction(CodeGenModule &CGM,
   Bld.CreateCondBr(CondCopy, CpyThenBB, CpyMergeBB);
 
   CGF.EmitBlock(CpyThenBB);
-  Idx = 0;
-  for (auto &Private : Privates) {
-    // Elem = *((type[i]*)RemoteReduceData[i])
-    Address ElemPtrPtrAddr =
-        Bld.CreateConstArrayGEP(RemoteReduceData, Idx, CGF.getPointerSize());
-    llvm::Value *ElemPtrPtr = CGF.EmitLoadOfScalar(
-        ElemPtrPtrAddr, /*Volatile=*/false, C.VoidPtrTy, SourceLocation());
-    Address ElemPtr =
-        Address(ElemPtrPtr, C.getTypeAlignInChars(Private->getType()));
-    ElemPtr = Bld.CreateElementBitCast(
-        ElemPtr, CGF.ConvertTypeForMem(Private->getType()));
-    llvm::Value *Elem = CGF.EmitLoadOfScalar(
-        ElemPtr, /*Volatile=*/false, Private->getType(), SourceLocation());
-
-    // *((type[i]*)LocalReduceData[i]) = Elem
-    Address LocalElemPtrPtrAddr =
-        Bld.CreateConstArrayGEP(LocalReduceData, Idx, CGF.getPointerSize());
-    llvm::Value *LocalElemPtrPtr = CGF.EmitLoadOfScalar(
-        LocalElemPtrPtrAddr, /*Volatile=*/false, C.VoidPtrTy, SourceLocation());
-    Address LocalElemPtr =
-        Address(LocalElemPtrPtr, C.getTypeAlignInChars(Private->getType()));
-    LocalElemPtr = Bld.CreateElementBitCast(
-        LocalElemPtr, CGF.ConvertTypeForMem(Private->getType()));
-    CGF.EmitStoreOfScalar(Elem, LocalElemPtr, /*Volatile=*/false,
-                          Private->getType());
-
-    Idx++;
-  }
+  EmitDirectionSpecializedReduceDataCopy(ReduceData_To_ReduceData, CGF,
+                                         ReductionArrayTy, Privates,
+                                         RemoteReduceData, LocalReduceData);
   Bld.CreateBr(CpyMergeBB);
 
   CGF.EmitBlock(CpyElseBB);
@@ -4184,11 +4657,14 @@ void CGOpenMPRuntimeNVPTX::emitReduction(
     CodeGenFunction &CGF, SourceLocation Loc, ArrayRef<const Expr *> Privates,
     ArrayRef<const Expr *> LHSExprs, ArrayRef<const Expr *> RHSExprs,
     ArrayRef<const Expr *> ReductionOps, bool WithNowait, bool SimpleReduction,
-    bool ParallelReduction, bool SimdReduction, bool TeamsReduction) {
+    OpenMPDirectiveKind ReductionKind) {
   if (!CGF.HaveInsertPoint())
     return;
 
-  assert((ParallelReduction || SimdReduction || TeamsReduction) &&
+  bool TeamsReduction = isOpenMPTeamsDirective(ReductionKind);
+  bool ParallelReduction = isOpenMPParallelDirective(ReductionKind);
+  bool SimdReduction = isOpenMPSimdDirective(ReductionKind);
+  assert((TeamsReduction || ParallelReduction || SimdReduction) &&
          "Invalid reduction selection in emitReduction.");
 
   auto &C = CGM.getContext();
@@ -4247,6 +4723,9 @@ void CGOpenMPRuntimeNVPTX::emitReduction(
       CGM, Privates, ReductionArrayTy, ReductionFn);
   auto *InterWarpCopy =
       EmitInterWarpCopyFunction(CGM, Privates, ReductionArrayTy);
+  auto *ScratchPadCopy = EmitCopyToScratchpad(CGM, Privates, ReductionArrayTy);
+  auto *LoadAndReduce = EmitReduceScratchpadFunction(
+      CGM, Privates, ReductionArrayTy, ReductionFn);
   llvm::Value *Args[] = {
       ThreadId,                              // i32 <gtid>
       CGF.Builder.getInt32(RHSExprs.size()), // i32 <n>
@@ -4272,6 +4751,36 @@ void CGOpenMPRuntimeNVPTX::emitReduction(
             /*WithNowait ? */ OMPRTL_NVPTX__kmpc_simd_reduce_nowait
             /*,OMPRTL__kmpc_reduce*/),
         Args);
+  }
+
+  // ReductionKind of OMPD_distribute_parallel_for is used to indicate
+  // reduction codegen of coalesced 'distribute parallel for' in a combined
+  // directive such as 'target teams distribute parallel for'. In this case
+  // return early since this function will be called again on the teams
+  // reduction directive.
+  if (ReductionKind == OMPD_distribute_parallel_for)
+    return;
+
+  if (TeamsReduction) {
+    llvm::Value *TeamsArgs[] = {
+        ThreadId,                              // i32 <gtid>
+        CGF.Builder.getInt32(RHSExprs.size()), // i32 <n>
+        ReductionArrayTySize,                  // size_type sizeof(RedList)
+        RL,                                    // void *RedList
+        ShuffleAndReduce, // void (*kmp_ShuffleReductFctPtr)(void *rhsData,
+                          // int16_t lane_id, int16_t lane_offset, int16_t
+                          // shortCircuit);
+        InterWarpCopy,    // void (*kmp_InterWarpCopyFctPtr)(void* src, int
+                          // warp_num);
+        ScratchPadCopy,   // (*kmp_CopyToScratchpadFctPtr)(void *reduceData,
+                          // void * scratchpad, int32_t index, int32_t width);
+        LoadAndReduce     // (*kmp_LoadReduceFctPtr)(void *reduceData,
+                          // void * scratchpad, int32_t index,
+                          // int32_t width, int32_t reduce);
+    };
+    Res = CGF.EmitRuntimeCall(
+        createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_teams_reduce_nowait),
+        TeamsArgs);
   }
 
   // 5. Build switch(res)

@@ -571,8 +571,7 @@ public:
                              ArrayRef<const Expr *> RHSExprs,
                              ArrayRef<const Expr *> ReductionOps,
                              bool WithNowait, bool SimpleReduction,
-                             bool ParallelReduction, bool SimdReduction,
-                             bool TeamsReduction) override;
+                             OpenMPDirectiveKind ReductionKind) override;
 };
 
 } // CodeGen namespace.
