@@ -4054,9 +4054,57 @@ void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForDirective(
       *this, S, OMPD_target_teams_distribute_parallel_for, CodeGen);
 }
 
+static void TargetTeamsDistributeParallelForSimdCodegen(
+    CodeGenModule &CGM, CodeGenFunction &CGF, PrePostActionTy &Action,
+    const OMPTargetTeamsDistributeParallelForSimdDirective &S) {
+  Action.Enter(CGF);
+  auto &&CodeGen = [&CGM, &S](CodeGenFunction &CGF, PrePostActionTy &) {
+    CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
+    CGF.EmitOMPReductionClauseInit(S, PrivateScope);
+    (void)PrivateScope.Privatize();
+    auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+      auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+        auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+          CGF.EmitOMPWorksharingLoop(S);
+        };
+        emitCommonOMPParallelDirective(CGF, S, OMPD_for, CodeGen);
+      };
+      CGF.EmitOMPDistributeLoop(S, CodeGen);
+    };
+    CGM.getOpenMPRuntime().emitInlinedDirective(CGF, OMPD_distribute, CodeGen,
+                                                false);
+    CGF.EmitOMPReductionClauseFinal(S, OMPD_teams);
+  };
+  emitCommonOMPTeamsDirective(CGF, S,
+                              OMPD_target_teams_distribute_parallel_for_simd,
+                              CodeGen, /*CaptureLevel=*/1,
+                              /*ImplicitParamStop=*/2);
+  emitPostUpdateForReductionClause(
+      CGF, S, [](CodeGenFunction &) -> llvm::Value * { return nullptr; });
+}
+
+void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForSimdDeviceFunction(
+    CodeGenModule &CGM, StringRef ParentName,
+    const OMPTargetTeamsDistributeParallelForSimdDirective &S) {
+  // Emit SPMD target parallel for region as a standalone region.
+  auto &&CodeGen = [&S, &CGM](CodeGenFunction &CGF, PrePostActionTy &Action) {
+    TargetTeamsDistributeParallelForSimdCodegen(CGM, CGF, Action, S);
+  };
+  llvm::Function *Fn;
+  llvm::Constant *Addr;
+  // Emit target region as a standalone region.
+  CGM.getOpenMPRuntime().emitTargetOutlinedFunction(
+      S, ParentName, Fn, Addr, /*IsOffloadEntry=*/true, CodeGen);
+  assert(Fn && Addr && "Target device function emission failed.");
+}
+
 void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForSimdDirective(
     const OMPTargetTeamsDistributeParallelForSimdDirective &S) {
-  // empty codegen
+  auto &&CodeGen = [&S, this](CodeGenFunction &CGF, PrePostActionTy &Action) {
+    TargetTeamsDistributeParallelForSimdCodegen(CGM, CGF, Action, S);
+  };
+  emitCommonOMPTargetDirective(
+      *this, S, OMPD_target_teams_distribute_parallel_for_simd, CodeGen);
 }
 
 void CodeGenFunction::EmitOMPTeamsDistributeSimdDirective(
