@@ -2332,6 +2332,11 @@ CodeGenModule::CreateRuntimeVariable(llvm::Type *Ty,
 void CodeGenModule::EmitTentativeDefinition(const VarDecl *D) {
   assert(!D->getInit() && "Cannot emit definite definitions here!");
 
+  // If this is OpenMP device, check if it is legal to emit this global
+  // normally.
+  if (OpenMPRuntime && OpenMPRuntime->emitTargetGlobal(D))
+    return;
+
   StringRef MangledName = getMangledName(D);
   llvm::GlobalValue *GV = GetGlobalValue(MangledName);
 
