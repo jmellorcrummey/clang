@@ -8312,6 +8312,12 @@ public:
       ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
       SourceLocation EndLoc,
       llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA);
+  /// \brief Called on well-formed '\#pragma omp target teams distribute' after
+  /// parsing of the associated statement.
+  StmtResult ActOnOpenMPTargetTeamsDistributeDirective(
+      ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
+      SourceLocation EndLoc,
+      llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA);
 
   /// Checks correctness of linear modifiers.
   bool CheckOpenMPLinearModifier(OpenMPLinearClauseKind LinKind,
@@ -9219,6 +9225,18 @@ public:
   /// depending on FD and the current compilation settings.
   void maybeAddCUDAHostDeviceAttrs(Scope *S, FunctionDecl *FD,
                                    const LookupResult &Previous);
+
+  /// Check whether we're allowed to call Callee from the current context.
+  ///
+  /// If the call is never allowed in a semantically-correct program
+  /// (CFP_Never), emits an error and returns false.
+  ///
+  /// If the call is allowed in semantically-correct programs, but only if it's
+  /// never codegen'ed (CFP_WrongSide), creates a deferred diagnostic to be
+  /// emitted if and when the caller is codegen'ed, and returns true.
+  ///
+  /// Otherwise, returns true without emitting any diagnostics.
+  bool CheckCUDACall(SourceLocation Loc, FunctionDecl *Callee);
 
   /// Finds a function in \p Matches with highest calling priority
   /// from \p Caller context and erases all functions with lower
