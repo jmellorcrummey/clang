@@ -2061,14 +2061,19 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
           OrigVD = cast<VarDecl>(
               cast<DeclRefExpr>(OD->getInit()->IgnoreImpCasts())->getDecl());
 
-        // If we have an alloca for this variable, then we need to share the
-        // storage too, not only the reference.
-        auto *Val =
-            cast<llvm::Instruction>(CGF.GetAddrOfLocalVar(OrigVD).getPointer());
-        if (isa<llvm::LoadInst>(Val))
+        // If the variable does not have local storage it is always a reference.
+        if (!OrigVD->hasLocalStorage()) {
           DST = DataSharingInfo::DST_Ref;
-        else if (isa<llvm::BitCastInst>(Val))
-          DST = DataSharingInfo::DST_Cast;
+        } else {
+          // If we have an alloca for this variable, then we need to share the
+          // storage too, not only the reference.
+          auto *Val = cast<llvm::Instruction>(
+              CGF.GetAddrOfLocalVar(OrigVD).getPointer());
+          if (isa<llvm::LoadInst>(Val))
+            DST = DataSharingInfo::DST_Ref;
+          else if (isa<llvm::BitCastInst>(Val))
+            DST = DataSharingInfo::DST_Cast;
+        }
       }
 
       // Do not insert the same declaration twice.
@@ -2457,7 +2462,8 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
 
     assert(OriginalVal && "Can't obtain value to replace with??");
 
-    EnclosingFuncInfo.ValuesToBeReplaced.push_back(OriginalVal);
+    EnclosingFuncInfo.ValuesToBeReplaced.push_back(std::make_pair(
+        OriginalVal, DSI.CapturesValues[i].second == DataSharingInfo::DST_Ref));
   }
 
   CGF.EmitBlock(ExitBB);
@@ -3300,12 +3306,13 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
         continue;
       }
 
-      auto It = std::find(DSI.ValuesToBeReplaced.begin(),
-                          DSI.ValuesToBeReplaced.end(), &I);
+      auto It = std::find_if(
+          DSI.ValuesToBeReplaced.begin(), DSI.ValuesToBeReplaced.end(),
+          [&I](std::pair<llvm::Value *, bool> &P) { return P.first == &I; });
       if (It == DSI.ValuesToBeReplaced.end())
         continue;
 
-      LastNonAllocaReplacement = cast<llvm::Instruction>(*It);
+      LastNonAllocaReplacement = cast<llvm::Instruction>(It->first);
     }
 
     // We will start inserting after the first alloca or at the beginning of the
@@ -3369,17 +3376,19 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
     // Create the remaining arguments. One if it is a reference sharing (the
     // reference itself), two otherwise (the address of the replacement and the
     // value to be replaced).
-    for (auto *R : DSI.ValuesToBeReplaced) {
-
+    for (auto &VR : DSI.ValuesToBeReplaced) {
+      auto *Replacement = VR.first;
+      bool IsReference = VR.second;
       // Is it a reference? If not, create the address alloca.
-      if (!isa<llvm::LoadInst>(R)) {
+      if (!IsReference) {
         InitArgs.push_back(new llvm::AllocaInst(
-            R->getType(), /*ArraySize=*/nullptr, PointerAlign,
-            R->getName() + ".shared", InsertPtr));
-        // We will have to replace the uses of R by the load of new alloca.
-        Replacements.push_back(std::make_pair(R, InitArgs.back()));
+            Replacement->getType(), /*ArraySize=*/nullptr, PointerAlign,
+            Replacement->getName() + ".shared", InsertPtr));
+        // We will have to replace the uses of Replacement by the load of new
+        // alloca.
+        Replacements.push_back(std::make_pair(Replacement, InitArgs.back()));
       }
-      InitArgs.push_back(R);
+      InitArgs.push_back(Replacement);
     }
 
     // We now need to insert the sharing calls. We insert after the last value
@@ -3428,6 +3437,33 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
     // If this is an entry point, we have to initialize the data sharing first.
     if (DSI.IsEntryPoint)
       InitializeEntryPoint(InsertPtr);
+
+    // Adjust address spaces in the function arguments.
+    auto FArg = DSI.InitializationFunction->arg_begin();
+    for (auto &Arg : InitArgs) {
+
+      // Types match, nothing to do.
+      if (FArg->getType() == Arg->getType()) {
+        ++FArg;
+        continue;
+      }
+
+      // Check if there is some address space mismatch.
+      llvm::PointerType *FArgTy = dyn_cast<llvm::PointerType>(FArg->getType());
+      llvm::PointerType *ArgTy = dyn_cast<llvm::PointerType>(Arg->getType());
+      if (FArgTy && ArgTy &&
+          FArgTy->getElementType() == ArgTy->getElementType() &&
+          FArgTy->getAddressSpace() != ArgTy->getAddressSpace()) {
+        Arg = llvm::CastInst::Create(llvm::CastInst::AddrSpaceCast, Arg, FArgTy,
+                                     ".data_share_addrspace_cast", InsertPtr);
+        ++FArg;
+        continue;
+      }
+
+      llvm_unreachable(
+          "Unexpected type in data sharing initialization arguments.");
+    }
+
     (void)llvm::CallInst::Create(DSI.InitializationFunction, InitArgs, "",
                                  InsertPtr);
 
