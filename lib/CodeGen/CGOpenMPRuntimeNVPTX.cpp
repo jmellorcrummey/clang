@@ -1837,14 +1837,16 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
          "thread id variable must be of type kmp_int32 *");
 
   llvm::Function *OutlinedFun = nullptr;
-  if (!isOpenMPParallelDirective(D.getDirectiveKind())) {
-    // no outlining happening for teams
-  } else if (isSPMDExecutionMode()) {
-    // Simplified code generation if in SPMD mode.
+  if (isSPMDExecutionMode()) {
+    // Call to outlined function if in SPMD mode.
     return CGOpenMPRuntime::emitParallelOrTeamsOutlinedFunction(
         D, ThreadIDVar, InnermostKind, CodeGen, CaptureLevel,
         ImplicitParamStop);
+  } else if (isOpenMPTeamsDirective(D.getDirectiveKind())) {
+    // No outlining required for teams or target teams
   } else {
+    // Call to a parallel that is not combined with a teams or target
+    // directive (non SPMD).
     const CapturedStmt *CS = cast<CapturedStmt>(D.getAssociatedStmt());
     CodeGenFunction CGF(CGM, true);
     bool HasCancel = false;
@@ -3246,22 +3248,65 @@ void CGOpenMPRuntimeNVPTX::emitNumTeamsClause(CodeGenFunction &CGF,
                                               const Expr *ThreadLimit,
                                               SourceLocation Loc) {}
 
+static void emitPostUpdateForReductionClause(
+    CodeGenFunction &CGF, const OMPExecutableDirective &D,
+    const llvm::function_ref<llvm::Value *(CodeGenFunction &)> &CondGen) {
+  if (!CGF.HaveInsertPoint())
+    return;
+  llvm::BasicBlock *DoneBB = nullptr;
+  for (const auto *C : D.getClausesOfKind<OMPReductionClause>()) {
+    if (auto *PostUpdate = C->getPostUpdateExpr()) {
+      if (!DoneBB) {
+        if (auto *Cond = CondGen(CGF)) {
+          // If the first post-update expression is found, emit conditional
+          // block if it was requested.
+          auto *ThenBB = CGF.createBasicBlock(".omp.reduction.pu");
+          DoneBB = CGF.createBasicBlock(".omp.reduction.pu.done");
+          CGF.Builder.CreateCondBr(Cond, ThenBB, DoneBB);
+          CGF.EmitBlock(ThenBB);
+        }
+      }
+      CGF.EmitIgnoredExpr(PostUpdate);
+    }
+  }
+  if (DoneBB)
+    CGF.EmitBlock(DoneBB, /*IsFinished=*/true);
+}
+
 void CGOpenMPRuntimeNVPTX::emitTeamsCall(CodeGenFunction &CGF,
                                          const OMPExecutableDirective &D,
                                          SourceLocation Loc,
                                          llvm::Value *OutlinedFn,
                                          ArrayRef<llvm::Value *> CapturedVars) {
-  // OutlinedFn(&GTid, &zero, CapturedStruct);
-  auto ThreadIDAddr = emitThreadIDAddress(CGF, Loc);
-  Address ZeroAddr =
-      CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
-                           /*Name*/ ".zero.addr");
-  CGF.InitTempAlloca(ZeroAddr, CGF.Builder.getInt32(/*C*/ 0));
-  llvm::SmallVector<llvm::Value *, 16> OutlinedFnArgs;
-  OutlinedFnArgs.push_back(ThreadIDAddr.getPointer());
-  OutlinedFnArgs.push_back(ZeroAddr.getPointer());
-  OutlinedFnArgs.append(CapturedVars.begin(), CapturedVars.end());
-  CGF.EmitCallOrInvoke(OutlinedFn, OutlinedFnArgs);
+  if (isSPMDExecutionMode()) {
+    // OutlinedFn(&GTid, &zero, CapturedStruct);
+    auto ThreadIDAddr = emitThreadIDAddress(CGF, Loc);
+    Address ZeroAddr =
+        CGF.CreateTempAlloca(CGF.Int32Ty, CharUnits::fromQuantity(4),
+                             /*Name*/ ".zero.addr");
+    CGF.InitTempAlloca(ZeroAddr, CGF.Builder.getInt32(/*C*/ 0));
+    llvm::SmallVector<llvm::Value *, 16> OutlinedFnArgs;
+    OutlinedFnArgs.push_back(ThreadIDAddr.getPointer());
+    OutlinedFnArgs.push_back(ZeroAddr.getPointer());
+    OutlinedFnArgs.append(CapturedVars.begin(), CapturedVars.end());
+    CGF.EmitCallOrInvoke(OutlinedFn, OutlinedFnArgs);
+  } else {
+    // just emit the statements in the teams region inlined
+    auto &&CodeGen = [&D](CodeGenFunction &CGF, PrePostActionTy &) {
+      CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
+      (void)CGF.EmitOMPFirstprivateClause(D, PrivateScope);
+      CGF.EmitOMPPrivateClause(D, PrivateScope);
+      CGF.EmitOMPReductionClauseInit(D, PrivateScope);
+      (void)PrivateScope.Privatize();
+      CGF.EmitStmt(
+          cast<CapturedStmt>(D.getAssociatedStmt())->getCapturedStmt());
+      CGF.EmitOMPReductionClauseFinal(D, OMPD_teams);
+    };
+
+    emitInlinedDirective(CGF, OMPD_teams, CodeGen);
+    emitPostUpdateForReductionClause(
+        CGF, D, [](CodeGenFunction &) -> llvm::Value * { return nullptr; });
+  }
 }
 
 llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
