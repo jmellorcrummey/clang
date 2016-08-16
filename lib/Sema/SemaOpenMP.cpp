@@ -12811,10 +12811,12 @@ checkMappableExpressionList(Sema &SemaRef, DSAStackTy *DSAS,
 
       // OpenMP 4.5 [2.15.5.1, Restrictions, p.3]
       // A list item cannot appear in both a map clause and a data-sharing
-      // attribute clause on the same construct
+      // attribute clause on the same construct. We are excluding reduction
+      // in this check because the OpenMP committee is working on lifting this
+      // restriction for reduction.
       if (isOpenMPTargetExecutionDirective(DKind) && VD) {
         auto DVar = DSAS->getTopDSA(VD, false);
-        if (isOpenMPPrivate(DVar.CKind)) {
+        if (isOpenMPPrivate(DVar.CKind) && DVar.CKind != OMPC_reduction) {
           SemaRef.Diag(ELoc, diag::err_omp_variable_in_given_clause_and_dsa)
               << getOpenMPClauseName(DVar.CKind)
               << getOpenMPClauseName(OMPC_map)
