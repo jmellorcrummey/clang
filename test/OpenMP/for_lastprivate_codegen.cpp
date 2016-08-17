@@ -318,6 +318,7 @@ int main() {
     // BLOCKS: [[SIVAR_PRIVATE_ADDR:%.+]] = alloca i{{[0-9]+}},
     // BLOCKS: store i{{[0-9]+}}* [[SIVAR]], i{{[0-9]+}}** [[SIVAR_ADDR:%.+]],
     // BLOCKS: {{.+}} = load i{{[0-9]+}}*, i{{[0-9]+}}** [[SIVAR_ADDR]]
+    // BLOCKS: load i{{[0-9]+}}*, i{{[0-9]+}}** %{{.+}}
     // BLOCKS: [[GTID_REF:%.+]] = load i{{[0-9]+}}*, i{{[0-9]+}}** %{{.+}}
     // BLOCKS: [[GTID:%.+]] = load i{{[0-9]+}}, i{{[0-9]+}}* [[GTID_REF]]
     // BLOCKS: call {{.+}} @__kmpc_for_static_init_4(%{{.+}}* @{{.+}}, i32 [[GTID]], i32 34, i32* [[IS_LAST_ADDR:%.+]], i32* %{{.+}}, i32* %{{.+}}, i32* %{{.+}}, i32 1, i32 1)
