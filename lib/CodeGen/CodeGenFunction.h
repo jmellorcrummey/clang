@@ -2585,6 +2585,9 @@ public:
   void EmitOMPPrivateLoopCounters(const OMPLoopDirective &S,
                                   OMPPrivateScope &LoopScope);
 
+  /// \brief Emit a helper variable and return corresponding lvalue.
+  LValue EmitOMPHelperVar(const DeclRefExpr *Helper);
+
 private:
   /// Helpers for the OpenMP loop directives.
   void EmitOMPLoopBody(const OMPLoopDirective &D, JumpDest LoopExit);

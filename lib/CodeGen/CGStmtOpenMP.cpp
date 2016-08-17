@@ -1721,11 +1721,13 @@ void CodeGenFunction::EmitOMPSimdFinal(
 }
 
 /// \brief Emit a helper variable and return corresponding lvalue.
-static LValue EmitOMPHelperVar(CodeGenFunction &CGF,
-                               const DeclRefExpr *Helper) {
-  auto VDecl = cast<VarDecl>(Helper->getDecl());
-  CGF.EmitVarDecl(*VDecl);
-  return CGF.EmitLValue(Helper);
+LValue CodeGenFunction::EmitOMPHelperVar(const DeclRefExpr *Helper) {
+  auto *VDecl = cast<VarDecl>(Helper->getDecl());
+
+  // Don't need to emit variable if it was emitted before.
+  if (LocalDeclMap.find(VDecl) == LocalDeclMap.end())
+    EmitVarDecl(*VDecl);
+  return EmitLValue(Helper);
 }
 
 static void emitDeviceOMPSimdDirective(CodeGenFunction &CGF,
@@ -2279,14 +2281,10 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
     emitAlignedClause(*this, S);
     EmitOMPLinearClauseInit(S);
     // Emit helper vars inits.
-    LValue LB =
-        EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getLowerBoundVariable()));
-    LValue UB =
-        EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getUpperBoundVariable()));
-    LValue ST =
-        EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getStrideVariable()));
-    LValue IL =
-        EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getIsLastIterVariable()));
+    LValue LB = EmitOMPHelperVar(cast<DeclRefExpr>(S.getLowerBoundVariable()));
+    LValue UB = EmitOMPHelperVar(cast<DeclRefExpr>(S.getUpperBoundVariable()));
+    LValue ST = EmitOMPHelperVar(cast<DeclRefExpr>(S.getStrideVariable()));
+    LValue IL = EmitOMPHelperVar(cast<DeclRefExpr>(S.getIsLastIterVariable()));
 
     if (isOpenMPLoopBoundSharingDirective(S.getDirectiveKind())) {
       // When composing distribute with for we need to use the pragma distribute
@@ -3031,13 +3029,12 @@ void CodeGenFunction::EmitOMPDistributeLoop(
     {
       // Emit helper vars inits.
       LValue LB =
-          EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getLowerBoundVariable()));
+          EmitOMPHelperVar(cast<DeclRefExpr>(S.getLowerBoundVariable()));
       LValue UB =
-          EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getUpperBoundVariable()));
-      LValue ST =
-          EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getStrideVariable()));
+          EmitOMPHelperVar(cast<DeclRefExpr>(S.getUpperBoundVariable()));
+      LValue ST = EmitOMPHelperVar(cast<DeclRefExpr>(S.getStrideVariable()));
       LValue IL =
-          EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getIsLastIterVariable()));
+          EmitOMPHelperVar(cast<DeclRefExpr>(S.getIsLastIterVariable()));
 
       OMPPrivateScope LoopScope(*this);
       if (EmitOMPFirstprivateClause(S, LoopScope)) {

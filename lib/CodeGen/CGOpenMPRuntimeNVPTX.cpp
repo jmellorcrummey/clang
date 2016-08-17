@@ -2523,9 +2523,12 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
   auto FI = MasterRD->field_begin();
   for (unsigned i = 0; i < OrigAddresses.size(); ++i, ++FI) {
     llvm::Value *OriginalVal = nullptr;
-    if (DSI.CapturesValues[i].first) {
-      OriginalVal = EnclosingCGF.GetAddrOfLocalVar(DSI.CapturesValues[i].first)
-                        .getPointer();
+    if (const VarDecl *VD = DSI.CapturesValues[i].first) {
+      DeclRefExpr DRE(const_cast<VarDecl *>(VD),
+                      /*RefersToEnclosingVariableOrCapture=*/false,
+                      VD->getType(), VK_LValue, SourceLocation());
+      Address OriginalAddr = EnclosingCGF.EmitOMPHelperVar(&DRE).getAddress();
+      OriginalVal = OriginalAddr.getPointer();
     } else
       OriginalVal = CGF.LoadCXXThis();
 
