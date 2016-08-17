@@ -126,7 +126,7 @@ enum DATA_SHARING_SIZES {
   // The maximum number of workers in a kernel.
   DS_Max_Worker_Threads = 992,
   // The size reserved for data in a shared memory slot.
-  DS_Slot_Size = 4,
+  DS_Slot_Size = 256,
   // The maximum number of threads in a worker warp.
   DS_Max_Worker_Warp_Size = 32,
   // The number of bits required to represent the maximum number of threads in a
