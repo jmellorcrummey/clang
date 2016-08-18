@@ -3036,12 +3036,14 @@ void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::
 /// compilation unit.
 static llvm::Function *
 createOffloadingHelperFunction(CodeGenModule &CGM, StringRef Name,
+                               bool RequiresArgument,
                                const RegionCodeGenTy &Codegen) {
   auto &C = CGM.getContext();
   FunctionArgList Args;
   ImplicitParamDecl DummyPtr(C, /*DC=*/nullptr, SourceLocation(),
                              /*Id=*/nullptr, C.VoidPtrTy);
-  Args.push_back(&DummyPtr);
+  if (RequiresArgument)
+    Args.push_back(&DummyPtr);
 
   CodeGenFunction CGF(CGM);
   auto &FI = CGM.getTypes().arrangeBuiltinFunctionDeclaration(C.VoidTy, Args);
@@ -3146,13 +3148,13 @@ CGOpenMPRuntime::createOffloadingBinaryDescriptorRegistration() {
                                 IdentInfo, C.CharTy);
 
   auto *UnRegFn = createOffloadingHelperFunction(
-      CGM, ".omp_offloading.descriptor_unreg",
+      CGM, ".omp_offloading.descriptor_unreg", /*RequiresArgument=*/true,
       [&](CodeGenFunction &CGF, PrePostActionTy &) {
         CGF.EmitCallOrInvoke(createRuntimeFunction(OMPRTL__tgt_unregister_lib),
                              Desc);
       });
   auto *RegFn = createOffloadingHelperFunction(
-      CGM, ".omp_offloading.descriptor_reg",
+      CGM, ".omp_offloading.descriptor_reg", /*RequiresArgument=*/false,
       [&](CodeGenFunction &CGF, PrePostActionTy &) {
         CGF.EmitCallOrInvoke(createRuntimeFunction(OMPRTL__tgt_register_lib),
                              Desc);
@@ -7013,7 +7015,7 @@ llvm::Function *CGOpenMPRuntime::emitRegistrationFunction() {
 
       // Create a helper function to register the destructor.
       auto *DtorFn = createOffloadingHelperFunction(
-          CGM, ".omp_offloading_dtor_helper",
+          CGM, ".omp_offloading_dtor_helper", /*RequiresArgument=*/true,
           [&](CodeGenFunction &CGF, PrePostActionTy &) {
             // Produce an ID whose address uniquely identifies the target
             // region.
