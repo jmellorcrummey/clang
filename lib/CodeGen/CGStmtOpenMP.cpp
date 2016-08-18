@@ -4117,11 +4117,6 @@ void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForSimdDirective(
       *this, S, OMPD_target_teams_distribute_parallel_for_simd, CodeGen);
 }
 
-void CodeGenFunction::EmitOMPTeamsDistributeSimdDirective(
-    const OMPTeamsDistributeSimdDirective &S) {
-  // empty codegen
-}
-
 void CodeGenFunction::EmitOMPTargetTeamsDistributeDirective(
     const OMPTargetTeamsDistributeDirective &S) {
   // empty codegen

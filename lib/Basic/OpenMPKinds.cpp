@@ -798,14 +798,13 @@ bool clang::isOpenMPSimdDirective(OpenMPDirectiveKind DKind) {
 bool clang::isOpenMPNestingDistributeDirective(OpenMPDirectiveKind Kind) {
   return Kind == OMPD_distribute || Kind == OMPD_distribute_parallel_for ||
          Kind == OMPD_distribute_parallel_for_simd ||
-         Kind == OMPD_distribute_simd;
+         Kind == OMPD_distribute_simd || Kind == OMPD_teams_distribute_simd;
   // TODO add next directives.
 }
 
 bool clang::isOpenMPDistributeDirective(OpenMPDirectiveKind Kind) {
   return isOpenMPNestingDistributeDirective(Kind) ||
-         Kind == OMPD_teams_distribute || Kind == OMPD_teams_distribute_simd || 
-         Kind == OMPD_target_teams_distribute;
+         Kind == OMPD_teams_distribute || Kind == OMPD_target_teams_distribute;
   // TODO add next directives.
 }
 
@@ -831,4 +830,9 @@ bool clang::isOpenMPLoopBoundSharingDirective(OpenMPDirectiveKind Kind) {
          Kind == OMPD_teams_distribute_parallel_for ||
          Kind == OMPD_target_teams_distribute_parallel_for ||
          Kind == OMPD_target_teams_distribute_parallel_for_simd;
+}
+
+bool clang::requiresAdditionalIterationVar(OpenMPDirectiveKind DKind) {
+  return DKind == OMPD_distribute_simd || DKind == OMPD_teams_distribute_simd;
+  // TODO add more directives if we detect any other cases.
 }

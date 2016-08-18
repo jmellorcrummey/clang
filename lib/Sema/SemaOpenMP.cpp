@@ -864,7 +864,7 @@ public:
   ImplicitDeviceFunctionChecker(Sema &SemaReference) : SemaRef(SemaReference){};
 
   /// Traverse body of lambda, and mark it the with OMPDeclareTargetDeclAttr
-  bool TraverseLambdaCapture(LambdaExpr *LE, const LambdaCapture *C);
+  bool TraverseLambdaCapture(LambdaExpr *LE, const LambdaCapture *C, Expr *Init);
 
   /// Traverse FunctionDecl and mark it the with OMPDeclareTargetDeclAttr
   bool VisitFunctionDecl(FunctionDecl *F);
@@ -906,7 +906,8 @@ void Sema::checkDeclImplicitlyUsedOpenMPTargetContext(Decl *D) {
 }
 
 bool ImplicitDeviceFunctionChecker::TraverseLambdaCapture(
-    LambdaExpr *LE, const LambdaCapture *C) {
+    LambdaExpr *LE, const LambdaCapture *C,
+    Expr *Init) {
   if (CXXRecordDecl *Class = LE->getLambdaClass())
     if (!Class->hasAttr<OMPDeclareTargetDeclAttr>()) {
       Attr *A = OMPDeclareTargetDeclAttr::CreateImplicit(
@@ -4358,10 +4359,9 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
       }
       return false;
     }
-    // Allow some constructs (except teams) to be orphaned (they could be
-    // used in functions, called from OpenMP regions with the required
-    // preconditions).
-    if (ParentRegion == OMPD_unknown && !isOpenMPTeamsDirective(CurrentRegion))
+    // Allow some constructs (except the ones that start with teams) to be orphaned (they could be used in functions, called from OpenMP regions with the required preconditions).
+    if (ParentRegion == OMPD_unknown && !(isOpenMPTeamsDirective(CurrentRegion) &&
+               !isOpenMPTargetExecutionDirective(CurrentRegion)))
       return false;
     if (CurrentRegion == OMPD_cancellation_point ||
         CurrentRegion == OMPD_cancel) {
