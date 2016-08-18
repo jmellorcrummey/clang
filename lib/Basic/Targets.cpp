@@ -2160,7 +2160,10 @@ public:
       Opts.cl_khr_int64_base_atomics = 1;
       Opts.cl_khr_int64_extended_atomics = 1;
       Opts.cl_khr_mipmap_image = 1;
+      Opts.cl_khr_subgroups = 1;
       Opts.cl_khr_3d_image_writes = 1;
+      Opts.cl_amd_media_ops = 1;
+      Opts.cl_amd_media_ops2 = 1;
     }
   }
 
@@ -4907,7 +4910,7 @@ public:
       // the frontend matches that.
       if (Triple.getEnvironment() == llvm::Triple::EABI ||
           Triple.getOS() == llvm::Triple::UnknownOS ||
-          StringRef(CPU).startswith("cortex-m")) {
+          ArchProfile == llvm::ARM::PK_M) {
         setABI("aapcs");
       } else if (Triple.isWatchABI()) {
         setABI("aapcs16");
@@ -5236,7 +5239,7 @@ public:
     if (SoftFloat)
       Builder.defineMacro("__SOFTFP__");
 
-    if (CPU == "xscale")
+    if (ArchKind == llvm::ARM::AK_XSCALE)
       Builder.defineMacro("__XSCALE__");
 
     if (isThumb()) {

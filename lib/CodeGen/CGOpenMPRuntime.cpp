@@ -6743,7 +6743,7 @@ IsDeclareTargetDeclaration(const ValueDecl *VD) {
     return Attr;
 
   if (auto *Attr = VD->getAttr<OMPDeclareTargetDeclAttr>())
-	  return Attr;
+    return Attr;
 
   for (const Decl *RD : RelevantDecl->redecls())
     if (auto *Attr = RD->getAttr<OMPDeclareTargetDeclAttr>())
@@ -6765,7 +6765,6 @@ bool CGOpenMPRuntime::emitDeviceCtorDtor(const VarDecl &D,
   // If this is not an OpenMP device, don't have to generate anything.
   if (!CGM.getLangOpts().OpenMPIsDevice)
     return false;
-
 
   // Produce the unique prefix to identify the new target regions. We use the
   // source location of the variable declaration which we know to not conflict

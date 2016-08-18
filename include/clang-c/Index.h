@@ -2333,25 +2333,25 @@ enum CXCursorKind {
    */
   CXCursor_OMPTeamsDistributeDirective = 271,
 
+  /** \brief OpenMP teams distribute simd directive.
+   */
+  CXCursor_OMPTeamsDistributeSimdDirective = 272,
+
   /** \brief OpenMP target teams directive.
    */
-  CXCursor_OMPTargetTeamsDirective = 272,
+  CXCursor_OMPTargetTeamsDirective = 273,
 
   /** \brief OpenMP teams distribute parallel for directive.
    */
-  CXCursor_OMPTeamsDistributeParallelForDirective = 273,
+  CXCursor_OMPTeamsDistributeParallelForDirective = 274,
 
   /** \brief OpenMP target teams distribute parallel for directive.
    */
-  CXCursor_OMPTargetTeamsDistributeParallelForDirective = 274,
+  CXCursor_OMPTargetTeamsDistributeParallelForDirective = 275,
 
   /** \brief OpenMP target teams distribute parallel for simd directive.
    */
-  CXCursor_OMPTargetTeamsDistributeParallelForSimdDirective = 275,
-
-  /** \brief OpenMP teams distribute simd directive.
-   */
-  CXCursor_OMPTeamsDistributeSimdDirective = 276,
+  CXCursor_OMPTargetTeamsDistributeParallelForSimdDirective = 276,
 
   /** \brief OpenMP target teams distribute directive.
    */
