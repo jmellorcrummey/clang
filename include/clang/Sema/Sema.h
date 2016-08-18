@@ -3639,6 +3639,9 @@ public:
   bool makeUnavailableInSystemHeader(SourceLocation loc,
                                      UnavailableAttr::ImplicitReason reason);
 
+  /// \brief Issue any -Wunguarded-availability warnings in \c FD
+  void DiagnoseUnguardedAvailabilityViolations(Decl *FD);
+
   //===--------------------------------------------------------------------===//
   // Expression Parsing Callbacks: SemaExpr.cpp.
 
@@ -8275,6 +8278,12 @@ public:
   /// Called on well-formed '\#pragma omp teams distribute' after parsing of
   /// the associated statement.
   StmtResult ActOnOpenMPTeamsDistributeDirective(
+      ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
+      SourceLocation EndLoc,
+      llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA);
+  /// Called on well-formed '\#pragma omp teams distribute simd' after parsing
+  /// of the associated statement.
+  StmtResult ActOnOpenMPTeamsDistributeSimdDirective(
       ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
       SourceLocation EndLoc,
       llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA);
