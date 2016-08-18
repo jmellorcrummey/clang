@@ -2357,7 +2357,11 @@ enum CXCursorKind {
    */
   CXCursor_OMPTargetTeamsDistributeDirective = 277,
 
-  CXCursor_LastStmt     = CXCursor_OMPTargetTeamsDistributeDirective,
+  /** \brief OpenMP target teams distribute directive.
+   */
+  CXCursor_OMPTargetTeamsDistributeSimdDirective = 278,
+
+  CXCursor_LastStmt     = CXCursor_OMPTargetTeamsDistributeSimdDirective,
 
   /**
    * \brief Cursor that represents the translation unit itself.
