@@ -1839,15 +1839,14 @@ void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
       CGF.EmitOMPPrivateLoopCounters(S, LoopScope);
       CGF.EmitOMPLinearClause(S, LoopScope);
       bool LastprivateAlreadyEmitted =
-        requiresAdditionalIterationVar(S.getDirectiveKind()) ||
-        S.getDirectiveKind() == OMPD_target_simd;
+          requiresAdditionalIterationVar(S.getDirectiveKind()) ||
+          S.getDirectiveKind() == OMPD_target_simd;
       if (!LastprivateAlreadyEmitted)
         CGF.EmitOMPPrivateClause(S, LoopScope);
       CGF.EmitOMPReductionClauseInit(S, LoopScope);
       bool HasLastprivateClause = false;
       if (!LastprivateAlreadyEmitted)
-        HasLastprivateClause =
-            CGF.EmitOMPLastprivateClauseInit(S, LoopScope);
+        HasLastprivateClause = CGF.EmitOMPLastprivateClauseInit(S, LoopScope);
       (void)LoopScope.Privatize();
       CGF.EmitOMPInnerLoop(S, LoopScope.requiresCleanups(), S.getCond(),
                            S.getInc(),
@@ -2186,7 +2185,8 @@ void CodeGenFunction::EmitOMPDistributeParallelForSimdDirective(
                                              PrePostActionTy &) {
         CGF.EmitOMPWorksharingLoop(S);
       };
-      emitCommonOMPParallelDirective(CGF, S, OMPD_simd, CGInlinedWorksharingLoop);
+      emitCommonOMPParallelDirective(CGF, S, OMPD_simd,
+                                     CGInlinedWorksharingLoop);
     };
     CGF.EmitOMPDistributeLoop(S, CGParallelFor);
   };
@@ -3927,8 +3927,7 @@ void CodeGenFunction::EmitOMPTargetSimdDirective(
 }
 
 void CodeGenFunction::EmitOMPTargetSimdDeviceFunction(
-    CodeGenModule &CGM, StringRef ParentName,
-    const OMPTargetSimdDirective &S) {
+    CodeGenModule &CGM, StringRef ParentName, const OMPTargetSimdDirective &S) {
   auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
     TargetSimdCodegen(CGF, Action, S);
   };
@@ -3976,9 +3975,9 @@ void CodeGenFunction::EmitOMPTargetParallelForDirective(
   emitCommonOMPTargetDirective(*this, S, OMPD_target_parallel_for, CodeGen);
 }
 
-static void TargetParallelForSimdCodegen(CodeGenFunction &CGF,
-                                         PrePostActionTy &Action,
-                                         const OMPTargetParallelForSimdDirective &S) {
+static void
+TargetParallelForSimdCodegen(CodeGenFunction &CGF, PrePostActionTy &Action,
+                             const OMPTargetParallelForSimdDirective &S) {
   Action.Enter(CGF);
   // Emit directive as a combined directive that consists of two implicit
   // directives: 'parallel' with 'for' directive.
@@ -4009,7 +4008,8 @@ void CodeGenFunction::EmitOMPTargetParallelForSimdDirective(
   auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
     TargetParallelForSimdCodegen(CGF, Action, S);
   };
-  emitCommonOMPTargetDirective(*this, S, OMPD_target_parallel_for_simd, CodeGen);
+  emitCommonOMPTargetDirective(*this, S, OMPD_target_parallel_for_simd,
+                               CodeGen);
 }
 
 static void TargetTeamsDistributeParallelForCodegen(

@@ -4829,7 +4829,7 @@ void CudaToolChain::addClangTargetOptions(
     const llvm::opt::ArgList &DriverArgs, llvm::opt::ArgStringList &CC1Args,
     Action::OffloadKind DeviceOffloadingKind) const {
   Linux::addClangTargetOptions(DriverArgs, CC1Args, DeviceOffloadingKind);
-    
+
   StringRef GpuArch = DriverArgs.getLastArgValue(options::OPT_march_EQ);
   assert(!GpuArch.empty() && "Must have an explicit GPU arch.");
   std::string LibDeviceFile;
@@ -4867,7 +4867,7 @@ void CudaToolChain::addClangTargetOptions(
   // came with CUDA-7.0.
   CC1Args.push_back("-target-feature");
   CC1Args.push_back("+ptx42");
-  
+
   if (DeviceOffloadingKind == Action::OFK_OpenMP) {
     SmallVector<std::string, 8> LibraryPaths;
     if (char *env = ::getenv("LIBRARY_PATH")) {
