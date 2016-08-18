@@ -2028,6 +2028,7 @@ void CodeGenFunction::EmitOMPOuterLoop(
     RT.emitForDispatchFinish(*this, S, S.getLocEnd(), IVSize, IVSigned);
   else /* !DynamicOrOrdered */
     RT.emitForStaticFinish(*this, S.getLocEnd());
+
 }
 
 void CodeGenFunction::EmitOMPForOuterLoop(
@@ -2212,6 +2213,18 @@ void CodeGenFunction::EmitOMPTeamsDistributeDirective(
   OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
   CGM.getOpenMPRuntime().emitInlinedDirective(
       *this, OMPD_teams_distribute,
+      [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+        OMPLoopScope PreInitScope(CGF, S);
+        CGF.EmitStmt(
+            cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
+      });
+}
+
+void CodeGenFunction::EmitOMPTeamsDistributeSimdDirective(
+    const OMPTeamsDistributeSimdDirective &S) {
+  OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
+  CGM.getOpenMPRuntime().emitInlinedDirective(
+      *this, OMPD_teams_distribute_simd,
       [&S](CodeGenFunction &CGF, PrePostActionTy &) {
         OMPLoopScope PreInitScope(CGF, S);
         CGF.EmitStmt(
