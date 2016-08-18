@@ -2527,9 +2527,12 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
   auto FI = MasterRD->field_begin();
   for (unsigned i = 0; i < OrigAddresses.size(); ++i, ++FI) {
     llvm::Value *OriginalVal = nullptr;
-    if (DSI.CapturesValues[i].first) {
-      OriginalVal = EnclosingCGF.GetAddrOfLocalVar(DSI.CapturesValues[i].first)
-                        .getPointer();
+    if (const VarDecl *VD = DSI.CapturesValues[i].first) {
+      DeclRefExpr DRE(const_cast<VarDecl *>(VD),
+                      /*RefersToEnclosingVariableOrCapture=*/false,
+                      VD->getType(), VK_LValue, SourceLocation());
+      Address OriginalAddr = EnclosingCGF.EmitOMPHelperVar(&DRE).getAddress();
+      OriginalVal = OriginalAddr.getPointer();
     } else
       OriginalVal = CGF.LoadCXXThis();
 
@@ -3208,9 +3211,10 @@ void CGOpenMPRuntimeNVPTX::emitSimdCall(CodeGenFunction &CGF,
 /// \param CriticalOpGen Generator for the statement associated with the given
 /// critical region.
 /// \param Hint Value of the 'hint' clause (optional).
-void CGOpenMPRuntimeNVPTX::emitCriticalRegion(CodeGenFunction &CGF,
-    StringRef CriticalName, const RegionCodeGenTy &CriticalOpGen,
-    SourceLocation Loc, const Expr *Hint) {
+void CGOpenMPRuntimeNVPTX::emitCriticalRegion(
+    CodeGenFunction &CGF, StringRef CriticalName,
+    const RegionCodeGenTy &CriticalOpGen, SourceLocation Loc,
+    const Expr *Hint) {
 
   auto *LoopBB = CGF.createBasicBlock("omp.critical.loop");
   auto *TestBB = CGF.createBasicBlock("omp.critical.test");
@@ -3226,9 +3230,10 @@ void CGOpenMPRuntimeNVPTX::emitCriticalRegion(CodeGenFunction &CGF,
 
   /// Initialise the counter variable for the loop.
   auto Int32Ty =
-    CGF.getContext().getIntTypeForBitwidth(/*DestWidth*/ 32, /*Signed*/ true);
+      CGF.getContext().getIntTypeForBitwidth(/*DestWidth*/ 32, /*Signed*/ true);
   auto Counter = CGF.CreateMemTemp(Int32Ty, "critical_counter");
-  auto CounterLVal = CGF.MakeNaturalAlignAddrLValue(Counter.getPointer(), Int32Ty);
+  auto CounterLVal =
+      CGF.MakeNaturalAlignAddrLValue(Counter.getPointer(), Int32Ty);
   CGF.EmitStoreOfScalar(llvm::ConstantInt::get(CGM.Int32Ty, 0), CounterLVal);
   CGF.EmitBranch(LoopBB);
 
@@ -3261,7 +3266,7 @@ void CGOpenMPRuntimeNVPTX::emitCriticalRegion(CodeGenFunction &CGF,
   GetNVPTXCTABarrier(CGF);
 
   auto *IncCounterVal =
-    CGF.Builder.CreateNSWAdd(CounterVal, CGF.Builder.getInt32(1));
+      CGF.Builder.CreateNSWAdd(CounterVal, CGF.Builder.getInt32(1));
   CGF.EmitStoreOfScalar(IncCounterVal, CounterLVal);
   CGF.EmitBranch(LoopBB);
 

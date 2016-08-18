@@ -3640,6 +3640,9 @@ public:
   bool makeUnavailableInSystemHeader(SourceLocation loc,
                                      UnavailableAttr::ImplicitReason reason);
 
+  /// \brief Issue any -Wunguarded-availability warnings in \c FD
+  void DiagnoseUnguardedAvailabilityViolations(Decl *FD);
+
   //===--------------------------------------------------------------------===//
   // Expression Parsing Callbacks: SemaExpr.cpp.
 
@@ -8282,6 +8285,12 @@ public:
       ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
       SourceLocation EndLoc,
       llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA);
+  /// Called on well-formed '\#pragma omp teams distribute simd' after parsing
+  /// of the associated statement.
+  StmtResult ActOnOpenMPTeamsDistributeSimdDirective(
+      ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
+      SourceLocation EndLoc,
+      llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA);
   /// \brief Called on well-formed '\#pragma omp target teams' after parsing of
   /// the associated statement.
   StmtResult ActOnOpenMPTargetTeamsDirective(ArrayRef<OMPClause *> Clauses,
@@ -8303,12 +8312,6 @@ public:
   /// \brief Called on well-formed '\#pragma omp target teams distribute
   /// parallel for simd' after parsing of the associated statement.
   StmtResult ActOnOpenMPTargetTeamsDistributeParallelForSimdDirective(
-      ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
-      SourceLocation EndLoc,
-      llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA);
-  /// \brief Called on well-formed '\#pragma omp teams distribute simd' after
-  /// parsing of the associated statement.
-  StmtResult ActOnOpenMPTeamsDistributeSimdDirective(
       ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
       SourceLocation EndLoc,
       llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA);

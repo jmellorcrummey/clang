@@ -2521,6 +2521,8 @@ public:
       const OMPTargetParallelForSimdDirective &S);
   void EmitOMPTargetSimdDirective(const OMPTargetSimdDirective &S);
   void EmitOMPTeamsDistributeDirective(const OMPTeamsDistributeDirective &S);
+  void
+  EmitOMPTeamsDistributeSimdDirective(const OMPTeamsDistributeSimdDirective &S);
   void EmitOMPTargetTeamsDirective(const OMPTargetTeamsDirective &S);
   void EmitOMPTeamsDistributeParallelForDirective(
       const OMPTeamsDistributeParallelForDirective &S);
@@ -2528,8 +2530,6 @@ public:
       const OMPTargetTeamsDistributeParallelForDirective &S);
   void EmitOMPTargetTeamsDistributeParallelForSimdDirective(
       const OMPTargetTeamsDistributeParallelForSimdDirective &S);
-  void
-  EmitOMPTeamsDistributeSimdDirective(const OMPTeamsDistributeSimdDirective &S);
   void EmitOMPTargetTeamsDistributeDirective(
       const OMPTargetTeamsDistributeDirective &S);
 
@@ -2545,9 +2545,9 @@ public:
   EmitOMPTargetParallelDeviceFunction(CodeGenModule &CGM, StringRef ParentName,
                                       const OMPTargetParallelDirective &S);
   /// Emit device code for the target parallel directive.
-  static void
-  EmitOMPTargetSimdDeviceFunction(CodeGenModule &CGM, StringRef ParentName,
-                                      const OMPTargetSimdDirective &S);
+  static void EmitOMPTargetSimdDeviceFunction(CodeGenModule &CGM,
+                                              StringRef ParentName,
+                                              const OMPTargetSimdDirective &S);
   /// Emit device code for the target parallel for directive.
   static void EmitOMPTargetParallelForDeviceFunction(
       CodeGenModule &CGM, StringRef ParentName,
@@ -2584,6 +2584,9 @@ public:
   /// Emit initial code for loop counters of loop-based directives.
   void EmitOMPPrivateLoopCounters(const OMPLoopDirective &S,
                                   OMPPrivateScope &LoopScope);
+
+  /// \brief Emit a helper variable and return corresponding lvalue.
+  LValue EmitOMPHelperVar(const DeclRefExpr *Helper);
 
 private:
   /// Helpers for the OpenMP loop directives.

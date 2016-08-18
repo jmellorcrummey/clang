@@ -2141,8 +2141,22 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
 
   if (const auto *VD = dyn_cast<VarDecl>(ND)) {
     // Check if this is a global variable.
-    if (VD->hasLinkage() || VD->isStaticDataMember())
+    if (VD->hasLinkage() || VD->isStaticDataMember()) {
+
+      // Globals may be made local in the current captured statement and should
+      // be emitted as such. This happens when the same initialization
+      // expression is emitted several times outside and inside the capture
+      // region.
+      auto it = LocalDeclMap.find(VD);
+      if (it != LocalDeclMap.end()) {
+        if (auto RefTy = VD->getType()->getAs<ReferenceType>()) {
+          return EmitLoadOfReferenceLValue(it->second, RefTy);
+        }
+        return MakeAddrLValue(it->second, T);
+      }
+
       return EmitGlobalVarDeclLValue(*this, E, VD);
+    }
 
     Address addr = Address::invalid();
 

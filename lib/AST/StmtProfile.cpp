@@ -739,6 +739,11 @@ void StmtProfiler::VisitOMPTeamsDistributeDirective(
   VisitOMPLoopDirective(S);
 }
 
+void StmtProfiler::VisitOMPTeamsDistributeSimdDirective(
+    const OMPTeamsDistributeSimdDirective *S) {
+  VisitOMPLoopDirective(S);
+}
+
 void StmtProfiler::VisitOMPTargetTeamsDirective(
     const OMPTargetTeamsDirective *S) {
   VisitOMPExecutableDirective(S);
@@ -756,11 +761,6 @@ void StmtProfiler::VisitOMPTargetTeamsDistributeParallelForDirective(
 
 void StmtProfiler::VisitOMPTargetTeamsDistributeParallelForSimdDirective(
     const OMPTargetTeamsDistributeParallelForSimdDirective *S) {
-  VisitOMPLoopDirective(S);
-}
-
-void StmtProfiler::VisitOMPTeamsDistributeSimdDirective(
-    const OMPTeamsDistributeSimdDirective *S) {
   VisitOMPLoopDirective(S);
 }
 
