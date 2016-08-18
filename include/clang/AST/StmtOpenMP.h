@@ -3766,8 +3766,9 @@ class OMPTargetTeamsDistributeSimdDirective : public OMPLoopDirective {
   /// \param NumClauses Number of clauses.
   ///
   OMPTargetTeamsDistributeSimdDirective(SourceLocation StartLoc,
-                                  SourceLocation EndLoc, unsigned CollapsedNum,
-                                  unsigned NumClauses)
+                                        SourceLocation EndLoc,
+                                        unsigned CollapsedNum,
+                                        unsigned NumClauses)
       : OMPLoopDirective(this, OMPTargetTeamsDistributeSimdDirectiveClass,
                          OMPD_target_teams_distribute_simd, StartLoc, EndLoc,
                          CollapsedNum, NumClauses) {}
@@ -3778,7 +3779,7 @@ class OMPTargetTeamsDistributeSimdDirective : public OMPLoopDirective {
   /// \param NumClauses Number of clauses.
   ///
   explicit OMPTargetTeamsDistributeSimdDirective(unsigned CollapsedNum,
-                                           unsigned NumClauses)
+                                                 unsigned NumClauses)
       : OMPLoopDirective(this, OMPTargetTeamsDistributeSimdDirectiveClass,
                          OMPD_target_teams_distribute_simd, SourceLocation(),
                          SourceLocation(), CollapsedNum, NumClauses) {}
@@ -3806,10 +3807,9 @@ public:
   /// \param CollapsedNum Number of collapsed nested loops.
   /// \param NumClauses Number of clauses.
   ///
-  static OMPTargetTeamsDistributeSimdDirective *CreateEmpty(const ASTContext &C,
-                                                      unsigned NumClauses,
-                                                      unsigned CollapsedNum,
-                                                      EmptyShell);
+  static OMPTargetTeamsDistributeSimdDirective *
+  CreateEmpty(const ASTContext &C, unsigned NumClauses, unsigned CollapsedNum,
+              EmptyShell);
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == OMPTargetTeamsDistributeSimdDirectiveClass;

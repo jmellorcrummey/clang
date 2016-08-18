@@ -3688,8 +3688,8 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
     case STMT_OMP_TARGET_TEAMS_DISTRIBUTE_SIMD_DIRECTIVE: {
       unsigned NumClauses = Record[ASTStmtReader::NumStmtFields];
       unsigned CollapsedNum = Record[ASTStmtReader::NumStmtFields + 1];
-      S = OMPTargetTeamsDistributeSimdDirective::CreateEmpty(Context, NumClauses,
-                                                         CollapsedNum, Empty);
+      S = OMPTargetTeamsDistributeSimdDirective::CreateEmpty(
+          Context, NumClauses, CollapsedNum, Empty);
       break;
     }
 

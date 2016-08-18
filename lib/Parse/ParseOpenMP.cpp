@@ -112,7 +112,7 @@ static OpenMPDirectiveKind ParseOpenMPDirectiveKind(Parser &P) {
        OMPD_target_teams_distribute_parallel_for_simd},
       {OMPD_for, OMPD_simd, OMPD_for_simd},
       {OMPD_target_teams_distribute, OMPD_simd,
-          OMPD_target_teams_distribute_simd},
+       OMPD_target_teams_distribute_simd},
       {OMPD_parallel, OMPD_for, OMPD_parallel_for},
       {OMPD_parallel_for, OMPD_simd, OMPD_parallel_for_simd},
       {OMPD_parallel, OMPD_sections, OMPD_parallel_sections},

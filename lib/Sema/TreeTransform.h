@@ -7718,7 +7718,8 @@ StmtResult TreeTransform<Derived>::TransformOMPTargetTeamsDistributeDirective(
 }
 
 template <typename Derived>
-StmtResult TreeTransform<Derived>::TransformOMPTargetTeamsDistributeSimdDirective(
+StmtResult
+TreeTransform<Derived>::TransformOMPTargetTeamsDistributeSimdDirective(
     OMPTargetTeamsDistributeSimdDirective *D) {
   DeclarationNameInfo DirName;
   getDerived().getSema().StartOpenMPDSABlock(
