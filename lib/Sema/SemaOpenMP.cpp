@@ -2494,6 +2494,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
   // | sections         | target teams    | *                                  |
+  // |                  | distribute      |                                    |
+  // | sections         | target teams    | *                                  |
   // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | section          | parallel        | *                                  |
@@ -3805,7 +3807,7 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | teams distribute | teams distribute|                                    |
   // |                  | simd            |                                    |
   // | teams distribute | target teams    |                                    |
-  // |                  | distribute      |
+  // |                  | distribute      |                                    |
   // | teams distribute | target teams    |                                    |
   // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
