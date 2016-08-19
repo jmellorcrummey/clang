@@ -881,7 +881,9 @@ public:
 };
 }
 
-
+/// Traverse declaration of /param D to check whether it has
+/// OMPDeclareTargetDeclAttr or not. If so, it marks definition with
+/// OMPDeclareTargetDeclAttr.
 static void ImplicitDeclareTargetCheck(Sema &SemaRef, Decl *D)
 {
 	if (SemaRef.getLangOpts().OpenMPImplicitDeclareTarget) {

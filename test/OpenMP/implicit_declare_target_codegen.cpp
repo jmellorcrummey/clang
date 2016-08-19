@@ -233,10 +233,7 @@ void fooz (int argc, char* argv[])
 
 #ifdef CK5
 
-template<typename t>
-t bar(t i);
-
-static int foo(int i) { return bar<int>(i); }
+static int foo(int i) { return i; }
 
 int fooz()
 {
@@ -290,9 +287,6 @@ int fooz()
   return i;
 }
 
-
-template<typename t>
-t bar(t i) { return i;}
 
 #endif
 
