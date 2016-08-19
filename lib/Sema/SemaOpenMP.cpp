@@ -884,16 +884,15 @@ public:
 /// Traverse declaration of /param D to check whether it has
 /// OMPDeclareTargetDeclAttr or not. If so, it marks definition with
 /// OMPDeclareTargetDeclAttr.
-static void ImplicitDeclareTargetCheck(Sema &SemaRef, Decl *D)
-{
-	if (SemaRef.getLangOpts().OpenMPImplicitDeclareTarget) {
-	  // Structured block of target region is visited to catch function call.
-	  // Revealed function calls are marked with OMPDeclareTargetDeclAttr
-	  // attribute,
-	  // in case -fopenmp-implicit-declare-target extension is enabled.
-	  ImplicitDeviceFunctionChecker FunctionCallChecker(SemaRef);
-	  FunctionCallChecker.TraverseDecl(D);
-	}
+static void ImplicitDeclareTargetCheck(Sema &SemaRef, Decl *D) {
+  if (SemaRef.getLangOpts().OpenMPImplicitDeclareTarget) {
+    // Structured block of target region is visited to catch function call.
+    // Revealed function calls are marked with OMPDeclareTargetDeclAttr
+    // attribute,
+    // in case -fopenmp-implicit-declare-target extension is enabled.
+    ImplicitDeviceFunctionChecker FunctionCallChecker(SemaRef);
+    FunctionCallChecker.TraverseDecl(D);
+  }
 }
 
 /// Traverse declaration of /param D to check whether it has
