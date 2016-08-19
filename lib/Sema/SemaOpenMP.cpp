@@ -879,18 +879,19 @@ public:
   /// Traverse Destructor and mark it the with OMPDeclareTargetDeclAttr
   bool VisitCXXDestructorDecl(CXXDestructorDecl *D);
 };
+}
 
-static void ImplicitDeclareTargetCheck(Sema &S)
+
+static void ImplicitDeclareTargetCheck(Sema &SemaRef, Decl *D)
 {
-	if (S.getLangOpts().OpenMPImplicitDeclareTarget) {
+	if (SemaRef.getLangOpts().OpenMPImplicitDeclareTarget) {
 	  // Structured block of target region is visited to catch function call.
 	  // Revealed function calls are marked with OMPDeclareTargetDeclAttr
 	  // attribute,
 	  // in case -fopenmp-implicit-declare-target extension is enabled.
-	  ImplicitDeviceFunctionChecker FunctionCallChecker(*this);
-	  FunctionCallChecker.TraverseDecl(CS->getCapturedDecl());
+	  ImplicitDeviceFunctionChecker FunctionCallChecker(SemaRef);
+	  FunctionCallChecker.TraverseDecl(D);
 	}
-}
 }
 
 /// Traverse declaration of /param D to check whether it has
@@ -908,8 +909,7 @@ void Sema::checkDeclImplicitlyUsedOpenMPTargetContext(Decl *D) {
               Context, OMPDeclareTargetDeclAttr::MT_To);
           D->addAttr(A);
 
-          ImplicitDeviceFunctionChecker FunctionCallChecker(*this);
-          FunctionCallChecker.TraverseDecl(FD);
+          ImplicitDeclareTargetCheck(*this, FD);
           return;
         }
       }
@@ -8292,7 +8292,7 @@ StmtResult Sema::ActOnOpenMPTargetDirective(ArrayRef<OMPClause *> Clauses,
 
   getCurFunction()->setHasBranchProtectedScope();
 
-  ImplicitDeclareTargetCheck(*this);
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
 
   return OMPTargetDirective::Create(Context, StartLoc, EndLoc, Clauses, AStmt);
 }
@@ -8314,7 +8314,7 @@ Sema::ActOnOpenMPTargetParallelDirective(ArrayRef<OMPClause *> Clauses,
 
   getCurFunction()->setHasBranchProtectedScope();
 
-  ImplicitDeclareTargetCheck(*this);
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
 
   return OMPTargetParallelDirective::Create(Context, StartLoc, EndLoc, Clauses,
                                             AStmt);
@@ -8365,7 +8365,7 @@ StmtResult Sema::ActOnOpenMPTargetParallelForDirective(
 
   getCurFunction()->setHasBranchProtectedScope();
 
-  ImplicitDeclareTargetCheck(*this);
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
 
   return OMPTargetParallelForDirective::Create(Context, StartLoc, EndLoc,
                                                NestedLoopCount, Clauses, AStmt,
@@ -8816,7 +8816,7 @@ StmtResult Sema::ActOnOpenMPTargetParallelForSimdDirective(
 
   getCurFunction()->setHasBranchProtectedScope();
 
-  ImplicitDeclareTargetCheck(*this);
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
 
   return OMPTargetParallelForSimdDirective::Create(
       Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
@@ -8866,7 +8866,7 @@ StmtResult Sema::ActOnOpenMPTargetSimdDirective(
 
   getCurFunction()->setHasBranchProtectedScope();
 
-  ImplicitDeclareTargetCheck(*this);
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
 
   return OMPTargetSimdDirective::Create(Context, StartLoc, EndLoc,
                                         NestedLoopCount, Clauses, AStmt, B);
@@ -8954,7 +8954,7 @@ StmtResult Sema::ActOnOpenMPTeamsDistributeSimdDirective(
 
   getCurFunction()->setHasBranchProtectedScope();
 
-  ImplicitDeclareTargetCheck(*this);
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
 
   return OMPTeamsDistributeSimdDirective::Create(
       Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
@@ -8977,14 +8977,7 @@ StmtResult Sema::ActOnOpenMPTargetTeamsDirective(ArrayRef<OMPClause *> Clauses,
 
   getCurFunction()->setHasBranchProtectedScope();
 
-  if (getLangOpts().OpenMPImplicitDeclareTarget) {
-    // Structured block of target region is visited to catch function call.
-    // Revealed function calls are marked with OMPDeclareTargetDeclAttr
-    // attribute,
-    // in case -fopenmp-implicit-declare-target extension is enabled.
-    ImplicitDeviceFunctionChecker FunctionCallChecker(*this);
-    FunctionCallChecker.TraverseDecl(CS->getCapturedDecl());
-  }
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
 
   return OMPTargetTeamsDirective::Create(Context, StartLoc, EndLoc, Clauses,
                                          AStmt);
@@ -9061,7 +9054,7 @@ StmtResult Sema::ActOnOpenMPTargetTeamsDistributeParallelForDirective(
 
   getCurFunction()->setHasBranchProtectedScope();
 
-  ImplicitDeclareTargetCheck(*this);
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
 
   return OMPTargetTeamsDistributeParallelForDirective::Create(
       Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
@@ -9116,7 +9109,7 @@ StmtResult Sema::ActOnOpenMPTargetTeamsDistributeParallelForSimdDirective(
 
   getCurFunction()->setHasBranchProtectedScope();
 
-  ImplicitDeclareTargetCheck(*this);
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
 
   return OMPTargetTeamsDistributeParallelForSimdDirective::Create(
       Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
@@ -9157,7 +9150,7 @@ StmtResult Sema::ActOnOpenMPTargetTeamsDistributeDirective(
 
   getCurFunction()->setHasBranchProtectedScope();
 
-  ImplicitDeclareTargetCheck(*this);
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
 
   return OMPTargetTeamsDistributeDirective::Create(
       Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
@@ -9212,7 +9205,7 @@ StmtResult Sema::ActOnOpenMPTargetTeamsDistributeSimdDirective(
 
   getCurFunction()->setHasBranchProtectedScope();
 
-  ImplicitDeclareTargetCheck(*this);
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
 
   return OMPTargetTeamsDistributeSimdDirective::Create(
       Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
