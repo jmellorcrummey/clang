@@ -2052,7 +2052,7 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
   if (auto *D = dyn_cast<CapturedDecl>(Context))
     Body = D->getBody();
   else
-    Body = cast<FunctionDecl>(D)->getBody();
+    Body = cast<FunctionDecl>(Context)->getBody();
 
   // Track if in this region one has to share
 

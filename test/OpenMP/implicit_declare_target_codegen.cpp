@@ -227,6 +227,67 @@ void fooz (int argc, char* argv[])
 }
 #endif
 
+// Combined constructs test
+// RUN: %clang_cc1 -fopenmp-implicit-declare-target -DCK5 -verify -fopenmp -x c++ -triple powerpc64le-unknown-unknown -fopenmp-targets=powerpc64le-ibm-linux-gnu -emit-llvm-bc %s -o %t-ppc-host.bc
+// RUN: %clang_cc1 -fopenmp-implicit-declare-target -DCK5  -verify -fopenmp -x c++ -triple nvptx64-unknown-unknown -fopenmp-targets=nvptx64-nvidia-cuda -emit-llvm %s -fopenmp-is-device -fopenmp-host-ir-file-path %t-ppc-host.bc -o - | FileCheck %s --check-prefix CK5 --check-prefix CK5-64#ifdef CK4
 
+#ifdef CK5
+
+static int foo(int i) { return i; }
+
+int fooz()
+{
+  int i = 0;
+
+  #pragma omp target teams
+  {
+    foo(i);
+  }
+
+  #pragma omp target teams distribute
+  {
+    foo(i);
+  }
+
+  #pragma omp target teams distribute parallel for
+  {
+    foo(i);
+  }
+
+  #pragma omp target teams distribute parallel for simd
+  {
+    foo(i);
+  }
+
+  #pragma omp target teams distribute simd
+  {
+    foo(i);
+  }
+
+  #pragma omp target parallel for
+  {
+    foo(i);
+  }
+
+  #pragma omp target parallel for simd
+  {
+    foo(i);
+  }
+
+  #pragma omp target simd
+  {
+    foo(i);
+  }
+
+  #pragma omp target parallel
+  {
+    foo(i);
+  }
+
+  return i;
+}
+
+
+#endif
 
 #endif

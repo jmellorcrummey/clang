@@ -4122,6 +4122,11 @@ void CodeGenFunction::EmitOMPTargetTeamsDistributeDirective(
   // empty codegen
 }
 
+void CodeGenFunction::EmitOMPTargetTeamsDistributeSimdDirective(
+    const OMPTargetTeamsDistributeSimdDirective &S) {
+  // empty codegen
+}
+
 void CodeGenFunction::EmitOMPTeamsDirective(const OMPTeamsDirective &S) {
   auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
     OMPPrivateScope PrivateScope(CGF);
