@@ -7646,17 +7646,6 @@ StmtResult TreeTransform<Derived>::TransformOMPTeamsDistributeDirective(
   return Res;
 }
 
-template <typename Derived>
-StmtResult TreeTransform<Derived>::TransformOMPTeamsDistributeSimdDirective(
-    OMPTeamsDistributeSimdDirective *D) {
-  DeclarationNameInfo DirName;
-  getDerived().getSema().StartOpenMPDSABlock(
-      OMPD_teams_distribute_simd, DirName, nullptr, D->getLocStart());
-  StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
-  getDerived().getSema().EndOpenMPDSABlock(Res.get());
-  return Res;
-}
-
 //===----------------------------------------------------------------------===//
 // OpenMP clause transformation
 //===----------------------------------------------------------------------===//
@@ -11185,6 +11174,9 @@ TreeTransform<Derived>::TransformObjCMessageExpr(ObjCMessageExpr *E) {
   }
   else if (E->getReceiverKind() == ObjCMessageExpr::SuperClass ||
            E->getReceiverKind() == ObjCMessageExpr::SuperInstance) {
+    if (!E->getMethodDecl())
+      return ExprError();
+
     // Build a new class message send to 'super'.
     SmallVector<SourceLocation, 16> SelLocs;
     E->getSelectorLocs(SelLocs);
