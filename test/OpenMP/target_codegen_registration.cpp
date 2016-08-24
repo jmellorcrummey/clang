@@ -161,7 +161,7 @@
 // CHECK-SAME: { i32, void ()*, i8* } { i32 500, void ()* [[P500:@[^,]+]], i8* null },
 // CHECK-SAME: { i32, void ()*, i8* } { i32 501, void ()* [[P501:@[^,]+]], i8* null },
 // CHECK-SAME: { i32, void ()*, i8* } { i32 65535, void ()* [[PMAX:@[^,]+]], i8* null },
-// CHECK-SAME: { i32, void ()*, i8* } { i32 0, void ()* bitcast (void (i8*)* [[REGFN:@.+]] to void ()*), i8* null }]
+// CHECK-SAME: { i32, void ()*, i8* } { i32 0, void ()* [[REGFN:@.+]], i8* null }]
 
 // CHECK-NTARGET: @llvm.global_ctors = appending global [3   x { i32, void ()*, i8* }] [
 
@@ -369,7 +369,7 @@ struct ST {
 //CHECK:     ret void
 //CHECK:     declare i32 @__tgt_unregister_lib([[DSCTY]]*)
 
-//CHECK:     define internal void [[REGFN]](i8*)
+//CHECK:     define internal void [[REGFN]]()
 //CHECK:     call i32 @__tgt_register_lib([[DSCTY]]* [[DESC]])
 //CHECK:     call i32 @__cxa_atexit(void (i8*)* [[UNREGFN]], i8* bitcast ([[DSCTY]]* [[DESC]] to i8*),
 //CHECK:     ret void

@@ -229,56 +229,73 @@ void fooz (int argc, char* argv[])
 
 // Combined constructs test
 // RUN: %clang_cc1 -fopenmp-implicit-declare-target -DCK5 -verify -fopenmp -x c++ -triple powerpc64le-unknown-unknown -fopenmp-targets=powerpc64le-ibm-linux-gnu -emit-llvm-bc %s -o %t-ppc-host.bc
-// RUN: %clang_cc1 -fopenmp-implicit-declare-target -DCK5  -verify -fopenmp -x c++ -triple nvptx64-unknown-unknown -fopenmp-targets=nvptx64-nvidia-cuda -emit-llvm %s -fopenmp-is-device -fopenmp-host-ir-file-path %t-ppc-host.bc -o - | FileCheck %s --check-prefix CK5 --check-prefix CK5-64#ifdef CK4
+// RUN: %clang_cc1 -fopenmp-implicit-declare-target -DCK5  -verify -fopenmp -x c++ -triple nvptx64-unknown-unknown -fopenmp-targets=nvptx64-nvidia-cuda -emit-llvm %s -fopenmp-is-device -fopenmp-host-ir-file-path %t-ppc-host.bc -o - | FileCheck %s --check-prefix CK5 --check-prefix CK5-64
 
 #ifdef CK5
 
+// CK5: define internal i32 @{{.*}}foo{{.*}}(i32 %i)
 static int foo(int i) { return i; }
 
 int fooz()
 {
   int i = 0;
 
+  // CK5: define void @__omp_offloading_{{.+}}(i{{64|32}} %{{.+}})
   #pragma omp target teams
   {
     foo(i);
   }
 
+  // FIXME: Not supported yet
   #pragma omp target teams distribute
+  for(i=0; i<10; ++i)
   {
     foo(i);
   }
 
+  // CK5: define void @__omp_offloading_{{.+}}(i{{64|32}} %{{.+}})
   #pragma omp target teams distribute parallel for
+  for(i=0; i<10; ++i)
   {
     foo(i);
   }
 
+  // CK5: define void @__omp_offloading_{{.+}}(i{{64|32}} %{{.+}})
   #pragma omp target teams distribute parallel for simd
+  for(i=0; i<10; ++i)
   {
     foo(i);
   }
 
+  // FIXME: Not supported yet
   #pragma omp target teams distribute simd
+  for(i=0; i<10; ++i)
   {
     foo(i);
   }
 
+  // CK5: define void @__omp_offloading_{{.+}}(i{{64|32}} %{{.+}})
   #pragma omp target parallel for
+  for(i=0; i<10; ++i)
   {
     foo(i);
   }
 
+  // CK5: define void @__omp_offloading_{{.+}}(i{{64|32}} %{{.+}})
   #pragma omp target parallel for simd
+  for(i=0; i<10; ++i)
   {
     foo(i);
   }
 
+  // CK5: define void @__omp_offloading_{{.+}}(i{{64|32}} %{{.+}})
   #pragma omp target simd
+  for(i=0; i<10; ++i)
   {
     foo(i);
   }
 
+  // CK5: define void @__omp_offloading_{{.+}}(i{{64|32}} %{{.+}})
   #pragma omp target parallel
   {
     foo(i);
