@@ -1978,8 +1978,6 @@ public:
       const OMPTargetParallelForSimdDirective *D);
   void VisitOMPTargetSimdDirective(const OMPTargetSimdDirective *D);
   void VisitOMPTeamsDistributeDirective(const OMPTeamsDistributeDirective *D);
-  void VisitOMPTeamsDistributeSimdDirective(
-      const OMPTeamsDistributeSimdDirective *D);
 
 private:
   void AddDeclarationNameInfo(const Stmt *S);
@@ -2766,11 +2764,6 @@ void EnqueueVisitor::VisitOMPTargetSimdDirective(
 
 void EnqueueVisitor::VisitOMPTeamsDistributeDirective(
     const OMPTeamsDistributeDirective *D) {
-  VisitOMPLoopDirective(D);
-}
-
-void EnqueueVisitor::VisitOMPTeamsDistributeSimdDirective(
-    const OMPTeamsDistributeSimdDirective *D) {
   VisitOMPLoopDirective(D);
 }
 
@@ -4902,8 +4895,6 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
     return cxstring::createRef("OMPTargetSimdDirective");
   case CXCursor_OMPTeamsDistributeDirective:
     return cxstring::createRef("OMPTeamsDistributeDirective");
-  case CXCursor_OMPTeamsDistributeSimdDirective:
-    return cxstring::createRef("OMPTeamsDistributeSimdDirective");
   case CXCursor_OverloadCandidate:
       return cxstring::createRef("OverloadCandidate");
   case CXCursor_TypeAliasTemplateDecl:
@@ -7778,6 +7769,33 @@ CXSourceRangeList *clang_getSkippedRanges(CXTranslationUnit TU, CXFile file) {
   skipped->ranges = new CXSourceRange[skipped->count];
   for (unsigned i = 0, ei = skipped->count; i != ei; ++i)
     skipped->ranges[i] = cxloc::translateSourceRange(Ctx, wantedRanges[i]);
+
+  return skipped;
+}
+
+CXSourceRangeList *clang_getAllSkippedRanges(CXTranslationUnit TU) {
+  CXSourceRangeList *skipped = new CXSourceRangeList;
+  skipped->count = 0;
+  skipped->ranges = nullptr;
+
+  if (isNotUsableTU(TU)) {
+    LOG_BAD_TU(TU);
+    return skipped;
+  }
+    
+  ASTUnit *astUnit = cxtu::getASTUnit(TU);
+  PreprocessingRecord *ppRec = astUnit->getPreprocessor().getPreprocessingRecord();
+  if (!ppRec)
+    return skipped;
+
+  ASTContext &Ctx = astUnit->getASTContext();
+
+  const std::vector<SourceRange> &SkippedRanges = ppRec->getSkippedRanges();
+
+  skipped->count = SkippedRanges.size();
+  skipped->ranges = new CXSourceRange[skipped->count];
+  for (unsigned i = 0, ei = skipped->count; i != ei; ++i)
+    skipped->ranges[i] = cxloc::translateSourceRange(Ctx, SkippedRanges[i]);
 
   return skipped;
 }
