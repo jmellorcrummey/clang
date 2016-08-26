@@ -1721,11 +1721,13 @@ void CodeGenFunction::EmitOMPSimdFinal(
 }
 
 /// \brief Emit a helper variable and return corresponding lvalue.
-static LValue EmitOMPHelperVar(CodeGenFunction &CGF,
-                               const DeclRefExpr *Helper) {
-  auto VDecl = cast<VarDecl>(Helper->getDecl());
-  CGF.EmitVarDecl(*VDecl);
-  return CGF.EmitLValue(Helper);
+LValue CodeGenFunction::EmitOMPHelperVar(const DeclRefExpr *Helper) {
+  auto *VDecl = cast<VarDecl>(Helper->getDecl());
+
+  // Don't need to emit variable if it was emitted before.
+  if (LocalDeclMap.find(VDecl) == LocalDeclMap.end())
+    EmitVarDecl(*VDecl);
+  return EmitLValue(Helper);
 }
 
 static void emitDeviceOMPSimdDirective(CodeGenFunction &CGF,
@@ -1837,15 +1839,14 @@ void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
       CGF.EmitOMPPrivateLoopCounters(S, LoopScope);
       CGF.EmitOMPLinearClause(S, LoopScope);
       bool LastprivateAlreadyEmitted =
-        requiresAdditionalIterationVar(S.getDirectiveKind()) ||
-        S.getDirectiveKind() == OMPD_target_simd;
+          requiresAdditionalIterationVar(S.getDirectiveKind()) ||
+          S.getDirectiveKind() == OMPD_target_simd;
       if (!LastprivateAlreadyEmitted)
         CGF.EmitOMPPrivateClause(S, LoopScope);
       CGF.EmitOMPReductionClauseInit(S, LoopScope);
       bool HasLastprivateClause = false;
       if (!LastprivateAlreadyEmitted)
-        HasLastprivateClause =
-            CGF.EmitOMPLastprivateClauseInit(S, LoopScope);
+        HasLastprivateClause = CGF.EmitOMPLastprivateClauseInit(S, LoopScope);
       (void)LoopScope.Privatize();
       CGF.EmitOMPInnerLoop(S, LoopScope.requiresCleanups(), S.getCond(),
                            S.getInc(),
@@ -2026,6 +2027,7 @@ void CodeGenFunction::EmitOMPOuterLoop(
     RT.emitForDispatchFinish(*this, S, S.getLocEnd(), IVSize, IVSigned);
   else /* !DynamicOrOrdered */
     RT.emitForStaticFinish(*this, S.getLocEnd());
+
 }
 
 void CodeGenFunction::EmitOMPForOuterLoop(
@@ -2183,7 +2185,8 @@ void CodeGenFunction::EmitOMPDistributeParallelForSimdDirective(
                                              PrePostActionTy &) {
         CGF.EmitOMPWorksharingLoop(S);
       };
-      emitCommonOMPParallelDirective(CGF, S, OMPD_simd, CGInlinedWorksharingLoop);
+      emitCommonOMPParallelDirective(CGF, S, OMPD_simd,
+                                     CGInlinedWorksharingLoop);
     };
     CGF.EmitOMPDistributeLoop(S, CGParallelFor);
   };
@@ -2210,6 +2213,18 @@ void CodeGenFunction::EmitOMPTeamsDistributeDirective(
   OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
   CGM.getOpenMPRuntime().emitInlinedDirective(
       *this, OMPD_teams_distribute,
+      [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+        OMPLoopScope PreInitScope(CGF, S);
+        CGF.EmitStmt(
+            cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
+      });
+}
+
+void CodeGenFunction::EmitOMPTeamsDistributeSimdDirective(
+    const OMPTeamsDistributeSimdDirective &S) {
+  OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
+  CGM.getOpenMPRuntime().emitInlinedDirective(
+      *this, OMPD_teams_distribute_simd,
       [&S](CodeGenFunction &CGF, PrePostActionTy &) {
         OMPLoopScope PreInitScope(CGF, S);
         CGF.EmitStmt(
@@ -2279,14 +2294,10 @@ bool CodeGenFunction::EmitOMPWorksharingLoop(const OMPLoopDirective &S) {
     emitAlignedClause(*this, S);
     EmitOMPLinearClauseInit(S);
     // Emit helper vars inits.
-    LValue LB =
-        EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getLowerBoundVariable()));
-    LValue UB =
-        EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getUpperBoundVariable()));
-    LValue ST =
-        EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getStrideVariable()));
-    LValue IL =
-        EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getIsLastIterVariable()));
+    LValue LB = EmitOMPHelperVar(cast<DeclRefExpr>(S.getLowerBoundVariable()));
+    LValue UB = EmitOMPHelperVar(cast<DeclRefExpr>(S.getUpperBoundVariable()));
+    LValue ST = EmitOMPHelperVar(cast<DeclRefExpr>(S.getStrideVariable()));
+    LValue IL = EmitOMPHelperVar(cast<DeclRefExpr>(S.getIsLastIterVariable()));
 
     if (isOpenMPLoopBoundSharingDirective(S.getDirectiveKind())) {
       // When composing distribute with for we need to use the pragma distribute
@@ -3031,13 +3042,12 @@ void CodeGenFunction::EmitOMPDistributeLoop(
     {
       // Emit helper vars inits.
       LValue LB =
-          EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getLowerBoundVariable()));
+          EmitOMPHelperVar(cast<DeclRefExpr>(S.getLowerBoundVariable()));
       LValue UB =
-          EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getUpperBoundVariable()));
-      LValue ST =
-          EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getStrideVariable()));
+          EmitOMPHelperVar(cast<DeclRefExpr>(S.getUpperBoundVariable()));
+      LValue ST = EmitOMPHelperVar(cast<DeclRefExpr>(S.getStrideVariable()));
       LValue IL =
-          EmitOMPHelperVar(*this, cast<DeclRefExpr>(S.getIsLastIterVariable()));
+          EmitOMPHelperVar(cast<DeclRefExpr>(S.getIsLastIterVariable()));
 
       OMPPrivateScope LoopScope(*this);
       if (EmitOMPFirstprivateClause(S, LoopScope)) {
@@ -3917,8 +3927,7 @@ void CodeGenFunction::EmitOMPTargetSimdDirective(
 }
 
 void CodeGenFunction::EmitOMPTargetSimdDeviceFunction(
-    CodeGenModule &CGM, StringRef ParentName,
-    const OMPTargetSimdDirective &S) {
+    CodeGenModule &CGM, StringRef ParentName, const OMPTargetSimdDirective &S) {
   auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
     TargetSimdCodegen(CGF, Action, S);
   };
@@ -3966,9 +3975,9 @@ void CodeGenFunction::EmitOMPTargetParallelForDirective(
   emitCommonOMPTargetDirective(*this, S, OMPD_target_parallel_for, CodeGen);
 }
 
-static void TargetParallelForSimdCodegen(CodeGenFunction &CGF,
-                                         PrePostActionTy &Action,
-                                         const OMPTargetParallelForSimdDirective &S) {
+static void
+TargetParallelForSimdCodegen(CodeGenFunction &CGF, PrePostActionTy &Action,
+                             const OMPTargetParallelForSimdDirective &S) {
   Action.Enter(CGF);
   // Emit directive as a combined directive that consists of two implicit
   // directives: 'parallel' with 'for' directive.
@@ -3999,7 +4008,8 @@ void CodeGenFunction::EmitOMPTargetParallelForSimdDirective(
   auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &Action) {
     TargetParallelForSimdCodegen(CGF, Action, S);
   };
-  emitCommonOMPTargetDirective(*this, S, OMPD_target_parallel_for_simd, CodeGen);
+  emitCommonOMPTargetDirective(*this, S, OMPD_target_parallel_for_simd,
+                               CodeGen);
 }
 
 static void TargetTeamsDistributeParallelForCodegen(
@@ -4107,13 +4117,13 @@ void CodeGenFunction::EmitOMPTargetTeamsDistributeParallelForSimdDirective(
       *this, S, OMPD_target_teams_distribute_parallel_for_simd, CodeGen);
 }
 
-void CodeGenFunction::EmitOMPTeamsDistributeSimdDirective(
-    const OMPTeamsDistributeSimdDirective &S) {
+void CodeGenFunction::EmitOMPTargetTeamsDistributeDirective(
+    const OMPTargetTeamsDistributeDirective &S) {
   // empty codegen
 }
 
-void CodeGenFunction::EmitOMPTargetTeamsDistributeDirective(
-    const OMPTargetTeamsDistributeDirective &S) {
+void CodeGenFunction::EmitOMPTargetTeamsDistributeSimdDirective(
+    const OMPTargetTeamsDistributeSimdDirective &S) {
   // empty codegen
 }
 

@@ -93,10 +93,6 @@ void StmtProfiler::VisitCompoundStmt(const CompoundStmt *S) {
   VisitStmt(S);
 }
 
-void StmtProfiler::VisitSwitchCase(const SwitchCase *S) {
-  VisitStmt(S);
-}
-
 void StmtProfiler::VisitCaseStmt(const CaseStmt *S) {
   VisitStmt(S);
 }
@@ -739,6 +735,11 @@ void StmtProfiler::VisitOMPTeamsDistributeDirective(
   VisitOMPLoopDirective(S);
 }
 
+void StmtProfiler::VisitOMPTeamsDistributeSimdDirective(
+    const OMPTeamsDistributeSimdDirective *S) {
+  VisitOMPLoopDirective(S);
+}
+
 void StmtProfiler::VisitOMPTargetTeamsDirective(
     const OMPTargetTeamsDirective *S) {
   VisitOMPExecutableDirective(S);
@@ -759,13 +760,13 @@ void StmtProfiler::VisitOMPTargetTeamsDistributeParallelForSimdDirective(
   VisitOMPLoopDirective(S);
 }
 
-void StmtProfiler::VisitOMPTeamsDistributeSimdDirective(
-    const OMPTeamsDistributeSimdDirective *S) {
+void StmtProfiler::VisitOMPTargetTeamsDistributeDirective(
+    const OMPTargetTeamsDistributeDirective *S) {
   VisitOMPLoopDirective(S);
 }
 
-void StmtProfiler::VisitOMPTargetTeamsDistributeDirective(
-    const OMPTargetTeamsDistributeDirective *S) {
+void StmtProfiler::VisitOMPTargetTeamsDistributeSimdDirective(
+    const OMPTargetTeamsDistributeSimdDirective *S) {
   VisitOMPLoopDirective(S);
 }
 

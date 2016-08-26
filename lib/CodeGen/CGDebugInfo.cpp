@@ -454,7 +454,8 @@ void CGDebugInfo::CreateCompileUnit() {
   TheCU = DBuilder.createCompileUnit(
       LangTag, remapDIPath(MainFileName), remapDIPath(getCurrentDirname()),
       Producer, LO.Optimize, CGM.getCodeGenOpts().DwarfDebugFlags, RuntimeVers,
-      CGM.getCodeGenOpts().SplitDwarfFile, EmissionKind, 0 /* DWOid */);
+      CGM.getCodeGenOpts().SplitDwarfFile, EmissionKind, 0 /* DWOid */,
+      CGM.getCodeGenOpts().SplitDwarfInlining);
 }
 
 llvm::DIType *CGDebugInfo::CreateType(const BuiltinType *BT) {
@@ -1650,18 +1651,24 @@ static bool hasExplicitMemberDefinition(CXXRecordDecl::method_iterator I,
 
 /// Does a type definition exist in an imported clang module?
 static bool isDefinedInClangModule(const RecordDecl *RD) {
+  // Only definitions that where imported from an AST file come from a module.
   if (!RD || !RD->isFromASTFile())
     return false;
+  // Anonymous entities cannot be addressed. Treat them as not from module.
   if (!RD->isExternallyVisible() && RD->getName().empty())
     return false;
   if (auto *CXXDecl = dyn_cast<CXXRecordDecl>(RD)) {
-    assert(CXXDecl->isCompleteDefinition() && "incomplete record definition");
-    if (CXXDecl->getTemplateSpecializationKind() != TSK_Undeclared)
-      // Make sure the instantiation is actually in a module.
-      if (CXXDecl->field_begin() != CXXDecl->field_end())
-        return CXXDecl->field_begin()->isFromASTFile();
+    if (!CXXDecl->isCompleteDefinition())
+      return false;
+    auto TemplateKind = CXXDecl->getTemplateSpecializationKind();
+    if (TemplateKind != TSK_Undeclared) {
+      // This is a template, check the origin of the first member.
+      if (CXXDecl->field_begin() == CXXDecl->field_end())
+        return TemplateKind == TSK_ExplicitInstantiationDeclaration;
+      if (!CXXDecl->field_begin()->isFromASTFile())
+        return false;
+    }
   }
-
   return true;
 }
 
@@ -1685,7 +1692,12 @@ static bool shouldOmitDefinition(codegenoptions::DebugInfoKind DebugKind,
   if (!CXXDecl)
     return false;
 
-  if (CXXDecl->hasDefinition() && CXXDecl->isDynamicClass())
+  // Only emit complete debug info for a dynamic class when its vtable is
+  // emitted.  However, Microsoft debuggers don't resolve type information
+  // across DLL boundaries, so skip this optimization if the class is marked
+  // dllimport.
+  if (CXXDecl->hasDefinition() && CXXDecl->isDynamicClass() &&
+      !CXXDecl->hasAttr<DLLImportAttr>())
     return true;
 
   TemplateSpecializationKind Spec = TSK_Undeclared;
@@ -2114,6 +2126,11 @@ llvm::DIType *CGDebugInfo::CreateType(const ArrayType *Ty, llvm::DIFile *Unit) {
     int64_t Count = -1; // Count == -1 is an unbounded array.
     if (const auto *CAT = dyn_cast<ConstantArrayType>(Ty))
       Count = CAT->getSize().getZExtValue();
+    else if (const auto *VAT = dyn_cast<VariableArrayType>(Ty)) {
+      llvm::APSInt V;
+      if (VAT->getSizeExpr()->EvaluateAsInt(V, CGM.getContext()))
+        Count = V.getExtValue();
+    }
 
     // FIXME: Verify this is right for VLAs.
     Subscripts.push_back(DBuilder.getOrCreateSubrange(0, Count));
@@ -2641,6 +2658,9 @@ void CGDebugInfo::collectFunctionDeclProps(GlobalDecl GD, llvm::DIFile *Unit,
       llvm::DIScope *Mod = getParentModuleOrNull(RDecl);
       FDContext = getContextDescriptor(RDecl, Mod ? Mod : TheCU);
     }
+    // Check if it is a noreturn-marked function
+    if (FD->isNoReturn())
+      Flags |= llvm::DINode::FlagNoReturn;
     // Collect template parameters.
     TParamsArray = CollectFunctionTemplateParams(FD, Unit);
   }

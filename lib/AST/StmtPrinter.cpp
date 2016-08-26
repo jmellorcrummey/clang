@@ -1209,6 +1209,12 @@ void StmtPrinter::VisitOMPTeamsDistributeDirective(
   PrintOMPExecutableDirective(Node);
 }
 
+void StmtPrinter::VisitOMPTeamsDistributeSimdDirective(
+    OMPTeamsDistributeSimdDirective *Node) {
+  Indent() << "#pragma omp teams distribute simd ";
+  PrintOMPExecutableDirective(Node);
+}
+
 void StmtPrinter::VisitOMPTargetTeamsDirective(OMPTargetTeamsDirective *Node) {
   Indent() << "#pragma omp target teams ";
   PrintOMPExecutableDirective(Node);
@@ -1232,15 +1238,15 @@ void StmtPrinter::VisitOMPTargetTeamsDistributeParallelForSimdDirective(
   PrintOMPExecutableDirective(Node);
 }
 
-void StmtPrinter::VisitOMPTeamsDistributeSimdDirective(
-    OMPTeamsDistributeSimdDirective *Node) {
-  Indent() << "#pragma omp teams distribute simd ";
-  PrintOMPExecutableDirective(Node);
-}
-
 void StmtPrinter::VisitOMPTargetTeamsDistributeDirective(
     OMPTargetTeamsDistributeDirective *Node) {
   Indent() << "#pragma omp target teams distribute ";
+  PrintOMPExecutableDirective(Node);
+}
+
+void StmtPrinter::VisitOMPTargetTeamsDistributeSimdDirective(
+    OMPTargetTeamsDistributeSimdDirective *Node) {
+  Indent() << "#pragma omp target teams distribute simd ";
   PrintOMPExecutableDirective(Node);
 }
 

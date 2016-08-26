@@ -864,7 +864,8 @@ public:
   ImplicitDeviceFunctionChecker(Sema &SemaReference) : SemaRef(SemaReference){};
 
   /// Traverse body of lambda, and mark it the with OMPDeclareTargetDeclAttr
-  bool TraverseLambdaCapture(LambdaExpr *LE, const LambdaCapture *C);
+  bool TraverseLambdaCapture(LambdaExpr *LE, const LambdaCapture *C,
+                             Expr *Init);
 
   /// Traverse FunctionDecl and mark it the with OMPDeclareTargetDeclAttr
   bool VisitFunctionDecl(FunctionDecl *F);
@@ -883,6 +884,20 @@ public:
 /// Traverse declaration of /param D to check whether it has
 /// OMPDeclareTargetDeclAttr or not. If so, it marks definition with
 /// OMPDeclareTargetDeclAttr.
+static void ImplicitDeclareTargetCheck(Sema &SemaRef, Decl *D) {
+  if (SemaRef.getLangOpts().OpenMPImplicitDeclareTarget) {
+    // Structured block of target region is visited to catch function call.
+    // Revealed function calls are marked with OMPDeclareTargetDeclAttr
+    // attribute,
+    // in case -fopenmp-implicit-declare-target extension is enabled.
+    ImplicitDeviceFunctionChecker FunctionCallChecker(SemaRef);
+    FunctionCallChecker.TraverseDecl(D);
+  }
+}
+
+/// Traverse declaration of /param D to check whether it has
+/// OMPDeclareTargetDeclAttr or not. If so, it marks definition with
+/// OMPDeclareTargetDeclAttr.
 void Sema::checkDeclImplicitlyUsedOpenMPTargetContext(Decl *D) {
   if (!D || D->isInvalidDecl())
     return;
@@ -895,8 +910,7 @@ void Sema::checkDeclImplicitlyUsedOpenMPTargetContext(Decl *D) {
               Context, OMPDeclareTargetDeclAttr::MT_To);
           D->addAttr(A);
 
-          ImplicitDeviceFunctionChecker FunctionCallChecker(*this);
-          FunctionCallChecker.TraverseDecl(FD);
+          ImplicitDeclareTargetCheck(*this, FD);
           return;
         }
       }
@@ -906,7 +920,7 @@ void Sema::checkDeclImplicitlyUsedOpenMPTargetContext(Decl *D) {
 }
 
 bool ImplicitDeviceFunctionChecker::TraverseLambdaCapture(
-    LambdaExpr *LE, const LambdaCapture *C) {
+    LambdaExpr *LE, const LambdaCapture *C, Expr *Init) {
   if (CXXRecordDecl *Class = LE->getLambdaClass())
     if (!Class->hasAttr<OMPDeclareTargetDeclAttr>()) {
       Attr *A = OMPDeclareTargetDeclAttr::CreateImplicit(
@@ -1828,10 +1842,11 @@ void Sema::ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope) {
   case OMPD_distribute_simd:
   case OMPD_distribute_parallel_for:
   case OMPD_teams_distribute:
+  case OMPD_teams_distribute_simd:
   case OMPD_teams_distribute_parallel_for:
   case OMPD_target_teams_distribute_parallel_for:
   case OMPD_target_teams_distribute_parallel_for_simd:
-  case OMPD_teams_distribute_simd: {
+  case OMPD_target_teams_distribute_simd: {
     QualType KmpInt32Ty = Context.getIntTypeForBitwidth(32, 1);
     QualType KmpInt32PtrTy =
         Context.getPointerType(KmpInt32Ty).withConst().withRestrict();
@@ -2063,6 +2078,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | parallel         | distribute simd | +                                  |
   // | parallel         | target simd     | *                                  |
   // | parallel         | teams distribute| +                                  |
+  // | parallel         | teams distribute|                                    |
+  // |                  | simd            | +                                  |
   // | parallel         | target teams    | *                                  |
   // | parallel         | teams distribute| +                                  |
   // |                  | parallel for    |                                    |
@@ -2072,10 +2089,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | parallel         | target teams    | *                                  |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | parallel         | teams distribute| +                                  |
-  // |                  | simd            |                                    |
   // | parallel         | target teams    | *                                  |
   // |                  | distribute      |                                    |
+  // | parallel         | target teams    | *                                  |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | for              | parallel        | *                                  |
   // | for              | for             | +                                  |
@@ -2121,6 +2138,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | for              | target simd     | *                                  |
   // | for              | teams distribute| +                                  |
+  // | for              | teams distribute|                                    |
+  // |                  | simd            | +                                  |
   // | for              | target teams    | *                                  |
   // | for              | teams distribute| +                                  |
   // |                  | parallel for    |                                    |
@@ -2130,10 +2149,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | for              | target teams    | *                                  |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | for              | teams distribute| +                                  |
-  // |                  | simd            |                                    |
   // | for              | target teams    | *                                  |
   // |                  | distribute      |                                    |
+  // | for              | target teams    | *                                  |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | master           | parallel        | *                                  |
   // | master           | for             | +                                  |
@@ -2179,6 +2198,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | master           | target simd     | *                                  |
   // | master           | teams distribute| +                                  |
+  // | master           | teams distribute|                                    |
+  // |                  | simd            | +                                  |
   // | master           | target teams    | *                                  |
   // | master           | teams distribute| +                                  |
   // |                  | parallel for    |                                    |
@@ -2188,10 +2209,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | master           | target teams    | *                                  |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | master           | teams distribute| +                                  |
-  // |                  | simd            |                                    |
   // | master           | target teams    | *                                  |
   // |                  | distribute      |                                    |
+  // | master           | target teams    | *                                  |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | critical         | parallel        | *                                  |
   // | critical         | for             | +                                  |
@@ -2236,6 +2257,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | critical         | target simd     | *                                  |
   // | critical         | teams distribute| +                                  |
+  // | critical         | teams distribute|                                    |
+  // |                  | simd            | +                                  |
   // | critical         | target teams    | *                                  |
   // | critical         | teams distribute| +                                  |
   // |                  | parallel for    |                                    |
@@ -2245,10 +2268,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | critical         | target teams    | *                                  |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | critical         | teams distribute| +                                  |
-  // |                  | simd            |                                    |
   // | critical         | target teams    | *                                  |
   // |                  | distribute      |                                    |
+  // | critical         | target teams    | *                                  |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | simd             | parallel        |                                    |
   // | simd             | for             |                                    |
@@ -2294,6 +2317,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | simd             | target simd     |                                    |
   // | simd             | teams distribute|                                    |
+  // | simd             | teams distribute|                                    |
+  // |                  | simd            |                                    |
   // | simd             | target teams    |                                    |
   // | simd             | teams distribute|                                    |
   // |                  | parallel for    |                                    |
@@ -2303,10 +2328,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | simd             | target teams    |                                    |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | simd             | teams distribute|                                    |
-  // |                  | simd            |                                    |
   // | simd             | target teams    |                                    |
   // |                  | distribute      |                                    |
+  // | simd             | target teams    |                                    |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | for simd         | parallel        |                                    |
   // | for simd         | for             |                                    |
@@ -2352,6 +2377,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | for simd         | target simd     |                                    |
   // | for simd         | teams distribute|                                    |
+  // | for simd         | teams distribute|                                    |
+  // |                  | simd            |                                    |
   // | for simd         | target teams    |                                    |
   // | for simd         | teams distribute|                                    |
   // |                  | parallel for    |                                    |
@@ -2361,10 +2388,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | for simd         | target teams    |                                    |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | for simd         | teams distribute|                                    |
-  // |                  | simd            |                                    |
   // | for simd         | target teams    |                                    |
   // |                  | distribute      |                                    |
+  // | for simd         | target teams    |                                    |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | parallel for simd| parallel        |                                    |
   // | parallel for simd| for             |                                    |
@@ -2409,6 +2436,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | parallel for simd| target simd     |                                    |
   // | parallel for simd| teams distribute|                                    |
+  // | parallel for simd| teams distribute|                                    |
+  // |                  | simd            |                                    |
   // | parallel for simd| target teams    |                                    |
   // | parallel for simd| teams distribute|                                    |
   // |                  | parallel for    |                                    |
@@ -2418,10 +2447,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | parallel for simd| target teams    |                                    |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | parallel for simd| teams distribute|                                    |
-  // |                  | simd            |                                    |
   // | parallel for simd| target teams    |                                    |
   // |                  | distribute      |                                    |
+  // | parallel for simd| target teams    |                                    |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | sections         | parallel        | *                                  |
   // | sections         | for             | +                                  |
@@ -2466,6 +2495,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | sections         | target parallel | +                                  |
   // |                  | for simd        |                                    |
   // | sections         | target simd     | *                                  |
+  // | sections         | teams distribute|                                    |
+  // |                  | simd            |                                    |
   // | sections         | target teams    | *                                  |
   // | sections         | teams distribute| +                                  |
   // |                  | parallel for    |                                    |
@@ -2475,10 +2506,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | sections         | target teams    | *                                  |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | sections         | teams distribute| +                                  |
-  // |                  | simd            |                                    |
   // | sections         | target teams    | *                                  |
   // |                  | distribute      |                                    |
+  // | sections         | target teams    | *                                  |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | section          | parallel        | *                                  |
   // | section          | for             | +                                  |
@@ -2524,6 +2555,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | section          | target simd     | *                                  |
   // | section          | teams distribute| +                                  |
+  // | section          | teams distribute| +                                  |
+  // |                  | simd            |                                    |
   // | section          | target teams    | *                                  |
   // | section          | teams distribute| +                                  |
   // |                  | parallel for    |                                    |
@@ -2533,10 +2566,12 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | section          | target teams    | *                                  |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | section          | teams distribute| +                                  |
-  // |                  | simd            |                                    |
   // | section          | target teams    | *                                  |
   // |                  | distribute      |                                    |
+  // | section          | target teams    | *                                  |
+  // |                  | distribute      |                                    |
+  // | section          | target teams    | *                                  |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | single           | parallel        | *                                  |
   // | single           | for             | +                                  |
@@ -2582,6 +2617,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | single           | target simd     | *                                  |
   // | single           | teams distribute| +                                  |
+  // | single           | teams distribute|                                    |
+  // |                  | simd            | +                                  |
   // | single           | target teams    | *                                  |
   // | single           | teams distribute| +                                  |
   // |                  | parallel for    |                                    |
@@ -2591,10 +2628,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | single           | target teams    | *                                  |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | single           | teams distribute| +                                  |
-  // |                  | simd            |                                    |
   // | single           | target teams    | *                                  |
   // |                  | distribute      |                                    |
+  // | single           | target teams    | *                                  |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | parallel for     | parallel        | *                                  |
   // | parallel for     | for             | +                                  |
@@ -2640,6 +2677,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | parallel for     | target simd     | *                                  |
   // | parallel for     | teams distribute| +                                  |
+  // | parallel for     | teams distribute|                                    |
+  // |                  | simd            | +                                  |
   // | parallel for     | target teams    | *                                  |
   // | parallel for     | teams distribute| +                                  |
   // |                  | parallel for    |                                    |
@@ -2649,10 +2688,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | parallel for     | target teams    | *                                  |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | parallel for     | teams distribute| +                                  |
-  // |                  | simd            |                                    |
   // | parallel for     | target teams    | *                                  |
   // |                  | distribute      |                                    |
+  // | parallel for     | target teams    | *                                  |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | parallel sections| parallel        | *                                  |
   // | parallel sections| for             | +                                  |
@@ -2698,6 +2737,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | parallel sections| target simd     | *                                  |
   // | parallel sections| teams distribute| +                                  |
+  // | parallel sections| teams distribute|                                    |
+  // |                  | simd            | +                                  |
   // | parallel sections| target teams    |                                    |
   // | parallel sections| teams distribute| +                                  |
   // |                  | parallel for    |                                    |
@@ -2707,10 +2748,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | parallel sections| target teams    | *                                  |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | parallel sections| teams distribute| +                                  |
-  // |                  | simd            |                                    |
   // | parallel sections| target teams    | *                                  |
   // |                  | distribute      |                                    |
+  // | parallel sections| target teams    | *                                  |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | task             | parallel        | *                                  |
   // | task             | for             | +                                  |
@@ -2756,6 +2797,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | task             | target simd     | *                                  |
   // | task             | teams distribute| +                                  |
+  // | task             | teams distribute|                                    |
+  // |                  | simd            | +                                  |
   // | task             | target teams    | *                                  |
   // | task             | teams distribute| +                                  |
   // |                  | parallel for    |                                    |
@@ -2765,10 +2808,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | task             | target teams    | *                                  |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | task             | teams distribute| +                                  |
-  // |                  | simd            |                                    |
   // | task             | target teams    | *                                  |
   // |                  | distribute      |                                    |
+  // | task             | target teams    | *                                  |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | ordered          | parallel        | *                                  |
   // | ordered          | for             | +                                  |
@@ -2814,6 +2857,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | ordered          | target simd     | *                                  |
   // | ordered          | teams distribute| +                                  |
+  // | ordered          | teams distribute|                                    |
+  // |                  | simd            | +                                  |
   // | ordered          | target teams    | *                                  |
   // | ordered          | teams distribute| +                                  |
   // |                  | parallel for    |                                    |
@@ -2823,10 +2868,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | ordered          | target teams    | *                                  |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | ordered          | teams distribute| +                                  |
-  // |                  | simd            |                                    |
   // | ordered          | target teams    | *                                  |
   // |                  | distribute      |                                    |
+  // | ordered          | target teams    | *                                  |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | atomic           | parallel        |                                    |
   // | atomic           | for             |                                    |
@@ -2872,6 +2917,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | atomic           | target simd     |                                    |
   // | atomic           | teams distribute|                                    |
+  // | atomic           | teams distribute|                                    |
+  // |                  | simd            |                                    |
   // | atomic           | target teams    |                                    |
   // | atomic           | teams distribute|                                    |
   // |                  | parallel for    |                                    |
@@ -2881,10 +2928,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | atomic           | target teams    |                                    |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | atomic           | teams distribute|                                    |
-  // |                  | simd            |                                    |
   // | atomic           | target teams    |                                    |
   // |                  | distribute      |                                    |
+  // | atomic           | target teams    |                                    |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | target           | parallel        | *                                  |
   // | target           | for             | *                                  |
@@ -2930,6 +2977,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | target           | target simd     |                                    |
   // | target           | teams distribute|                                    |
+  // | target           | teams distribute|                                    |
+  // |                  | simd            |                                    |
   // | target           | target teams    |                                    |
   // | target           | teams distribute| *                                  |
   // |                  | parallel for    |                                    |
@@ -2939,10 +2988,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | target           | target teams    |                                    |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | target           | teams distribute| *                                  |
-  // |                  | simd            |                                    |
   // | target           | target teams    |                                    |
   // |                  | distribute      |                                    |
+  // | target           | target teams    |                                    |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | target parallel  | parallel        | *                                  |
   // | target parallel  | for             | *                                  |
@@ -2988,6 +3037,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | target parallel  | target simd     |                                    |
   // | target parallel  | teams distribute| +                                  |
+  // | target parallel  | teams distribute| +                                  |
+  // |                  | simd            |                                    |
   // | target parallel  | target teams    |                                    |
   // | target parallel  | teams distribute|                                    |
   // |                  | parallel for    |                                    |
@@ -2997,10 +3048,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | target parallel  | target teams    |                                    |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | target parallel  | teams distribute|                                    |
-  // |                  | simd            |                                    |
   // | target parallel  | target teams    |                                    |
   // |                  | distribute      |                                    |
+  // | target parallel  | target teams    |                                    |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | target parallel  | parallel        | *                                  |
   // | for              |                 |                                    |
@@ -3076,6 +3127,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | for              |                 |                                    |
   // | target parallel  | teams distribute|                                    |
   // | for              |                 |                                    |
+  // | target parallel  | teams distribute|                                    |
+  // | for              | simd            |                                    |
   // | target parallel  | target teams    |                                    |
   // | for              |                 |                                    |
   // | target parallel  | teams distribute|                                    |
@@ -3086,10 +3139,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | target parallel  | target teams    |                                    |
   // | for              | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | target parallel  | teams distribute|                                    |
-  // | for              | simd            |                                    |
   // | target parallel  | target teams    |                                    |
   // | for              | distribute      |                                    |
+  // | target parallel  | target teams    |                                    |
+  // | for              | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | teams            | parallel        | *                                  |
   // | teams            | for             | +                                  |
@@ -3135,6 +3188,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | teams            | target simd     | +                                  |
   // | teams            | teams distribute| +                                  |
+  // | teams            | teams distribute| +                                  |
+  // |                  | simd            |                                    |
   // | teams            | target teams    |                                    |
   // | teams            | teams distribute|                                    |
   // |                  | parallel for    |                                    |
@@ -3144,10 +3199,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | teams            | target teams    |                                    |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | teams            | teams distribute|                                    |
-  // |                  | simd            |                                    |
   // | teams            | target teams    |                                    |
   // |                  | distribute      |                                    |
+  // | teams            | target teams    |                                    |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | taskloop         | parallel        | *                                  |
   // | taskloop         | for             | +                                  |
@@ -3192,16 +3247,18 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | taskloop         | target simd     | *                                  |
   // | taskloop         | teams distribute| +                                  |
+  // | taskloop         | teams distribute| +                                  |
+  // |                  | simd            |                                    |
   // | taskloop         | target teams    | *                                  |
   // | taskloop         | teams distribute| +                                  |
   // |                  | parallel for    |                                    |
   // | taskloop         | target teams    | *                                  |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | taskloop         | teams distribute| +                                  |
-  // |                  | simd            |                                    |
   // | taskloop         | target teams    | *                                  |
   // |                  | distribute      |                                    |
+  // | taskloop         | target teams    | *                                  |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | taskloop simd    | parallel        |                                    |
   // | taskloop simd    | for             |                                    |
@@ -3247,6 +3304,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | taskloop simd    | target simd     |                                    |
   // | taskloop simd    | teams distribute|                                    |
+  // | taskloop simd    | teams distribute|                                    |
+  // |                  | simd            |                                    |
   // | taskloop simd    | target teams    |                                    |
   // | taskloop simd    | teams distribute|                                    |
   // |                  | parallel for    |                                    |
@@ -3256,10 +3315,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | taskloop simd    | target teams    |                                    |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | taskloop simd    | teams distribute|                                    |
-  // |                  | simd            |                                    |
   // | taskloop simd    | target teams    |                                    |
   // |                  | distribute      |                                    |
+  // | taskloop simd    | target teams    |                                    |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | distribute       | parallel        | *                                  |
   // | distribute       | for             | *                                  |
@@ -3305,6 +3364,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | distribute       | target simd     |                                    |
   // | distribute       | teams distribute|                                    |
+  // | distribute       | teams distribute|                                    |
+  // |                  | simd            |                                    |
   // | distribute       | target teams    |                                    |
   // | distribute       | teams distribute|                                    |
   // |                  | parallel for    |                                    |
@@ -3314,10 +3375,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | distribute       | target teams    |                                    |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | distribute       | teams distribute|                                    |
-  // |                  | simd            |                                    |
   // | distribute       | target teams    |                                    |
   // |                  | distribute      |                                    |
+  // | distribute       | target teams    |                                    |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | distribute       | parallel        | *                                  |
   // | parallel for     |                 |                                    |
@@ -3394,6 +3455,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | parallel for     |                 |                                    |
   // | distribute       | teams distribute|                                    |
   // | parallel for     |                 |                                    |
+  // | distribute       | teams distribute|                                    |
+  // | parallel for     | simd            |                                    |
   // | distribute       | target teams    |                                    |
   // | parallel for     |                 |                                    |
   // | distribute       | teams distribute|                                    |
@@ -3404,10 +3467,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | distribute       | target teams    |                                    |
   // | parallel for     | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | distribute       | teams distribute|                                    |
-  // | parallel for     | simd            |                                    |
   // | distribute       | target teams    |                                    |
   // | parallel for     | distribute      |                                    |
+  // | distribute       | target teams    |                                    |
+  // | parallel for     | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | distribute       | parallel        | *                                  |
   // | parallel for simd|                 |                                    |
@@ -3483,6 +3546,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | parallel for simd|                 |                                    |
   // | distribute       | teams distribute|                                    |
   // | parallel for simd|                 |                                    |
+  // | distribute       | teams distribute|                                    |
+  // | parallel for simd| simd            |                                    |
   // | distribute       | target teams    |                                    |
   // | parallel for simd|                 |                                    |
   // | distribute       | teams distribute|                                    |
@@ -3493,10 +3558,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | distribute       | target teams    |                                    |
   // | parallel for simd| distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | distribute       | teams distribute|                                    |
-  // | parallel for simd| simd            |                                    |
   // | distribute       | target teams    |                                    |
   // | parallel for simd| distribute      |                                    |
+  // | distribute       | target teams    |                                    |
+  // | parallel for simd| distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | distribute simd  | parallel        | *                                  |
   // | distribute simd  | for             | *                                  |
@@ -3542,6 +3607,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | distribute simd  | target simd     | *                                  |
   // | distribute simd  | teams distribute| *                                  |
+  // | distribute simd  | teams distribute|                                    |
+  // |                  | simd            |                                    |
   // | distribute simd  | target teams    |                                    |
   // | distribute simd  | teams distribute|                                    |
   // |                  | parallel for    |                                    |
@@ -3551,10 +3618,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | distribute simd  | target teams    |                                    |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | distribute simd  | teams distribute|                                    |
-  // |                  | simd            |                                    |
   // | distribute simd  | target teams    |                                    |
   // |                  | distribute      |                                    |
+  // | distribute simd  | target teams    |                                    |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | target parallel  | parallel        | *                                  |
   // | for simd         |                 |                                    |
@@ -3630,6 +3697,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | for simd         |                 |                                    |
   // | target parallel  | teams distribute| *                                  |
   // | for simd         |                 |                                    |
+  // | target parallel  | teams distribute|                                    |
+  // | for simd         | simd            |                                    |
   // | target parallel  | target teams    |                                    |
   // | for simd         |                 |                                    |
   // | target parallel  | teams distribute|                                    |
@@ -3640,10 +3709,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | target parallel  | target teams    |                                    |
   // | for simd         | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | target parallel  | teams distribute|                                    |
-  // | for simd         | simd            |                                    |
   // | target parallel  | target teams    |                                    |
   // | for simd         | distribute      |                                    |
+  // | target parallel  | target teams    |                                    |
+  // | for simd         | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | target simd      | parallel        |                                    |
   // | target simd      | for             |                                    |
@@ -3689,6 +3758,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | for simd        |                                    |
   // | target simd      | target simd     |                                    |
   // | target simd      | teams distribute|                                    |
+  // | target simd      | teams distribute|                                    |
+  // |                  | simd            |                                    |
   // | target simd      | target teams    |                                    |
   // | target simd      | teams distribute|                                    |
   // |                  | parallel for    |                                    |
@@ -3698,10 +3769,10 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | target simd      | target teams    |                                    |
   // |                  | distribute      |                                    |
   // |                  |parallel for simd|                                    |
-  // | target simd      | teams distribute|                                    |
-  // |                  | simd            |                                    |
   // | target simd      | target teams    |                                    |
   // |                  | distribute      |                                    |
+  // | target simd      | target teams    |                                    |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | teams distribute | parallel        |                                    |
   // | teams distribute | for             |                                    |
@@ -3746,8 +3817,87 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | teams distribute | target parallel |                                    |
   // |                  | for simd        |                                    |
   // | teams distribute | teams distribute|                                    |
+  // | teams distribute | teams distribute|                                    |
+  // |                  | simd            |                                    |
   // | teams distribute | target teams    |                                    |
   // |                  | distribute      |                                    |
+  // | teams distribute | target teams    |                                    |
+  // |                  | distribute simd |                                    |
+  // +------------------+-----------------+------------------------------------+
+  // | teams distribute | parallel        |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | for             |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | for simd        |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | master          |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | critical        |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | simd            |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | sections        |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | section         |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | single          |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | parallel for    |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute |parallel for simd|                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute |parallel sections|                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | task            |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | taskyield       |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | barrier         |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | taskwait        |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | taskgroup       |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | flush           |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | ordered         | + (with simd clause)               |
+  // | simd             |                 |                                    |
+  // | teams distribute | atomic          |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | target          |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | target parallel |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | target parallel |                                    |
+  // | simd             | for             |                                    |
+  // | teams distribute | target enter    |                                    |
+  // | simd             | data            |                                    |
+  // | teams distribute | target exit     |                                    |
+  // | simd             | data            |                                    |
+  // | teams distribute | teams           |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | cancellation    |                                    |
+  // | simd             | point           |                                    |
+  // | teams distribute | cancel          |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | taskloop        |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | taskloop simd   |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | distribute      |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | distribute      |                                    |
+  // | simd             | parallel for    |                                    |
+  // | teams distribute | distribute      |                                    |
+  // | simd             |parallel for simd|                                    |
+  // | teams distribute | distribute simd |                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | target parallel |                                    |
+  // | simd             | for simd        |                                    |
+  // | teams distribute | teams distribute|                                    |
+  // | simd             |                 |                                    |
+  // | teams distribute | teams distribute|                                    |
+  // | simd             | simd            |                                    |
   // +------------------+-----------------+------------------------------------+
   // | target teams     | parallel        | *                                  |
   // | target teams     | for             | +                                  |
@@ -3805,6 +3955,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // |                  | simd            |                                    |
   // | target teams     | target teams    |                                    |
   // |                  | distribute      |                                    |
+  // | target teams     | target teams    |                                    |
+  // |                  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | teams distribute | parallel        | *                                  |
   // | parallel for     |                 |                                    |
@@ -3893,6 +4045,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | parallel for     | simd            |                                    |
   // | teams distribute | target teams    |                                    |
   // | parallel for     | distribute      |                                    |
+  // | teams distribute | target teams    |                                    |
+  // | parallel for     | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   // | target teams     | parallel        | *                                  |
   // | distribute       |                 |                                    |
@@ -4019,6 +4173,9 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | target teams     | target teams    |                                    |
   // | distribute       | distribute      |                                    |
   // | parallel for     |                 |                                    |
+  // | target teams     | target teams    |                                    |
+  // | distribute       | distribute simd |                                    |
+  // | parallel for     |                 |                                    |
   // +------------------+-----------------+------------------------------------+
   // | target teams     | parallel        | *                                  |
   // | distribute       |                 |                                    |
@@ -4145,93 +4302,9 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | target teams     | target teams    |                                    |
   // | distribute       | distribute      |                                    |
   // | parallel for simd|                 |                                    |
-  // +------------------+-----------------+------------------------------------+
-  // | teams distribute | parallel        | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | for             | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | for simd        | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | master          | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | critical        | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | simd            | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | sections        | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | section         | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | single          | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | parallel for    | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute |parallel for simd| *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute |parallel sections| *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | task            | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | taskyield       | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | barrier         | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | taskwait        | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | taskgroup       | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | flush           | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | ordered         | +                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | atomic          | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | target          | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | target parallel | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | target parallel | *                                  |
-  // | simd             | for             |                                    |
-  // | teams distribute | target enter    | *                                  |
-  // | simd             | data            |                                    |
-  // | teams distribute | target exit     | *                                  |
-  // | simd             | data            |                                    |
-  // | teams distribute | teams           | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | cancellation    | +                                  |
-  // | simd             | point           |                                    |
-  // | teams distribute | cancel          | +                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | taskloop        | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | taskloop simd   | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | distribute      |                                    |
-  // | simd             |                 |                                    |
-  // | teams distribute | distribute      | *                                  |
-  // | simd             | parallel for    |                                    |
-  // | teams distribute | distribute      | *                                  |
-  // | simd             |parallel for simd|                                    |
-  // | teams distribute | distribute simd | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | target parallel | *                                  |
-  // | simd             | for simd        |                                    |
-  // | teams distribute | target simd     | *                                  |
-  // | simd             |                 |                                    |
-  // | teams distribute | target teams    |                                    |
-  // | simd             |                 |                                    |
-  // | teams distribute | teams distribute|                                    |
-  // | simd             | parallel for    |                                    |
-  // | teams distribute | target teams    |                                    |
-  // | simd             | distribute      |                                    |
-  // |                  | parallel for    |                                    |
-  // | teams distribute | target teams    |                                    |
-  // | simd             | distribute      |                                    |
-  // |                  |parallel for simd|                                    |
-  // | teams distribute | teams distribute|                                    |
-  // | simd             | simd            |                                    |
-  // | teams distribute | target teams    |                                    |
-  // | simd             | distribute      |                                    |
+  // | target teams     | target teams    |                                    |
+  // | distribute       | distribute simd |                                    |
+  // | parallel for simd|                 |                                    |
   // +------------------+-----------------+------------------------------------+
   // | target teams     | parallel        | *                                  |
   // | distribute       |                 |                                    |
@@ -4320,6 +4393,98 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
   // | distribute       | simd            |                                    |
   // | target teams     | target teams    |                                    |
   // | distribute       | distribute      |                                    |
+  // | target teams     | target teams    |                                    |
+  // | distribute       | distribute simd |                                    |
+  // +------------------+-----------------+------------------------------------+
+  // | target teams     | parallel        | *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | for             | *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | for simd        | *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | master          | *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | critical        | *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | simd            | *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | sections        | *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | section         | *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | single          | *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | parallel for    | *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     |parallel for simd| *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     |parallel sections| *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | task            | *                                  |
+  // | distribute simd  |                 |                                    |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | taskyield       | *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | barrier         | *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | taskwait        | *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | taskgroup       | *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | flush           | *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | ordered         | +                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | atomic          | *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | target          |                                    |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | target parallel |                                    |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | target parallel |                                    |
+  // | distribute simd  | for             |                                    |
+  // | target teams     | target enter    |                                    |
+  // | distribute simd  | data            |                                    |
+  // | target teams     | target exit     |                                    |
+  // | distribute simd  | data            |                                    |
+  // | target teams     | teams           |                                    |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | cancellation    | +                                  |
+  // | distribute simd  | point           |                                    |
+  // | target teams     | cancel          | +                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | taskloop        | *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | taskloop simd   | *                                  |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | distribute      |                                    |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | distribute      |                                    |
+  // | distribute simd  | parallel for    |                                    |
+  // | target teams     | distribute      |                                    |
+  // | distribute simd  |parallel for simd|                                    |
+  // | target teams     | distribute simd |                                    |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | target parallel |                                    |
+  // | distribute simd  | for simd        |                                    |
+  // | target teams     | target simd     |                                    |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | target teams    |                                    |
+  // | distribute simd  |                 |                                    |
+  // | target teams     | teams distribute|                                    |
+  // | distribute simd  | parallel for    |                                    |
+  // | target teams     | target teams    |                                    |
+  // | distribute simd  | distribute      |                                    |
+  // |                  | parallel for    |                                    |
+  // | target teams     | target teams    |                                    |
+  // | distribute simd  | distribute      |                                    |
+  // |                  |parallel for simd|                                    |
+  // | target teams     | teams distribute|                                    |
+  // | distribute simd  | simd            |                                    |
+  // | target teams     | target teams    |                                    |
+  // | distribute simd  | distribute      |                                    |
+  // | target teams     | target teams    |                                    |
+  // | distribute simd  | distribute simd |                                    |
   // +------------------+-----------------+------------------------------------+
   if (Stack->getCurScope()) {
     auto ParentRegion = Stack->getParentDirective();
@@ -4368,10 +4533,12 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
       }
       return false;
     }
-    // Allow some constructs (except teams) to be orphaned (they could be
-    // used in functions, called from OpenMP regions with the required
-    // preconditions).
-    if (ParentRegion == OMPD_unknown && !isOpenMPTeamsDirective(CurrentRegion))
+    // Allow some constructs (except the ones that start with teams) to be
+    // orphaned (they could be used in functions, called from OpenMP regions
+    // with the required preconditions).
+    if (ParentRegion == OMPD_unknown &&
+        !(isOpenMPTeamsDirective(CurrentRegion) &&
+          !isOpenMPTargetExecutionDirective(CurrentRegion)))
       return false;
     if (CurrentRegion == OMPD_cancellation_point ||
         CurrentRegion == OMPD_cancel) {
@@ -4482,7 +4649,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
                           !isOpenMPDistributeDirective(CurrentRegion);
       Recommend = ShouldBeInParallelRegion;
     }
-    if (!NestingProhibited && isOpenMPNestingDistributeDirective(CurrentRegion) &&
+    if (!NestingProhibited &&
+        isOpenMPNestingDistributeDirective(CurrentRegion) &&
         !isOpenMPTeamsDirective(CurrentRegion)) {
       // OpenMP 4.5 [2.17 Nesting of Regions]
       // The region associated with the distribute construct must be strictly
@@ -4841,6 +5009,10 @@ StmtResult Sema::ActOnOpenMPExecutableDirective(
     Res = ActOnOpenMPTeamsDistributeDirective(
         ClausesWithImplicit, AStmt, StartLoc, EndLoc, VarsWithInheritedDSA);
     break;
+  case OMPD_teams_distribute_simd:
+    Res = ActOnOpenMPTeamsDistributeSimdDirective(
+        ClausesWithImplicit, AStmt, StartLoc, EndLoc, VarsWithInheritedDSA);
+    break;
   case OMPD_target_teams:
     Res = ActOnOpenMPTargetTeamsDirective(ClausesWithImplicit, AStmt, StartLoc,
                                           EndLoc);
@@ -4863,12 +5035,12 @@ StmtResult Sema::ActOnOpenMPExecutableDirective(
     AllowedNameModifiers.push_back(OMPD_target);
     AllowedNameModifiers.push_back(OMPD_parallel);
     break;
-  case OMPD_teams_distribute_simd:
-    Res = ActOnOpenMPTeamsDistributeSimdDirective(
-        ClausesWithImplicit, AStmt, StartLoc, EndLoc, VarsWithInheritedDSA);
-    break;
   case OMPD_target_teams_distribute:
     Res = ActOnOpenMPTargetTeamsDistributeDirective(
+        ClausesWithImplicit, AStmt, StartLoc, EndLoc, VarsWithInheritedDSA);
+    break;
+  case OMPD_target_teams_distribute_simd:
+    Res = ActOnOpenMPTargetTeamsDistributeSimdDirective(
         ClausesWithImplicit, AStmt, StartLoc, EndLoc, VarsWithInheritedDSA);
     break;
   case OMPD_declare_target:
@@ -5817,7 +5989,7 @@ Expr *OpenMPIterationSpaceChecker::BuildPrivateCounterVar() const {
   return nullptr;
 }
 
-/// \brief Build initization of the counter to be used for codegen.
+/// \brief Build initialization of the counter to be used for codegen.
 Expr *OpenMPIterationSpaceChecker::BuildCounterInit() const { return LB; }
 
 /// \brief Build step of the counter be used for codegen.
@@ -8121,14 +8293,7 @@ StmtResult Sema::ActOnOpenMPTargetDirective(ArrayRef<OMPClause *> Clauses,
 
   getCurFunction()->setHasBranchProtectedScope();
 
-  if (getLangOpts().OpenMPImplicitDeclareTarget) {
-    // Structured block of target region is visited to catch function call.
-    // Revealed function calls are marked with OMPDeclareTargetDeclAttr
-    // attribute,
-    // in case -fopenmp-implicit-declare-target extension is enabled.
-    ImplicitDeviceFunctionChecker FunctionCallChecker(*this);
-    FunctionCallChecker.TraverseDecl(CS->getCapturedDecl());
-  }
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
 
   return OMPTargetDirective::Create(Context, StartLoc, EndLoc, Clauses, AStmt);
 }
@@ -8149,6 +8314,8 @@ Sema::ActOnOpenMPTargetParallelDirective(ArrayRef<OMPClause *> Clauses,
   CS->getCapturedDecl()->setNothrow();
 
   getCurFunction()->setHasBranchProtectedScope();
+
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
 
   return OMPTargetParallelDirective::Create(Context, StartLoc, EndLoc, Clauses,
                                             AStmt);
@@ -8198,6 +8365,9 @@ StmtResult Sema::ActOnOpenMPTargetParallelForDirective(
   }
 
   getCurFunction()->setHasBranchProtectedScope();
+
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
+
   return OMPTargetParallelForDirective::Create(Context, StartLoc, EndLoc,
                                                NestedLoopCount, Clauses, AStmt,
                                                B, DSAStack->isCancelRegion());
@@ -8646,9 +8816,11 @@ StmtResult Sema::ActOnOpenMPTargetParallelForSimdDirective(
     return StmtError();
 
   getCurFunction()->setHasBranchProtectedScope();
-  return OMPTargetParallelForSimdDirective::Create(Context, StartLoc, EndLoc,
-                                                   NestedLoopCount, Clauses,
-                                                   AStmt, B);
+
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
+
+  return OMPTargetParallelForSimdDirective::Create(
+      Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
 }
 
 StmtResult Sema::ActOnOpenMPTargetSimdDirective(
@@ -8694,6 +8866,9 @@ StmtResult Sema::ActOnOpenMPTargetSimdDirective(
     return StmtError();
 
   getCurFunction()->setHasBranchProtectedScope();
+
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
+
   return OMPTargetSimdDirective::Create(Context, StartLoc, EndLoc,
                                         NestedLoopCount, Clauses, AStmt, B);
 }
@@ -8731,6 +8906,61 @@ StmtResult Sema::ActOnOpenMPTeamsDistributeDirective(
       Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
 }
 
+StmtResult Sema::ActOnOpenMPTeamsDistributeSimdDirective(
+    ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
+    SourceLocation EndLoc,
+    llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA) {
+  if (!AStmt)
+    return StmtError();
+
+  CapturedStmt *CS = cast<CapturedStmt>(AStmt);
+  // 1.2.2 OpenMP Language Terminology
+  // Structured block - An executable statement with a single entry at the
+  // top and a single exit at the bottom.
+  // The point of exit cannot be a branch out of the structured block.
+  // longjmp() and throw() must not violate the entry/exit criteria.
+  CS->getCapturedDecl()->setNothrow();
+
+  bool CoalescedSchedule;
+  bool CoalescedDistSchedule;
+  std::tie(CoalescedSchedule, CoalescedDistSchedule) =
+      generateCoalescedSchedule(*this, Clauses);
+  OMPLoopDirective::HelperExprs B;
+  // In presence of clause 'collapse' with number of loops, it will
+  // define the nested loops number.
+  unsigned NestedLoopCount = CheckOpenMPLoop(
+      OMPD_teams_distribute_simd, getCollapseNumberExpr(Clauses),
+      nullptr /*ordered not a clause on distribute*/, AStmt, *this, *DSAStack,
+      VarsWithImplicitDSA, B, CoalescedSchedule, CoalescedDistSchedule);
+
+  if (NestedLoopCount == 0)
+    return StmtError();
+
+  assert((CurContext->isDependentContext() || B.builtAll()) &&
+         "omp teams distribute simd loop exprs were not built");
+
+  if (!CurContext->isDependentContext()) {
+    // Finalize the clauses that need pre-built expressions for CodeGen.
+    for (auto C : Clauses) {
+      if (auto *LC = dyn_cast<OMPLinearClause>(C))
+        if (FinishOpenMPLinearClause(*LC, cast<DeclRefExpr>(B.IterationVarRef),
+                                     B.NumIterations, *this, CurScope,
+                                     DSAStack))
+          return StmtError();
+    }
+  }
+
+  if (checkSimdlenSafelenSpecified(*this, Clauses))
+    return StmtError();
+
+  getCurFunction()->setHasBranchProtectedScope();
+
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
+
+  return OMPTeamsDistributeSimdDirective::Create(
+      Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
+}
+
 StmtResult Sema::ActOnOpenMPTargetTeamsDirective(ArrayRef<OMPClause *> Clauses,
                                                  Stmt *AStmt,
                                                  SourceLocation StartLoc,
@@ -8747,6 +8977,8 @@ StmtResult Sema::ActOnOpenMPTargetTeamsDirective(ArrayRef<OMPClause *> Clauses,
   CS->getCapturedDecl()->setNothrow();
 
   getCurFunction()->setHasBranchProtectedScope();
+
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
 
   return OMPTargetTeamsDirective::Create(Context, StartLoc, EndLoc, Clauses,
                                          AStmt);
@@ -8822,59 +9054,10 @@ StmtResult Sema::ActOnOpenMPTargetTeamsDistributeParallelForDirective(
          "omp for loop exprs were not built");
 
   getCurFunction()->setHasBranchProtectedScope();
+
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
+
   return OMPTargetTeamsDistributeParallelForDirective::Create(
-      Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
-}
-
-StmtResult Sema::ActOnOpenMPTeamsDistributeSimdDirective(
-    ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
-    SourceLocation EndLoc,
-    llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA) {
-  if (!AStmt)
-    return StmtError();
-
-  CapturedStmt *CS = cast<CapturedStmt>(AStmt);
-  // 1.2.2 OpenMP Language Terminology
-  // Structured block - An executable statement with a single entry at the
-  // top and a single exit at the bottom.
-  // The point of exit cannot be a branch out of the structured block.
-  // longjmp() and throw() must not violate the entry/exit criteria.
-  CS->getCapturedDecl()->setNothrow();
-
-  bool CoalescedSchedule;
-  bool CoalescedDistSchedule;
-  std::tie(CoalescedSchedule, CoalescedDistSchedule) =
-      generateCoalescedSchedule(*this, Clauses);
-  OMPLoopDirective::HelperExprs B;
-  // In presence of clause 'collapse' with number of loops, it will
-  // define the nested loops number.
-  unsigned NestedLoopCount = CheckOpenMPLoop(
-      OMPD_teams_distribute_simd, getCollapseNumberExpr(Clauses),
-      nullptr /*ordered not a clause on distribute*/, AStmt, *this, *DSAStack,
-      VarsWithImplicitDSA, B, CoalescedSchedule, CoalescedDistSchedule);
-
-  if (NestedLoopCount == 0)
-    return StmtError();
-
-  assert((CurContext->isDependentContext() || B.builtAll()) &&
-         "omp for loop exprs were not built");
-
-  if (!CurContext->isDependentContext()) {
-    // Finalize the clauses that need pre-built expressions for CodeGen.
-    for (auto C : Clauses) {
-      if (auto LC = dyn_cast<OMPLinearClause>(C))
-        if (FinishOpenMPLinearClause(*LC, cast<DeclRefExpr>(B.IterationVarRef),
-                                     B.NumIterations, *this, CurScope,
-                                     DSAStack))
-          return StmtError();
-    }
-  }
-
-  if (checkSimdlenSafelenSpecified(*this, Clauses))
-    return StmtError();
-
-  getCurFunction()->setHasBranchProtectedScope();
-  return OMPTeamsDistributeSimdDirective::Create(
       Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
 }
 
@@ -8926,6 +9109,9 @@ StmtResult Sema::ActOnOpenMPTargetTeamsDistributeParallelForSimdDirective(
     return StmtError();
 
   getCurFunction()->setHasBranchProtectedScope();
+
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
+
   return OMPTargetTeamsDistributeParallelForSimdDirective::Create(
       Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
 }
@@ -8964,7 +9150,65 @@ StmtResult Sema::ActOnOpenMPTargetTeamsDistributeDirective(
          "omp for loop exprs were not built");
 
   getCurFunction()->setHasBranchProtectedScope();
+
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
+
   return OMPTargetTeamsDistributeDirective::Create(
+      Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
+}
+
+StmtResult Sema::ActOnOpenMPTargetTeamsDistributeSimdDirective(
+    ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
+    SourceLocation EndLoc,
+    llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA) {
+  if (!AStmt)
+    return StmtError();
+
+  CapturedStmt *CS = cast<CapturedStmt>(AStmt);
+  // 1.2.2 OpenMP Language Terminology
+  // Structured block - An executable statement with a single entry at the
+  // top and a single exit at the bottom.
+  // The point of exit cannot be a branch out of the structured block.
+  // longjmp() and throw() must not violate the entry/exit criteria.
+  CS->getCapturedDecl()->setNothrow();
+
+  bool CoalescedSchedule;
+  bool CoalescedDistSchedule;
+  std::tie(CoalescedSchedule, CoalescedDistSchedule) =
+      generateCoalescedSchedule(*this, Clauses);
+  OMPLoopDirective::HelperExprs B;
+  // In presence of clause 'collapse' with number of loops, it will
+  // define the nested loops number.
+  unsigned NestedLoopCount = CheckOpenMPLoop(
+      OMPD_target_teams_distribute_simd, getCollapseNumberExpr(Clauses),
+      nullptr /*ordered not a clause on distribute*/, AStmt, *this, *DSAStack,
+      VarsWithImplicitDSA, B, CoalescedSchedule, CoalescedDistSchedule);
+
+  if (NestedLoopCount == 0)
+    return StmtError();
+
+  assert((CurContext->isDependentContext() || B.builtAll()) &&
+         "omp for loop exprs were not built");
+
+  if (!CurContext->isDependentContext()) {
+    // Finalize the clauses that need pre-built expressions for CodeGen.
+    for (auto C : Clauses) {
+      if (auto LC = dyn_cast<OMPLinearClause>(C))
+        if (FinishOpenMPLinearClause(*LC, cast<DeclRefExpr>(B.IterationVarRef),
+                                     B.NumIterations, *this, CurScope,
+                                     DSAStack))
+          return StmtError();
+    }
+  }
+
+  if (checkSimdlenSafelenSpecified(*this, Clauses))
+    return StmtError();
+
+  getCurFunction()->setHasBranchProtectedScope();
+
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
+
+  return OMPTargetTeamsDistributeSimdDirective::Create(
       Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
 }
 

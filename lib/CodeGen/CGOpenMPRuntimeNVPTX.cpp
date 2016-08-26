@@ -130,7 +130,7 @@ enum DATA_SHARING_SIZES {
   // The maximum number of workers in a kernel.
   DS_Max_Worker_Threads = 992,
   // The size reserved for data in a shared memory slot.
-  DS_Slot_Size = 4,
+  DS_Slot_Size = 256,
   // The maximum number of threads in a worker warp.
   DS_Max_Worker_Warp_Size = 32,
   // The number of bits required to represent the maximum number of threads in a
@@ -665,9 +665,10 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createKernelInitializerFunction(
 
   auto &Bld = CGF.Builder;
 
-  llvm::BasicBlock *WorkerBB = CGF.createBasicBlock(".worker");
-  llvm::BasicBlock *MasterCheckBB = CGF.createBasicBlock(".ismaster");
   llvm::BasicBlock *MasterBB = CGF.createBasicBlock(".master");
+  llvm::BasicBlock *SyncBB = CGF.createBasicBlock(".sync.after.master");
+  llvm::BasicBlock *WorkerCheckBB = CGF.createBasicBlock(".isworker");
+  llvm::BasicBlock *WorkerBB = CGF.createBasicBlock(".worker");
   llvm::BasicBlock *ExitBB = CGF.createBasicBlock(".exit");
 
   auto *RetTy = CGM.Int32Ty;
@@ -675,23 +676,32 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createKernelInitializerFunction(
   auto *Zero = llvm::ConstantInt::get(RetTy, 0);
   CGF.EmitStoreOfScalar(One, CGF.ReturnValue, /*Volatile=*/false, RetQTy);
 
+  auto *IsMaster =
+      Bld.CreateICmpEQ(GetNVPTXThreadID(CGF), GetMasterThreadID(CGF));
+  Bld.CreateCondBr(IsMaster, MasterBB, SyncBB);
+
+  CGF.EmitBlock(MasterBB);
+  // First action in sequential region:
+  // Initialize the state of the OpenMP runtime library on the GPU.
+  llvm::Value *Args[] = {GetThreadLimit(CGF, isSPMDExecutionMode())};
+  CGF.EmitRuntimeCall(
+      createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_init), Args);
+  initializeDataSharing(CGF, /*IsMaster=*/true);
+  CGF.EmitStoreOfScalar(Zero, CGF.ReturnValue, /*Volatile=*/false, RetQTy);
+  CGF.EmitBranch(SyncBB);
+
+  CGF.EmitBlock(SyncBB);
+  SyncCTAThreads(CGF);
+  CGF.EmitBranch(WorkerCheckBB);
+
+  CGF.EmitBlock(WorkerCheckBB);
   auto *IsWorker = Bld.CreateICmpULT(
       GetNVPTXThreadID(CGF), GetThreadLimit(CGF, isSPMDExecutionMode()));
-  Bld.CreateCondBr(IsWorker, WorkerBB, MasterCheckBB);
+  Bld.CreateCondBr(IsWorker, WorkerBB, ExitBB);
 
   CGF.EmitBlock(WorkerBB);
   initializeDataSharing(CGF, /*IsMaster=*/false);
   Bld.CreateCall(WorkerFunction);
-  CGF.EmitBranch(ExitBB);
-
-  CGF.EmitBlock(MasterCheckBB);
-  auto *IsMaster =
-      Bld.CreateICmpEQ(GetNVPTXThreadID(CGF), GetMasterThreadID(CGF));
-  Bld.CreateCondBr(IsMaster, MasterBB, ExitBB);
-
-  CGF.EmitBlock(MasterBB);
-  initializeDataSharing(CGF, /*IsMaster=*/true);
-  CGF.EmitStoreOfScalar(Zero, CGF.ReturnValue, /*Volatile=*/false, RetQTy);
   CGF.EmitBranch(ExitBB);
 
   CGF.EmitBlock(ExitBB);
@@ -952,12 +962,6 @@ void CGOpenMPRuntimeNVPTX::emitGenericEntryHeader(CodeGenFunction &CGF,
   DataSharingFunctionInfoMap[CGF.CurFn].IsEntryPoint = true;
   DataSharingFunctionInfoMap[CGF.CurFn].EntryWorkerFunction = WST.WorkerFn;
   DataSharingFunctionInfoMap[CGF.CurFn].EntryExitBlock = EST.ExitBB;
-
-  // First action in sequential region:
-  // Initialize the state of the OpenMP runtime library on the GPU.
-  llvm::Value *Args[] = {GetThreadLimit(CGF, isSPMDExecutionMode())};
-  CGF.EmitRuntimeCall(
-      createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_kernel_init), Args);
 }
 
 void CGOpenMPRuntimeNVPTX::emitGenericEntryFooter(CodeGenFunction &CGF,
@@ -2094,17 +2098,15 @@ bool CGOpenMPRuntimeNVPTX::isSPMDExecutionMode() const {
   return CurrMode == CGOpenMPRuntimeNVPTX::ExecutionMode::SPMD;
 }
 
-void CGOpenMPRuntimeNVPTX::registerCtorDtorEntry(unsigned DeviceID,
-                                                 unsigned FileID,
-                                                 StringRef RegionName,
-                                                 unsigned Line,
-                                                 llvm::Function *Fn) {
+void CGOpenMPRuntimeNVPTX::registerCtorDtorEntry(
+    unsigned DeviceID, unsigned FileID, StringRef RegionName, unsigned Line,
+    llvm::Function *Fn, bool IsDtor) {
   // On top of the default registration we create a new global to force the
   // region to be executed as SPMD.
   SetPropertyExecutionMode(CGM, Fn->getName(), SPMD);
 
-  CGOpenMPRuntime::registerCtorDtorEntry(DeviceID, FileID, RegionName, Line,
-                                         Fn);
+  CGOpenMPRuntime::registerCtorDtorEntry(DeviceID, FileID, RegionName, Line, Fn,
+                                         IsDtor);
 }
 
 bool CGOpenMPRuntimeNVPTX::IndeterminateLevel() { return IsOrphaned; }
@@ -2619,9 +2621,12 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
   auto FI = MasterRD->field_begin();
   for (unsigned i = 0; i < OrigAddresses.size(); ++i, ++FI) {
     llvm::Value *OriginalVal = nullptr;
-    if (DSI.CapturesValues[i].first) {
-      OriginalVal = EnclosingCGF.GetAddrOfLocalVar(DSI.CapturesValues[i].first)
-                        .getPointer();
+    if (const VarDecl *VD = DSI.CapturesValues[i].first) {
+      DeclRefExpr DRE(const_cast<VarDecl *>(VD),
+                      /*RefersToEnclosingVariableOrCapture=*/false,
+                      VD->getType(), VK_LValue, SourceLocation());
+      Address OriginalAddr = EnclosingCGF.EmitOMPHelperVar(&DRE).getAddress();
+      OriginalVal = OriginalAddr.getPointer();
     } else
       OriginalVal = CGF.LoadCXXThis();
 
@@ -3321,9 +3326,10 @@ void CGOpenMPRuntimeNVPTX::emitSimdCall(CodeGenFunction &CGF,
 /// \param CriticalOpGen Generator for the statement associated with the given
 /// critical region.
 /// \param Hint Value of the 'hint' clause (optional).
-void CGOpenMPRuntimeNVPTX::emitCriticalRegion(CodeGenFunction &CGF,
-    StringRef CriticalName, const RegionCodeGenTy &CriticalOpGen,
-    SourceLocation Loc, const Expr *Hint) {
+void CGOpenMPRuntimeNVPTX::emitCriticalRegion(
+    CodeGenFunction &CGF, StringRef CriticalName,
+    const RegionCodeGenTy &CriticalOpGen, SourceLocation Loc,
+    const Expr *Hint) {
 
   auto *LoopBB = CGF.createBasicBlock("omp.critical.loop");
   auto *TestBB = CGF.createBasicBlock("omp.critical.test");
@@ -3339,9 +3345,10 @@ void CGOpenMPRuntimeNVPTX::emitCriticalRegion(CodeGenFunction &CGF,
 
   /// Initialise the counter variable for the loop.
   auto Int32Ty =
-    CGF.getContext().getIntTypeForBitwidth(/*DestWidth*/ 32, /*Signed*/ true);
+      CGF.getContext().getIntTypeForBitwidth(/*DestWidth*/ 32, /*Signed*/ true);
   auto Counter = CGF.CreateMemTemp(Int32Ty, "critical_counter");
-  auto CounterLVal = CGF.MakeNaturalAlignAddrLValue(Counter.getPointer(), Int32Ty);
+  auto CounterLVal =
+      CGF.MakeNaturalAlignAddrLValue(Counter.getPointer(), Int32Ty);
   CGF.EmitStoreOfScalar(llvm::ConstantInt::get(CGM.Int32Ty, 0), CounterLVal);
   CGF.EmitBranch(LoopBB);
 
@@ -3374,7 +3381,7 @@ void CGOpenMPRuntimeNVPTX::emitCriticalRegion(CodeGenFunction &CGF,
   GetNVPTXCTABarrier(CGF);
 
   auto *IncCounterVal =
-    CGF.Builder.CreateNSWAdd(CounterVal, CGF.Builder.getInt32(1));
+      CGF.Builder.CreateNSWAdd(CounterVal, CGF.Builder.getInt32(1));
   CGF.EmitStoreOfScalar(IncCounterVal, CounterLVal);
   CGF.EmitBranch(LoopBB);
 
