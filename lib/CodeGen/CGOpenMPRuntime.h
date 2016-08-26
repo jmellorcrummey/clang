@@ -177,12 +177,13 @@ protected:
   /// \param DeviceID The device ID of the target region in the system.
   /// \param FileID The file ID of the target region in the system.
   /// \param RegionName The name of the region.
-  /// \param Line Line where the declaration the target egion refers to is
+  /// \param Line Line where the declaration the target region refers to is
   /// defined.
   /// \param Fn The function that implements the target region.
+  /// \param IsDtor True if what being registered is a destructor.
   virtual void registerCtorDtorEntry(unsigned DeviceID, unsigned FileID,
                                      StringRef RegionName, unsigned Line,
-                                     llvm::Function *Fn);
+                                     llvm::Function *Fn, bool IsDtor);
 
 public:
   virtual StringRef RenameStandardFunction(StringRef name);
@@ -312,6 +313,9 @@ private:
   public:
     /// \brief Base class of the entries info.
     class OffloadEntryInfo {
+      // \brief Flags associated the device global.
+      llvm::ConstantInt *Flags;
+
     public:
       /// \brief Kind of a given entry. Currently, only target regions are
       /// supported.
@@ -326,13 +330,17 @@ private:
         OFFLOAD_ENTRY_INFO_INVALID = ~0u
       };
 
-      OffloadEntryInfo() : Order(~0u), Kind(OFFLOAD_ENTRY_INFO_INVALID) {}
-      explicit OffloadEntryInfo(OffloadingEntryInfoKinds Kind, unsigned Order)
-          : Order(Order), Kind(Kind) {}
+      OffloadEntryInfo()
+          : Flags(nullptr), Order(~0u), Kind(OFFLOAD_ENTRY_INFO_INVALID) {}
+      explicit OffloadEntryInfo(OffloadingEntryInfoKinds Kind, unsigned Order,
+                                llvm::ConstantInt *Flags)
+          : Flags(Flags), Order(Order), Kind(Kind) {}
 
       bool isValid() const { return Order != ~0u; }
       unsigned getOrder() const { return Order; }
       OffloadingEntryInfoKinds getKind() const { return Kind; }
+      llvm::ConstantInt *getFlags() const { return Flags; }
+      void setFlags(llvm::ConstantInt *NewFlags) { Flags = NewFlags; }
       static bool classof(const OffloadEntryInfo *Info) { return true; }
 
     protected:
@@ -363,12 +371,14 @@ private:
 
     public:
       OffloadEntryInfoTargetRegion()
-          : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_TARGET_REGION, ~0u),
+          : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_TARGET_REGION, ~0u,
+                             /*Flags=*/nullptr),
             Addr(nullptr), ID(nullptr) {}
       explicit OffloadEntryInfoTargetRegion(unsigned Order,
                                             llvm::Constant *Addr,
-                                            llvm::Constant *ID)
-          : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_TARGET_REGION, Order),
+                                            llvm::Constant *ID,
+                                            llvm::ConstantInt *Flags)
+          : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_TARGET_REGION, Order, Flags),
             Addr(Addr), ID(ID) {}
 
       llvm::Constant *getAddress() const { return Addr; }
@@ -392,8 +402,8 @@ private:
     /// \brief Register target region entry.
     void registerTargetRegionEntryInfo(unsigned DeviceID, unsigned FileID,
                                        StringRef ParentName, unsigned LineNum,
-                                       llvm::Constant *Addr,
-                                       llvm::Constant *ID);
+                                       llvm::Constant *Addr, llvm::Constant *ID,
+                                       llvm::ConstantInt *Flags);
     /// \brief Return true if a target region entry with the provided
     /// information exists.
     bool hasTargetRegionEntryInfo(unsigned DeviceID, unsigned FileID,
@@ -414,19 +424,19 @@ private:
       llvm::Constant *Addr;
       // \brief Type of the global variable.
       QualType Ty;
-      // \brief Flags associated the device global.
-      llvm::ConstantInt *Flags;
 
     public:
       OffloadEntryInfoDeviceGlobalVar()
-          : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_GLOBAL_VAR, ~0u),
-            Addr(nullptr), Flags(nullptr) {}
+          : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_GLOBAL_VAR, ~0u,
+                             /*Flags=*/nullptr),
+            Addr(nullptr) {}
       explicit OffloadEntryInfoDeviceGlobalVar(unsigned Order,
                                                llvm::Constant *Addr,
                                                QualType Ty,
                                                llvm::ConstantInt *Flags)
-          : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_GLOBAL_VAR, Order),
-            Addr(Addr), Ty(Ty), Flags(Flags) {}
+          : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_GLOBAL_VAR, Order,
+                             Flags),
+            Addr(Addr), Ty(Ty) {}
 
       llvm::Constant *getAddress() const { return Addr; }
       void setAddress(llvm::Constant *V) {
@@ -435,8 +445,6 @@ private:
       }
       QualType getType() const { return Ty; }
       void setType(QualType QTy) { Ty = QTy; }
-      llvm::ConstantInt *getFlags() const { return Flags; }
-      void setFlags(llvm::ConstantInt *NewFlags) { Flags = NewFlags; }
       static bool classof(const OffloadEntryInfo *Info) {
         return Info->getKind() == OFFLOAD_ENTRY_INFO_DEVICE_GLOBAL_VAR;
       }
@@ -468,9 +476,11 @@ private:
 
     public:
       OffloadEntryInfoDeviceFunction()
-          : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_FUNCTION, ~0u) {}
+          : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_FUNCTION, ~0u,
+                             /*Flags=*/nullptr) {}
       explicit OffloadEntryInfoDeviceFunction(bool IsRegistered)
-          : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_FUNCTION, ~0u),
+          : OffloadEntryInfo(OFFLOAD_ENTRY_INFO_DEVICE_FUNCTION, ~0u,
+                             /*Flags=*/nullptr),
             IsRegistered(IsRegistered) {}
 
       bool isRegistered() const { return IsRegistered; }

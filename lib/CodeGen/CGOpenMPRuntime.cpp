@@ -2881,14 +2881,16 @@ void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::
                                              "only required for the device "
                                              "code generation.");
   OffloadEntriesTargetRegion[DeviceID][FileID][ParentName][LineNum] =
-      OffloadEntryInfoTargetRegion(Order, /*Addr=*/nullptr, /*ID=*/nullptr);
+      OffloadEntryInfoTargetRegion(Order, /*Addr=*/nullptr, /*ID=*/nullptr,
+                                   /*Flags=*/nullptr);
   ++OffloadingOrderedEntriesNum;
 }
 
 void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::
     registerTargetRegionEntryInfo(unsigned DeviceID, unsigned FileID,
                                   StringRef ParentName, unsigned LineNum,
-                                  llvm::Constant *Addr, llvm::Constant *ID) {
+                                  llvm::Constant *Addr, llvm::Constant *ID,
+                                  llvm::ConstantInt *Flags) {
   // If we are emitting code for a target, the entry is already initialized,
   // only has to be registered.
   if (CGM.getLangOpts().OpenMPIsDevice) {
@@ -2899,9 +2901,11 @@ void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::
     assert(Entry.isValid() && "Entry not initialized!");
     Entry.setAddress(Addr);
     Entry.setID(ID);
+    Entry.setFlags(Flags);
     return;
   } else {
-    OffloadEntryInfoTargetRegion Entry(OffloadingOrderedEntriesNum++, Addr, ID);
+    OffloadEntryInfoTargetRegion Entry(OffloadingOrderedEntriesNum++, Addr, ID,
+                                       Flags);
     OffloadEntriesTargetRegion[DeviceID][FileID][ParentName][LineNum] = Entry;
   }
 }
@@ -3315,7 +3319,8 @@ void CGOpenMPRuntime::createOffloadEntriesAndInfoMetadata() {
                 E)) {
       assert(CE->getID() && CE->getAddress() &&
              "Entry ID and Addr are invalid!");
-      createOffloadEntry(CE->getID(), CE->getAddress(), /*Size=*/0);
+      createOffloadEntry(CE->getID(), CE->getAddress(), /*Size=*/0,
+                         CE->getFlags());
     } else if (auto *CE = dyn_cast<OffloadEntriesInfoManagerTy::
                                        OffloadEntryInfoDeviceGlobalVar>(E)) {
       assert(CE->getAddress() && "Entry Addr is invalid!");
@@ -5201,7 +5206,8 @@ void CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(
 
   // Register the information for the entry associated with this target region.
   OffloadEntriesInfoManager.registerTargetRegionEntryInfo(
-      DeviceID, FileID, ParentName, Line, OutlinedFn, OutlinedFnID);
+      DeviceID, FileID, ParentName, Line, OutlinedFn, OutlinedFnID,
+      /*Flags=*/nullptr);
 }
 
 /// discard all CompoundStmts intervening between two constructs
@@ -6754,11 +6760,24 @@ IsDeclareTargetDeclaration(const ValueDecl *VD) {
   return nullptr;
 }
 
+namespace {
+enum OpenMPOffloadingDeclareTargetFlags {
+  /// \brief Mark the entry has having a 'link' attribute.
+  OMP_DECLARE_TARGET_LINK = 0x01,
+  /// \brief Mark the entry has being a global constructor.
+  OMP_DECLARE_TARGET_CTOR = 0x02,
+  /// \brief Mark the entry has being a global destructor.
+  OMP_DECLARE_TARGET_DTOR = 0x04,
+};
+}
+
 void CGOpenMPRuntime::registerCtorDtorEntry(unsigned DeviceID, unsigned FileID,
                                             StringRef RegionName, unsigned Line,
-                                            llvm::Function *Fn) {
+                                            llvm::Function *Fn, bool IsDtor) {
   OffloadEntriesInfoManager.registerTargetRegionEntryInfo(
-      DeviceID, FileID, RegionName, Line, Fn, Fn);
+      DeviceID, FileID, RegionName, Line, Fn, Fn,
+      llvm::ConstantInt::get(CGM.Int32Ty, IsDtor ? OMP_DECLARE_TARGET_DTOR
+                                                 : OMP_DECLARE_TARGET_CTOR));
 }
 
 bool CGOpenMPRuntime::emitDeviceCtorDtor(const VarDecl &D,
@@ -6821,7 +6840,8 @@ bool CGOpenMPRuntime::emitDeviceCtorDtor(const VarDecl &D,
 
     // Register the information for the entry associated with this target
     // region.
-    registerCtorDtorEntry(DeviceID, FileID, ParentNameInit, Line, Fn);
+    registerCtorDtorEntry(DeviceID, FileID, ParentNameInit, Line, Fn,
+                          /*IsDtor=*/false);
   }
 
   // Create the target region for the destructor.
@@ -6836,7 +6856,8 @@ bool CGOpenMPRuntime::emitDeviceCtorDtor(const VarDecl &D,
       Fn, &D, Addr, PerformInit, /*emitInitOnly=*/false, /*emitDtorOnly=*/true);
 
   // Register the information for the entry associated with this target region.
-  registerCtorDtorEntry(DeviceID, FileID, ParentNameDtor, Line, Fn);
+  registerCtorDtorEntry(DeviceID, FileID, ParentNameDtor, Line, Fn,
+                        /*IsDtor=*/true);
 
   // We successfully generated the target regions to initialize and destroy the
   // global.
@@ -7010,7 +7031,8 @@ llvm::Function *CGOpenMPRuntime::emitRegistrationFunction() {
         // Register the information for the entry associated with this target
         // region.
         OffloadEntriesInfoManager.registerTargetRegionEntryInfo(
-            DeviceID, FileID, ParentName, Line, ID, ID);
+            DeviceID, FileID, ParentName, Line, ID, ID,
+            llvm::ConstantInt::get(CGM.Int32Ty, OMP_DECLARE_TARGET_CTOR));
       }
 
       // Create a helper function to register the destructor.
@@ -7056,7 +7078,8 @@ llvm::Function *CGOpenMPRuntime::emitRegistrationFunction() {
             // target
             // region.
             OffloadEntriesInfoManager.registerTargetRegionEntryInfo(
-                DeviceID, FileID, ParentName, Line, ID, ID);
+                DeviceID, FileID, ParentName, Line, ID, ID,
+                llvm::ConstantInt::get(CGM.Int32Ty, OMP_DECLARE_TARGET_DTOR));
           });
 
       // Register the destructor.
@@ -7072,11 +7095,6 @@ llvm::Function *CGOpenMPRuntime::emitRegistrationFunction() {
       CGF.StartFunction(GlobalDecl(), Ctx.VoidTy, Info.CtorDtorFunction,
                         *Info.CtorDtorFunctionInfo, ArgList);
       CGF.FinishFunction();
-    };
-
-    enum OpenMPOffloadingDeclareTargetFlags {
-      /// \brief Mark the entry has having a 'link' attribute.
-      OMP_DECLARE_TARGET_LINK = 0x01,
     };
 
     // If we have a variable, register it and emit any ctors/dtors launching.

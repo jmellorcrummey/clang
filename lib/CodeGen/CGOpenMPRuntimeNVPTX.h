@@ -433,9 +433,10 @@ private:
   /// \param Line Line where the declaration the target egion refers to is
   /// defined.
   /// \param Fn The function that implements the target region.
+  /// \param IsDtor True if what being registered is a destructor.
   virtual void registerCtorDtorEntry(unsigned DeviceID, unsigned FileID,
                                      StringRef RegionName, unsigned Line,
-                                     llvm::Function *Fn) override;
+                                     llvm::Function *Fn, bool IsDtor) override;
 
 public:
   explicit CGOpenMPRuntimeNVPTX(CodeGenModule &CGM);
