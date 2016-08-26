@@ -1639,8 +1639,10 @@ class OffloadingActionBuilder final {
           }
 
           // If we didn't reach the assemble phase, we can't generate the fat
-          // binary.
-          if (!isa<AssembleJobAction>(CudaDeviceActions[I]))
+          // binary. We don't need to generate the fat binary if we are not in
+          // device-only mode.
+          if (!isa<AssembleJobAction>(CudaDeviceActions[I]) ||
+              CompileDeviceOnly)
             continue;
 
           Action *AssembleAction = CudaDeviceActions[I];
