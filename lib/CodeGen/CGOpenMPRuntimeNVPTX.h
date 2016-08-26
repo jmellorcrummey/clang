@@ -224,8 +224,9 @@ private:
   public:
     llvm::Function *WorkerFn;
     const CGFunctionInfo *CGFI;
+    bool ContainsDeclareTarget;
 
-    WorkerFunctionState(CodeGenModule &CGM);
+    WorkerFunctionState(CodeGenModule &CGM, const OMPExecutableDirective &D);
 
   private:
     void createWorkerFunction(CodeGenModule &CGM);
@@ -370,6 +371,7 @@ private:
   /// \param Sequential Code to emit by a worker thread when the parallel region
   /// is to be computed sequentially.
   void emitParallelismLevelCode(CodeGenFunction &CGF,
+                                llvm::Value *ParallelLevel,
                                 const RegionCodeGenTy &Level0,
                                 const RegionCodeGenTy &Level1,
                                 const RegionCodeGenTy &Sequential);

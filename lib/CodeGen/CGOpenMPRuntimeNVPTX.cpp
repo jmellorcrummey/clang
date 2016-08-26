@@ -34,11 +34,11 @@ enum OpenMPRTLFunctionNVPTX {
   OMPRTL_NVPTX__kmpc_spmd_kernel_init,
   /// \brief Call to void __kmpc_spmd_kernel_deinit();
   OMPRTL_NVPTX__kmpc_spmd_kernel_deinit,
-  // Call to void __kmpc_serialized_parallel(ident_t *loc, kmp_int32
-  // global_tid);
+  /// Call to void __kmpc_serialized_parallel(ident_t *loc, kmp_int32
+  /// global_tid);
   OMPRTL_NVPTX__kmpc_serialized_parallel,
-  // Call to void __kmpc_end_serialized_parallel(ident_t *loc, kmp_int32
-  // global_tid);
+  /// Call to void __kmpc_end_serialized_parallel(ident_t *loc, kmp_int32
+  /// global_tid);
   OMPRTL_NVPTX__kmpc_end_serialized_parallel,
   /// \brief Call to void __kmpc_kernel_prepare_parallel(void
   /// *outlined_function);
@@ -58,6 +58,10 @@ enum OpenMPRTLFunctionNVPTX {
   OMPRTL_NVPTX__kmpc_kernel_convergent_simd,
   /// \brief Call to void __kmpc_kernel_end_convergent_simd(void *buffer);
   OMPRTL_NVPTX__kmpc_kernel_end_convergent_simd,
+  /// \brief Call to void __kmpc_kernel_end_convergent_simd(ident_t *loc,
+  /// kmp_int32
+  /// global_tid);
+  OMPRTL_NVPTX__kmpc_parallel_level,
   /// \brief Call to int32_t __kmpc_warp_active_thread_mask();
   OMPRTL_NVPTX__kmpc_warp_active_thread_mask,
   /// \brief Call to void
@@ -696,10 +700,69 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createKernelInitializerFunction(
   return InitFn;
 }
 
+namespace {
+/// \brief Return the declare target attribute if the declaration is marked as
+// 'declare target', i.e. the declaration itself, its template declaration, or
+/// any of its redeclarations have the 'declare target' attribute.
+static bool IsDeclareTargetDeclaration(const ValueDecl *VD) {
+  const Decl *RelevantDecl = VD;
+
+  // Try to get the original template if any.
+  if (auto *FD = dyn_cast<FunctionDecl>(VD)) {
+    if (auto *Tmpl = FD->getPrimaryTemplate())
+      RelevantDecl = Tmpl;
+  }
+
+  // Check if the declaration or any of its redeclarations have a declare target
+  // attribute.
+  if (RelevantDecl->getAttr<OMPDeclareTargetDeclAttr>())
+    return true;
+
+  if (VD->getAttr<OMPDeclareTargetDeclAttr>())
+    return true;
+
+  for (const Decl *RD : RelevantDecl->redecls())
+    if (RD->getAttr<OMPDeclareTargetDeclAttr>())
+      return true;
+
+  return false;
+}
+
+class DeclareTargetFinder : public ConstStmtVisitor<DeclareTargetFinder> {
+private:
+  bool ContainsDeclareTarget;
+
+public:
+  DeclareTargetFinder() : ContainsDeclareTarget(false) {}
+
+  void Visit(const Stmt *S) {
+    if (ContainsDeclareTarget)
+      return;
+
+    ConstStmtVisitor<DeclareTargetFinder>::Visit(S);
+    for (const Stmt *Child : S->children()) {
+      if (Child && !ContainsDeclareTarget)
+        Visit(Child);
+    }
+  }
+
+  void VisitCallExpr(const CallExpr *E) {
+    const FunctionDecl *FD = E->getDirectCallee();
+    ContainsDeclareTarget = FD && IsDeclareTargetDeclaration(FD);
+  }
+
+  bool containsDeclareTarget() { return ContainsDeclareTarget; }
+};
+} // namespace
+
 CGOpenMPRuntimeNVPTX::WorkerFunctionState::WorkerFunctionState(
-    CodeGenModule &CGM)
+    CodeGenModule &CGM, const OMPExecutableDirective &D)
     : WorkerFn(nullptr), CGFI(nullptr) {
   createWorkerFunction(CGM);
+
+  DeclareTargetFinder Finder;
+  Finder.Visit(cast<CapturedStmt>(D.getAssociatedStmt())->getCapturedStmt());
+  ContainsDeclareTarget = Finder.containsDeclareTarget();
 };
 
 void CGOpenMPRuntimeNVPTX::WorkerFunctionState::createWorkerFunction(
@@ -796,13 +859,26 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
 
     // Insert call to work function. We pass the master has source thread ID.
     auto Fn = cast<llvm::Function>(W);
-    llvm::Value *Args[] = {GetMasterThreadID(CGF)};
-    CGF.EmitCallOrInvoke(Fn, Args);
+    CGF.EmitCallOrInvoke(
+        Fn, {Bld.getInt16(/*ParallelLevel=*/0), GetMasterThreadID(CGF)});
 
     // Go to end of parallel region.
     CGF.EmitBranch(TerminateBB);
 
     CGF.EmitBlock(CheckNextBB);
+  }
+
+  // Default case: call to outlined function through pointer IF the target
+  // region
+  // makes a declare target call.
+  if (WST.ContainsDeclareTarget) {
+    auto ParallelFnTy =
+        llvm::FunctionType::get(CGM.VoidTy, {CGM.Int16Ty, CGM.Int32Ty},
+                                /*isVarArg*/ false)
+            ->getPointerTo();
+    auto WorkFnCast = Bld.CreateBitCast(Bld.CreateLoad(WorkFn), ParallelFnTy);
+    CGF.EmitCallOrInvoke(WorkFnCast, {Bld.getInt16(/*ParallelLevel=*/0),
+                                      GetMasterThreadID(CGF)});
   }
 
   // Signal end of parallel region.
@@ -1071,6 +1147,15 @@ CGOpenMPRuntimeNVPTX::createNVPTXRuntimeFunction(unsigned Function) {
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
     RTLFn =
         CGM.CreateRuntimeFunction(FnTy, "__kmpc_kernel_end_convergent_simd");
+    break;
+  }
+  case OMPRTL_NVPTX__kmpc_parallel_level: {
+    // Build void __kmpc_parallel_level(ident_t *loc, kmp_int32
+    // global_tid);
+    llvm::Type *TypeParams[] = {getIdentTyPointerTy(), CGM.Int32Ty};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.Int16Ty, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_parallel_level");
     break;
   }
   case OMPRTL_NVPTX__kmpc_warp_active_thread_mask: {
@@ -1400,9 +1485,11 @@ void CGOpenMPRuntimeNVPTX::emitGenericKernel(const OMPExecutableDirective &D,
   ExecutionModeRAII ModeRAII(CurrMode,
                              CGOpenMPRuntimeNVPTX::ExecutionMode::GENERIC);
   EntryFunctionState EST;
-  WorkerFunctionState WST(CGM);
+  WorkerFunctionState WST(CGM, D);
   Work.clear();
   WrapperFunctionsMap.clear();
+
+  IsOrphaned = false;
 
   // Emit target region as a standalone region.
   class NVPTXPrePostActionTy : public PrePostActionTy {
@@ -1432,6 +1519,9 @@ void CGOpenMPRuntimeNVPTX::emitGenericKernel(const OMPExecutableDirective &D,
   // Now change the name of the worker function to correspond to this target
   // region's entry function.
   WST.WorkerFn->setName(OutlinedFn->getName() + "_worker");
+
+  IsOrphaned = true;
+
   return;
 }
 
@@ -2048,7 +2138,7 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
   if (auto *D = dyn_cast<CapturedDecl>(Context))
     Body = D->getBody();
   else
-    Body = cast<FunctionDecl>(D)->getBody();
+    Body = cast<FunctionDecl>(Context)->getBody();
 
   // Track if in this region one has to share
 
@@ -2517,7 +2607,13 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
     }
   };
 
-  emitParallelismLevelCode(CGF, L0ParallelGen, L1ParallelGen, Sequential);
+  auto *RTLoc = emitUpdateLocation(CGF, SourceLocation());
+  auto ThreadID = getThreadID(CGF, SourceLocation());
+  llvm::Value *ParallelLevel = CGF.EmitRuntimeCall(
+      createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_parallel_level),
+      {RTLoc, ThreadID});
+  emitParallelismLevelCode(CGF, ParallelLevel, L0ParallelGen, L1ParallelGen,
+                           Sequential);
 
   // Generate the values to replace.
   auto FI = MasterRD->field_begin();
@@ -2585,15 +2681,20 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
 
   // Create a function that takes as argument the source lane.
   FunctionArgList WrapperArgs;
+  QualType Int16QTy =
+      Ctx.getIntTypeForBitwidth(/*DestWidth=*/16, /*Signed=*/false);
   QualType Int32QTy =
       Ctx.getIntTypeForBitwidth(/*DestWidth=*/32, /*Signed=*/false);
   QualType Int32PtrQTy = Ctx.getPointerType(Int32QTy);
+  ImplicitParamDecl ParallelLevelArg(Ctx, /*DC=*/nullptr, SourceLocation(),
+                                     /*Id=*/nullptr, Int16QTy);
   ImplicitParamDecl WrapperArg(Ctx, /*DC=*/nullptr, SourceLocation(),
                                /*Id=*/nullptr, Int32QTy);
   ImplicitParamDecl WrapperLaneArg(Ctx, /*DC=*/nullptr, SourceLocation(),
                                    /*Id=*/nullptr, Int32PtrQTy);
   ImplicitParamDecl WrapperNumLanesArg(Ctx, /*DC=*/nullptr, SourceLocation(),
                                        /*Id=*/nullptr, Int32PtrQTy);
+  WrapperArgs.push_back(&ParallelLevelArg);
   WrapperArgs.push_back(&WrapperArg);
   if (IsSimd) {
     WrapperArgs.push_back(&WrapperLaneArg);
@@ -2611,6 +2712,11 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
 
   CodeGenFunction CGF(CGM, /*suppressNewContext=*/true);
   CGF.StartFunction(GlobalDecl(), Ctx.VoidTy, Fn, CGFI, WrapperArgs);
+
+  // Get the parallelism level (L0, L1, L2+).
+  auto ParallelLevelAddr = CGF.GetAddrOfLocalVar(&ParallelLevelArg);
+  auto *ParallelLevel = CGF.EmitLoadOfScalar(
+      ParallelLevelAddr, /*Volatile=*/false, Int16QTy, SourceLocation());
 
   // Get the source thread ID, it is the argument of the current function.
   auto SourceLaneIDAddr = CGF.GetAddrOfLocalVar(&WrapperArg);
@@ -2738,9 +2844,11 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
 
   // In Simd we only support L1 level.
   if (IsSimd)
-    emitParallelismLevelCode(CGF, Sequential, L1ParallelGen, Sequential);
+    emitParallelismLevelCode(CGF, ParallelLevel, Sequential, L1ParallelGen,
+                             Sequential);
   else
-    emitParallelismLevelCode(CGF, L0ParallelGen, L1ParallelGen, Sequential);
+    emitParallelismLevelCode(CGF, ParallelLevel, L0ParallelGen, L1ParallelGen,
+                             Sequential);
 
   // Get the array of arguments.
   SmallVector<llvm::Value *, 8> Args;
@@ -2808,8 +2916,9 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
 // one of the three possible parallelism level. This also emits the required
 // data sharing code for each level.
 void CGOpenMPRuntimeNVPTX::emitParallelismLevelCode(
-    CodeGenFunction &CGF, const RegionCodeGenTy &Level0,
-    const RegionCodeGenTy &Level1, const RegionCodeGenTy &Sequential) {
+    CodeGenFunction &CGF, llvm::Value *ParallelLevel,
+    const RegionCodeGenTy &Level0, const RegionCodeGenTy &Level1,
+    const RegionCodeGenTy &Sequential) {
   auto &Bld = CGF.Builder;
 
   // Flags that prevent code to be emitted if it can be proven that threads
@@ -2845,9 +2954,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelismLevelCode(
     // Do we need runtime checks
     if (!OnlyInL0) {
       NextBB = CGF.createBasicBlock(".next.parallel");
-      auto *ThreadID = GetNVPTXThreadID(CGF);
-      auto *MasterID = GetMasterThreadID(CGF);
-      auto *Cond = Bld.CreateICmpEQ(ThreadID, MasterID);
+      auto *Cond = Bld.CreateICmpEQ(ParallelLevel, Bld.getInt16(0));
       Bld.CreateCondBr(Cond, LBB, NextBB);
     }
 
@@ -2868,8 +2975,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelismLevelCode(
     // Do we need runtime checks
     if (!OnlyInL1) {
       NextBB = CGF.createBasicBlock(".next.parallel");
-      auto *ParallelLevelVal = getParallelismLevel(CGF);
-      auto *Cond = Bld.CreateICmpEQ(ParallelLevelVal, Bld.getInt32(1));
+      auto *Cond = Bld.CreateICmpEQ(ParallelLevel, Bld.getInt16(1));
       Bld.CreateCondBr(Cond, LBB, NextBB);
     }
 
@@ -2888,8 +2994,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelismLevelCode(
 
     // Do we need runtime checks
     if (!OnlySequential) {
-      auto *ParallelLevelVal = getParallelismLevel(CGF);
-      auto *Cond = Bld.CreateICmpSGT(ParallelLevelVal, Bld.getInt32(1));
+      auto *Cond = Bld.CreateICmpSGT(ParallelLevel, Bld.getInt16(1));
       Bld.CreateCondBr(Cond, SeqBB, AfterBB);
     }
 
@@ -2987,7 +3092,8 @@ void CGOpenMPRuntimeNVPTX::emitGenericParallelCall(
         WorkSource, /*Volatile=*/false,
         Ctx.getIntTypeForBitwidth(/*DestWidth=*/32, /*Signed=*/false),
         SourceLocation());
-    CGF.EmitCallOrInvoke(WFn, SourceThread);
+    CGF.EmitCallOrInvoke(WFn,
+                         {Bld.getInt16(/*ParallelLevel=*/1), SourceThread});
     ArrayDecay = Bld.CreateConstInBoundsGEP2_32(
         llvm::ArrayType::get(CGM.Int8Ty, TASK_STATE_SIZE), TaskState,
         /*Idx0=*/0, /*Idx1=*/0);
@@ -3031,9 +3137,15 @@ void CGOpenMPRuntimeNVPTX::emitGenericParallelCall(
         EndArgs);
   };
 
-  auto &&ThenGen = [this, &L0ParallelGen, &L1ParallelGen,
+  auto &&ThenGen = [this, &Loc, &L0ParallelGen, &L1ParallelGen,
                     &SeqGen](CodeGenFunction &CGF, PrePostActionTy &) {
-    emitParallelismLevelCode(CGF, L0ParallelGen, L1ParallelGen, SeqGen);
+    auto *RTLoc = emitUpdateLocation(CGF, Loc);
+    auto ThreadID = getThreadID(CGF, Loc);
+    llvm::Value *ParallelLevel = CGF.EmitRuntimeCall(
+        createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_parallel_level),
+        {RTLoc, ThreadID});
+    emitParallelismLevelCode(CGF, ParallelLevel, L0ParallelGen, L1ParallelGen,
+                             SeqGen);
   };
 
   if (IfCond) {
@@ -3150,10 +3262,12 @@ void CGOpenMPRuntimeNVPTX::emitSimdCall(CodeGenFunction &CGF,
 
     llvm::SmallVector<llvm::Value *, 16> OutlinedFnArgs;
 
+    auto *ParallelLevel = Bld.getInt16(1);
     auto *SourceThread = CGF.EmitLoadOfScalar(
         WorkSource, /*Volatile=*/false,
         Ctx.getIntTypeForBitwidth(/*DestWidth=*/32, /*Signed=*/false),
         SourceLocation());
+    OutlinedFnArgs.push_back(ParallelLevel);
     OutlinedFnArgs.push_back(SourceThread);
     OutlinedFnArgs.push_back(LaneId.getPointer());
     OutlinedFnArgs.push_back(NumLanes.getPointer());
@@ -3195,8 +3309,11 @@ void CGOpenMPRuntimeNVPTX::emitSimdCall(CodeGenFunction &CGF,
   };
 
   CodeGenFunction::RunCleanupsScope Scope(CGF);
-  // We only do SIMD if nested in a parallel region.
-  emitParallelismLevelCode(CGF, SeqGen, L1SimdGen, SeqGen);
+  auto ThreadID = getThreadID(CGF, Loc);
+  llvm::Value *ParallelLevel = CGF.EmitRuntimeCall(
+      createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_parallel_level),
+      {RTLoc, ThreadID});
+  emitParallelismLevelCode(CGF, ParallelLevel, SeqGen, L1SimdGen, SeqGen);
 }
 
 /// \brief Emits a critical region.
@@ -3304,7 +3421,7 @@ bool CGOpenMPRuntimeNVPTX::requiresBarrier(const OMPLoopDirective &S) const {
 }
 
 CGOpenMPRuntimeNVPTX::CGOpenMPRuntimeNVPTX(CodeGenModule &CGM)
-    : CGOpenMPRuntime(CGM), IsOrphaned(false), ParallelNestingLevel(0),
+    : CGOpenMPRuntime(CGM), IsOrphaned(true), ParallelNestingLevel(0),
       CurrMode(ExecutionMode::Unknown) {
   if (!CGM.getLangOpts().OpenMPIsDevice)
     llvm_unreachable("OpenMP NVPTX can only handle device code.");
