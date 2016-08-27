@@ -2239,20 +2239,20 @@ void CodeGenFunction::EmitOMPDistributeSimdDirective(
 
 void CodeGenFunction::EmitOMPTeamsDistributeDirective(
     const OMPTeamsDistributeDirective &S) {
-  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-    auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-      auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-        CGF.EmitStmt(
-            cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
-      };
-      CGF.EmitOMPDistributeLoop(S, CodeGen);
+  auto &&CGDistributeInlined = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+    OMPPrivateScope PrivateScope(CGF);
+    (void)PrivateScope.Privatize();
+    auto &&CGDistributeLoop = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+
+      CGF.EmitOMPDistributeLoop(S, [](CodeGenFunction &, PrePostActionTy &) {});
+
     };
     CGF.CGM.getOpenMPRuntime().emitInlinedDirective(CGF, OMPD_distribute,
-                                                    CodeGen,
+                                                    CGDistributeLoop,
                                                     /*HasCancel=*/false);
   };
   emitCommonOMPTeamsDirective(*this, S, OMPD_teams_distribute,
-                              CodeGen, /*CaptureLevel=*/1,
+                              CGDistributeInlined, /*CaptureLevel=*/1,
                               /*ImplicitParamStop=*/2);
 }
 
