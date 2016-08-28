@@ -1397,15 +1397,19 @@ GetExecutionMode(CodeGenModule &CGM, const OMPExecutableDirective &D) {
 class ExecutionModeRAII {
 private:
   CGOpenMPRuntimeNVPTX::ExecutionMode &CurrMode;
+  bool &IsOrphaned;
 
 public:
   ExecutionModeRAII(CGOpenMPRuntimeNVPTX::ExecutionMode &CurrMode,
-                    CGOpenMPRuntimeNVPTX::ExecutionMode ThisMode)
-      : CurrMode(CurrMode) {
+                    CGOpenMPRuntimeNVPTX::ExecutionMode ThisMode,
+                    bool &IsOrphaned, bool ThisOrphaned)
+      : CurrMode(CurrMode), IsOrphaned(IsOrphaned) {
     CurrMode = ThisMode;
+    IsOrphaned = ThisOrphaned;
   }
   ~ExecutionModeRAII() {
     CurrMode = CGOpenMPRuntimeNVPTX::ExecutionMode::Unknown;
+    IsOrphaned = !IsOrphaned;
   }
 };
 }; // namespace
@@ -1417,13 +1421,12 @@ void CGOpenMPRuntimeNVPTX::emitGenericKernel(const OMPExecutableDirective &D,
                                              bool IsOffloadEntry,
                                              const RegionCodeGenTy &CodeGen) {
   ExecutionModeRAII ModeRAII(CurrMode,
-                             CGOpenMPRuntimeNVPTX::ExecutionMode::GENERIC);
+                             CGOpenMPRuntimeNVPTX::ExecutionMode::GENERIC,
+                             IsOrphaned, false);
   EntryFunctionState EST;
   WorkerFunctionState WST(CGM, D);
   Work.clear();
   WrapperFunctionsMap.clear();
-
-  IsOrphaned = false;
 
   // Emit target region as a standalone region.
   class NVPTXPrePostActionTy : public PrePostActionTy {
@@ -1453,8 +1456,6 @@ void CGOpenMPRuntimeNVPTX::emitGenericKernel(const OMPExecutableDirective &D,
   // Now change the name of the worker function to correspond to this target
   // region's entry function.
   WST.WorkerFn->setName(OutlinedFn->getName() + "_worker");
-
-  IsOrphaned = true;
 
   return;
 }
@@ -1567,8 +1568,8 @@ void CGOpenMPRuntimeNVPTX::emitSPMDKernel(const OMPExecutableDirective &D,
                                           llvm::Constant *&OutlinedFnID,
                                           bool IsOffloadEntry,
                                           const RegionCodeGenTy &CodeGen) {
-  ExecutionModeRAII ModeRAII(CurrMode,
-                             CGOpenMPRuntimeNVPTX::ExecutionMode::SPMD);
+  ExecutionModeRAII ModeRAII(
+      CurrMode, CGOpenMPRuntimeNVPTX::ExecutionMode::SPMD, IsOrphaned, false);
   EntryFunctionState EST(D);
 
   // Emit target region as a standalone region.
