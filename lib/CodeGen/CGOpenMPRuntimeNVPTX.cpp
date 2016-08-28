@@ -365,75 +365,6 @@ CGOpenMPRuntimeNVPTX::getNVPTXIsWarpActiveMaster(CodeGenFunction &CGF) {
   return Bld.CreateICmpEQ(getNVPTXWarpActiveThreadID(CGF), Bld.getInt32(0),
                           "is_warp_active_master");
 }
-// \brief Return the address where the parallelism level is kept in shared
-// memory for the current thread. It is assumed we have up to 992 parallel
-// worker threads.
-// FIXME: Make this value reside in a descriptor whose size is decided at
-// runtime (extern shared memory). This can be used for the other thread
-// specific state as well.
-LValue
-CGOpenMPRuntimeNVPTX::getParallelismLevelLValue(CodeGenFunction &CGF) const {
-  auto &M = CGM.getModule();
-
-  const char *Name = "__openmp_nvptx_parallelism_levels";
-  llvm::GlobalVariable *Gbl = M.getGlobalVariable(Name);
-
-  if (!Gbl) {
-    auto *Ty = llvm::ArrayType::get(CGM.Int32Ty, DS_Max_Worker_Threads);
-    Gbl = new llvm::GlobalVariable(
-        M, Ty,
-        /*isConstant=*/false, llvm::GlobalVariable::CommonLinkage,
-        llvm::Constant::getNullValue(Ty), Name,
-        /*InsertBefore=*/nullptr, llvm::GlobalVariable::NotThreadLocal,
-        ADDRESS_SPACE_SHARED);
-  }
-
-  llvm::Value *Idx[] = {llvm::Constant::getNullValue(CGM.Int32Ty),
-                        GetNVPTXThreadID(CGF)};
-  llvm::Value *AddrVal = CGF.Builder.CreateInBoundsGEP(Gbl, Idx);
-  return CGF.MakeNaturalAlignAddrLValue(
-      AddrVal, CGF.getContext().getIntTypeForBitwidth(/*DestWidth=*/32,
-                                                      /*isSigned=*/true));
-}
-
-// \brief Return an integer with the parallelism level. Zero means that the
-// current region is not enclosed in a parallel/simd region. The current level
-// is kept in a shared memory array.
-llvm::Value *
-CGOpenMPRuntimeNVPTX::getParallelismLevel(CodeGenFunction &CGF) const {
-  auto Addr = getParallelismLevelLValue(CGF);
-  return CGF.EmitLoadOfLValue(Addr, SourceLocation()).getScalarVal();
-}
-
-// \brief Increase the value of parallelism level for the current thread.
-void CGOpenMPRuntimeNVPTX::increaseParallelismLevel(CodeGenFunction &CGF,
-                                                    bool IsSimd) const {
-  unsigned Increment = IsSimd ? 10 : 1;
-  auto Addr = getParallelismLevelLValue(CGF);
-  auto *CurVal = CGF.EmitLoadOfLValue(Addr, SourceLocation()).getScalarVal();
-  auto *NewVal =
-      CGF.Builder.CreateNSWAdd(CurVal, CGF.Builder.getInt32(Increment));
-  CGF.EmitStoreOfScalar(NewVal, Addr);
-}
-
-// \brief Decrease the value of parallelism level for the current thread.
-void CGOpenMPRuntimeNVPTX::decreaseParallelismLevel(CodeGenFunction &CGF,
-                                                    bool IsSimd) const {
-  unsigned Increment = IsSimd ? 10 : 1;
-  auto Addr = getParallelismLevelLValue(CGF);
-  auto *CurVal = CGF.EmitLoadOfLValue(Addr, SourceLocation()).getScalarVal();
-  auto *NewVal =
-      CGF.Builder.CreateNSWSub(CurVal, CGF.Builder.getInt32(Increment));
-  CGF.EmitStoreOfScalar(NewVal, Addr);
-}
-
-// \brief Initialize with zero the value of parallelism level for the current
-// thread.
-void CGOpenMPRuntimeNVPTX::initializeParallelismLevel(
-    CodeGenFunction &CGF) const {
-  auto Addr = getParallelismLevelLValue(CGF);
-  CGF.EmitStoreOfScalar(llvm::Constant::getNullValue(CGM.Int32Ty), Addr);
-}
 
 static FieldDecl *addFieldToRecordDecl(ASTContext &C, DeclContext *DC,
                                        QualType FieldTy) {
@@ -946,7 +877,6 @@ void CGOpenMPRuntimeNVPTX::emitGenericEntryHeader(CodeGenFunction &CGF,
   //
   //  // ... and send to worker loop, awaiting parallel invocation.
   //  CGF.EmitBlock(WorkerBB);
-  //  initializeParallelismLevel(CGF);
   //  llvm::SmallVector<llvm::Value *, 16> WorkerVars;
   //  for (auto &I : CGF.CurFn->args()) {
   //    WorkerVars.push_back(&I);
@@ -2018,20 +1948,12 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
     else if (auto *OPFD = dyn_cast<OMPParallelForDirective>(&D))
       HasCancel = OPFD->hasCancel();
 
-    // Include updates in runtime parallelism level.
-    auto &&CodeGenWithDataSharing = [this, &CodeGen](CodeGenFunction &CGF,
-                                                     PrePostActionTy &) {
-      increaseParallelismLevel(CGF);
-      CodeGen(CGF);
-      decreaseParallelismLevel(CGF);
-    };
-
     // Save the current parallel context because it may be overwritten by the
     // innermost regions.
     const Decl *CurrentContext = CurrentParallelContext;
 
-    CGOpenMPOutlinedRegionInfo CGInfo(*CS, ThreadIDVar, CodeGenWithDataSharing,
-                                      InnermostKind, HasCancel);
+    CGOpenMPOutlinedRegionInfo CGInfo(*CS, ThreadIDVar, CodeGen, InnermostKind,
+                                      HasCancel);
     CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
     {
       ParallelNestingLevelRAII NestingRAII(ParallelNestingLevel);
@@ -2055,21 +1977,13 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitSimdOutlinedFunction(
 
   const CapturedStmt *CS = cast<CapturedStmt>(D.getAssociatedStmt());
 
-  // Include updates in runtime parallelism level.
-  auto &&CodeGenWithDataSharing = [this, &CodeGen](CodeGenFunction &CGF,
-                                                   PrePostActionTy &) {
-    increaseParallelismLevel(CGF, /*IsSimd=*/true);
-    CodeGen(CGF);
-    decreaseParallelismLevel(CGF, /*IsSimd=*/true);
-  };
-
   // Save the current parallel context because it may be overwritten by the
   // innermost regions.
   const Decl *CurrentContext = CurrentParallelContext;
 
   CodeGenFunction CGF(CGM, true);
-  CGOpenMPSimdOutlinedRegionInfo CGInfo(*CS, LaneIDVar, NumLanesVar,
-                                        CodeGenWithDataSharing, InnermostKind);
+  CGOpenMPSimdOutlinedRegionInfo CGInfo(*CS, LaneIDVar, NumLanesVar, CodeGen,
+                                        InnermostKind);
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
   {
     ParallelNestingLevelRAII NestingRAII(ParallelNestingLevel, /*IsSimd=*/true);
