@@ -1915,6 +1915,16 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
         ImplicitParamStop);
   } else if (isOpenMPTeamsDirective(D.getDirectiveKind())) {
     // No outlining required for teams or target teams
+  if(D.getDirectiveKind() == OMPD_teams_distribute) {
+  const CapturedStmt *CS = cast<CapturedStmt>(D.getAssociatedStmt());
+  CodeGenFunction CGF(CGM, true);
+  CGOpenMPOutlinedRegionInfo CGInfo(*CS, ThreadIDVar, CodeGen, InnermostKind,
+                                    /* hasCancel = */ false);
+  CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
+  return CGF.GenerateOpenMPCapturedStmtFunction(
+      *CS, /*UseCapturedArgumentsOnly=*/false, CaptureLevel, ImplicitParamStop);
+
+  }
   } else {
     // Call to a parallel that is not combined with a teams or target
     // directive (non SPMD).
@@ -3354,7 +3364,7 @@ void CGOpenMPRuntimeNVPTX::emitTeamsCall(CodeGenFunction &CGF,
                                          SourceLocation Loc,
                                          llvm::Value *OutlinedFn,
                                          ArrayRef<llvm::Value *> CapturedVars) {
-  if (isSPMDExecutionMode()) {
+  if (isSPMDExecutionMode() || D.getDirectiveKind() == OMPD_teams_distribute) {
     // OutlinedFn(&GTid, &zero, CapturedStruct);
     auto ThreadIDAddr = emitThreadIDAddress(CGF, Loc);
     Address ZeroAddr =

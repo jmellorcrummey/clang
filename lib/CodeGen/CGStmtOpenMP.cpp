@@ -2246,7 +2246,12 @@ void CodeGenFunction::EmitOMPTeamsDistributeDirective(
     CGF.EmitOMPReductionClauseInit(S, PrivateScope);
     (void)PrivateScope.Privatize();
     auto &&CGDistributeLoop = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-      CGF.EmitOMPDistributeLoop(S, [](CodeGenFunction &, PrePostActionTy &) {});
+      auto &&CGBody = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+        CGF.EmitStmt(
+            cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
+      };
+
+      CGF.EmitOMPDistributeLoop(S, CGBody);
     };
     OMPLexicalScope Scope(CGF, S, /*AsInlined=*/true);
     CGF.CGM.getOpenMPRuntime().emitInlinedDirective(CGF, OMPD_distribute,
