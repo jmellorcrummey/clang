@@ -4655,7 +4655,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
       // OpenMP 4.5 [2.17 Nesting of Regions]
       // The region associated with the distribute construct must be strictly
       // nested inside a teams region
-      NestingProhibited = ParentRegion != OMPD_teams;
+      NestingProhibited = (ParentRegion != OMPD_teams) &&
+          (ParentRegion != OMPD_target_teams);
       Recommend = ShouldBeInTeamsRegion;
     }
     if (!NestingProhibited &&
