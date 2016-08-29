@@ -31,32 +31,6 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   // Data Sharing related calls.
   //
 
-  // \brief Return the address where the parallelism level is kept in shared
-  // memory for the current thread. It is assumed we have up to 992 parallel
-  // worker threads.
-  //
-  // FIXME: Make this value reside in a descriptor whose size is decided at
-  // runtime (extern shared memory). This can be used for the other thread
-  // specific state as well.
-  LValue getParallelismLevelLValue(CodeGenFunction &CGF) const;
-
-  // \brief Return an integer with the parallelism level. Zero means that the
-  // current region is not enclosed in a parallel/simd region. The current level
-  // is kept in a shared memory array.
-  llvm::Value *getParallelismLevel(CodeGenFunction &CGF) const;
-
-  // \brief Increase the value of parallelism level for the current thread.
-  void increaseParallelismLevel(CodeGenFunction &CGF,
-                                bool IsSimd = false) const;
-
-  // \brief Decrease the value of parallelism level for the current thread.
-  void decreaseParallelismLevel(CodeGenFunction &CGF,
-                                bool IsSimd = false) const;
-
-  // \brief Initialize with zero the value of parallelism level for the current
-  // thread.
-  void initializeParallelismLevel(CodeGenFunction &CGF) const;
-
   // \brief Type of the data sharing master slot. By default the size is zero
   // meaning that the data size is to be determined.
   QualType DataSharingMasterSlotQty;
@@ -224,8 +198,9 @@ private:
   public:
     llvm::Function *WorkerFn;
     const CGFunctionInfo *CGFI;
+    bool ContainsDeclareTarget;
 
-    WorkerFunctionState(CodeGenModule &CGM);
+    WorkerFunctionState(CodeGenModule &CGM, const OMPExecutableDirective &D);
 
   private:
     void createWorkerFunction(CodeGenModule &CGM);
@@ -370,6 +345,7 @@ private:
   /// \param Sequential Code to emit by a worker thread when the parallel region
   /// is to be computed sequentially.
   void emitParallelismLevelCode(CodeGenFunction &CGF,
+                                llvm::Value *ParallelLevel,
                                 const RegionCodeGenTy &Level0,
                                 const RegionCodeGenTy &Level1,
                                 const RegionCodeGenTy &Sequential);
@@ -433,9 +409,10 @@ private:
   /// \param Line Line where the declaration the target egion refers to is
   /// defined.
   /// \param Fn The function that implements the target region.
+  /// \param IsDtor True if what being registered is a destructor.
   virtual void registerCtorDtorEntry(unsigned DeviceID, unsigned FileID,
                                      StringRef RegionName, unsigned Line,
-                                     llvm::Function *Fn) override;
+                                     llvm::Function *Fn, bool IsDtor) override;
 
 public:
   explicit CGOpenMPRuntimeNVPTX(CodeGenModule &CGM);

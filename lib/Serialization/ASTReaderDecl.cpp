@@ -1398,7 +1398,7 @@ void ASTDeclReader::VisitNamespaceDecl(NamespaceDecl *D) {
     // any other module's anonymous namespaces, so don't attach the anonymous
     // namespace at all.
     NamespaceDecl *Anon = cast<NamespaceDecl>(Reader.GetDecl(AnonNamespace));
-    if (F.Kind != MK_ImplicitModule && F.Kind != MK_ExplicitModule)
+    if (!F.isModule())
       D->setAnonymousNamespace(Anon);
   }
 }
@@ -1539,7 +1539,7 @@ void ASTDeclReader::ReadCXXDefinitionData(
     Lambda.NumCaptures = Record[Idx++];
     Lambda.NumExplicitCaptures = Record[Idx++];
     Lambda.ManglingNumber = Record[Idx++];
-    Lambda.ContextDecl = ReadDecl(Record, Idx);
+    Lambda.ContextDecl = ReadDeclID(Record, Idx);
     Lambda.Captures 
       = (Capture*)Reader.Context.Allocate(sizeof(Capture)*Lambda.NumCaptures);
     Capture *ToCapture = Lambda.Captures;
@@ -3768,8 +3768,7 @@ void ASTDeclReader::UpdateDecl(Decl *D, ModuleFile &ModuleFile,
       // Each module has its own anonymous namespace, which is disjoint from
       // any other module's anonymous namespaces, so don't attach the anonymous
       // namespace at all.
-      if (ModuleFile.Kind != MK_ImplicitModule &&
-          ModuleFile.Kind != MK_ExplicitModule) {
+      if (!ModuleFile.isModule()) {
         if (TranslationUnitDecl *TU = dyn_cast<TranslationUnitDecl>(D))
           TU->setAnonymousNamespace(Anon);
         else
@@ -3795,6 +3794,23 @@ void ASTDeclReader::UpdateDecl(Decl *D, ModuleFile &ModuleFile,
       // default argument.
       if (Param->hasUninstantiatedDefaultArg())
         Param->setDefaultArg(DefaultArg);
+      break;
+    }
+
+    case UPD_CXX_INSTANTIATED_DEFAULT_MEMBER_INITIALIZER: {
+      auto FD = cast<FieldDecl>(D);
+      auto DefaultInit = Reader.ReadExpr(F);
+
+      // Only apply the update if the field still has an uninstantiated
+      // default member initializer.
+      if (FD->hasInClassInitializer() && !FD->getInClassInitializer()) {
+        if (DefaultInit)
+          FD->setInClassInitializer(DefaultInit);
+        else
+          // Instantiation failed. We can get here if we serialized an AST for
+          // an invalid program.
+          FD->removeInClassInitializer();
+      }
       break;
     }
 

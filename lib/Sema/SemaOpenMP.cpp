@@ -108,6 +108,7 @@ private:
     bool CancelRegion = false;
     unsigned AssociatedLoops = 1;
     SourceLocation InnerTeamsRegionLoc;
+    bool DefaultMapIsToFrom = false;
     SharingMapTy(OpenMPDirectiveKind DKind, DeclarationNameInfo Name,
                  Scope *CurScope, SourceLocation Loc)
         : Directive(DKind), DirectiveName(Name), CurScope(CurScope),
@@ -326,8 +327,8 @@ public:
   Scope *getCurScope() { return Stack.back().CurScope; }
   SourceLocation getConstructLoc() { return Stack.back().ConstructLoc; }
 
-  // Do the check specified in \a Check to all component lists and return true
-  // if any issue is found.
+  /// Do the check specified in \a Check to all component lists and return true
+  /// if any issue is found.
   bool checkMappableExprComponentListsForDecl(
       ValueDecl *VD, bool CurrentRegionOnly,
       const llvm::function_ref<
@@ -355,8 +356,8 @@ public:
     return false;
   }
 
-  // Do the check specified in \a Check to all component lists at a given level
-  // and return true if any issue is found.
+  /// Do the check specified in \a Check to all component lists at a given level
+  /// and return true if any issue is found.
   bool checkMappableExprComponentListsForDeclAtLevel(
       ValueDecl *VD, unsigned Level,
       const llvm::function_ref<
@@ -376,8 +377,8 @@ public:
     return false;
   }
 
-  // Create a new mappable expression component list associated with a given
-  // declaration and initialize it with the provided list of components.
+  /// Create a new mappable expression component list associated with a given
+  /// declaration and initialize it with the provided list of components.
   void addMappableExpressionComponents(
       ValueDecl *VD,
       OMPClauseMappableExprCommon::MappableExprComponentListRef Components,
@@ -389,6 +390,24 @@ public:
     MEC.Components.resize(MEC.Components.size() + 1);
     MEC.Components.back().append(Components.begin(), Components.end());
     MEC.Kind = WhereFoundClauseKind;
+  }
+
+  /// Return true if the default map is set to to/from at the given level.
+  bool isDefaultMapToFromAtLevel(unsigned Level) {
+    auto StartI = std::next(Stack.begin());
+    auto EndI = Stack.end();
+    if (std::distance(StartI, EndI) <= (int)Level)
+      return false;
+    std::advance(StartI, Level);
+
+    return StartI->DefaultMapIsToFrom;
+  }
+
+  /// Set whether the default map is to/from.
+  void setDefaultMapToFrom(bool Val) {
+    assert(Stack.size() > 1 &&
+           "Not expecting to retrieve components from a empty stack!");
+    Stack.back().DefaultMapIsToFrom = Val;
   }
 
   unsigned getNestingLevel() const {
@@ -1087,7 +1106,8 @@ bool Sema::IsOpenMPCapturedByRef(ValueDecl *D, unsigned Level) {
       IsByRef = !(Ty->isPointerType() && IsVariableAssociatedWithSection);
     } else {
       // By default, all the data that has a scalar type is mapped by copy.
-      IsByRef = !Ty->isScalarType();
+      IsByRef =
+          !Ty->isScalarType() || DSAStack->isDefaultMapToFromAtLevel(Level);
     }
   }
 
@@ -4655,7 +4675,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
       // OpenMP 4.5 [2.17 Nesting of Regions]
       // The region associated with the distribute construct must be strictly
       // nested inside a teams region
-      NestingProhibited = ParentRegion != OMPD_teams;
+      NestingProhibited = (ParentRegion != OMPD_teams) &&
+          (ParentRegion != OMPD_target_teams);
       Recommend = ShouldBeInTeamsRegion;
     }
     if (!NestingProhibited &&
@@ -13532,6 +13553,8 @@ OMPClause *Sema::ActOnOpenMPDefaultmapClause(
         << Value << getOpenMPClauseName(OMPC_defaultmap);
     return nullptr;
   }
+
+  DSAStack->setDefaultMapToFrom(/*Val=*/true);
 
   return new (Context)
       OMPDefaultmapClause(StartLoc, LParenLoc, MLoc, KindLoc, EndLoc, Kind, M);
