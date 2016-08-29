@@ -6198,7 +6198,8 @@ public:
       // The default map type for a scalar/complex type is 'to' because by
       // default the value doesn't have to be retrieved. For an aggregate
       // type, the default is 'tofrom'.
-      CurMapTypes.push_back(ElementType->isAggregateType()
+      CurMapTypes.push_back((ElementType->isAggregateType() ||
+                             CurDir.hasClausesOfKind<OMPDefaultmapClause>())
                                 ? (OMP_MAP_TO | OMP_MAP_FROM)
                                 : OMP_MAP_TO);
 
