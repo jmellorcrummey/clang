@@ -1914,17 +1914,8 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
         D, ThreadIDVar, InnermostKind, CodeGen, CaptureLevel,
         ImplicitParamStop);
   } else if (isOpenMPTeamsDirective(D.getDirectiveKind())) {
-    // No outlining required for teams or target teams
-  if(D.getDirectiveKind() == OMPD_teams_distribute) {
-  const CapturedStmt *CS = cast<CapturedStmt>(D.getAssociatedStmt());
-  CodeGenFunction CGF(CGM, true);
-  CGOpenMPOutlinedRegionInfo CGInfo(*CS, ThreadIDVar, CodeGen, InnermostKind,
-                                    /* hasCancel = */ false);
-  CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
-  return CGF.GenerateOpenMPCapturedStmtFunction(
-      *CS, /*UseCapturedArgumentsOnly=*/false, CaptureLevel, ImplicitParamStop);
-
-  }
+    // No outlining required for the other teams constructs
+    // such as: teams and target teams
   } else {
     // Call to a parallel that is not combined with a teams or target
     // directive (non SPMD).
@@ -3364,7 +3355,7 @@ void CGOpenMPRuntimeNVPTX::emitTeamsCall(CodeGenFunction &CGF,
                                          SourceLocation Loc,
                                          llvm::Value *OutlinedFn,
                                          ArrayRef<llvm::Value *> CapturedVars) {
-  if (isSPMDExecutionMode() || D.getDirectiveKind() == OMPD_teams_distribute) {
+  if (isSPMDExecutionMode()) {
     // OutlinedFn(&GTid, &zero, CapturedStruct);
     auto ThreadIDAddr = emitThreadIDAddress(CGF, Loc);
     Address ZeroAddr =
@@ -3376,6 +3367,29 @@ void CGOpenMPRuntimeNVPTX::emitTeamsCall(CodeGenFunction &CGF,
     OutlinedFnArgs.push_back(ZeroAddr.getPointer());
     OutlinedFnArgs.append(CapturedVars.begin(), CapturedVars.end());
     CGF.EmitCallOrInvoke(OutlinedFn, OutlinedFnArgs);
+  } else if (D.getDirectiveKind() == OMPD_teams_distribute) {
+    auto &&CGDistributeInlined = [&D](CodeGenFunction &CGF, PrePostActionTy &) {
+      CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
+      (void)CGF.EmitOMPFirstprivateClause(D, PrivateScope);
+      CGF.EmitOMPPrivateClause(D, PrivateScope);
+      CGF.EmitOMPReductionClauseInit(D, PrivateScope);
+      (void)PrivateScope.Privatize();
+      auto &&CGDistributeLoop = [&D](CodeGenFunction &CGF, PrePostActionTy &) {
+        auto &&CGBody = [&D](CodeGenFunction &CGF, PrePostActionTy &) {
+          CGF.EmitStmt(
+              cast<CapturedStmt>(D.getAssociatedStmt())->getCapturedStmt());
+        };
+
+        CGF.EmitOMPDistributeLoop(*(dyn_cast<OMPLoopDirective>(&D)), CGBody);
+      };
+      CGF.CGM.getOpenMPRuntime().emitInlinedDirective(CGF, OMPD_distribute,
+                                                      CGDistributeLoop,
+                                                      /*HasCancel=*/false);
+      CGF.EmitOMPReductionClauseFinal(D, OMPD_teams_distribute);
+    };
+    emitInlinedDirective(CGF, OMPD_teams_distribute, CGDistributeInlined);
+    emitPostUpdateForReductionClause(
+        CGF, D, [](CodeGenFunction &) -> llvm::Value * { return nullptr; });
   } else {
     // just emit the statements in the teams region inlined
     auto &&CodeGen = [&D](CodeGenFunction &CGF, PrePostActionTy &) {
