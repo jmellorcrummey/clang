@@ -1729,64 +1729,6 @@ namespace {
 /// to duplicate code, but we have to ensure that both these definitions are
 /// always the same.  This is a problem because a CGOpenMPRegionInfo object
 /// from CGOpenMPRuntimeNVPTX.cpp is accessed in methods of CGOpenMPRuntime.cpp.
-
-/// Lexical scope for OpenMP executable constructs, that handles correct codegen
-/// for captured expressions.
-class OMPLexicalScope final : public CodeGenFunction::LexicalScope {
-  void emitPreInitStmt(CodeGenFunction &CGF, const OMPExecutableDirective &S) {
-    for (const auto *C : S.clauses()) {
-      if (auto *CPI = OMPClauseWithPreInit::get(C)) {
-        if (auto *PreInit = cast_or_null<DeclStmt>(CPI->getPreInitStmt())) {
-          for (const auto *I : PreInit->decls()) {
-            if (!I->hasAttr<OMPCaptureNoInitAttr>())
-              CGF.EmitVarDecl(cast<VarDecl>(*I));
-            else {
-              CodeGenFunction::AutoVarEmission Emission =
-                  CGF.EmitAutoVarAlloca(cast<VarDecl>(*I));
-              CGF.EmitAutoVarCleanups(Emission);
-            }
-          }
-        }
-      }
-    }
-  }
-  CodeGenFunction::OMPPrivateScope InlinedShareds;
-
-  static bool isCapturedVar(CodeGenFunction &CGF, const VarDecl *VD) {
-    return CGF.LambdaCaptureFields.lookup(VD) ||
-           (CGF.CapturedStmtInfo && CGF.CapturedStmtInfo->lookup(VD)) ||
-           (CGF.CurCodeDecl && isa<BlockDecl>(CGF.CurCodeDecl));
-  }
-
-public:
-  OMPLexicalScope(CodeGenFunction &CGF, const OMPExecutableDirective &S,
-                  bool AsInlined = false)
-      : CodeGenFunction::LexicalScope(CGF, S.getSourceRange()),
-        InlinedShareds(CGF) {
-    emitPreInitStmt(CGF, S);
-    if (AsInlined) {
-      if (S.hasAssociatedStmt()) {
-        auto *CS = cast<CapturedStmt>(S.getAssociatedStmt());
-        for (auto &C : CS->captures()) {
-          if (C.capturesVariable() || C.capturesVariableByCopy()) {
-            auto *VD = C.getCapturedVar();
-            DeclRefExpr DRE(const_cast<VarDecl *>(VD),
-                            isCapturedVar(CGF, VD) ||
-                                (CGF.CapturedStmtInfo &&
-                                 InlinedShareds.isGlobalVarCaptured(VD)),
-                            VD->getType().getNonReferenceType(), VK_LValue,
-                            SourceLocation());
-            InlinedShareds.addPrivate(VD, [&CGF, &DRE]() -> Address {
-              return CGF.EmitLValue(&DRE).getAddress();
-            });
-          }
-        }
-        (void)InlinedShareds.Privatize();
-      }
-    }
-  }
-};
-
 ///
 /// \brief Base class for handling code generation inside OpenMP regions.
 class CGOpenMPRegionInfo : public CodeGenFunction::CGCapturedStmtInfo {
@@ -3493,13 +3435,9 @@ void CGOpenMPRuntimeNVPTX::emitTeamsCall(CodeGenFunction &CGF,
       CGF.EmitOMPReductionClauseInit(D, PrivateScope);
       (void)PrivateScope.Privatize();
       auto &&CGDistributeLoop = [&D](CodeGenFunction &CGF, PrePostActionTy &) {
-        auto &&CGBody = [&D](CodeGenFunction &CGF, PrePostActionTy &) {
-          CGF.EmitStmt(
-              cast<CapturedStmt>(D.getAssociatedStmt())->getCapturedStmt());
-        };
-        CGF.EmitOMPDistributeLoop(*(dyn_cast<OMPLoopDirective>(&D)), CGBody);
+        CGF.EmitOMPDistributeLoop(*(dyn_cast<OMPLoopDirective>(&D)),
+                                  [](CodeGenFunction &, PrePostActionTy &) {});
       };
-      OMPLexicalScope Scope(CGF, D, /*AsInlined=*/true);
       CGF.CGM.getOpenMPRuntime().emitInlinedDirective(CGF, OMPD_distribute,
                                                       CGDistributeLoop,
                                                       /*HasCancel=*/false);
