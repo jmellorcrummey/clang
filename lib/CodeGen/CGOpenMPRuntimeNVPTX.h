@@ -348,11 +348,11 @@ private:
   /// parallel region.
   /// \param Sequential Code to emit by a worker thread when the parallel region
   /// is to be computed sequentially.
-  void emitParallelismLevelCode(CodeGenFunction &CGF,
-                                llvm::Value *ParallelLevel,
-                                const RegionCodeGenTy &Level0,
-                                const RegionCodeGenTy &Level1,
-                                const RegionCodeGenTy &Sequential);
+  void emitParallelismLevelCode(
+      CodeGenFunction &CGF,
+      const llvm::function_ref<llvm::Value *()> &ParallelLevelGen,
+      const RegionCodeGenTy &Level0, const RegionCodeGenTy &Level1,
+      const RegionCodeGenTy &Sequential);
 
   /// \brief Emits code for parallel or serial call of the \a OutlinedFn with
   /// variables captured in a record which address is stored in \a
