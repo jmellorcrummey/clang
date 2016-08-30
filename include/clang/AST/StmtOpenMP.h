@@ -3837,12 +3837,12 @@ class OMPTeamsDistributeParallelForSimdDirective : public OMPLoopDirective {
   /// \param NumClauses Number of clauses.
   ///
   OMPTeamsDistributeParallelForSimdDirective(SourceLocation StartLoc,
-                                         SourceLocation EndLoc,
-                                         unsigned CollapsedNum,
-                                         unsigned NumClauses)
+                                             SourceLocation EndLoc,
+                                             unsigned CollapsedNum,
+                                             unsigned NumClauses)
       : OMPLoopDirective(this, OMPTeamsDistributeParallelForSimdDirectiveClass,
-                         OMPD_teams_distribute_parallel_for_simd, StartLoc, EndLoc,
-                         CollapsedNum, NumClauses) {}
+                         OMPD_teams_distribute_parallel_for_simd, StartLoc,
+                         EndLoc, CollapsedNum, NumClauses) {}
 
   /// \brief Build an empty directive.
   ///
@@ -3850,10 +3850,11 @@ class OMPTeamsDistributeParallelForSimdDirective : public OMPLoopDirective {
   /// \param NumClauses Number of clauses.
   ///
   explicit OMPTeamsDistributeParallelForSimdDirective(unsigned CollapsedNum,
-                                                  unsigned NumClauses)
+                                                      unsigned NumClauses)
       : OMPLoopDirective(this, OMPTeamsDistributeParallelForSimdDirectiveClass,
-                         OMPD_teams_distribute_parallel_for_simd, SourceLocation(),
-                         SourceLocation(), CollapsedNum, NumClauses) {}
+                         OMPD_teams_distribute_parallel_for_simd,
+                         SourceLocation(), SourceLocation(), CollapsedNum,
+                         NumClauses) {}
 
 public:
   /// \brief Creates directive with a list of \a Clauses.

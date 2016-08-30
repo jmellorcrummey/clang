@@ -126,7 +126,7 @@ static OpenMPDirectiveKind ParseOpenMPDirectiveKind(Parser &P) {
       {OMPD_teams_distribute_parallel, OMPD_for,
        OMPD_teams_distribute_parallel_for},
       {OMPD_teams_distribute_parallel_for, OMPD_simd,
-        OMPD_teams_distribute_parallel_for_simd},
+       OMPD_teams_distribute_parallel_for_simd},
       {OMPD_teams_distribute, OMPD_simd, OMPD_teams_distribute_simd}};
   enum { CancellationPoint = 0, DeclareReduction = 1, TargetData = 2 };
   auto Tok = P.getCurToken();
@@ -784,7 +784,7 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
   case OMPD_target_teams_distribute:
   case OMPD_target_teams_distribute_simd:
   case OMPD_teams_distribute_parallel_for_simd:
-      Diag(Tok, diag::err_omp_unexpected_directive)
+    Diag(Tok, diag::err_omp_unexpected_directive)
         << getOpenMPDirectiveName(DKind);
     break;
   }
@@ -944,7 +944,7 @@ StmtResult Parser::ParseOpenMPDeclarativeOrExecutableDirective(
   case OMPD_target_teams_distribute:
   case OMPD_target_teams_distribute_simd:
   case OMPD_teams_distribute_parallel_for_simd: {
-      ConsumeToken();
+    ConsumeToken();
     // Parse directive name of the 'critical' directive if any.
     if (DKind == OMPD_critical) {
       BalancedDelimiterTracker T(*this, tok::l_paren,

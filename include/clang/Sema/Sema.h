@@ -8346,7 +8346,8 @@ public:
       ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
       SourceLocation EndLoc,
       llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA);
-  /// \brief Called on well-formed '\#pragma omp teams distribute parallel for simd'
+  /// \brief Called on well-formed '\#pragma omp teams distribute parallel for
+  /// simd'
   /// after parsing of the associated statement.
   StmtResult ActOnOpenMPTeamsDistributeParallelForSimdDirective(
       ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,

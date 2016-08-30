@@ -1853,15 +1853,17 @@ OMPTeamsDistributeParallelForSimdDirective::Create(
     const ASTContext &C, SourceLocation StartLoc, SourceLocation EndLoc,
     unsigned CollapsedNum, ArrayRef<OMPClause *> Clauses, Stmt *AssociatedStmt,
     const HelperExprs &Exprs) {
-  unsigned Size = llvm::alignTo(sizeof(OMPTeamsDistributeParallelForSimdDirective),
-                                llvm::alignOf<OMPClause *>());
-  void *Mem = C.Allocate(
-      Size + sizeof(OMPClause *) * Clauses.size() +
-      sizeof(Stmt *) *
-          numLoopChildren(CollapsedNum, OMPD_teams_distribute_parallel_for_simd));
+  unsigned Size =
+      llvm::alignTo(sizeof(OMPTeamsDistributeParallelForSimdDirective),
+                    llvm::alignOf<OMPClause *>());
+  void *Mem =
+      C.Allocate(Size + sizeof(OMPClause *) * Clauses.size() +
+                 sizeof(Stmt *) *
+                     numLoopChildren(CollapsedNum,
+                                     OMPD_teams_distribute_parallel_for_simd));
   OMPTeamsDistributeParallelForSimdDirective *Dir = new (Mem)
       OMPTeamsDistributeParallelForSimdDirective(StartLoc, EndLoc, CollapsedNum,
-                                             Clauses.size());
+                                                 Clauses.size());
   Dir->setClauses(Clauses);
   Dir->setAssociatedStmt(AssociatedStmt);
   Dir->setIterationVariable(Exprs.IterationVarRef);
@@ -1898,15 +1900,17 @@ OMPTeamsDistributeParallelForSimdDirective::Create(
 
 OMPTeamsDistributeParallelForSimdDirective *
 OMPTeamsDistributeParallelForSimdDirective::CreateEmpty(const ASTContext &C,
-                                                    unsigned NumClauses,
-                                                    unsigned CollapsedNum,
-                                                    EmptyShell) {
-  unsigned Size = llvm::alignTo(sizeof(OMPTeamsDistributeParallelForSimdDirective),
-                                llvm::alignOf<OMPClause *>());
-  void *Mem = C.Allocate(
-      Size + sizeof(OMPClause *) * NumClauses +
-      sizeof(Stmt *) *
-          numLoopChildren(CollapsedNum, OMPD_teams_distribute_parallel_for_simd));
+                                                        unsigned NumClauses,
+                                                        unsigned CollapsedNum,
+                                                        EmptyShell) {
+  unsigned Size =
+      llvm::alignTo(sizeof(OMPTeamsDistributeParallelForSimdDirective),
+                    llvm::alignOf<OMPClause *>());
+  void *Mem =
+      C.Allocate(Size + sizeof(OMPClause *) * NumClauses +
+                 sizeof(Stmt *) *
+                     numLoopChildren(CollapsedNum,
+                                     OMPD_teams_distribute_parallel_for_simd));
   return new (Mem)
       OMPTeamsDistributeParallelForSimdDirective(CollapsedNum, NumClauses);
 }
