@@ -1728,6 +1728,64 @@ namespace {
 /// to duplicate code, but we have to ensure that both these definitions are
 /// always the same.  This is a problem because a CGOpenMPRegionInfo object
 /// from CGOpenMPRuntimeNVPTX.cpp is accessed in methods of CGOpenMPRuntime.cpp.
+
+/// Lexical scope for OpenMP executable constructs, that handles correct codegen
+/// for captured expressions.
+class OMPLexicalScope final : public CodeGenFunction::LexicalScope {
+  void emitPreInitStmt(CodeGenFunction &CGF, const OMPExecutableDirective &S) {
+    for (const auto *C : S.clauses()) {
+      if (auto *CPI = OMPClauseWithPreInit::get(C)) {
+        if (auto *PreInit = cast_or_null<DeclStmt>(CPI->getPreInitStmt())) {
+          for (const auto *I : PreInit->decls()) {
+            if (!I->hasAttr<OMPCaptureNoInitAttr>())
+              CGF.EmitVarDecl(cast<VarDecl>(*I));
+            else {
+              CodeGenFunction::AutoVarEmission Emission =
+                  CGF.EmitAutoVarAlloca(cast<VarDecl>(*I));
+              CGF.EmitAutoVarCleanups(Emission);
+            }
+          }
+        }
+      }
+    }
+  }
+  CodeGenFunction::OMPPrivateScope InlinedShareds;
+
+  static bool isCapturedVar(CodeGenFunction &CGF, const VarDecl *VD) {
+    return CGF.LambdaCaptureFields.lookup(VD) ||
+           (CGF.CapturedStmtInfo && CGF.CapturedStmtInfo->lookup(VD)) ||
+           (CGF.CurCodeDecl && isa<BlockDecl>(CGF.CurCodeDecl));
+  }
+
+public:
+  OMPLexicalScope(CodeGenFunction &CGF, const OMPExecutableDirective &S,
+                  bool AsInlined = false)
+      : CodeGenFunction::LexicalScope(CGF, S.getSourceRange()),
+        InlinedShareds(CGF) {
+    emitPreInitStmt(CGF, S);
+    if (AsInlined) {
+      if (S.hasAssociatedStmt()) {
+        auto *CS = cast<CapturedStmt>(S.getAssociatedStmt());
+        for (auto &C : CS->captures()) {
+          if (C.capturesVariable() || C.capturesVariableByCopy()) {
+            auto *VD = C.getCapturedVar();
+            DeclRefExpr DRE(const_cast<VarDecl *>(VD),
+                            isCapturedVar(CGF, VD) ||
+                                (CGF.CapturedStmtInfo &&
+                                 InlinedShareds.isGlobalVarCaptured(VD)),
+                            VD->getType().getNonReferenceType(), VK_LValue,
+                            SourceLocation());
+            InlinedShareds.addPrivate(VD, [&CGF, &DRE]() -> Address {
+              return CGF.EmitLValue(&DRE).getAddress();
+            });
+          }
+        }
+        (void)InlinedShareds.Privatize();
+      }
+    }
+  }
+};
+
 ///
 /// \brief Base class for handling code generation inside OpenMP regions.
 class CGOpenMPRegionInfo : public CodeGenFunction::CGCapturedStmtInfo {
@@ -1971,7 +2029,8 @@ llvm::Value *CGOpenMPRuntimeNVPTX::emitParallelOrTeamsOutlinedFunction(
         D, ThreadIDVar, InnermostKind, CodeGen, CaptureLevel,
         ImplicitParamStop);
   } else if (isOpenMPTeamsDirective(D.getDirectiveKind())) {
-    // No outlining required for teams or target teams
+    // No outlining required for the other teams constructs
+    // such as: teams and target teams
   } else {
     // Call to a parallel that is not combined with a teams or target
     // directive (non SPMD).
@@ -3422,8 +3481,35 @@ void CGOpenMPRuntimeNVPTX::emitTeamsCall(CodeGenFunction &CGF,
     OutlinedFnArgs.push_back(ZeroAddr.getPointer());
     OutlinedFnArgs.append(CapturedVars.begin(), CapturedVars.end());
     CGF.EmitCallOrInvoke(OutlinedFn, OutlinedFnArgs);
+  } else if (D.getDirectiveKind() == OMPD_teams_distribute) {
+    // This code generation is a duplication of the one in CGStmtOpenMP.cpp
+    // and it has to be removed once the sharing from teams distribute to
+    // any contained worksharing loop works smoothly.
+    auto &&CGDistributeInlined = [&D](CodeGenFunction &CGF, PrePostActionTy &) {
+      CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
+      (void)CGF.EmitOMPFirstprivateClause(D, PrivateScope);
+      CGF.EmitOMPPrivateClause(D, PrivateScope);
+      CGF.EmitOMPReductionClauseInit(D, PrivateScope);
+      (void)PrivateScope.Privatize();
+      auto &&CGDistributeLoop = [&D](CodeGenFunction &CGF, PrePostActionTy &) {
+        auto &&CGBody = [&D](CodeGenFunction &CGF, PrePostActionTy &) {
+          CGF.EmitStmt(
+              cast<CapturedStmt>(D.getAssociatedStmt())->getCapturedStmt());
+        };
+        CGF.EmitOMPDistributeLoop(*(dyn_cast<OMPLoopDirective>(&D)), CGBody);
+      };
+      OMPLexicalScope Scope(CGF, D, /*AsInlined=*/true);
+      CGF.CGM.getOpenMPRuntime().emitInlinedDirective(CGF, OMPD_distribute,
+                                                      CGDistributeLoop,
+                                                      /*HasCancel=*/false);
+      CGF.EmitOMPReductionClauseFinal(D, OMPD_teams_distribute);
+    };
+    emitInlinedDirective(CGF, OMPD_teams_distribute, CGDistributeInlined);
+    emitPostUpdateForReductionClause(
+        CGF, D, [](CodeGenFunction &) -> llvm::Value * { return nullptr; });
   } else {
-    // just emit the statements in the teams region inlined
+    // Just emit the statements in the teams region inlined.
+    // This has to be removed too when data sharing is fixed.
     auto &&CodeGen = [&D](CodeGenFunction &CGF, PrePostActionTy &) {
       CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
       (void)CGF.EmitOMPFirstprivateClause(D, PrivateScope);
