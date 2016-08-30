@@ -642,57 +642,136 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createKernelInitializerFunction(
 }
 
 namespace {
-/// \brief Return the declare target attribute if the declaration is marked as
-// 'declare target', i.e. the declaration itself, its template declaration, or
-/// any of its redeclarations have the 'declare target' attribute.
-static bool IsDeclareTargetDeclaration(const ValueDecl *VD) {
-  const Decl *RelevantDecl = VD;
+//
+// This class is used to traverse a region to see if OMP constructs match the
+// given condition.
+//
+//    If there is an OpenMP construct in the target region, test the condition.
+//    There are calls in the target region to externally defined functions and
+//    they are not builtins, assume that the condition is met.
+//
+class OpenMPFinder : public ConstStmtVisitor<OpenMPFinder> {
+public:
+  using MatchTy =
+      const llvm::function_ref<bool(const OMPExecutableDirective &)>;
 
-  // Try to get the original template if any.
-  if (auto *FD = dyn_cast<FunctionDecl>(VD)) {
-    if (auto *Tmpl = FD->getPrimaryTemplate())
-      RelevantDecl = Tmpl;
+private:
+  MatchTy Matcher;
+  bool ContainsOpenMP;
+  llvm::SmallPtrSet<const Stmt *, 8> Visited;
+
+  void VisitFunctionDecl(const FunctionDecl *FD) {
+    if (!FD)
+      return;
+    if (FD->doesThisDeclarationHaveABody()) {
+      // If the call is to a function whose body we have parsed in
+      // the frontend, look inside it.
+      auto Body = FD->getBody();
+      if (Visited.insert(Body).second)
+        Visit(FD->getBody());
+    } else if (!FD->getBuiltinID()) {
+      // If this is an externally defined function that is not a builtin,
+      // assume it may match the requested condition.
+      ContainsOpenMP = true;
+    }
   }
 
-  // Check if the declaration or any of its redeclarations have a declare target
-  // attribute.
-  if (RelevantDecl->getAttr<OMPDeclareTargetDeclAttr>())
-    return true;
-
-  if (VD->getAttr<OMPDeclareTargetDeclAttr>())
-    return true;
-
-  for (const Decl *RD : RelevantDecl->redecls())
-    if (RD->getAttr<OMPDeclareTargetDeclAttr>())
-      return true;
-
-  return false;
-}
-
-class DeclareTargetFinder : public ConstStmtVisitor<DeclareTargetFinder> {
-private:
-  bool ContainsDeclareTarget;
-
 public:
-  DeclareTargetFinder() : ContainsDeclareTarget(false) {}
+  OpenMPFinder(MatchTy &Matcher) : Matcher(Matcher), ContainsOpenMP(false) {}
 
   void Visit(const Stmt *S) {
-    if (ContainsDeclareTarget)
+    if (ContainsOpenMP)
       return;
 
-    ConstStmtVisitor<DeclareTargetFinder>::Visit(S);
+    ConstStmtVisitor<OpenMPFinder>::Visit(S);
     for (const Stmt *Child : S->children()) {
-      if (Child && !ContainsDeclareTarget)
+      if (Child && !ContainsOpenMP)
         Visit(Child);
     }
   }
 
   void VisitCallExpr(const CallExpr *E) {
-    const FunctionDecl *FD = E->getDirectCallee();
-    ContainsDeclareTarget = FD && IsDeclareTargetDeclaration(FD);
+    VisitFunctionDecl(E->getDirectCallee());
   }
 
-  bool containsDeclareTarget() { return ContainsDeclareTarget; }
+  void VisitCXXConstructExpr(const CXXConstructExpr *E) {
+    VisitFunctionDecl(E->getConstructor());
+
+    // Visit the destructor.
+    QualType Ty = E->getType();
+    const CXXRecordDecl *RD = Ty->getAsCXXRecordDecl();
+    if (!ContainsOpenMP && RD)
+      VisitFunctionDecl(RD->getDestructor());
+  }
+
+  // Found an OMP directive.
+  void VisitOMPExecutableDirective(const Stmt *S) {
+    const OMPExecutableDirective &D = *cast<OMPExecutableDirective>(S);
+    ContainsOpenMP = Matcher(D);
+  }
+
+  bool containsOpenMP() { return ContainsOpenMP; }
+};
+
+/// This is a visitor to inspect calls within a target region to determine if
+/// their bodies may contain a parallel directive. If so, a specialized codegen
+/// path is taken (e.g. when building the worker loop).
+class OrphanedParallelFinder : public ConstStmtVisitor<OrphanedParallelFinder> {
+private:
+  bool ContainsOrphanedParallel;
+  llvm::SmallPtrSet<const Stmt *, 8> Visited;
+
+  void FindParallel(const FunctionDecl *FD) {
+    if (!FD)
+      return;
+    if (FD->doesThisDeclarationHaveABody()) {
+      // If the call in the target region is to a function whose body we
+      // have parsed in the frontend, look inside it.
+      auto Body = FD->getBody();
+
+      if (Visited.insert(Body).second) {
+        OpenMPFinder::MatchTy &CondGen =
+            [](const OMPExecutableDirective &D) -> bool {
+          return isOpenMPParallelDirective(D.getDirectiveKind());
+        };
+        OpenMPFinder Finder(CondGen);
+        Finder.Visit(Body);
+        ContainsOrphanedParallel = Finder.containsOpenMP();
+      }
+    } else if (!FD->getBuiltinID()) {
+      // If this is an externally defined function that is not a builtin,
+      // assume it may match the requested condition.
+      ContainsOrphanedParallel = true;
+    }
+  }
+
+public:
+  OrphanedParallelFinder() : ContainsOrphanedParallel(false) {}
+
+  void Visit(const Stmt *S) {
+    if (ContainsOrphanedParallel)
+      return;
+
+    ConstStmtVisitor<OrphanedParallelFinder>::Visit(S);
+    for (const Stmt *Child : S->children()) {
+      if (Child && !ContainsOrphanedParallel)
+        Visit(Child);
+    }
+  }
+
+  void VisitCallExpr(const CallExpr *E) { FindParallel(E->getDirectCallee()); }
+
+  void VisitCXXConstructExpr(const CXXConstructExpr *E) {
+    FindParallel(E->getConstructor());
+
+    // Visit the destructor.
+    QualType Ty = E->getType();
+    const CXXRecordDecl *RD = Ty->getAsCXXRecordDecl();
+    if (!ContainsOrphanedParallel && RD)
+      FindParallel(RD->getDestructor());
+  }
+
+  bool containsOrphanedParallel() { return ContainsOrphanedParallel; }
 };
 } // namespace
 
@@ -701,9 +780,9 @@ CGOpenMPRuntimeNVPTX::WorkerFunctionState::WorkerFunctionState(
     : WorkerFn(nullptr), CGFI(nullptr) {
   createWorkerFunction(CGM);
 
-  DeclareTargetFinder Finder;
+  OrphanedParallelFinder Finder;
   Finder.Visit(cast<CapturedStmt>(D.getAssociatedStmt())->getCapturedStmt());
-  ContainsDeclareTarget = Finder.containsDeclareTarget();
+  ContainsOrphanedParallel = Finder.containsOrphanedParallel();
 };
 
 void CGOpenMPRuntimeNVPTX::WorkerFunctionState::createWorkerFunction(
@@ -809,10 +888,10 @@ void CGOpenMPRuntimeNVPTX::emitWorkerLoop(CodeGenFunction &CGF,
     CGF.EmitBlock(CheckNextBB);
   }
 
-  // Default case: call to outlined function through pointer IF the target
-  // region
-  // makes a declare target call.
-  if (WST.ContainsDeclareTarget) {
+  // Default case: call to outlined function through pointer if the target
+  // region makes a declare target call that may contain an orphaned parallel
+  // directive.
+  if (WST.ContainsOrphanedParallel) {
     auto ParallelFnTy =
         llvm::FunctionType::get(CGM.VoidTy, {CGM.Int16Ty, CGM.Int32Ty},
                                 /*isVarArg*/ false)
@@ -1287,6 +1366,15 @@ llvm::Value *CGOpenMPRuntimeNVPTX::getThreadID(CodeGenFunction &CGF,
   return GetGlobalThreadId(CGF);
 }
 
+llvm::Value *CGOpenMPRuntimeNVPTX::getParallelLevel(CodeGenFunction &CGF,
+                                                    SourceLocation Loc) {
+  auto *RTLoc = emitUpdateLocation(CGF, Loc);
+  auto ThreadID = getThreadID(CGF, Loc);
+  return CGF.EmitRuntimeCall(
+      createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_parallel_level),
+      {RTLoc, ThreadID});
+}
+
 /// \brief Registers the context of a parallel region with the runtime
 /// codegen implementation.
 void CGOpenMPRuntimeNVPTX::registerParallelContext(
@@ -1460,60 +1548,6 @@ void CGOpenMPRuntimeNVPTX::emitGenericKernel(const OMPExecutableDirective &D,
   return;
 }
 
-namespace {
-// In SPMD codegen mode we may not need the OMP runtime, in which case
-// we can avoid initializing it.
-//
-// This class is used to determine if there can be any calls to the OMP
-// runtime in the given target region.
-//
-// The OpenMP runtime is required if:
-//
-//    There is an OpenMP construct in the target region.
-//    There are calls in the target region to externally defined functions and
-//    they are not builtins.
-//
-class OpenMPFinder : public ConstStmtVisitor<OpenMPFinder> {
-private:
-  bool ContainsOpenMP;
-  llvm::SmallPtrSet<const Stmt *, 8> Visited;
-
-public:
-  OpenMPFinder() : ContainsOpenMP(false) {}
-
-  void Visit(const Stmt *S) {
-    if (ContainsOpenMP)
-      return;
-
-    ConstStmtVisitor<OpenMPFinder>::Visit(S);
-    for (const Stmt *Child : S->children()) {
-      if (Child && !ContainsOpenMP)
-        Visit(Child);
-    }
-  }
-
-  void VisitCallExpr(const CallExpr *E) {
-    const FunctionDecl *FD = E->getDirectCallee();
-    if (FD && FD->doesThisDeclarationHaveABody()) {
-      // If the call is to a function whose body we have parsed in
-      // the frontend, look inside it.
-      auto Body = FD->getBody();
-      if (Visited.insert(Body).second)
-        Visit(FD->getBody());
-    } else if (!FD->getBuiltinID()) {
-      // If this is an externally defined function that is not a builtin,
-      // assume it contains OMP directives.
-      ContainsOpenMP = true;
-    }
-  }
-
-  // Found an OMP directive, we need the runtime.
-  void VisitOMPExecutableDirective(const Stmt *S) { ContainsOpenMP = true; }
-
-  bool containsOpenMP() { return ContainsOpenMP; }
-};
-};
-
 static const OMPExecutableDirective *
 getSPMDDirective(const OMPExecutableDirective &D) {
   switch (D.getDirectiveKind()) {
@@ -1556,7 +1590,9 @@ void CGOpenMPRuntimeNVPTX::EntryFunctionState::setRequiresOMPRuntime(
   if (!RequiresOMPRuntime) {
     // If this target region can never call into the OMP runtime, don't setup
     // the runtime.
-    OpenMPFinder Finder;
+    OpenMPFinder::MatchTy &CondGen =
+        [](const OMPExecutableDirective &D) -> bool { return true; };
+    OpenMPFinder Finder(CondGen);
     Finder.Visit(cast<CapturedStmt>(D.getAssociatedStmt())->getCapturedStmt());
     RequiresOMPRuntime = Finder.containsOpenMP();
   }
@@ -2525,11 +2561,7 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
     }
   };
 
-  auto *RTLoc = emitUpdateLocation(CGF, SourceLocation());
-  auto ThreadID = getThreadID(CGF, SourceLocation());
-  llvm::Value *ParallelLevel = CGF.EmitRuntimeCall(
-      createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_parallel_level),
-      {RTLoc, ThreadID});
+  llvm::Value *ParallelLevel = getParallelLevel(CGF, SourceLocation());
   emitParallelismLevelCode(CGF, ParallelLevel, L0ParallelGen, L1ParallelGen,
                            Sequential);
 
@@ -3060,11 +3092,7 @@ void CGOpenMPRuntimeNVPTX::emitGenericParallelCall(
 
   auto &&ThenGen = [this, &Loc, &L0ParallelGen, &L1ParallelGen,
                     &SeqGen](CodeGenFunction &CGF, PrePostActionTy &) {
-    auto *RTLoc = emitUpdateLocation(CGF, Loc);
-    auto ThreadID = getThreadID(CGF, Loc);
-    llvm::Value *ParallelLevel = CGF.EmitRuntimeCall(
-        createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_parallel_level),
-        {RTLoc, ThreadID});
+    llvm::Value *ParallelLevel = getParallelLevel(CGF, Loc);
     emitParallelismLevelCode(CGF, ParallelLevel, L0ParallelGen, L1ParallelGen,
                              SeqGen);
   };
@@ -3183,6 +3211,7 @@ void CGOpenMPRuntimeNVPTX::emitSimdCall(CodeGenFunction &CGF,
 
     llvm::SmallVector<llvm::Value *, 16> OutlinedFnArgs;
 
+    // We are in an L1 parallel region.
     auto *ParallelLevel = Bld.getInt16(1);
     auto *SourceThread = CGF.EmitLoadOfScalar(
         WorkSource, /*Volatile=*/false,
@@ -3230,10 +3259,7 @@ void CGOpenMPRuntimeNVPTX::emitSimdCall(CodeGenFunction &CGF,
   };
 
   CodeGenFunction::RunCleanupsScope Scope(CGF);
-  auto ThreadID = getThreadID(CGF, Loc);
-  llvm::Value *ParallelLevel = CGF.EmitRuntimeCall(
-      createNVPTXRuntimeFunction(OMPRTL_NVPTX__kmpc_parallel_level),
-      {RTLoc, ThreadID});
+  llvm::Value *ParallelLevel = getParallelLevel(CGF, Loc);
   emitParallelismLevelCode(CGF, ParallelLevel, SeqGen, L1SimdGen, SeqGen);
 }
 
