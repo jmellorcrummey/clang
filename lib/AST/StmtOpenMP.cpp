@@ -1737,6 +1737,7 @@ OMPTargetTeamsDistributeDirective *OMPTargetTeamsDistributeDirective::Create(
   OMPTargetTeamsDistributeDirective *Dir =
       new (Mem) OMPTargetTeamsDistributeDirective(StartLoc, EndLoc,
                                                   CollapsedNum, Clauses.size());
+
   Dir->setClauses(Clauses);
   Dir->setAssociatedStmt(AssociatedStmt);
   Dir->setIterationVariable(Exprs.IterationVarRef);

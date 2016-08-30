@@ -3222,7 +3222,8 @@ void CodeGenFunction::EmitOMPDistributeLoop(
                          [&S, &LoopExit,
                           &CodeGenDistributeLoopContent](CodeGenFunction &CGF) {
                            if (S.getDirectiveKind() == OMPD_distribute ||
-                               S.getDirectiveKind() == OMPD_teams_distribute) {
+                               S.getDirectiveKind() == OMPD_teams_distribute ||
+                               S.getDirectiveKind() == OMPD_target_teams_distribute) {
                              CGF.EmitOMPLoopBody(S, LoopExit);
                              CGF.EmitStopPoint(&S);
                            } else if (isOpenMPLoopBoundSharingDirective(
@@ -4198,22 +4199,15 @@ static void TargetTeamsDistributeCodegen(CodeGenFunction &CGF, PrePostActionTy &
     CGF.EmitOMPReductionClauseInit(S, PrivateScope);
     (void)PrivateScope.Privatize();
     auto &&CGDistributeLoop = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-      auto &&CGBody = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-        CGF.EmitStmt(
-            cast<CapturedStmt>(S.getAssociatedStmt())->getCapturedStmt());
-      };
-
-      CGF.EmitOMPDistributeLoop(S, CGBody);
+      CGF.EmitOMPDistributeLoop(S, [](CodeGenFunction &, PrePostActionTy &) {});
     };
-    // no need to create a lexical scope because there is a single function
-    // for target and teams
     CGF.CGM.getOpenMPRuntime().emitInlinedDirective(CGF, OMPD_distribute,
                                                     CGDistributeLoop,
                                                     /*HasCancel=*/false);
     CGF.EmitOMPReductionClauseFinal(S, OMPD_teams);
   };
-
-  emitCommonOMPTeamsDirective(CGF, S, OMPD_teams, CGDistributeInlined);
+  emitCommonOMPTeamsDirective(CGF, S, OMPD_teams_distribute,
+                              CGDistributeInlined, 1, 2);
   emitPostUpdateForReductionClause(
       CGF, S, [](CodeGenFunction &) -> llvm::Value * { return nullptr; });
 }

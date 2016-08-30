@@ -3424,7 +3424,8 @@ void CGOpenMPRuntimeNVPTX::emitTeamsCall(CodeGenFunction &CGF,
     OutlinedFnArgs.push_back(ZeroAddr.getPointer());
     OutlinedFnArgs.append(CapturedVars.begin(), CapturedVars.end());
     CGF.EmitCallOrInvoke(OutlinedFn, OutlinedFnArgs);
-  } else if (D.getDirectiveKind() == OMPD_teams_distribute) {
+  } else if (D.getDirectiveKind() == OMPD_teams_distribute ||
+      D.getDirectiveKind() == OMPD_target_teams_distribute) {
     // This code generation is a duplication of the one in CGStmtOpenMP.cpp
     // and it has to be removed once the sharing from teams distribute to
     // any contained worksharing loop works smoothly.
@@ -3441,9 +3442,9 @@ void CGOpenMPRuntimeNVPTX::emitTeamsCall(CodeGenFunction &CGF,
       CGF.CGM.getOpenMPRuntime().emitInlinedDirective(CGF, OMPD_distribute,
                                                       CGDistributeLoop,
                                                       /*HasCancel=*/false);
-      CGF.EmitOMPReductionClauseFinal(D, OMPD_teams_distribute);
+      CGF.EmitOMPReductionClauseFinal(D, D.getDirectiveKind());
     };
-    emitInlinedDirective(CGF, OMPD_teams_distribute, CGDistributeInlined);
+    emitInlinedDirective(CGF, D.getDirectiveKind(), CGDistributeInlined);
     emitPostUpdateForReductionClause(
         CGF, D, [](CodeGenFunction &) -> llvm::Value * { return nullptr; });
   } else {
