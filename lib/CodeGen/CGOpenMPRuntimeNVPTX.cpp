@@ -1711,11 +1711,10 @@ void CGOpenMPRuntimeNVPTX::emitForDispatchFinish(CodeGenFunction &CGF,
     DistChunked = C->getChunkSize() != nullptr;
 
   if (isSPMDExecutionMode() && DistChunked &&
-      // TODO: add target_teams_distribute_parallel_for_simd and
-      // teams_distribute_parallel_for_simd.
       (Kind == OMPD_target_teams_distribute_parallel_for ||
        Kind == OMPD_teams_distribute_parallel_for ||
-       Kind == OMPD_target_teams_distribute_parallel_for_simd))
+       Kind == OMPD_target_teams_distribute_parallel_for_simd ||
+       Kind == OMPD_teams_distribute_parallel_for_simd))
     SyncCTAThreads(CGF);
 }
 
