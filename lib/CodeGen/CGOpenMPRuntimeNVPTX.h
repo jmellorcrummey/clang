@@ -198,7 +198,7 @@ private:
   public:
     llvm::Function *WorkerFn;
     const CGFunctionInfo *CGFI;
-    bool ContainsDeclareTarget;
+    bool ContainsOrphanedParallel;
 
     WorkerFunctionState(CodeGenModule &CGM, const OMPExecutableDirective &D);
 
@@ -246,6 +246,10 @@ private:
   /// \brief Gets thread id value for the current thread.
   ///
   llvm::Value *getThreadID(CodeGenFunction &CGF, SourceLocation Loc) override;
+
+  /// Get parallel level of this thread.
+  /// Return value is zero (level 0), one (level 1), or two (> level 1).
+  llvm::Value *getParallelLevel(CodeGenFunction &CGF, SourceLocation Loc);
 
   /// \brief Registers the context of a parallel region with the runtime
   /// codegen implementation.
