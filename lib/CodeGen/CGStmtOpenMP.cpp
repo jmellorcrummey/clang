@@ -1876,8 +1876,12 @@ void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
   if (OutlinedSimd)
     emitDeviceOMPSimdDirective(*this, S, OMPD_simd, CodeGen);
   else {
-    OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
-    CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_simd, CodeGen);
+    if (S.getDirectiveKind() == OMPD_teams_distribute_simd){
+      CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_simd, CodeGen);
+    } else {
+      OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
+      CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_simd, CodeGen);
+    }
   }
 }
 
@@ -2263,8 +2267,6 @@ void CodeGenFunction::EmitOMPTeamsDistributeSimdDirective(
     const OMPTeamsDistributeSimdDirective &S) {
   auto &&CGDistributeInlined = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
     OMPPrivateScope PrivateScope(CGF);
-    (void)CGF.EmitOMPFirstprivateClause(S, PrivateScope);
-    CGF.EmitOMPPrivateClause(S, PrivateScope);
     CGF.EmitOMPReductionClauseInit(S, PrivateScope);
     (void)PrivateScope.Privatize();
     auto &&CGDistributeLoop = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
@@ -3153,24 +3155,6 @@ void CodeGenFunction::EmitOMPDistributeLoop(
         }
       }
       const bool Ordered = S.getSingleClause<OMPOrderedClause>() != nullptr;
-
-      // if (S.getDirectiveKind() == OMPD_teams_distribute_simd) {
-      //   // When composing distribute with for we need to use the pragma distribute
-      //   // chunk lower and upper bounds rather than the whole loop iteration
-      //   // space. Therefore we copy the bounds of the previous schedule into the
-      //   // the current ones.
-      //   const unsigned IVSize = getContext().getTypeSize(IVExpr->getType());
-      //   LValue PrevLB = EmitLValue(S.getPrevLowerBoundVariable());
-      //   LValue PrevUB = EmitLValue(S.getPrevUpperBoundVariable());
-      //   auto PrevLBVal = EmitLoadOfScalar(PrevLB, SourceLocation());
-      //   PrevLBVal = Builder.CreateIntCast(PrevLBVal, Builder.getIntNTy(IVSize),
-      //                                     /*isSigned=*/false);
-      //   auto PrevUBVal = EmitLoadOfScalar(PrevUB, SourceLocation());
-      //   PrevUBVal = Builder.CreateIntCast(PrevUBVal, Builder.getIntNTy(IVSize),
-      //                                     /*isSigned=*/false);
-      //   EmitStoreOfScalar(PrevLBVal, LB);
-      //   EmitStoreOfScalar(PrevUBVal, UB);
-      // }
 
       if (RT.generateCoalescedSchedule(DistScheduleKind, ScheduleKind,
                                        /* Chunked */ DistChunk != nullptr,

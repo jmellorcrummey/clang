@@ -3459,6 +3459,30 @@ void CGOpenMPRuntimeNVPTX::emitTeamsCall(CodeGenFunction &CGF,
     emitInlinedDirective(CGF, D.getDirectiveKind(), CGDistributeInlined);
     emitPostUpdateForReductionClause(
         CGF, D, [](CodeGenFunction &) -> llvm::Value * { return nullptr; });
+  } else if (D.getDirectiveKind() == OMPD_teams_distribute_simd) {
+    // This code generation is a duplication of the one in CGStmtOpenMP.cpp
+    // and it has to be removed once the sharing from teams distribute to
+    // any contained worksharing loop works smoothly.
+    auto &&CGDistributeInlined = [&D](CodeGenFunction &CGF, PrePostActionTy &) {
+      CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
+      (void)CGF.EmitOMPFirstprivateClause(D, PrivateScope);
+      CGF.EmitOMPPrivateClause(D, PrivateScope);
+      CGF.EmitOMPReductionClauseInit(D, PrivateScope);
+      (void)PrivateScope.Privatize();
+      auto &&CGDistributeLoop = [&D](CodeGenFunction &CGF, PrePostActionTy &) {
+        auto &&CGSimd = [&D](CodeGenFunction &CGF, PrePostActionTy &) {
+          CGF.EmitOMPSimdLoop(*(dyn_cast<OMPLoopDirective>(&D)), false);
+        };
+        CGF.EmitOMPDistributeLoop(*(dyn_cast<OMPLoopDirective>(&D)), CGSimd);
+      };
+      CGF.CGM.getOpenMPRuntime().emitInlinedDirective(CGF, OMPD_distribute,
+                                                      CGDistributeLoop,
+                                                      /*HasCancel=*/false);
+      CGF.EmitOMPReductionClauseFinal(D, D.getDirectiveKind());
+    };
+    emitInlinedDirective(CGF, D.getDirectiveKind(), CGDistributeInlined);
+    emitPostUpdateForReductionClause(
+        CGF, D, [](CodeGenFunction &) -> llvm::Value * { return nullptr; });
   } else {
     // Just emit the statements in the teams region inlined.
     // This has to be removed too when data sharing is fixed.
