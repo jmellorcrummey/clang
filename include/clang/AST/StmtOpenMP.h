@@ -880,7 +880,8 @@ public:
                OMPTargetTeamsDistributeParallelForDirectiveClass ||
            T->getStmtClass() ==
                OMPTargetTeamsDistributeParallelForSimdDirectiveClass ||
-           T->getStmtClass() == OMPTeamsDistributeParallelForSimdDirectiveClass ||
+           T->getStmtClass() ==
+               OMPTeamsDistributeParallelForSimdDirectiveClass ||
            T->getStmtClass() == OMPTargetTeamsDistributeDirectiveClass;
   }
 };

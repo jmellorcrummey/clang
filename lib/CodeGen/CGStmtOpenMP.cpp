@@ -3223,7 +3223,8 @@ void CodeGenFunction::EmitOMPDistributeLoop(
                           &CodeGenDistributeLoopContent](CodeGenFunction &CGF) {
                            if (S.getDirectiveKind() == OMPD_distribute ||
                                S.getDirectiveKind() == OMPD_teams_distribute ||
-                               S.getDirectiveKind() == OMPD_target_teams_distribute) {
+                               S.getDirectiveKind() ==
+                                   OMPD_target_teams_distribute) {
                              CGF.EmitOMPLoopBody(S, LoopExit);
                              CGF.EmitStopPoint(&S);
                            } else if (isOpenMPLoopBoundSharingDirective(
@@ -4188,9 +4189,9 @@ void CodeGenFunction::EmitOMPTargetTeamsDirective(
   emitCommonOMPTargetDirective(*this, S, OMPD_target, CodeGen);
 }
 
-
-static void TargetTeamsDistributeCodegen(CodeGenFunction &CGF, PrePostActionTy &Action,
-                               const OMPTargetTeamsDistributeDirective &S) {
+static void
+TargetTeamsDistributeCodegen(CodeGenFunction &CGF, PrePostActionTy &Action,
+                             const OMPTargetTeamsDistributeDirective &S) {
   Action.Enter(CGF);
   auto &&CGDistributeInlined = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
     CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
