@@ -9582,6 +9582,7 @@ OMPClause *Sema::ActOnOpenMPIfClause(OpenMPDirectiveKind NameModifier,
 
     OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
     if ((DKind == OMPD_teams_distribute_parallel_for ||
+         DKind == OMPD_teams_distribute_parallel_for_simd ||
          isOpenMPTargetExecutionDirective(DKind)) &&
         !CurContext->isDependentContext()) {
       llvm::MapVector<Expr *, DeclRefExpr *> Captures;
@@ -9699,6 +9700,7 @@ OMPClause *Sema::ActOnOpenMPNumThreadsClause(Expr *NumThreads,
 
   OpenMPDirectiveKind DKind = DSAStack->getCurrentDirective();
   if ((DKind == OMPD_teams_distribute_parallel_for ||
+       DKind == OMPD_teams_distribute_parallel_for_simd ||
        isOpenMPTargetExecutionDirective(DKind)) &&
       !CurContext->isDependentContext()) {
     llvm::MapVector<Expr *, DeclRefExpr *> Captures;

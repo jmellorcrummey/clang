@@ -1712,11 +1712,10 @@ void CGOpenMPRuntimeNVPTX::emitForDispatchFinish(CodeGenFunction &CGF,
     DistChunked = C->getChunkSize() != nullptr;
 
   if (isSPMDExecutionMode() && DistChunked &&
-      // TODO: add target_teams_distribute_parallel_for_simd and
-      // teams_distribute_parallel_for_simd.
       (Kind == OMPD_target_teams_distribute_parallel_for ||
        Kind == OMPD_teams_distribute_parallel_for ||
-       Kind == OMPD_target_teams_distribute_parallel_for_simd))
+       Kind == OMPD_target_teams_distribute_parallel_for_simd ||
+       Kind == OMPD_teams_distribute_parallel_for_simd))
     SyncCTAThreads(CGF);
 }
 
@@ -2562,8 +2561,10 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
     }
   };
 
-  llvm::Value *ParallelLevel = getParallelLevel(CGF, SourceLocation());
-  emitParallelismLevelCode(CGF, ParallelLevel, L0ParallelGen, L1ParallelGen,
+  auto &&ParallelLevelGen = [this, &CGF]() -> llvm::Value * {
+    return getParallelLevel(CGF, SourceLocation());
+  };
+  emitParallelismLevelCode(CGF, ParallelLevelGen, L0ParallelGen, L1ParallelGen,
                            Sequential);
 
   // Generate the values to replace.
@@ -2669,8 +2670,6 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
 
   // Get the parallelism level (L0, L1, L2+).
   auto ParallelLevelAddr = CGF.GetAddrOfLocalVar(&ParallelLevelArg);
-  auto *ParallelLevel = CGF.EmitLoadOfScalar(
-      ParallelLevelAddr, /*Volatile=*/false, Int16QTy, SourceLocation());
 
   // Get the source thread ID, it is the argument of the current function.
   auto SourceLaneIDAddr = CGF.GetAddrOfLocalVar(&WrapperArg);
@@ -2796,13 +2795,18 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
     // A sequential region does not use the wrapper.
   };
 
+  auto &&ParallelLevelGen = [&CGF, &ParallelLevelAddr,
+                             &Int16QTy]() -> llvm::Value * {
+    return CGF.EmitLoadOfScalar(ParallelLevelAddr, /*Volatile=*/false, Int16QTy,
+                                SourceLocation());
+  };
   // In Simd we only support L1 level.
   if (IsSimd)
-    emitParallelismLevelCode(CGF, ParallelLevel, Sequential, L1ParallelGen,
+    emitParallelismLevelCode(CGF, ParallelLevelGen, Sequential, L1ParallelGen,
                              Sequential);
   else
-    emitParallelismLevelCode(CGF, ParallelLevel, L0ParallelGen, L1ParallelGen,
-                             Sequential);
+    emitParallelismLevelCode(CGF, ParallelLevelGen, L0ParallelGen,
+                             L1ParallelGen, Sequential);
 
   // Get the array of arguments.
   SmallVector<llvm::Value *, 8> Args;
@@ -2870,7 +2874,8 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
 // one of the three possible parallelism level. This also emits the required
 // data sharing code for each level.
 void CGOpenMPRuntimeNVPTX::emitParallelismLevelCode(
-    CodeGenFunction &CGF, llvm::Value *ParallelLevel,
+    CodeGenFunction &CGF,
+    const llvm::function_ref<llvm::Value *()> &ParallelLevelGen,
     const RegionCodeGenTy &Level0, const RegionCodeGenTy &Level1,
     const RegionCodeGenTy &Sequential) {
   auto &Bld = CGF.Builder;
@@ -2908,6 +2913,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelismLevelCode(
     // Do we need runtime checks
     if (!OnlyInL0) {
       NextBB = CGF.createBasicBlock(".next.parallel");
+      llvm::Value *ParallelLevel = ParallelLevelGen();
       auto *Cond = Bld.CreateICmpEQ(ParallelLevel, Bld.getInt16(0));
       Bld.CreateCondBr(Cond, LBB, NextBB);
     }
@@ -2929,6 +2935,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelismLevelCode(
     // Do we need runtime checks
     if (!OnlyInL1) {
       NextBB = CGF.createBasicBlock(".next.parallel");
+      llvm::Value *ParallelLevel = ParallelLevelGen();
       auto *Cond = Bld.CreateICmpEQ(ParallelLevel, Bld.getInt16(1));
       Bld.CreateCondBr(Cond, LBB, NextBB);
     }
@@ -2948,6 +2955,7 @@ void CGOpenMPRuntimeNVPTX::emitParallelismLevelCode(
 
     // Do we need runtime checks
     if (!OnlySequential) {
+      llvm::Value *ParallelLevel = ParallelLevelGen();
       auto *Cond = Bld.CreateICmpSGT(ParallelLevel, Bld.getInt16(1));
       Bld.CreateCondBr(Cond, SeqBB, AfterBB);
     }
@@ -3093,9 +3101,11 @@ void CGOpenMPRuntimeNVPTX::emitGenericParallelCall(
 
   auto &&ThenGen = [this, &Loc, &L0ParallelGen, &L1ParallelGen,
                     &SeqGen](CodeGenFunction &CGF, PrePostActionTy &) {
-    llvm::Value *ParallelLevel = getParallelLevel(CGF, Loc);
-    emitParallelismLevelCode(CGF, ParallelLevel, L0ParallelGen, L1ParallelGen,
-                             SeqGen);
+    auto &&ParallelLevelGen = [this, &CGF, &Loc]() -> llvm::Value * {
+      return getParallelLevel(CGF, Loc);
+    };
+    emitParallelismLevelCode(CGF, ParallelLevelGen, L0ParallelGen,
+                             L1ParallelGen, SeqGen);
   };
 
   if (IfCond) {
@@ -3260,8 +3270,10 @@ void CGOpenMPRuntimeNVPTX::emitSimdCall(CodeGenFunction &CGF,
   };
 
   CodeGenFunction::RunCleanupsScope Scope(CGF);
-  llvm::Value *ParallelLevel = getParallelLevel(CGF, Loc);
-  emitParallelismLevelCode(CGF, ParallelLevel, SeqGen, L1SimdGen, SeqGen);
+  auto &&ParallelLevelGen = [this, &CGF, &Loc]() -> llvm::Value * {
+    return getParallelLevel(CGF, Loc);
+  };
+  emitParallelismLevelCode(CGF, ParallelLevelGen, SeqGen, L1SimdGen, SeqGen);
 }
 
 /// \brief Emits a critical region.
