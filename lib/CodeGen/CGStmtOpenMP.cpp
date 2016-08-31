@@ -2278,7 +2278,7 @@ void CodeGenFunction::EmitOMPTeamsDistributeSimdDirective(
                                                     /*HasCancel=*/false);
     CGF.EmitOMPReductionClauseFinal(S, OMPD_teams);
   };
-  emitCommonOMPTeamsDirective(*this, S, OMPD_teams_distribute,
+  emitCommonOMPTeamsDirective(*this, S, OMPD_teams_distribute_simd,
                               CGDistributeInlined, 1, 2);
   emitPostUpdateForReductionClause(
       *this, S, [](CodeGenFunction &) -> llvm::Value * { return nullptr; });
@@ -3153,6 +3153,24 @@ void CodeGenFunction::EmitOMPDistributeLoop(
         }
       }
       const bool Ordered = S.getSingleClause<OMPOrderedClause>() != nullptr;
+
+      // if (S.getDirectiveKind() == OMPD_teams_distribute_simd) {
+      //   // When composing distribute with for we need to use the pragma distribute
+      //   // chunk lower and upper bounds rather than the whole loop iteration
+      //   // space. Therefore we copy the bounds of the previous schedule into the
+      //   // the current ones.
+      //   const unsigned IVSize = getContext().getTypeSize(IVExpr->getType());
+      //   LValue PrevLB = EmitLValue(S.getPrevLowerBoundVariable());
+      //   LValue PrevUB = EmitLValue(S.getPrevUpperBoundVariable());
+      //   auto PrevLBVal = EmitLoadOfScalar(PrevLB, SourceLocation());
+      //   PrevLBVal = Builder.CreateIntCast(PrevLBVal, Builder.getIntNTy(IVSize),
+      //                                     /*isSigned=*/false);
+      //   auto PrevUBVal = EmitLoadOfScalar(PrevUB, SourceLocation());
+      //   PrevUBVal = Builder.CreateIntCast(PrevUBVal, Builder.getIntNTy(IVSize),
+      //                                     /*isSigned=*/false);
+      //   EmitStoreOfScalar(PrevLBVal, LB);
+      //   EmitStoreOfScalar(PrevUBVal, UB);
+      // }
 
       if (RT.generateCoalescedSchedule(DistScheduleKind, ScheduleKind,
                                        /* Chunked */ DistChunk != nullptr,
