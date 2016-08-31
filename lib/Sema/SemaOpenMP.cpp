@@ -6926,6 +6926,7 @@ static unsigned CheckOpenMPLoop(
                                  NumIterations.get())
             : SemaRef.BuildBinOp(CurScope, CondLoc, BO_LE, IV.get(), UB.get());
     assert(DistCond.isUsable() && "distribute cond expr was not built");
+
     DistInc =
         SemaRef.BuildBinOp(CurScope, DistIncLoc, BO_Add, IV.get(), ST.get());
     assert(DistInc.isUsable() && "distribute inc expr was not built");

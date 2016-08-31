@@ -2524,13 +2524,14 @@ public:
   void
   EmitOMPTeamsDistributeSimdDirective(const OMPTeamsDistributeSimdDirective &S);
   void EmitOMPTargetTeamsDirective(const OMPTargetTeamsDirective &S);
-  void EmitOMPTargetTeamsDistributeDirective(const OMPTargetTeamsDistributeDirective &S);
   void EmitOMPTeamsDistributeParallelForDirective(
       const OMPTeamsDistributeParallelForDirective &S);
   void EmitOMPTargetTeamsDistributeParallelForDirective(
       const OMPTargetTeamsDistributeParallelForDirective &S);
   void EmitOMPTargetTeamsDistributeParallelForSimdDirective(
       const OMPTargetTeamsDistributeParallelForSimdDirective &S);
+  void EmitOMPTargetTeamsDistributeDirective(
+      const OMPTargetTeamsDistributeDirective &S);
   void EmitOMPTargetTeamsDistributeSimdDirective(
       const OMPTargetTeamsDistributeSimdDirective &S);
   void EmitOMPTeamsDistributeParallelForSimdDirective(
