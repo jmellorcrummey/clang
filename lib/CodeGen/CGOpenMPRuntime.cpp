@@ -6621,6 +6621,10 @@ void CGOpenMPRuntime::scanForTargetRegionsFunctions(const Stmt *S,
       CodeGenFunction::EmitOMPTargetTeamsDistributeDeviceFunction(
           CGM, ParentName, cast<OMPTargetTeamsDistributeDirective>(*S));
       break;
+    case Stmt::OMPTargetTeamsDistributeSimdDirectiveClass:
+      CodeGenFunction::EmitOMPTargetTeamsDistributeSimdDeviceFunction(
+          CGM, ParentName, cast<OMPTargetTeamsDistributeSimdDirective>(*S));
+      break;
     case Stmt::OMPTargetParallelDirectiveClass:
       CodeGenFunction::EmitOMPTargetParallelDeviceFunction(
           CGM, ParentName, cast<OMPTargetParallelDirective>(*S));

@@ -1469,6 +1469,7 @@ GetExecutionMode(CodeGenModule &CGM, const OMPExecutableDirective &D) {
   }
   case OMPD_target_teams:
   case OMPD_target_teams_distribute:
+  case OMPD_target_teams_distribute_simd:
     return CGOpenMPRuntimeNVPTX::ExecutionMode::GENERIC;
   case OMPD_target_parallel:
   case OMPD_target_parallel_for:

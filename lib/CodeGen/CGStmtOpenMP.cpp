@@ -1876,7 +1876,8 @@ void CodeGenFunction::EmitOMPSimdLoop(const OMPLoopDirective &S,
   if (OutlinedSimd)
     emitDeviceOMPSimdDirective(*this, S, OMPD_simd, CodeGen);
   else {
-    if (S.getDirectiveKind() == OMPD_teams_distribute_simd){
+    if (S.getDirectiveKind() == OMPD_teams_distribute_simd ||
+        S.getDirectiveKind() == OMPD_target_teams_distribute_simd){
       CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_simd, CodeGen);
     } else {
       OMPLexicalScope Scope(*this, S, /*AsInlined=*/true);
@@ -4205,8 +4206,6 @@ TargetTeamsDistributeCodegen(CodeGenFunction &CGF, PrePostActionTy &Action,
   Action.Enter(CGF);
   auto &&CGDistributeInlined = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
     CodeGenFunction::OMPPrivateScope PrivateScope(CGF);
-    (void)CGF.EmitOMPFirstprivateClause(S, PrivateScope);
-    CGF.EmitOMPPrivateClause(S, PrivateScope);
     CGF.EmitOMPReductionClauseInit(S, PrivateScope);
     (void)PrivateScope.Privatize();
     auto &&CGDistributeLoop = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
