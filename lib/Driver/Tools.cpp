@@ -5223,6 +5223,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       if (!Args.hasFlag(options::OPT_fopenmp_use_tls,
                         options::OPT_fnoopenmp_use_tls, /*Default=*/true))
         CmdArgs.push_back("-fnoopenmp-use-tls");
+
+      // If the user provides the fopenmp-nonaliased-maps flag, pass it on.
+      if (Args.hasFlag(options::OPT_fopenmp_nonaliased_maps,
+                       options::OPT_fnoopenmp_nonaliased_maps, /*Default=*/false))
+        CmdArgs.push_back("-fopenmp-nonaliased-maps");
+
       Args.AddAllArgs(CmdArgs, options::OPT_fopenmp_version_EQ);
       break;
     default:

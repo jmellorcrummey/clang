@@ -271,7 +271,7 @@ static Address castValueFromUintptr(CodeGenFunction &CGF, QualType DstType,
 
 llvm::Function *CodeGenFunction::GenerateOpenMPCapturedStmtFunction(
     const CapturedStmt &S, bool UseCapturedArgumentsOnly, unsigned CaptureLevel,
-    unsigned ImplicitParamStop) {
+    unsigned ImplicitParamStop, bool NonAliasedMaps) {
   assert(
       CapturedStmtInfo &&
       "CapturedStmtInfo should be set when generating the captured function");
@@ -325,6 +325,9 @@ llvm::Function *CodeGenFunction::GenerateOpenMPCapturedStmtFunction(
     }
     if (ArgType->isVariablyModifiedType())
       ArgType = getContext().getVariableArrayDecayedType(ArgType);
+    // Add restrict to all target pointers if flag is provided.
+    if (NonAliasedMaps && ArgType->isAnyPointerType())
+      ArgType = ArgType.withRestrict();
     Args.push_back(ImplicitParamDecl::Create(getContext(), nullptr,
                                              FD->getLocation(), II, ArgType));
     ++I;

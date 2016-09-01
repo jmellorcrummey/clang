@@ -2341,7 +2341,8 @@ public:
   Address GenerateCapturedStmtArgument(const CapturedStmt &S);
   llvm::Function *GenerateOpenMPCapturedStmtFunction(
       const CapturedStmt &S, bool UseCapturedArgumentsOnly = false,
-      unsigned CaptureLevel = 1, unsigned ImplicitParamStop = 0);
+      unsigned CaptureLevel = 1, unsigned ImplicitParamStop = 0,
+      bool NonAliasedMaps = false);
   void GenerateOpenMPCapturedVars(const CapturedStmt &S,
                                   SmallVectorImpl<llvm::Value *> &CapturedVars,
                                   unsigned CaptureLevel = 1);

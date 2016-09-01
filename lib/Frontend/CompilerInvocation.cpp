@@ -2074,6 +2074,8 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
       Opts.OpenMP && !Args.hasArg(options::OPT_fnoopenmp_use_tls);
   Opts.OpenMPIsDevice =
       Opts.OpenMP && Args.hasArg(options::OPT_fopenmp_is_device);
+  Opts.OpenMPNonAliasedMaps =
+      Opts.OpenMP && Args.hasArg(options::OPT_fopenmp_nonaliased_maps);
   Opts.OpenMPNoSPMD =
       Opts.OpenMP && Args.hasArg(options::OPT_fopenmp_nvptx_nospmd);
   Opts.OpenMPImplicitDeclareTarget =

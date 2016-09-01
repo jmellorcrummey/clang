@@ -5197,7 +5197,9 @@ void CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(
       isOpenMPParallelDirective(D.getDirectiveKind()) ||
       isOpenMPTeamsDirective(D.getDirectiveKind());
   OutlinedFn =
-      CGF.GenerateOpenMPCapturedStmtFunction(CS, UseCapturedArgumentsOnly);
+      CGF.GenerateOpenMPCapturedStmtFunction(CS, UseCapturedArgumentsOnly,
+          /*CaptureLevel=*/ 1, /*ImplicitParamStop=*/ 0,
+          CGM.getLangOpts().OpenMPNonAliasedMaps);
 
   // If this target outline function is not an offload entry, we don't need to
   // register it.

@@ -190,6 +190,7 @@ LANGOPT(OpenMPImplicitDeclareTarget      , 1, 0, "Enable implicit declare target
 LANGOPT(OpenMPIsDevice    , 1, 0, "Generate code only for OpenMP target device")
 LANGOPT(OpenMPNoDeviceEH  , 1, 0, "Do not generate exception handling code even if that is activated for the host.")
 LANGOPT(OpenMPNoSPMD      , 1, 0, "Do not generate SPMD code for an NVPTX OpenMP target device.")
+LANGOPT(OpenMPNonAliasedMaps  , 1, 0, "Assume non-aliased maps in target regions.")
 LANGOPT(RenderScript      , 1, 0, "RenderScript")
 
 LANGOPT(CUDAIsDevice      , 1, 0, "compiling for CUDA device")
