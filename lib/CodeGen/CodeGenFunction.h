@@ -2602,6 +2602,7 @@ public:
 
   /// \brief Emit a helper variable and return corresponding lvalue.
   LValue EmitOMPHelperVar(const DeclRefExpr *Helper);
+  void EmitOMPHelperVar(const VarDecl *VDecl);
 
 private:
   /// Helpers for the OpenMP loop directives.

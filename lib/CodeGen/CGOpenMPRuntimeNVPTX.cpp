@@ -2210,8 +2210,8 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
 
     // Add loop bounds if required.
     DoOnSharedLoopBounds(
-        *Dir, [&AlreadySharedDecls, &C, &Info, &SharedMasterRD,
-               &SharedWarpRD](const VarDecl *LB, const VarDecl *UB) {
+        *Dir, [&AlreadySharedDecls, &C, &Info, &SharedMasterRD, &SharedWarpRD,
+               &Dir, &CGF](const VarDecl *LB, const VarDecl *UB) {
           // Do not insert the same declaration twice.
           if (AlreadySharedDecls.count(LB))
             return;
@@ -2235,6 +2235,17 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
                                             /*IndexTypeQuals=*/0);
           addFieldToRecordDecl(C, SharedWarpRD, QTy);
           addFieldToRecordDecl(C, SharedWarpRD, QTy);
+
+          // Emit the preinits to make sure the initializers are properly
+          // emitted.
+          // FIXME: This is a hack - it won't work if declarations being shared
+          // appear after the first parallel region.
+          const OMPLoopDirective *L = cast<OMPLoopDirective>(Dir);
+          if (auto *PreInits = cast_or_null<DeclStmt>(L->getPreInits()))
+            for (const auto *I : PreInits->decls()) {
+              cast<VarDecl>(I)->dump();
+              CGF.EmitOMPHelperVar(cast<VarDecl>(I));
+            }
         });
   }
 
