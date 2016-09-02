@@ -2243,7 +2243,6 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
           const OMPLoopDirective *L = cast<OMPLoopDirective>(Dir);
           if (auto *PreInits = cast_or_null<DeclStmt>(L->getPreInits()))
             for (const auto *I : PreInits->decls()) {
-              cast<VarDecl>(I)->dump();
               CGF.EmitOMPHelperVar(cast<VarDecl>(I));
             }
         });
