@@ -88,7 +88,7 @@ class OMPLoopScope : public CodeGenFunction::RunCleanupsScope {
     if (auto *LD = dyn_cast<OMPLoopDirective>(&S)) {
       if (auto *PreInits = cast_or_null<DeclStmt>(LD->getPreInits())) {
         for (const auto *I : PreInits->decls())
-          CGF.EmitVarDecl(cast<VarDecl>(*I));
+          CGF.EmitOMPHelperVar(cast<VarDecl>(I));
       }
     }
   }
@@ -1723,11 +1723,13 @@ void CodeGenFunction::EmitOMPSimdFinal(
 /// \brief Emit a helper variable and return corresponding lvalue.
 LValue CodeGenFunction::EmitOMPHelperVar(const DeclRefExpr *Helper) {
   auto *VDecl = cast<VarDecl>(Helper->getDecl());
-
+  EmitOMPHelperVar(VDecl);
+  return EmitLValue(Helper);
+}
+void CodeGenFunction::EmitOMPHelperVar(const VarDecl *VDecl) {
   // Don't need to emit variable if it was emitted before.
   if (LocalDeclMap.find(VDecl) == LocalDeclMap.end())
     EmitVarDecl(*VDecl);
-  return EmitLValue(Helper);
 }
 
 static void emitDeviceOMPSimdDirective(CodeGenFunction &CGF,
