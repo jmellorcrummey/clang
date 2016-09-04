@@ -1776,7 +1776,6 @@ void Generic_GCC::CudaInstallationDetector::init(
     CudaPathCandidates.push_back(
         Args.getLastArgValue(options::OPT_cuda_path_EQ));
   else {
-    CudaPathCandidates.push_back(D.SysRoot + "/usr/local/cuda-8.0");
     CudaPathCandidates.push_back(D.SysRoot + "/usr/local/cuda");
     // FIXME: Uncomment this once we can compile the cuda 8 headers.
     // CudaPathCandidates.push_back(D.SysRoot + "/usr/local/cuda-8.0");
