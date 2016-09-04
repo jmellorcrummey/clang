@@ -1549,14 +1549,7 @@ ConstantAddress CodeGenModule::GetWeakRefReference(const ValueDecl *VD) {
 }
 
 void CodeGenModule::EmitGlobal(GlobalDecl GD) {
-  llvm::errs() << " ---> " << getMangledName(GD) << "\n";
   const auto *Global = cast<ValueDecl>(GD.getDecl());
-
-  if ( getMangledName(GD) == "_ZL6colidx") {
-
-    llvm::errs() << "Hey!!!\n";
-
-  }
 
   // Weak references don't produce any output by themselves.
   if (Global->hasAttr<WeakRefAttr>())
@@ -2454,7 +2447,6 @@ void CodeGenModule::maybeSetTrivialComdat(const Decl &D,
 /// Pass IsTentative as true if you want to create a tentative definition.
 void CodeGenModule::EmitGlobalVarDefinition(const VarDecl *D,
                                             bool IsTentative) {
-  llvm::errs() << " -d-> " << D->getName() << "\n";
   // OpenCL global variables of sampler type are translated to function calls,
   // therefore no need to be translated.
   QualType ASTTy = D->getType();
