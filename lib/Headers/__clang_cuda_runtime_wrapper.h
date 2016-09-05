@@ -62,7 +62,7 @@
 #include "cuda.h"
 #if !defined(CUDA_VERSION)
 #error "cuda.h did not define CUDA_VERSION"
-#elif CUDA_VERSION < 7000 || CUDA_VERSION > 7050
+#elif CUDA_VERSION < 7000 || CUDA_VERSION > 8000
 #error "Unsupported CUDA version!"
 #endif
 
