@@ -1466,6 +1466,11 @@ bool CodeGenModule::MustBeEmitted(const ValueDecl *Global) {
   if (LangOpts.EmitAllDecls)
     return true;
 
+  // In OpenMP device mode all declarations that were not filtered should be
+  // emitted.
+  if (LangOpts.OpenMPIsDevice)
+    return true;
+
   return getContext().DeclMustBeEmitted(Global);
 }
 
