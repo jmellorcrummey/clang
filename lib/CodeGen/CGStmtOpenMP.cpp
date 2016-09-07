@@ -1307,10 +1307,9 @@ static void emitCommonOMPParallelDirective(CodeGenFunction &CGF,
                                            unsigned CaptureLevel = 1) {
   CGF.CGM.getOpenMPRuntime().registerParallelContext(CGF, S);
   auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
-  auto OutlinedFn =
-      CGF.CGM.getOpenMPRuntime().emitParallelOrTeamsOutlinedFunction(
-          S, *CS->getCapturedDecl()->param_begin(), InnermostKind, CodeGen,
-          CaptureLevel);
+  auto OutlinedFn = CGF.CGM.getOpenMPRuntime().emitParallelOutlinedFunction(
+      S, *CS->getCapturedDecl()->param_begin(), InnermostKind, CodeGen,
+      CaptureLevel);
   if (const auto *NumThreadsClause = S.getSingleClause<OMPNumThreadsClause>()) {
     CodeGenFunction::RunCleanupsScope NumThreadsScope(CGF);
     auto NumThreads = CGF.EmitScalarExpr(NumThreadsClause->getNumThreads(),
@@ -2191,10 +2190,9 @@ static void emitCommonOMPTeamsDirective(CodeGenFunction &CGF,
                                         unsigned CaptureLevel = 1,
                                         unsigned ImplicitParamStop = 0) {
   auto CS = cast<CapturedStmt>(S.getAssociatedStmt());
-  auto OutlinedFn =
-      CGF.CGM.getOpenMPRuntime().emitParallelOrTeamsOutlinedFunction(
-          S, *CS->getCapturedDecl()->param_begin(), InnermostKind, CodeGen,
-          CaptureLevel, ImplicitParamStop);
+  auto OutlinedFn = CGF.CGM.getOpenMPRuntime().emitTeamsOutlinedFunction(
+      S, *CS->getCapturedDecl()->param_begin(), InnermostKind, CodeGen,
+      CaptureLevel, ImplicitParamStop);
 
   const OMPNumTeamsClause *NT = S.getSingleClause<OMPNumTeamsClause>();
   const OMPThreadLimitClause *TL = S.getSingleClause<OMPThreadLimitClause>();
@@ -3169,8 +3167,8 @@ void CodeGenFunction::EmitOMPDistributeLoop(
         // whenever the OpenMP standard gives us freedom to do so.
         //
         // This case is called if there is no dist_schedule clause, and there is
-        // no
-        // schedule clause, with a schedule(auto), or with a schedule(static,1).
+        // no schedule clause, with a schedule(auto), or with a
+        // schedule(static,1).
         //
         // Codegen is optimized for this case.  Since chunk size is 1 we do not
         // need to generate the inner loop, i.e., the chunk iterator can be
@@ -3186,7 +3184,7 @@ void CodeGenFunction::EmitOMPDistributeLoop(
                                     IVSize, IVSigned, /* Ordered = */ false,
                                     IL.getAddress(), LB.getAddress(),
                                     UB.getAddress(), ST.getAddress(), Chunk,
-                                    /*Coalesced=*/true);
+                                    /*CoalescedDistSchedule=*/true);
         auto LoopExit =
             getJumpDestInCurrentScope(createBasicBlock("omp.loop.exit"));
         // IV = LB
@@ -3206,7 +3204,8 @@ void CodeGenFunction::EmitOMPDistributeLoop(
                          });
         EmitBlock(LoopExit.getBlock());
         // Tell the runtime we are done.
-        RT.emitForStaticFinish(*this, S.getLocStart());
+        RT.emitForStaticFinish(*this, S.getLocStart(),
+                               /*CoalescedDistSchedule=*/true);
         // Emit the parallel reduction.
         EmitOMPReductionClauseFinal(S, OMPD_distribute_parallel_for);
       } else if (RT.isStaticNonchunked(DistScheduleKind,

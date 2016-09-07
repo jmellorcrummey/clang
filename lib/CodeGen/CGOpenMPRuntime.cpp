@@ -917,10 +917,11 @@ static Address createIdentFieldGEP(CodeGenFunction &CGF, Address Addr,
   return CGF.Builder.CreateStructGEP(Addr, Field, Offset, Name);
 }
 
-llvm::Value *CGOpenMPRuntime::emitParallelOrTeamsOutlinedFunction(
-    const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
-    OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen,
-    unsigned CaptureLevel, unsigned ImplicitParamStop) {
+static llvm::Value *emitParallelOrTeamsOutlinedFunction(
+    CodeGenModule &CGM, const OMPExecutableDirective &D,
+    const VarDecl *ThreadIDVar, OpenMPDirectiveKind InnermostKind,
+    const RegionCodeGenTy &CodeGen, unsigned CaptureLevel,
+    unsigned ImplicitParamStop) {
   assert(ThreadIDVar->getType()->isPointerType() &&
          "thread id variable must be of type kmp_int32 *");
   const CapturedStmt *CS = cast<CapturedStmt>(D.getAssociatedStmt());
@@ -937,6 +938,24 @@ llvm::Value *CGOpenMPRuntime::emitParallelOrTeamsOutlinedFunction(
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
   return CGF.GenerateOpenMPCapturedStmtFunction(
       *CS, /*UseCapturedArgumentsOnly=*/false, CaptureLevel, ImplicitParamStop);
+}
+
+llvm::Value *CGOpenMPRuntime::emitTeamsOutlinedFunction(
+    const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
+    OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen,
+    unsigned CaptureLevel, unsigned ImplicitParamStop) {
+  return emitParallelOrTeamsOutlinedFunction(CGM, D, ThreadIDVar, InnermostKind,
+                                             CodeGen, CaptureLevel,
+                                             ImplicitParamStop);
+}
+
+llvm::Value *CGOpenMPRuntime::emitParallelOutlinedFunction(
+    const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
+    OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen,
+    unsigned CaptureLevel, unsigned ImplicitParamStop) {
+  return emitParallelOrTeamsOutlinedFunction(CGM, D, ThreadIDVar, InnermostKind,
+                                             CodeGen, CaptureLevel,
+                                             ImplicitParamStop);
 }
 
 llvm::Value *CGOpenMPRuntime::emitSimdOutlinedFunction(
@@ -2710,9 +2729,9 @@ void CGOpenMPRuntime::emitDistributeStaticInit(
     CodeGenFunction &CGF, SourceLocation Loc,
     OpenMPDistScheduleClauseKind SchedKind, unsigned IVSize, bool IVSigned,
     bool Ordered, Address IL, Address LB, Address UB, Address ST,
-    llvm::Value *Chunk, bool Coalesced) {
+    llvm::Value *Chunk, bool CoalescedDistSchedule) {
   OpenMPSchedType ScheduleNum =
-      getRuntimeSchedule(SchedKind, Chunk != nullptr, Coalesced);
+      getRuntimeSchedule(SchedKind, Chunk != nullptr, CoalescedDistSchedule);
   auto *UpdatedLocation = emitUpdateLocation(CGF, Loc);
   auto *ThreadId = getThreadID(CGF, Loc);
   auto *StaticInitFunction = createForStaticInitFunction(IVSize, IVSigned);
@@ -2723,7 +2742,8 @@ void CGOpenMPRuntime::emitDistributeStaticInit(
 }
 
 void CGOpenMPRuntime::emitForStaticFinish(CodeGenFunction &CGF,
-                                          SourceLocation Loc) {
+                                          SourceLocation Loc,
+                                          bool CoalescedDistSchedule) {
   if (!CGF.HaveInsertPoint())
     return;
   // Call __kmpc_for_static_fini(ident_t *loc, kmp_int32 tid);
