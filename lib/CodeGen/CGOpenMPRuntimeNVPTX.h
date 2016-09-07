@@ -27,6 +27,45 @@ class CGOpenMPRuntimeNVPTX : public CGOpenMPRuntime {
   llvm::StringMap<StringRef> stdFuncs;
   StringRef RenameStandardFunction(StringRef name) override;
 
+  ///
+  /// \param CGF Reference to current CodeGenFunction.
+  /// \param Loc Clang source location.
+  /// \param SchedKind Schedule kind, specified by the 'dist_schedule' clause.
+  /// \param IVSize Size of the iteration variable in bits.
+  /// \param IVSigned Sign of the interation variable.
+  /// \param Ordered true if loop is ordered, false otherwise.
+  /// \param IL Address of the output variable in which the flag of the
+  /// last iteration is returned.
+  /// \param LB Address of the output variable in which the lower iteration
+  /// number is returned.
+  /// \param UB Address of the output variable in which the upper iteration
+  /// number is returned.
+  /// \param ST Address of the output variable in which the stride value is
+  /// returned nesessary to generated the static_chunked scheduled loop.
+  /// \param Chunk Value of the chunk for the static_chunked scheduled loop.
+  /// For the default (nullptr) value, the chunk 1 will be used.
+  /// \param CoalescedDistSchedule Indicates if coalesced scheduling type is
+  /// required.
+  ///
+  virtual void
+  emitDistributeStaticInit(CodeGenFunction &CGF, SourceLocation Loc,
+                           OpenMPDistScheduleClauseKind SchedKind,
+                           unsigned IVSize, bool IVSigned, bool Ordered,
+                           Address IL, Address LB, Address UB, Address ST,
+                           llvm::Value *Chunk = nullptr,
+                           bool CoalescedDistSchedule = false) override;
+
+  /// \brief Call the appropriate runtime routine to notify that we finished
+  /// all the work with current loop.
+  ///
+  /// \param CGF Reference to current CodeGenFunction.
+  /// \param Loc Clang source location.
+  /// \param CoalescedDistSchedule Indicates if coalesced scheduling type is
+  /// required.
+  ///
+  virtual void emitForStaticFinish(CodeGenFunction &CGF, SourceLocation Loc,
+                                   bool CoalescedDistSchedule = false) override;
+
   //
   // Data Sharing related calls.
   //
@@ -179,19 +218,27 @@ private:
   class EntryFunctionState {
   public:
     llvm::BasicBlock *ExitBB;
-    // This variable records if the current target region requires a valid
+    // This variable records if the current SPMD target region requires a valid
     // OMP runtime.  In SPMD mode it is possible to disable the OMP runtime
     // and thus reduce runtime overhead.
     bool RequiresOMPRuntime;
+    // This variable records if the current SPMD target region requires data
+    // sharing support.  Data sharing support is required if this SPMD
+    // construct may have a nested parallel or simd directive.
+    bool RequiresDataSharing;
 
-    EntryFunctionState() : ExitBB(nullptr), RequiresOMPRuntime(true){};
+    EntryFunctionState()
+        : ExitBB(nullptr), RequiresOMPRuntime(true),
+          RequiresDataSharing(true){};
 
     EntryFunctionState(const OMPExecutableDirective &D)
-        : ExitBB(nullptr), RequiresOMPRuntime(true) {
+        : ExitBB(nullptr), RequiresOMPRuntime(true), RequiresDataSharing(true) {
       setRequiresOMPRuntime(D);
+      setRequiresDataSharing(D);
     };
 
     void setRequiresOMPRuntime(const OMPExecutableDirective &D);
+    void setRequiresDataSharing(const OMPExecutableDirective &D);
   };
 
   class WorkerFunctionState {
@@ -209,7 +256,7 @@ private:
   // State information to track orphaned directives.
   bool IsOrphaned;
   // Track parallel nesting level.
-  int ParallelNestingLevel;
+  unsigned ParallelNestingLevel;
 
   // The current codegen mode.  This is used to customize code generation of
   // certain constructs.
@@ -496,8 +543,8 @@ public:
   void emitNumTeamsClause(CodeGenFunction &CGF, const Expr *NumTeams,
                           const Expr *ThreadLimit, SourceLocation Loc) override;
 
-  /// \brief Emits inlined function for the specified OpenMP parallel
-  //  directive but an inlined function for teams.
+  /// \brief Emits inlined function for the specified OpenMP teams
+  //  directive.
   /// \a D. This outlined function has type void(*)(kmp_int32 *ThreadID,
   /// kmp_int32 BoundID, struct context_vars*).
   /// \param D OpenMP directive.
@@ -506,7 +553,22 @@ public:
   /// is a directive itself, for combined - its innermost directive).
   /// \param CodeGen Code generation sequence for the \a D directive.
   /// \param CaptureLevel Codegening level of a combined construct.
-  llvm::Value *emitParallelOrTeamsOutlinedFunction(
+  llvm::Value *emitTeamsOutlinedFunction(
+      const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
+      OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen,
+      unsigned CaptureLevel = 1, unsigned ImplicitParamStop = 0) override;
+
+  /// \brief Emits inlined function for the specified OpenMP parallel
+  //  directive.
+  /// \a D. This outlined function has type void(*)(kmp_int32 *ThreadID,
+  /// kmp_int32 BoundID, struct context_vars*).
+  /// \param D OpenMP directive.
+  /// \param ThreadIDVar Variable for thread id in the current OpenMP region.
+  /// \param InnermostKind Kind of innermost directive (for simple directives it
+  /// is a directive itself, for combined - its innermost directive).
+  /// \param CodeGen Code generation sequence for the \a D directive.
+  /// \param CaptureLevel Codegening level of a combined construct.
+  llvm::Value *emitParallelOutlinedFunction(
       const OMPExecutableDirective &D, const VarDecl *ThreadIDVar,
       OpenMPDirectiveKind InnermostKind, const RegionCodeGenTy &CodeGen,
       unsigned CaptureLevel = 1, unsigned ImplicitParamStop = 0) override;
