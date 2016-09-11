@@ -18,6 +18,7 @@
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/StmtOpenMP.h"
+#include "clang/AST/EvaluatedExprVisitor.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/IR/CallSite.h"
@@ -711,6 +712,9 @@ enum OpenMPRTLFunction {
   //
   // Offloading related calls
   //
+  // Call to void __kmpc_push_target_tripcount(int32_t device_id,
+  // kmp_uint64 size);
+  OMPRTL__kmpc_push_target_tripcount,
   // Call to int32_t __tgt_target(int32_t device_id, void *host_ptr, int32_t
   // arg_num, void** args_base, void **args, size_t *arg_sizes, int32_t
   // *arg_types);
@@ -1678,6 +1682,15 @@ CGOpenMPRuntime::createRuntimeFunction(unsigned Function) {
     llvm::FunctionType *FnTy =
         llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg=*/false);
     RTLFn = CGM.CreateRuntimeFunction(FnTy, /*Name=*/"__kmpc_doacross_wait");
+    break;
+  }
+  case OMPRTL__kmpc_push_target_tripcount: {
+    // Call to void __kmpc_push_target_tripcount(int32_t device_id,
+    // kmp_uint64 size);
+    llvm::Type *TypeParams[] = {CGM.Int32Ty, CGM.Int64Ty};
+    llvm::FunctionType *FnTy =
+        llvm::FunctionType::get(CGM.VoidTy, TypeParams, /*isVarArg*/ false);
+    RTLFn = CGM.CreateRuntimeFunction(FnTy, "__kmpc_push_target_tripcount");
     break;
   }
   case OMPRTL__tgt_target: {
@@ -6402,6 +6415,144 @@ static void emitOffloadingArraysArgument(
     SizesArrayArg = llvm::ConstantPointerNull::get(CGM.SizeTy->getPointerTo());
     MapTypesArrayArg =
         llvm::ConstantPointerNull::get(CGM.Int32Ty->getPointerTo());
+  }
+}
+
+namespace {
+class FirstPrivateChecker : public EvaluatedExprVisitor<FirstPrivateChecker> {
+  bool FirstPrivate;
+  const OMPExecutableDirective &D;
+
+public:
+  typedef EvaluatedExprVisitor<FirstPrivateChecker> Super;
+
+  FirstPrivateChecker(ASTContext &Ctx, const OMPExecutableDirective &D)
+      : Super(Ctx), FirstPrivate(true), D(D) {}
+
+  bool isFirstPrivate() { return FirstPrivate; }
+
+  void Visit(Expr *E) {
+    if (!FirstPrivate)
+      return;
+
+    Super::Visit(E);
+  }
+
+  // Any Stmt not whitelisted will cause the condition to be marked complex.
+  void VisitStmt(Stmt *S) { FirstPrivate = false; }
+
+  void VisitBinaryOperator(BinaryOperator *E) {
+    Visit(E->getLHS());
+    Visit(E->getRHS());
+  }
+
+  void VisitCastExpr(CastExpr *E) { Visit(E->getSubExpr()); }
+
+  void VisitUnaryOperator(UnaryOperator *E) {
+    // Skip checking conditionals with derefernces.
+    if (E->getOpcode() == UO_Deref)
+      FirstPrivate = false;
+    else
+      Visit(E->getSubExpr());
+  }
+
+  void VisitConditionalOperator(ConditionalOperator *E) {
+    Visit(E->getCond());
+    Visit(E->getTrueExpr());
+    Visit(E->getFalseExpr());
+  }
+
+  void VisitParenExpr(ParenExpr *E) { Visit(E->getSubExpr()); }
+
+  void VisitBinaryConditionalOperator(BinaryConditionalOperator *E) {
+    Visit(E->getOpaqueValue()->getSourceExpr());
+    Visit(E->getFalseExpr());
+  }
+
+  void VisitIntegerLiteral(IntegerLiteral *E) {}
+  void VisitFloatingLiteral(FloatingLiteral *E) {}
+  void VisitCXXBoolLiteralExpr(CXXBoolLiteralExpr *E) {}
+  void VisitCharacterLiteral(CharacterLiteral *E) {}
+  void VisitGNUNullExpr(GNUNullExpr *E) {}
+  void VisitImaginaryLiteral(ImaginaryLiteral *E) {}
+
+  bool IsMapped(VarDecl *VD) {
+    for (auto *C : D.getClausesOfKind<OMPMapClause>())
+      for (auto L : C->decl_component_lists(VD)) {
+        assert(L.first == VD &&
+               "We got information for the wrong declaration??");
+        assert(!L.second.empty() &&
+               "Not expecting declaration with no component lists.");
+        return true;
+      }
+
+    return false;
+  }
+
+  void VisitDeclRefExpr(DeclRefExpr *E) {
+    VarDecl *VD = dyn_cast<VarDecl>(E->getDecl());
+    if (!VD)
+      return;
+
+    if (auto *CED = dyn_cast<OMPCapturedExprDecl>(VD))
+      Visit(CED->getInit());
+    else
+      FirstPrivate = !IsMapped(VD);
+  }
+};
+}
+
+// check for inner (nested) SPMD teams construct, if any
+static const OMPExecutableDirective *
+getNestedTeamsSPMDDirective(const OMPExecutableDirective &D) {
+  const CapturedStmt &CS = *cast<CapturedStmt>(D.getAssociatedStmt());
+
+  if (auto *NestedDir = dyn_cast_or_null<OMPExecutableDirective>(
+          ignoreCompoundStmts(CS.getCapturedStmt()))) {
+    OpenMPDirectiveKind DirectiveKind = NestedDir->getDirectiveKind();
+    if (isOpenMPTeamsDirective(DirectiveKind) &&
+        isOpenMPParallelDirective(DirectiveKind))
+      return NestedDir;
+  }
+
+  return nullptr;
+}
+
+void CGOpenMPRuntime::emitTargetNumIterationsCall(
+    CodeGenFunction &CGF, const OMPExecutableDirective &D, const Expr *Device,
+    const llvm::function_ref<llvm::Value *(
+        CodeGenFunction &CGF, const OMPLoopDirective &D)> &SizeEmitter) {
+  OpenMPDirectiveKind Kind = D.getDirectiveKind();
+  const OMPExecutableDirective *TD = &D;
+  // Get nested teams distribute parallel for, if any.
+  if (Kind == OMPD_target && (TD = getNestedTeamsSPMDDirective(D)))
+    Kind = TD->getDirectiveKind();
+
+  if (isOpenMPWorksharingDirective(Kind) && isOpenMPTeamsDirective(Kind)) {
+    auto &Ctx = CGF.getContext();
+    const OMPLoopDirective &LD = *dyn_cast<OMPLoopDirective>(TD);
+    FirstPrivateChecker Checker(Ctx, /* target construct */ D);
+    Checker.Visit(LD.getNumIterations());
+
+    if (Checker.isFirstPrivate()) {
+      auto &&CodeGen = [&LD, &Device, &SizeEmitter, this](CodeGenFunction &CGF,
+                                                          PrePostActionTy &) {
+        llvm::Value *NumIterations = SizeEmitter(CGF, LD);
+
+        // Emit device ID if any.
+        llvm::Value *DeviceID;
+        if (Device)
+          DeviceID = CGF.Builder.CreateIntCast(CGF.EmitScalarExpr(Device),
+                                               CGF.Int32Ty, /*isSigned=*/true);
+        else
+          DeviceID = CGF.Builder.getInt32(OMP_DEVICEID_UNDEF);
+
+        llvm::Value *Args[] = {DeviceID, NumIterations};
+        CGF.EmitRuntimeCall(
+            createRuntimeFunction(OMPRTL__kmpc_push_target_tripcount), Args);
+      };
+      emitInlinedDirective(CGF, OMPD_for, CodeGen, false);
+    }
   }
 }
 
