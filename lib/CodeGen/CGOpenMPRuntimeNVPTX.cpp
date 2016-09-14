@@ -3875,11 +3875,13 @@ StringRef CGOpenMPRuntimeNVPTX::RenameStandardFunction(StringRef name) {
 
     // Power functions
     stdFuncs.insert(std::make_pair("pow", "__nv_pow"));
+    stdFuncs.insert(std::make_pair("powi", "__nv_powi"));
     stdFuncs.insert(std::make_pair("sqrt", "__nv_sqrt"));
     stdFuncs.insert(std::make_pair("cbrt", "__nv_cbrt"));
     stdFuncs.insert(std::make_pair("hypot", "__nv_hypot"));
 
     stdFuncs.insert(std::make_pair("powf", "__nv_powf"));
+    stdFuncs.insert(std::make_pair("powif", "__nv_powif"));
     stdFuncs.insert(std::make_pair("sqrtf", "__nv_sqrtf"));
     stdFuncs.insert(std::make_pair("cbrtf", "__nv_cbrtf"));
     stdFuncs.insert(std::make_pair("hypotf", "__nv_hypotf"));
