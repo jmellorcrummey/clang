@@ -801,6 +801,13 @@ public:
       FindParallel(RD->getDestructor());
   }
 
+  // Found an OMP directive.
+  void VisitOMPExecutableDirective(const Stmt *S) {
+    const OMPExecutableDirective &D = *cast<OMPExecutableDirective>(S);
+    if (D.hasAssociatedStmt())
+      Visit(cast<CapturedStmt>(D.getAssociatedStmt())->getCapturedStmt());
+  }
+
   bool containsOrphanedParallel() { return ContainsOrphanedParallel; }
 };
 } // namespace
