@@ -952,6 +952,7 @@ bool ImplicitDeviceFunctionChecker::TraverseLambdaCapture(
 }
 
 bool ImplicitDeviceFunctionChecker::VisitFunctionDecl(FunctionDecl *F) {
+  assert(F);
   if (!F->hasAttr<OMPDeclareTargetDeclAttr>()) {
     Attr *A = OMPDeclareTargetDeclAttr::CreateImplicit(
         SemaRef.Context, OMPDeclareTargetDeclAttr::MT_To);
@@ -977,13 +978,16 @@ bool ImplicitDeviceFunctionChecker::VisitCXXConstructExpr(CXXConstructExpr *E) {
   const RecordType *RT =
       SemaRef.Context.getBaseElementType(Ty)->getAs<RecordType>();
   CXXRecordDecl *RD = cast<CXXRecordDecl>(RT->getDecl());
-  VisitCXXDestructorDecl(RD->getDestructor());
+
+  if (auto *Destructor = RD->getDestructor())
+    VisitCXXDestructorDecl(Destructor);
 
   return VisitFunctionDecl(Constructor);
 }
 
 bool ImplicitDeviceFunctionChecker::VisitCXXDestructorDecl(
     CXXDestructorDecl *D) {
+  assert(D);
   return VisitFunctionDecl(D);
 }
 
