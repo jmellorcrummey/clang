@@ -6276,6 +6276,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-fopenmp-nvptx-nospmd");
   }
 
+  if (Args.hasFlag(options::OPT_fopenmp_ignore_unmappable_types,
+                   options::OPT_fnoopenmp_ignore_unmappable_types,
+                   /*Default=*/false)) {
+    CmdArgs.push_back("-fopenmp-ignore-unmappable-types");
+  }
+
   // For all the host OpenMP offloading compile jobs we need to pass the targets
   // information using -fopenmp-targets= option.
   if (isa<CompileJobAction>(JA) && JA.isHostOffloading(Action::OFK_OpenMP)) {

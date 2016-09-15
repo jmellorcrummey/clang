@@ -12552,6 +12552,11 @@ OMPClause *Sema::ActOnOpenMPDeviceClause(Expr *Device, SourceLocation StartLoc,
 
 static bool IsCXXRecordForMappable(Sema &SemaRef, SourceLocation Loc,
                                    DSAStackTy *Stack, CXXRecordDecl *RD) {
+  // If the user requested the compiler to ignore unmappable types, just return
+  // true.
+  if (SemaRef.getLangOpts().OpenMPIgnoreUnmappableTypes)
+    return true;
+
   if (!RD || RD->isInvalidDecl())
     return true;
 
@@ -12596,6 +12601,11 @@ static bool IsCXXRecordForMappable(Sema &SemaRef, SourceLocation Loc,
 
 static bool CheckTypeMappable(SourceLocation SL, SourceRange SR, Sema &SemaRef,
                               DSAStackTy *Stack, QualType QTy) {
+  // If the user requested the compiler to ignore unmappable types, just return
+  // true.
+  if (SemaRef.getLangOpts().OpenMPIgnoreUnmappableTypes)
+    return true;
+
   NamedDecl *ND;
   if (QTy->isIncompleteType(&ND)) {
     SemaRef.Diag(SL, diag::err_incomplete_type) << QTy << SR;
