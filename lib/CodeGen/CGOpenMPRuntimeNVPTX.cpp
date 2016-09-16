@@ -690,15 +690,26 @@ private:
   bool MatchesOpenMP;
   llvm::SmallPtrSet<const Stmt *, 8> Visited;
 
+  Stmt *getBody(const FunctionDecl *FD) {
+    const FunctionDecl *D = FD;
+    if (FunctionTemplateDecl *FunTmpl = FD->getPrimaryTemplate()) {
+      if (const FunctionDecl *TD = FunTmpl->getTemplatedDecl())
+        D = TD;
+    } else if (const FunctionDecl *PD = FD->getTemplateInstantiationPattern()) {
+      D = PD;
+    }
+    return D->doesThisDeclarationHaveABody() ? D->getBody() : nullptr;
+  }
+
   void VisitFunctionDecl(const FunctionDecl *FD) {
     if (!FD)
       return;
-    if (FD->doesThisDeclarationHaveABody()) {
+    Stmt *Body = getBody(FD);
+    if (Body) {
       // If the call is to a function whose body we have parsed in
       // the frontend, look inside it.
-      auto Body = FD->getBody();
       if (Visited.insert(Body).second)
-        Visit(FD->getBody());
+        Visit(Body);
     } else if (!FD->getBuiltinID()) {
       // If this is an externally defined function that is not a builtin,
       // assume it may match the requested condition.
