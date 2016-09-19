@@ -2595,7 +2595,7 @@ public:
   /// translation unit. False, if this is the initial analysis at the point
   /// delete-expression was encountered.
   explicit MismatchingNewDeleteDetector(bool EndOfTU)
-      : IsArrayForm(false), Field(nullptr), EndOfTU(EndOfTU),
+      : Field(nullptr), IsArrayForm(false), EndOfTU(EndOfTU),
         HasUndefinedConstructors(false) {}
 
   /// \brief Checks whether pointee of a delete-expression is initialized with
@@ -2614,11 +2614,11 @@ public:
   /// \param DeleteWasArrayForm Array form-ness of the delete-expression used
   /// for deleting the \p Field.
   MismatchResult analyzeField(FieldDecl *Field, bool DeleteWasArrayForm);
+  FieldDecl *Field;
   /// List of mismatching new-expressions used for initialization of the pointee
   llvm::SmallVector<const CXXNewExpr *, 4> NewExprs;
   /// Indicates whether delete-expression was in array form.
   bool IsArrayForm;
-  FieldDecl *Field;
 
 private:
   const bool EndOfTU;
@@ -3707,6 +3707,7 @@ Sema::PerformImplicitConversion(Expr *From, QualType ToType,
   case ICK_Qualification:
   case ICK_Num_Conversion_Kinds:
   case ICK_C_Only_Conversion:
+  case ICK_Incompatible_Pointer_Conversion:
     llvm_unreachable("Improper second standard conversion");
   }
 

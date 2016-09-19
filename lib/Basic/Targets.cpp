@@ -879,7 +879,6 @@ public:
     : TargetInfo(Triple), HasVSX(false), HasP8Vector(false),
       HasP8Crypto(false), HasDirectMove(false), HasQPX(false), HasHTM(false),
       HasBPERMD(false), HasExtDiv(false) {
-    BigEndian = (Triple.getArch() != llvm::Triple::ppc64le);
     SimdDefaultAlign = 128;
     LongDoubleWidth = LongDoubleAlign = 128;
     LongDoubleFormat = &llvm::APFloat::PPCDoubleDouble;
@@ -1712,7 +1711,6 @@ class NVPTXTargetInfo : public TargetInfo {
 public:
   NVPTXTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
       : TargetInfo(Triple) {
-    BigEndian = false;
     TLSSupported = false;
     LongWidth = LongAlign = 64;
     AddrSpaceMap = &NVPTXAddrSpaceMap;
@@ -1772,6 +1770,12 @@ public:
         HostTarget->useZeroLengthBitfieldAlignment();
     UseExplicitBitFieldAlignment = HostTarget->useExplicitBitFieldAlignment();
     ZeroLengthBitfieldBoundary = HostTarget->getZeroLengthBitfieldBoundary();
+
+    // This is a bit of a lie, but it controls __GCC_ATOMIC_XXX_LOCK_FREE, and
+    // we need those macros to be identical on host and device, because (among
+    // other things) they affect which standard library classes are defined, and
+    // we need all classes to be defined on both the host and device.
+    MaxAtomicInlineWidth = HostTarget->getMaxAtomicInlineWidth();
 
     // Properties intentionally not copied from host:
     // - LargeArrayMinWidth, LargeArrayAlign: Not visible across the
@@ -1961,15 +1965,15 @@ class AMDGPUTargetInfo final : public TargetInfo {
     GK_EVERGREEN_DOUBLE_OPS,
     GK_NORTHERN_ISLANDS,
     GK_CAYMAN,
-    GK_SOUTHERN_ISLANDS,
-    GK_SEA_ISLANDS,
-    GK_VOLCANIC_ISLANDS
+    GK_GFX6,
+    GK_GFX7,
+    GK_GFX8
   } GPU;
 
   bool hasFP64:1;
   bool hasFMAF:1;
   bool hasLDEXPF:1;
-  bool hasDenormSupport:1;
+  bool hasFullSpeedFP32Denorms:1;
 
   static bool isAMDGCN(const llvm::Triple &TT) {
     return TT.getArch() == llvm::Triple::amdgcn;
@@ -1978,18 +1982,16 @@ class AMDGPUTargetInfo final : public TargetInfo {
 public:
   AMDGPUTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
     : TargetInfo(Triple) ,
-      GPU(isAMDGCN(Triple) ? GK_SOUTHERN_ISLANDS : GK_R600),
+      GPU(isAMDGCN(Triple) ? GK_GFX6 : GK_R600),
       hasFP64(false),
       hasFMAF(false),
       hasLDEXPF(false),
-      hasDenormSupport(false){
+      hasFullSpeedFP32Denorms(false){
     if (getTriple().getArch() == llvm::Triple::amdgcn) {
       hasFP64 = true;
       hasFMAF = true;
       hasLDEXPF = true;
     }
-    if (Opts.CPU == "fiji")
-      hasDenormSupport = true;
 
     resetDataLayout(getTriple().getArch() == llvm::Triple::amdgcn ?
                     DataLayoutStringSI : DataLayoutStringR600);
@@ -2044,8 +2046,6 @@ public:
 
   void adjustTargetOptions(const CodeGenOptions &CGOpts,
                            TargetOptions &TargetOpts) const override {
-    if (!hasDenormSupport)
-      return;
     bool hasFP32Denormals = false;
     bool hasFP64Denormals = false;
     for (auto &I : TargetOpts.FeaturesAsWritten) {
@@ -2055,11 +2055,11 @@ public:
         hasFP64Denormals = true;
     }
     if (!hasFP32Denormals)
-      TargetOpts.Features.push_back((Twine(CGOpts.FlushDenorm ? '-' : '+') +
-                                     Twine("fp32-denormals")).str());
+      TargetOpts.Features.push_back((Twine(hasFullSpeedFP32Denorms &&
+          !CGOpts.FlushDenorm ? '+' : '-') + Twine("fp32-denormals")).str());
+    // Always do not flush fp64 denorms.
     if (!hasFP64Denormals && hasFP64)
-      TargetOpts.Features.push_back((Twine(CGOpts.FlushDenorm ? '-' : '+') +
-                                     Twine("fp64-denormals")).str());
+      TargetOpts.Features.push_back("+fp64-denormals");
   }
 
   ArrayRef<Builtin::Info> getTargetBuiltins() const override {
@@ -2118,21 +2118,23 @@ public:
 
   static GPUKind parseAMDGCNName(StringRef Name) {
     return llvm::StringSwitch<GPUKind>(Name)
-      .Case("tahiti",   GK_SOUTHERN_ISLANDS)
-      .Case("pitcairn", GK_SOUTHERN_ISLANDS)
-      .Case("verde",    GK_SOUTHERN_ISLANDS)
-      .Case("oland",    GK_SOUTHERN_ISLANDS)
-      .Case("hainan",   GK_SOUTHERN_ISLANDS)
-      .Case("bonaire",  GK_SEA_ISLANDS)
-      .Case("kabini",   GK_SEA_ISLANDS)
-      .Case("kaveri",   GK_SEA_ISLANDS)
-      .Case("hawaii",   GK_SEA_ISLANDS)
-      .Case("mullins",  GK_SEA_ISLANDS)
-      .Case("tonga",    GK_VOLCANIC_ISLANDS)
-      .Case("iceland",  GK_VOLCANIC_ISLANDS)
-      .Case("carrizo",  GK_VOLCANIC_ISLANDS)
-      .Case("fiji",     GK_VOLCANIC_ISLANDS)
-      .Case("stoney",   GK_VOLCANIC_ISLANDS)
+      .Case("tahiti",    GK_GFX6)
+      .Case("pitcairn",  GK_GFX6)
+      .Case("verde",     GK_GFX6)
+      .Case("oland",     GK_GFX6)
+      .Case("hainan",    GK_GFX6)
+      .Case("bonaire",   GK_GFX7)
+      .Case("kabini",    GK_GFX7)
+      .Case("kaveri",    GK_GFX7)
+      .Case("hawaii",    GK_GFX7)
+      .Case("mullins",   GK_GFX7)
+      .Case("tonga",     GK_GFX8)
+      .Case("iceland",   GK_GFX8)
+      .Case("carrizo",   GK_GFX8)
+      .Case("fiji",      GK_GFX8)
+      .Case("stoney",    GK_GFX8)
+      .Case("polaris10", GK_GFX8)
+      .Case("polaris11", GK_GFX8)
       .Default(GK_NONE);
   }
 
@@ -2159,7 +2161,7 @@ public:
       Opts.cl_khr_local_int32_base_atomics = 1;
       Opts.cl_khr_local_int32_extended_atomics = 1;
     }
-    if (GPU >= GK_SOUTHERN_ISLANDS) {
+    if (GPU >= GK_GFX6) {
       Opts.cl_khr_fp16 = 1;
       Opts.cl_khr_int64_base_atomics = 1;
       Opts.cl_khr_int64_extended_atomics = 1;
@@ -2261,11 +2263,11 @@ bool AMDGPUTargetInfo::initFeatureMap(
       CPU = "tahiti";
 
     switch (parseAMDGCNName(CPU)) {
-    case GK_SOUTHERN_ISLANDS:
-    case GK_SEA_ISLANDS:
+    case GK_GFX6:
+    case GK_GFX7:
       break;
 
-    case GK_VOLCANIC_ISLANDS:
+    case GK_GFX8:
       Features["s-memrealtime"] = true;
       Features["16-bit-insts"] = true;
       break;
@@ -2309,6 +2311,8 @@ const Builtin::Info BuiltinInfo[] = {
   { #ID, TYPE, ATTRS, HEADER, ALL_LANGUAGES, nullptr },
 #define TARGET_BUILTIN(ID, TYPE, ATTRS, FEATURE)                               \
   { #ID, TYPE, ATTRS, nullptr, ALL_LANGUAGES, FEATURE },
+#define TARGET_HEADER_BUILTIN(ID, TYPE, ATTRS, HEADER, LANGS, FEATURE)         \
+  { #ID, TYPE, ATTRS, HEADER, LANGS, FEATURE },
 #include "clang/Basic/BuiltinsX86.def"
 };
 
@@ -2669,7 +2673,6 @@ class X86TargetInfo : public TargetInfo {
 public:
   X86TargetInfo(const llvm::Triple &Triple, const TargetOptions &)
       : TargetInfo(Triple) {
-    BigEndian = false;
     LongDoubleFormat = &llvm::APFloat::x87DoubleExtended;
   }
   unsigned getFloatEvalMethod() const override {
@@ -4884,11 +4887,9 @@ class ARMTargetInfo : public TargetInfo {
   }
 
 public:
-  ARMTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts,
-                bool IsBigEndian)
+  ARMTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
       : TargetInfo(Triple), FPMath(FP_Default), IsAAPCS(true), LDREX(0),
         HW_FP(0) {
-    BigEndian = IsBigEndian;
 
     switch (getTriple().getOS()) {
     case llvm::Triple::NetBSD:
@@ -5528,7 +5529,7 @@ const Builtin::Info ARMTargetInfo::BuiltinInfo[] = {
 class ARMleTargetInfo : public ARMTargetInfo {
 public:
   ARMleTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
-      : ARMTargetInfo(Triple, Opts, /*BigEndian=*/false) {}
+      : ARMTargetInfo(Triple, Opts) {}
   void getTargetDefines(const LangOptions &Opts,
                         MacroBuilder &Builder) const override {
     Builder.defineMacro("__ARMEL__");
@@ -5539,7 +5540,7 @@ public:
 class ARMbeTargetInfo : public ARMTargetInfo {
 public:
   ARMbeTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
-      : ARMTargetInfo(Triple, Opts, /*BigEndian=*/true) {}
+      : ARMTargetInfo(Triple, Opts) {}
   void getTargetDefines(const LangOptions &Opts,
                         MacroBuilder &Builder) const override {
     Builder.defineMacro("__ARMEB__");
@@ -6050,7 +6051,6 @@ class AArch64leTargetInfo : public AArch64TargetInfo {
 public:
   AArch64leTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
       : AArch64TargetInfo(Triple, Opts) {
-    BigEndian = false;
   }
   void getTargetDefines(const LangOptions &Opts,
                         MacroBuilder &Builder) const override {
@@ -6117,11 +6117,11 @@ class HexagonTargetInfo : public TargetInfo {
   static const TargetInfo::GCCRegAlias GCCRegAliases[];
   std::string CPU;
   bool HasHVX, HasHVXDouble;
+  bool UseLongCalls;
 
 public:
   HexagonTargetInfo(const llvm::Triple &Triple, const TargetOptions &)
       : TargetInfo(Triple) {
-    BigEndian = false;
     // Specify the vector alignment explicitly. For v512x1, the calculated
     // alignment would be 512*alignment(i1), which is 512 bytes, instead of
     // the required minimum of 64 bytes.
@@ -6141,6 +6141,7 @@ public:
     UseBitFieldTypeAlignment = true;
     ZeroLengthBitfieldBoundary = 32;
     HasHVX = HasHVXDouble = false;
+    UseLongCalls = false;
   }
 
   ArrayRef<Builtin::Info> getTargetBuiltins() const override {
@@ -6175,6 +6176,7 @@ public:
       .Case("hexagon", true)
       .Case("hvx", HasHVX)
       .Case("hvx-double", HasHVXDouble)
+      .Case("long-calls", UseLongCalls)
       .Default(false);
   }
 
@@ -6184,6 +6186,9 @@ public:
 
   bool handleTargetFeatures(std::vector<std::string> &Features,
                             DiagnosticsEngine &Diags) override;
+
+  void setFeatureEnabled(llvm::StringMap<bool> &Features, StringRef Name,
+                         bool Enabled) const override;
 
   BuiltinVaListKind getBuiltinVaListKind() const override {
     return TargetInfo::CharPtrBuiltinVaList;
@@ -6253,6 +6258,17 @@ void HexagonTargetInfo::getTargetDefines(const LangOptions &Opts,
   }
 }
 
+bool HexagonTargetInfo::initFeatureMap(llvm::StringMap<bool> &Features,
+      DiagnosticsEngine &Diags, StringRef CPU,
+      const std::vector<std::string> &FeaturesVec) const {
+  // Default for v60: -hvx, -hvx-double.
+  Features["hvx"] = false;
+  Features["hvx-double"] = false;
+  Features["long-calls"] = false;
+
+  return TargetInfo::initFeatureMap(Features, Diags, CPU, FeaturesVec);
+}
+
 bool HexagonTargetInfo::handleTargetFeatures(std::vector<std::string> &Features,
                                              DiagnosticsEngine &Diags) {
   for (auto &F : Features) {
@@ -6264,20 +6280,26 @@ bool HexagonTargetInfo::handleTargetFeatures(std::vector<std::string> &Features,
       HasHVX = HasHVXDouble = true;
     else if (F == "-hvx-double")
       HasHVXDouble = false;
+
+    if (F == "+long-calls")
+      UseLongCalls = true;
+    else if (F == "-long-calls")
+      UseLongCalls = false;
   }
   return true;
 }
 
-bool HexagonTargetInfo::initFeatureMap(llvm::StringMap<bool> &Features,
-      DiagnosticsEngine &Diags, StringRef CPU,
-      const std::vector<std::string> &FeaturesVec) const {
-  // Default for v60: -hvx, -hvx-double.
-  Features["hvx"] = false;
-  Features["hvx-double"] = false;
-
-  return TargetInfo::initFeatureMap(Features, Diags, CPU, FeaturesVec);
+void HexagonTargetInfo::setFeatureEnabled(llvm::StringMap<bool> &Features,
+      StringRef Name, bool Enabled) const {
+  if (Enabled) {
+    if (Name == "hvx-double")
+      Features["hvx"] = true;
+  } else {
+    if (Name == "hvx")
+      Features["hvx-double"] = false;
+  }
+  Features[Name] = Enabled;
 }
-
 
 const char *const HexagonTargetInfo::GCCRegNames[] = {
   "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7",
@@ -6729,7 +6751,6 @@ class SparcV8elTargetInfo : public SparcV8TargetInfo {
    SparcV8elTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
        : SparcV8TargetInfo(Triple, Opts) {
      resetDataLayout("e-m:e-p:32:32-i64:64-f128:64-n32-S64");
-     BigEndian = false;
   }
 };
 
@@ -6964,7 +6985,6 @@ class MSP430TargetInfo : public TargetInfo {
 public:
   MSP430TargetInfo(const llvm::Triple &Triple, const TargetOptions &)
       : TargetInfo(Triple) {
-    BigEndian = false;
     TLSSupported = false;
     IntWidth = 16;
     IntAlign = 16;
@@ -7114,10 +7134,8 @@ public:
     Int64Type   = SignedLong;
     RegParmMax = 5;
     if (Triple.getArch() == llvm::Triple::bpfeb) {
-      BigEndian = true;
       resetDataLayout("E-m:e-p:64:64-i64:64-n32:64-S128");
     } else {
-      BigEndian = false;
       resetDataLayout("e-m:e-p:64:64-i64:64-n32:64-S128");
     }
     MaxAtomicPromoteWidth = 64;
@@ -7196,8 +7214,6 @@ public:
         IsNan2008(false), IsSingleFloat(false), FloatABI(HardFloat),
         DspRev(NoDSP), HasMSA(false), HasFP64(false) {
     TheCXXABI.set(TargetCXXABI::GenericMIPS);
-    BigEndian = getTriple().getArch() == llvm::Triple::mips ||
-                getTriple().getArch() == llvm::Triple::mips64;
 
     setABI((getTriple().getArch() == llvm::Triple::mips ||
             getTriple().getArch() == llvm::Triple::mipsel)
@@ -7700,7 +7716,6 @@ class PNaClTargetInfo : public TargetInfo {
 public:
   PNaClTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
       : TargetInfo(Triple) {
-    BigEndian = false;
     this->LongAlign = 32;
     this->LongWidth = 32;
     this->PointerAlign = 32;
@@ -7768,7 +7783,6 @@ class Le64TargetInfo : public TargetInfo {
 public:
   Le64TargetInfo(const llvm::Triple &Triple, const TargetOptions &)
       : TargetInfo(Triple) {
-    BigEndian = false;
     NoAsmVariants = true;
     LongWidth = LongAlign = PointerWidth = PointerAlign = 64;
     MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 64;
@@ -7814,7 +7828,6 @@ class WebAssemblyTargetInfo : public TargetInfo {
 public:
   explicit WebAssemblyTargetInfo(const llvm::Triple &T, const TargetOptions &)
       : TargetInfo(T), SIMDLevel(NoSIMD) {
-    BigEndian = false;
     NoAsmVariants = true;
     SuitableAlign = 128;
     LargeArrayMinWidth = 128;
@@ -7823,6 +7836,9 @@ public:
     SigAtomicType = SignedLong;
     LongDoubleWidth = LongDoubleAlign = 128;
     LongDoubleFormat = &llvm::APFloat::IEEEquad;
+    SizeType = UnsignedInt;
+    PtrDiffType = SignedInt;
+    IntPtrType = SignedInt;
   }
 
 protected:
@@ -7941,6 +7957,9 @@ public:
     LongAlign = LongWidth = 64;
     PointerAlign = PointerWidth = 64;
     MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 64;
+    SizeType = UnsignedLong;
+    PtrDiffType = SignedLong;
+    IntPtrType = SignedLong;
     resetDataLayout("e-m:e-p:64:64-i64:64-n32:64-S128");
   }
 
@@ -7975,7 +7994,6 @@ public:
            "SPIR target must use unknown OS");
     assert(getTriple().getEnvironment() == llvm::Triple::UnknownEnvironment &&
            "SPIR target must use unknown environment type");
-    BigEndian = false;
     TLSSupported = false;
     LongWidth = LongAlign = 64;
     AddrSpaceMap = &SPIRAddrSpaceMap;
@@ -8059,7 +8077,6 @@ class XCoreTargetInfo : public TargetInfo {
 public:
   XCoreTargetInfo(const llvm::Triple &Triple, const TargetOptions &)
       : TargetInfo(Triple) {
-    BigEndian = false;
     NoAsmVariants = true;
     LongLongAlign = 32;
     SuitableAlign = 32;
@@ -8238,6 +8255,8 @@ static TargetInfo *AllocateTarget(const llvm::Triple &Triple,
       return new DarwinARMTargetInfo(Triple, Opts);
 
     switch (os) {
+    case llvm::Triple::CloudABI:
+      return new CloudABITargetInfo<ARMleTargetInfo>(Triple, Opts);
     case llvm::Triple::Linux:
       return new LinuxTargetInfo<ARMleTargetInfo>(Triple, Opts);
     case llvm::Triple::FreeBSD:

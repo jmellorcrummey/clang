@@ -4604,6 +4604,19 @@ static void handleObjCPreciseLifetimeAttr(Sema &S, Decl *D,
 // Microsoft specific attribute handlers.
 //===----------------------------------------------------------------------===//
 
+UuidAttr *Sema::mergeUuidAttr(Decl *D, SourceRange Range,
+                              unsigned AttrSpellingListIndex, StringRef Uuid) {
+  if (const auto *UA = D->getAttr<UuidAttr>()) {
+    if (UA->getGuid().equals_lower(Uuid))
+      return nullptr;
+    Diag(UA->getLocation(), diag::err_mismatched_uuid);
+    Diag(Range.getBegin(), diag::note_previous_uuid);
+    D->dropAttr<UuidAttr>();
+  }
+
+  return ::new (Context) UuidAttr(Range, Context, Uuid, AttrSpellingListIndex);
+}
+
 static void handleUuidAttr(Sema &S, Decl *D, const AttributeList &Attr) {
   if (!S.LangOpts.CPlusPlus) {
     S.Diag(Attr.getLoc(), diag::err_attribute_not_supported_in_lang)
@@ -4645,8 +4658,10 @@ static void handleUuidAttr(Sema &S, Decl *D, const AttributeList &Attr) {
     }
   }
 
-  D->addAttr(::new (S.Context) UuidAttr(Attr.getRange(), S.Context, StrRef,
-                                        Attr.getAttributeSpellingListIndex()));
+  UuidAttr *UA = S.mergeUuidAttr(D, Attr.getRange(),
+                                 Attr.getAttributeSpellingListIndex(), StrRef);
+  if (UA)
+    D->addAttr(UA);
 }
 
 static void handleMSInheritanceAttr(Sema &S, Decl *D, const AttributeList &Attr) {
@@ -5629,6 +5644,9 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     break;
   case AttributeList::AT_VecTypeHint:
     handleVecTypeHint(S, D, Attr);
+    break;
+  case AttributeList::AT_RequireConstantInit:
+    handleSimpleAttribute<RequireConstantInitAttr>(S, D, Attr);
     break;
   case AttributeList::AT_InitPriority:
     handleInitPriorityAttr(S, D, Attr);

@@ -45,6 +45,7 @@ class ItaniumCXXABI : public CodeGen::CGCXXABI {
 protected:
   bool UseARMMethodPtrABI;
   bool UseARMGuardVarABI;
+  bool Use32BitVTableOffsetABI;
 
   ItaniumMangleContext &getMangleContext() {
     return cast<ItaniumMangleContext>(CodeGen::CGCXXABI::getMangleContext());
@@ -55,7 +56,8 @@ public:
                 bool UseARMMethodPtrABI = false,
                 bool UseARMGuardVarABI = false) :
     CGCXXABI(CGM), UseARMMethodPtrABI(UseARMMethodPtrABI),
-    UseARMGuardVarABI(UseARMGuardVarABI) { }
+    UseARMGuardVarABI(UseARMGuardVarABI),
+    Use32BitVTableOffsetABI(false) { }
 
   bool classifyReturnType(CGFunctionInfo &FI) const override;
 
@@ -425,7 +427,9 @@ public:
 
 class iOS64CXXABI : public ARMCXXABI {
 public:
-  iOS64CXXABI(CodeGen::CodeGenModule &CGM) : ARMCXXABI(CGM) {}
+  iOS64CXXABI(CodeGen::CodeGenModule &CGM) : ARMCXXABI(CGM) {
+    Use32BitVTableOffsetABI = true;
+  }
 
   // ARM64 libraries are prepared for non-unique RTTI.
   bool shouldRTTIBeUnique() const override { return false; }
@@ -579,9 +583,15 @@ llvm::Value *ItaniumCXXABI::EmitLoadOfMemberFunctionPointer(
     CGF.GetVTablePtr(Address(This, VTablePtrAlign), VTableTy, RD);
 
   // Apply the offset.
+  // On ARM64, to reserve extra space in virtual member function pointers,
+  // we only pay attention to the low 32 bits of the offset.
   llvm::Value *VTableOffset = FnAsInt;
   if (!UseARMMethodPtrABI)
     VTableOffset = Builder.CreateSub(VTableOffset, ptrdiff_1);
+  if (Use32BitVTableOffsetABI) {
+    VTableOffset = Builder.CreateTrunc(VTableOffset, CGF.Int32Ty);
+    VTableOffset = Builder.CreateZExt(VTableOffset, CGM.PtrDiffTy);
+  }
   VTable = Builder.CreateGEP(VTable, VTableOffset);
 
   // Load the virtual function to call.
@@ -1462,9 +1472,7 @@ void ItaniumCXXABI::emitVTableDefinitions(CodeGenVTables &CGVT,
       CGM.GetAddrOfRTTIDescriptor(CGM.getContext().getTagDeclType(RD));
 
   // Create and set the initializer.
-  llvm::Constant *Init = CGVT.CreateVTableInitializer(
-      RD, VTLayout.vtable_component_begin(), VTLayout.getNumVTableComponents(),
-      VTLayout.vtable_thunk_begin(), VTLayout.getNumVTableThunks(), RTTI);
+  llvm::Constant *Init = CGVT.CreateVTableInitializer(VTLayout, RTTI);
   VTable->setInitializer(Init);
 
   // Set the correct linkage.
@@ -1575,7 +1583,7 @@ llvm::GlobalVariable *ItaniumCXXABI::getAddrOfVTable(const CXXRecordDecl *RD,
 
   ItaniumVTableContext &VTContext = CGM.getItaniumVTableContext();
   llvm::ArrayType *ArrayType = llvm::ArrayType::get(
-      CGM.Int8PtrTy, VTContext.getVTableLayout(RD).getNumVTableComponents());
+      CGM.Int8PtrTy, VTContext.getVTableLayout(RD).vtable_components().size());
 
   VTable = CGM.CreateOrReplaceCXXRuntimeVariable(
       Name, ArrayType, llvm::GlobalValue::ExternalLinkage);
