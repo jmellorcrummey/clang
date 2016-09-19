@@ -493,6 +493,8 @@
 // RUN: env CL="/Gy" _CL_="/Gy- -- %s" %clang_cl -### 2>&1 | FileCheck -check-prefix=ENV-_CL_ %s
 // ENV-_CL_-NOT: "-ffunction-sections"
 
+// RUN: env CL="%s" _CL_="%s" not %clang --rsp-quoting=windows -c
+
 // Accept "core" clang options.
 // (/Zs is for syntax-only, -Werror makes it fail hard on unknown options)
 // RUN: %clang_cl \
@@ -513,9 +515,12 @@
 // RUN:     -fms-extensions \
 // RUN:     -fno-ms-extensions \
 // RUN:     -mllvm -disable-llvm-optzns \
-// RUN:     -resource-dir \
+// RUN:     -resource-dir asdf \
+// RUN:     -resource-dir=asdf \
 // RUN:     -Wunused-variable \
 // RUN:     -fmacro-backtrace-limit=0 \
+// RUN:     -fstandalone-debug \
+// RUN:     -flimit-debug-info \
 // RUN:     -Werror /Zs -- %s 2>&1
 
 
