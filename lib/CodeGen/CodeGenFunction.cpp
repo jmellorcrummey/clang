@@ -25,6 +25,7 @@
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/StmtCXX.h"
+#include "clang/AST/StmtObjC.h"
 #include "clang/Basic/Builtins.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/CodeGen/CGFunctionInfo.h"
@@ -428,12 +429,24 @@ void CodeGenFunction::EmitFunctionInstrumentation(const char *Fn) {
   EmitNounwindRuntimeCall(F, args);
 }
 
-void CodeGenFunction::EmitMCountInstrumentation() {
-  llvm::FunctionType *FTy = llvm::FunctionType::get(VoidTy, false);
-
-  llvm::Constant *MCountFn =
-    CGM.CreateRuntimeFunction(FTy, getTarget().getMCountName());
-  EmitNounwindRuntimeCall(MCountFn);
+static void removeImageAccessQualifier(std::string& TyName) {
+  std::string ReadOnlyQual("__read_only");
+  std::string::size_type ReadOnlyPos = TyName.find(ReadOnlyQual);
+  if (ReadOnlyPos != std::string::npos)
+    // "+ 1" for the space after access qualifier.
+    TyName.erase(ReadOnlyPos, ReadOnlyQual.size() + 1);
+  else {
+    std::string WriteOnlyQual("__write_only");
+    std::string::size_type WriteOnlyPos = TyName.find(WriteOnlyQual);
+    if (WriteOnlyPos != std::string::npos)
+      TyName.erase(WriteOnlyPos, WriteOnlyQual.size() + 1);
+    else {
+      std::string ReadWriteQual("__read_write");
+      std::string::size_type ReadWritePos = TyName.find(ReadWriteQual);
+      if (ReadWritePos != std::string::npos)
+        TyName.erase(ReadWritePos, ReadWriteQual.size() + 1);
+    }
+  }
 }
 
 // OpenCL v1.2 s5.6.4.6 allows the compiler to store kernel argument
@@ -532,8 +545,6 @@ static void GenOpenCLArgMetadata(const FunctionDecl *FD, llvm::Function *Fn,
       if (ty.isCanonical() && pos != std::string::npos)
         typeName.erase(pos+1, 8);
 
-      argTypeNames.push_back(llvm::MDString::get(Context, typeName));
-
       std::string baseTypeName;
       if (isPipe)
         baseTypeName = ty.getCanonicalType()->getAs<PipeType>()
@@ -542,6 +553,17 @@ static void GenOpenCLArgMetadata(const FunctionDecl *FD, llvm::Function *Fn,
       else
         baseTypeName =
           ty.getUnqualifiedType().getCanonicalType().getAsString(Policy);
+
+      // Remove access qualifiers on images
+      // (as they are inseparable from type in clang implementation,
+      // but OpenCL spec provides a special query to get access qualifier
+      // via clGetKernelArgInfo with CL_KERNEL_ARG_ACCESS_QUALIFIER):
+      if (ty->isImageType()) {
+        removeImageAccessQualifier(typeName);
+        removeImageAccessQualifier(baseTypeName);
+      }
+
+      argTypeNames.push_back(llvm::MDString::get(Context, typeName));
 
       // Turn "unsigned type" to "utype"
       pos = baseTypeName.find("unsigned");
@@ -761,7 +783,7 @@ void CodeGenFunction::StartFunction(GlobalDecl GD,
     if (const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(D))
       if (FD->isMain())
         Fn->addFnAttr(llvm::Attribute::NoRecurse);
-  
+
   llvm::BasicBlock *EntryBB = createBasicBlock("entry", CurFn);
 
   // Create a marker to make it easy to insert allocas into the entryblock
@@ -794,8 +816,12 @@ void CodeGenFunction::StartFunction(GlobalDecl GD,
   if (ShouldInstrumentFunction())
     EmitFunctionInstrumentation("__cyg_profile_func_enter");
 
+  // Since emitting the mcount call here impacts optimizations such as function
+  // inlining, we just add an attribute to insert a mcount call in backend.
+  // The attribute "counting-function" is set to mcount function name which is
+  // architecture dependent.
   if (CGM.getCodeGenOpts().InstrumentForProfiling)
-    EmitMCountInstrumentation();
+    Fn->addFnAttr("counting-function", getTarget().getMCountName());
 
   if (RetTy->isVoidType()) {
     // Void type; nothing to return.
@@ -1143,6 +1169,28 @@ bool CodeGenFunction::containsBreak(const Stmt *S) {
   return false;
 }
 
+bool CodeGenFunction::mightAddDeclToScope(const Stmt *S) {
+  if (!S) return false;
+
+  // Some statement kinds add a scope and thus never add a decl to the current
+  // scope. Note, this list is longer than the list of statements that might
+  // have an unscoped decl nested within them, but this way is conservatively
+  // correct even if more statement kinds are added.
+  if (isa<IfStmt>(S) || isa<SwitchStmt>(S) || isa<WhileStmt>(S) ||
+      isa<DoStmt>(S) || isa<ForStmt>(S) || isa<CompoundStmt>(S) ||
+      isa<CXXForRangeStmt>(S) || isa<CXXTryStmt>(S) ||
+      isa<ObjCForCollectionStmt>(S) || isa<ObjCAtTryStmt>(S))
+    return false;
+
+  if (isa<DeclStmt>(S))
+    return true;
+
+  for (const Stmt *SubStmt : S->children())
+    if (mightAddDeclToScope(SubStmt))
+      return true;
+
+  return false;
+}
 
 /// ConstantFoldsToSimpleInteger - If the specified expression does not fold
 /// to a constant, or if it does but contains a label, return false.  If it
@@ -1692,6 +1740,7 @@ void CodeGenFunction::EmitVariablyModifiedType(QualType type) {
     case Type::Enum:
     case Type::Elaborated:
     case Type::TemplateSpecialization:
+    case Type::ObjCTypeParam:
     case Type::ObjCObject:
     case Type::ObjCInterface:
     case Type::ObjCObjectPointer:
@@ -1815,8 +1864,8 @@ Address CodeGenFunction::EmitMSVAListRef(const Expr *E) {
 }
 
 void CodeGenFunction::EmitDeclRefExprDbgValue(const DeclRefExpr *E,
-                                              llvm::Constant *Init) {
-  assert (Init && "Invalid DeclRefExpr initializer!");
+                                              const APValue &Init) {
+  assert(!Init.isUninit() && "Invalid DeclRefExpr initializer!");
   if (CGDebugInfo *Dbg = getDebugInfo())
     if (CGM.getCodeGenOpts().getDebugInfo() >= codegenoptions::LimitedDebugInfo)
       Dbg->EmitGlobalVariable(E->getDecl(), Init);

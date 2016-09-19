@@ -1243,8 +1243,9 @@ bool CursorVisitor::VisitUnresolvedUsingTypenameDecl(
 bool CursorVisitor::VisitStaticAssertDecl(StaticAssertDecl *D) {
   if (Visit(MakeCXCursor(D->getAssertExpr(), StmtParent, TU, RegionOfInterest)))
     return true;
-  if (Visit(MakeCXCursor(D->getMessage(), StmtParent, TU, RegionOfInterest)))
-    return true;
+  if (StringLiteral *Message = D->getMessage())
+    if (Visit(MakeCXCursor(Message, StmtParent, TU, RegionOfInterest)))
+      return true;
   return false;
 }
 
@@ -1532,6 +1533,18 @@ bool CursorVisitor::VisitTemplateTypeParmTypeLoc(TemplateTypeParmTypeLoc TL) {
 
 bool CursorVisitor::VisitObjCInterfaceTypeLoc(ObjCInterfaceTypeLoc TL) {
   return Visit(MakeCursorObjCClassRef(TL.getIFaceDecl(), TL.getNameLoc(), TU));
+}
+
+bool CursorVisitor::VisitObjCTypeParamTypeLoc(ObjCTypeParamTypeLoc TL) {
+  if (Visit(MakeCursorTypeRef(TL.getDecl(), TL.getLocStart(), TU)))
+    return true;
+  for (unsigned I = 0, N = TL.getNumProtocols(); I != N; ++I) {
+    if (Visit(MakeCursorObjCProtocolRef(TL.getProtocol(I), TL.getProtocolLoc(I),
+                                        TU)))
+      return true;
+  }
+
+  return false;
 }
 
 bool CursorVisitor::VisitObjCObjectTypeLoc(ObjCObjectTypeLoc TL) {
@@ -5635,6 +5648,7 @@ CXCursor clang_getCursorDefinition(CXCursor C) {
   case Decl::ObjCImplementation:
   case Decl::AccessSpec:
   case Decl::LinkageSpec:
+  case Decl::Export:
   case Decl::ObjCPropertyImpl:
   case Decl::FileScopeAsm:
   case Decl::StaticAssert:
