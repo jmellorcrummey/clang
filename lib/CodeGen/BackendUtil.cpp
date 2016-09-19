@@ -149,17 +149,6 @@ static void addAddDiscriminatorsPass(const PassManagerBuilder &Builder,
   PM.add(createAddDiscriminatorsPass());
 }
 
-static void addCleanupPassesForSampleProfiler(
-    const PassManagerBuilder &Builder, legacy::PassManagerBase &PM) {
-  // instcombine is needed before sample profile annotation because it converts
-  // certain function calls to be inlinable. simplifycfg and sroa are needed
-  // before instcombine for necessary preparation. E.g. load store is eliminated
-  // properly so that instcombine will not introduce unecessary liverange.
-  PM.add(createCFGSimplificationPass());
-  PM.add(createSROAPass());
-  PM.add(createInstructionCombiningPass());
-}
-
 static void addBoundsCheckingPass(const PassManagerBuilder &Builder,
                                   legacy::PassManagerBase &PM) {
   PM.add(createBoundsCheckingPass());
@@ -176,8 +165,11 @@ static void addSanitizerCoveragePass(const PassManagerBuilder &Builder,
   Opts.IndirectCalls = CGOpts.SanitizeCoverageIndirectCalls;
   Opts.TraceBB = CGOpts.SanitizeCoverageTraceBB;
   Opts.TraceCmp = CGOpts.SanitizeCoverageTraceCmp;
+  Opts.TraceDiv = CGOpts.SanitizeCoverageTraceDiv;
+  Opts.TraceGep = CGOpts.SanitizeCoverageTraceGep;
   Opts.Use8bitCounters = CGOpts.SanitizeCoverage8bitCounters;
   Opts.TracePC = CGOpts.SanitizeCoverageTracePC;
+  Opts.TracePCGuard = CGOpts.SanitizeCoverageTracePCGuard;
   PM.add(createSanitizerCoverageModulePass(Opts));
 }
 
@@ -461,8 +453,6 @@ void EmitAssemblyHelper::CreatePasses(legacy::PassManager &MPM,
   if (!CodeGenOpts.SampleProfileFile.empty()) {
     MPM.add(createPruneEHPass());
     MPM.add(createSampleProfileLoaderPass(CodeGenOpts.SampleProfileFile));
-    PMBuilder.addExtension(PassManagerBuilder::EP_EarlyAsPossible,
-                           addCleanupPassesForSampleProfiler);
   }
 
   PMBuilder.populateFunctionPassManager(FPM);
