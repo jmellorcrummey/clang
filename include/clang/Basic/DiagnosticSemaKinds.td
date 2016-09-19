@@ -659,7 +659,8 @@ def err_object_cannot_be_passed_returned_by_value : Error<
 def err_parameters_retval_cannot_have_fp16_type : Error<
   "%select{parameters|function return value}0 cannot have __fp16 type; did you forget * ?">;
 def err_opencl_half_load_store : Error<
-  "%select{loading directly from|assigning directly to}0 pointer to type %1 is not allowed">;
+  "%select{loading directly from|assigning directly to}0 pointer to type %1 requires "
+  "cl_khr_fp16. Use vector data %select{load|store}0 builtin functions instead">;
 def err_opencl_cast_to_half : Error<"casting to type %0 is not allowed">;
 def err_opencl_half_declaration : Error<
   "declaring variable of type %0 is not allowed">;
@@ -2255,6 +2256,8 @@ def err_attribute_only_once_per_parameter : Error<
   "%0 attribute can only be applied once per parameter">;
 def err_attribute_uuid_malformed_guid : Error<
   "uuid attribute contains a malformed GUID">;
+def err_mismatched_uuid : Error<"uuid does not match previous declaration">;
+def note_previous_uuid : Note<"previous uuid specified here">;
 def warn_attribute_pointers_only : Warning<
   "%0 attribute only applies to%select{| constant}1 pointer arguments">,
   InGroup<IgnoredAttributes>;
@@ -2572,7 +2575,7 @@ def warn_attribute_wrong_decl_type : Warning<
   "Objective-C instance methods|init methods of interface or class extension declarations|"
   "variables, functions and classes|"
   "functions, variables, classes, and Objective-C interfaces|"
-  "Objective-C protocols|"
+  "Objective-C protocols|variables with static or thread storage duration|"
   "functions and global variables|structs, unions, and typedefs|structs and typedefs|"
   "interface or protocol declarations|kernel functions|non-K&R-style functions|"
   "variables, enums, fields and typedefs|functions, methods, enums, and classes|"
@@ -4076,14 +4079,10 @@ def ext_explicit_instantiation_duplicate : ExtWarn<
     InGroup<MicrosoftTemplate>;
 def note_previous_explicit_instantiation : Note<
     "previous explicit instantiation is here">;
-def ext_explicit_instantiation_after_specialization : Extension<
-    "explicit instantiation of %0 that occurs after an explicit "
-    "specialization will be ignored (C++11 extension)">,
-    InGroup<CXX11>;
-def warn_cxx98_compat_explicit_instantiation_after_specialization : Warning<
-    "explicit instantiation of %0 that occurs after an explicit "
-    "specialization is incompatible with C++98">,
-    InGroup<CXX98CompatPedantic>, DefaultIgnore;
+def warn_explicit_instantiation_after_specialization : Warning<
+  "explicit instantiation of %0 that occurs after an explicit "
+  "specialization has no effect">,
+  InGroup<DiagGroup<"instantiation-after-specialization">>;
 def note_previous_template_specialization : Note<
     "previous template specialization is here">;
 def err_explicit_instantiation_nontemplate_type : Error<
@@ -5468,7 +5467,7 @@ def err_typecheck_invalid_lvalue_addrof : Error<
   "cannot take the address of an rvalue of type %0">;
 def ext_typecheck_addrof_temporary : ExtWarn<
   "taking the address of a temporary object of type %0">, 
-  InGroup<DiagGroup<"address-of-temporary">>, DefaultError;
+  InGroup<AddressOfTemporary>, DefaultError;
 def err_typecheck_addrof_temporary : Error<
   "taking the address of a temporary object of type %0">;
 def err_typecheck_addrof_dtor : Error<
@@ -6825,7 +6824,7 @@ def warn_side_effects_typeid : Warning<
   "operand to 'typeid'">, InGroup<PotentiallyEvaluatedExpression>;
 def warn_unused_result : Warning<
   "ignoring return value of function declared with %0 attribute">,
-  InGroup<DiagGroup<"unused-result">>;
+  InGroup<UnusedResult>;
 def warn_unused_volatile : Warning<
   "expression result unused; assign into a variable to force a volatile load">,
   InGroup<DiagGroup<"unused-volatile-lvalue">>;
@@ -6843,7 +6842,12 @@ def note_inequality_comparison_to_or_assign : Note<
 
 def err_incomplete_type_used_in_type_trait_expr : Error<
   "incomplete type %0 used in type trait expression">;
-  
+
+def err_require_constant_init_failed : Error<
+  "variable does not have a constant initializer">;
+def note_declared_required_constant_init_here : Note<
+  "required by 'require_constant_initializer' attribute here">;
+
 def err_dimension_expr_not_constant_integer : Error<
   "dimension expression does not evaluate to a constant unsigned int">;
 
@@ -7001,6 +7005,10 @@ def err_in_class_initializer_not_yet_parsed
 def err_in_class_initializer_not_yet_parsed_outer_class
     : Error<"cannot use defaulted default constructor of %0 within "
             "%1 outside of member functions because %2 has an initializer">;
+def err_in_class_initializer_cycle
+    : Error<"default member initializer for %0 uses itself">;
+def err_exception_spec_cycle
+    : Error<"exception specification of %0 uses itself">;
 
 def ext_in_class_initializer_non_constant : Extension<
   "in-class initializer for static data member is not a constant expression; "
@@ -7803,7 +7811,7 @@ def err_invalid_protocol_qualifiers : Error<
   "invalid protocol qualifiers on non-ObjC type">;
 def warn_ivar_use_hidden : Warning<
   "local declaration of %0 hides instance variable">,
-   InGroup<DiagGroup<"shadow-ivar">>;
+   InGroup<ShadowIvar>;
 def warn_direct_initialize_call : Warning<
   "explicit call to +initialize results in duplicate call to +initialize">,
    InGroup<ExplicitInitializeCall>;

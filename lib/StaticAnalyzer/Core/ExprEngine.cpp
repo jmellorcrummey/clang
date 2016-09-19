@@ -1212,16 +1212,8 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Stmt::ObjCBridgedCastExprClass: {
       Bldr.takeNodes(Pred);
       const CastExpr *C = cast<CastExpr>(S);
-      // Handle the previsit checks.
-      ExplodedNodeSet dstPrevisit;
-      getCheckerManager().runCheckersForPreStmt(dstPrevisit, Pred, C, *this);
-
-      // Handle the expression itself.
       ExplodedNodeSet dstExpr;
-      for (ExplodedNodeSet::iterator i = dstPrevisit.begin(),
-                                     e = dstPrevisit.end(); i != e ; ++i) {
-        VisitCast(C, C->getSubExpr(), *i, dstExpr);
-      }
+      VisitCast(C, C->getSubExpr(), Pred, dstExpr);
 
       // Handle the postvisit checks.
       getCheckerManager().runCheckersForPostStmt(Dst, dstExpr, C, *this);
@@ -2052,7 +2044,7 @@ void ExprEngine::VisitMemberExpr(const MemberExpr *M, ExplodedNode *Pred,
         if (!M->isGLValue()) {
           assert(M->getType()->isArrayType());
           const ImplicitCastExpr *PE =
-            dyn_cast<ImplicitCastExpr>((*I)->getParentMap().getParent(M));
+            dyn_cast<ImplicitCastExpr>((*I)->getParentMap().getParentIgnoreParens(M));
           if (!PE || PE->getCastKind() != CK_ArrayToPointerDecay) {
             llvm_unreachable("should always be wrapped in ArrayToPointerDecay");
           }

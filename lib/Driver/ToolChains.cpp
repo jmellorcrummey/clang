@@ -2778,6 +2778,13 @@ bool Generic_GCC::IsIntegratedAssemblerDefault() const {
   case llvm::Triple::mips:
   case llvm::Triple::mipsel:
     return true;
+  case llvm::Triple::mips64:
+  case llvm::Triple::mips64el:
+    // Enabled for Debian mips64/mips64el only. Other targets are unable to
+    // distinguish N32 from N64.
+    if (getTriple().getEnvironment() == llvm::Triple::GNUABI64)
+      return true;
+    return false;
   default:
     return false;
   }
@@ -4736,7 +4743,7 @@ SanitizerMask Linux::getSupportedSanitizers() const {
     Res |= SanitizerKind::Thread;
   if (IsX86_64 || IsMIPS64 || IsPowerPC64 || IsAArch64)
     Res |= SanitizerKind::Memory;
-  if (IsX86_64)
+  if (IsX86_64 || IsMIPS64)
     Res |= SanitizerKind::Efficiency;
   if (IsX86 || IsX86_64) {
     Res |= SanitizerKind::Function;
@@ -5040,6 +5047,10 @@ Tool *MyriadToolChain::SelectTool(const JobAction &JA) const {
 
 Tool *MyriadToolChain::buildLinker() const {
   return new tools::Myriad::Linker(*this);
+}
+
+SanitizerMask MyriadToolChain::getSupportedSanitizers() const {
+  return SanitizerKind::Address;
 }
 
 WebAssembly::WebAssembly(const Driver &D, const llvm::Triple &Triple,
