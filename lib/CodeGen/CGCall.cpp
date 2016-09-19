@@ -1722,6 +1722,13 @@ void CodeGenModule::ConstructAttributeList(
 
     FuncAttrs.addAttribute("less-precise-fpmad",
                            llvm::toStringRef(CodeGenOpts.LessPreciseFPMAD));
+
+    if (!CodeGenOpts.FPDenormalMode.empty())
+      FuncAttrs.addAttribute("denormal-fp-math",
+                             CodeGenOpts.FPDenormalMode);
+
+    FuncAttrs.addAttribute("no-trapping-math",
+                           llvm::toStringRef(CodeGenOpts.NoTrappingMath));
     FuncAttrs.addAttribute("no-infs-fp-math",
                            llvm::toStringRef(CodeGenOpts.NoInfsFPMath));
     FuncAttrs.addAttribute("no-nans-fp-math",
@@ -2301,13 +2308,6 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
 
         if (isPromoted)
           V = emitArgumentDemotion(*this, Arg, V);
-
-        if (const CXXMethodDecl *MD =
-            dyn_cast_or_null<CXXMethodDecl>(CurCodeDecl)) {
-          if (MD->isVirtual() && Arg == CXXABIThisDecl)
-            V = CGM.getCXXABI().
-                adjustThisParameterInVirtualFunctionPrologue(*this, CurGD, V);
-        }
 
         // Because of merging of function types from multiple decls it is
         // possible for the type of an argument to not match the corresponding

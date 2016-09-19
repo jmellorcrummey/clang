@@ -18,6 +18,7 @@
 #include "clang/AST/Attr.h"
 #include "clang/AST/Availability.h"
 #include "clang/AST/DeclarationName.h"
+#include "clang/AST/DeclTemplate.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprObjC.h"
 #include "clang/AST/ExternalASTSource.h"
@@ -1883,6 +1884,7 @@ public:
   /// \brief The parser has processed a module import translated from a
   /// #include or similar preprocessing directive.
   void ActOnModuleInclude(SourceLocation DirectiveLoc, Module *Mod);
+  void BuildModuleInclude(SourceLocation DirectiveLoc, Module *Mod);
 
   /// \brief The parsed has entered a submodule.
   void ActOnModuleBegin(SourceLocation DirectiveLoc, Module *Mod);
@@ -1919,6 +1921,11 @@ public:
   void diagnoseMissingImport(SourceLocation Loc, NamedDecl *Decl,
                              SourceLocation DeclLoc, ArrayRef<Module *> Modules,
                              MissingImportKind MIK, bool Recover);
+
+  Decl *ActOnStartExportDecl(Scope *S, SourceLocation ExportLoc,
+                             SourceLocation LBraceLoc);
+  Decl *ActOnFinishExportDecl(Scope *S, Decl *ExportDecl,
+                              SourceLocation RBraceLoc);
 
   /// \brief We've found a use of a templated declaration that would trigger an
   /// implicit instantiation. Check that any relevant explicit specializations
@@ -2201,6 +2208,8 @@ public:
   VisibilityAttr *mergeVisibilityAttr(Decl *D, SourceRange Range,
                                       VisibilityAttr::VisibilityType Vis,
                                       unsigned AttrSpellingListIndex);
+  UuidAttr *mergeUuidAttr(Decl *D, SourceRange Range,
+                          unsigned AttrSpellingListIndex, StringRef Uuid);
   DLLImportAttr *mergeDLLImportAttr(Decl *D, SourceRange Range,
                                     unsigned AttrSpellingListIndex);
   DLLExportAttr *mergeDLLExportAttr(Decl *D, SourceRange Range,
@@ -6668,10 +6677,10 @@ public:
       TemplateInstantiation,
 
       /// We are instantiating a default argument for a template
-      /// parameter. The Entity is the template, and
-      /// TemplateArgs/NumTemplateArguments provides the template
-      /// arguments as specified.
-      /// FIXME: Use a TemplateArgumentList
+      /// parameter. The Entity is the template parameter whose argument is
+      /// being instantiated, the Template is the template, and the
+      /// TemplateArgs/NumTemplateArguments provide the template arguments as
+      /// specified.
       DefaultTemplateArgumentInstantiation,
 
       /// We are instantiating a default argument for a function.
@@ -6786,6 +6795,9 @@ public:
   SmallVector<ActiveTemplateInstantiation, 16>
     ActiveTemplateInstantiations;
 
+  /// Specializations whose definitions are currently being instantiated.
+  llvm::DenseSet<std::pair<Decl *, unsigned>> InstantiatingSpecializations;
+
   /// \brief Extra modules inspected when performing a lookup during a template
   /// instantiation. Computed lazily.
   SmallVector<Module*, 16> ActiveTemplateInstantiationLookupModules;
@@ -6892,12 +6904,12 @@ public:
     /// \brief Note that we are instantiating a default argument in a
     /// template-id.
     InstantiatingTemplate(Sema &SemaRef, SourceLocation PointOfInstantiation,
-                          TemplateDecl *Template,
+                          TemplateParameter Param, TemplateDecl *Template,
                           ArrayRef<TemplateArgument> TemplateArgs,
                           SourceRange InstantiationRange = SourceRange());
 
-    /// \brief Note that we are instantiating a default argument in a
-    /// template-id.
+    /// \brief Note that we are substituting either explicitly-specified or
+    /// deduced template arguments during function template argument deduction.
     InstantiatingTemplate(Sema &SemaRef, SourceLocation PointOfInstantiation,
                           FunctionTemplateDecl *FunctionTemplate,
                           ArrayRef<TemplateArgument> TemplateArgs,
@@ -6964,9 +6976,14 @@ public:
     /// recursive template instantiations.
     bool isInvalid() const { return Invalid; }
 
+    /// \brief Determine whether we are already instantiating this
+    /// specialization in some surrounding active instantiation.
+    bool isAlreadyInstantiating() const { return AlreadyInstantiating; }
+
   private:
     Sema &SemaRef;
     bool Invalid;
+    bool AlreadyInstantiating;
     bool SavedInNonInstantiationSFINAEContext;
     bool CheckInstantiationDepth(SourceLocation PointOfInstantiation,
                                  SourceRange InstantiationRange);
@@ -7518,6 +7535,14 @@ public:
                ArrayRef<Decl *> Protocols,
                ArrayRef<SourceLocation> ProtocolLocs,
                SourceLocation ProtocolRAngleLoc);
+
+  /// Build an Objective-C type parameter type.
+  QualType BuildObjCTypeParamType(const ObjCTypeParamDecl *Decl,
+                                  SourceLocation ProtocolLAngleLoc,
+                                  ArrayRef<ObjCProtocolDecl *> Protocols,
+                                  ArrayRef<SourceLocation> ProtocolLocs,
+                                  SourceLocation ProtocolRAngleLoc,
+                                  bool FailOnError = false);
 
   /// Build an Objective-C object pointer type.
   QualType BuildObjCObjectType(QualType BaseType,
@@ -8702,8 +8727,8 @@ public:
     /// are not compatible, but we accept them as an extension.
     IncompatiblePointer,
 
-    /// IncompatiblePointer - The assignment is between two pointers types which
-    /// point to integers which have a different sign, but are otherwise
+    /// IncompatiblePointerSign - The assignment is between two pointers types
+    /// which point to integers which have a different sign, but are otherwise
     /// identical. This is a subset of the above, but broken out because it's by
     /// far the most common case of incompatible pointers.
     IncompatiblePointerSign,
