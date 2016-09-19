@@ -610,10 +610,10 @@ FormatStyle getGoogleStyle(FormatStyle::LanguageKind Language) {
   } else if (Language == FormatStyle::LK_JavaScript) {
     GoogleStyle.AlignAfterOpenBracket = FormatStyle::BAS_AlwaysBreak;
     GoogleStyle.AlignOperands = false;
-    GoogleStyle.AllowShortFunctionsOnASingleLine = FormatStyle::SFS_Inline;
+    GoogleStyle.AllowShortFunctionsOnASingleLine = FormatStyle::SFS_Empty;
     GoogleStyle.AlwaysBreakBeforeMultilineStrings = false;
     GoogleStyle.BreakBeforeTernaryOperators = false;
-    GoogleStyle.CommentPragmas = "@(export|requirecss|return|see|visibility) ";
+    GoogleStyle.CommentPragmas = "(taze:|@(export|requirecss|return|see|visibility)) ";
     GoogleStyle.MaxEmptyLinesToKeep = 3;
     GoogleStyle.NamespaceIndentation = FormatStyle::NI_All;
     GoogleStyle.SpacesInContainerLiterals = false;
@@ -685,7 +685,6 @@ FormatStyle getWebKitStyle() {
   Style.ObjCBlockIndentWidth = 4;
   Style.ObjCSpaceAfterProperty = true;
   Style.PointerAlignment = FormatStyle::PAS_Left;
-  Style.Standard = FormatStyle::LS_Cpp03;
   return Style;
 }
 
@@ -793,46 +792,25 @@ std::string configurationAsText(const FormatStyle &Style) {
 
 namespace {
 
-class Formatter : public TokenAnalyzer {
+class JavaScriptRequoter : public TokenAnalyzer {
 public:
-  Formatter(const Environment &Env, const FormatStyle &Style,
-            bool *IncompleteFormat)
-      : TokenAnalyzer(Env, Style), IncompleteFormat(IncompleteFormat) {}
+  JavaScriptRequoter(const Environment &Env, const FormatStyle &Style)
+      : TokenAnalyzer(Env, Style) {}
 
   tooling::Replacements
   analyze(TokenAnnotator &Annotator,
           SmallVectorImpl<AnnotatedLine *> &AnnotatedLines,
-          FormatTokenLexer &Tokens, tooling::Replacements &Result) override {
-    deriveLocalStyle(AnnotatedLines);
+          FormatTokenLexer &Tokens) override {
     AffectedRangeMgr.computeAffectedLines(AnnotatedLines.begin(),
                                           AnnotatedLines.end());
-
-    if (Style.Language == FormatStyle::LK_JavaScript &&
-        Style.JavaScriptQuotes != FormatStyle::JSQS_Leave)
-      requoteJSStringLiteral(AnnotatedLines, Result);
-
-    for (unsigned i = 0, e = AnnotatedLines.size(); i != e; ++i) {
-      Annotator.calculateFormattingInformation(*AnnotatedLines[i]);
-    }
-
-    Annotator.setCommentLineLevels(AnnotatedLines);
-
-    WhitespaceManager Whitespaces(
-        Env.getSourceManager(), Style,
-        inputUsesCRLF(Env.getSourceManager().getBufferData(Env.getFileID())));
-    ContinuationIndenter Indenter(Style, Tokens.getKeywords(),
-                                  Env.getSourceManager(), Whitespaces, Encoding,
-                                  BinPackInconclusiveFunctions);
-    UnwrappedLineFormatter(&Indenter, &Whitespaces, Style, Tokens.getKeywords(),
-                           IncompleteFormat)
-        .format(AnnotatedLines);
-    return Whitespaces.generateReplacements();
+    tooling::Replacements Result;
+    requoteJSStringLiteral(AnnotatedLines, Result);
+    return Result;
   }
 
 private:
-  // If the last token is a double/single-quoted string literal, generates a
-  // replacement with a single/double quoted string literal, re-escaping the
-  // contents in the process.
+  // Replaces double/single-quoted string literal as appropriate, re-escaping
+  // the contents in the process.
   void requoteJSStringLiteral(SmallVectorImpl<AnnotatedLine *> &Lines,
                               tooling::Replacements &Result) {
     for (AnnotatedLine *Line : Lines) {
@@ -844,8 +822,7 @@ private:
         StringRef Input = FormatTok->TokenText;
         if (FormatTok->Finalized || !FormatTok->isStringLiteral() ||
             // NB: testing for not starting with a double quote to avoid
-            // breaking
-            // `template strings`.
+            // breaking `template strings`.
             (Style.JavaScriptQuotes == FormatStyle::JSQS_Single &&
              !Input.startswith("\"")) ||
             (Style.JavaScriptQuotes == FormatStyle::JSQS_Double &&
@@ -870,7 +847,6 @@ private:
                 IsSingle ? "'" : "\"");
 
         // Escape internal quotes.
-        size_t ColumnWidth = FormatTok->TokenText.size();
         bool Escaped = false;
         for (size_t i = 1; i < Input.size() - 1; i++) {
           switch (Input[i]) {
@@ -880,7 +856,6 @@ private:
                  (!IsSingle && Input[i + 1] == '\''))) {
               // Remove this \, it's escaping a " or ' that no longer needs
               // escaping
-              ColumnWidth--;
               Replace(Start.getLocWithOffset(i), 1, "");
               continue;
             }
@@ -891,7 +866,6 @@ private:
             if (!Escaped && IsSingle == (Input[i] == '\'')) {
               // Escape the quote.
               Replace(Start.getLocWithOffset(i), 0, "\\");
-              ColumnWidth++;
             }
             Escaped = false;
             break;
@@ -900,16 +874,46 @@ private:
             break;
           }
         }
-
-        // For formatting, count the number of non-escaped single quotes in them
-        // and adjust ColumnWidth to take the added escapes into account.
-        // FIXME(martinprobst): this might conflict with code breaking a long
-        // string literal (which clang-format doesn't do, yet). For that to
-        // work, this code would have to modify TokenText directly.
-        FormatTok->ColumnWidth = ColumnWidth;
       }
     }
   }
+};
+
+class Formatter : public TokenAnalyzer {
+public:
+  Formatter(const Environment &Env, const FormatStyle &Style,
+            bool *IncompleteFormat)
+      : TokenAnalyzer(Env, Style), IncompleteFormat(IncompleteFormat) {}
+
+  tooling::Replacements
+  analyze(TokenAnnotator &Annotator,
+          SmallVectorImpl<AnnotatedLine *> &AnnotatedLines,
+          FormatTokenLexer &Tokens) override {
+    tooling::Replacements Result;
+    deriveLocalStyle(AnnotatedLines);
+    AffectedRangeMgr.computeAffectedLines(AnnotatedLines.begin(),
+                                          AnnotatedLines.end());
+    for (unsigned i = 0, e = AnnotatedLines.size(); i != e; ++i) {
+      Annotator.calculateFormattingInformation(*AnnotatedLines[i]);
+    }
+    Annotator.setCommentLineLevels(AnnotatedLines);
+
+    WhitespaceManager Whitespaces(
+        Env.getSourceManager(), Style,
+        inputUsesCRLF(Env.getSourceManager().getBufferData(Env.getFileID())));
+    ContinuationIndenter Indenter(Style, Tokens.getKeywords(),
+                                  Env.getSourceManager(), Whitespaces, Encoding,
+                                  BinPackInconclusiveFunctions);
+    UnwrappedLineFormatter(&Indenter, &Whitespaces, Style, Tokens.getKeywords(),
+                           IncompleteFormat)
+        .format(AnnotatedLines);
+    for (const auto &R : Whitespaces.generateReplacements())
+      if (Result.add(R))
+        return Result;
+    return Result;
+  }
+
+private:
 
   static bool inputUsesCRLF(StringRef Text) {
     return Text.count('\r') * 2 > Text.count('\n');
@@ -998,7 +1002,7 @@ public:
   tooling::Replacements
   analyze(TokenAnnotator &Annotator,
           SmallVectorImpl<AnnotatedLine *> &AnnotatedLines,
-          FormatTokenLexer &Tokens, tooling::Replacements &Result) override {
+          FormatTokenLexer &Tokens) override {
     // FIXME: in the current implementation the granularity of affected range
     // is an annotated line. However, this is not sufficient. Furthermore,
     // redundant code introduced by replacements does not necessarily
@@ -1015,6 +1019,8 @@ public:
       if (Line->Affected) {
         cleanupRight(Line->First, tok::comma, tok::comma);
         cleanupRight(Line->First, TT_CtorInitializerColon, tok::comma);
+        cleanupRight(Line->First, tok::l_paren, tok::comma);
+        cleanupLeft(Line->First, tok::comma, tok::r_paren);
         cleanupLeft(Line->First, TT_CtorInitializerComma, tok::l_brace);
         cleanupLeft(Line->First, TT_CtorInitializerColon, tok::l_brace);
       }
@@ -1128,6 +1134,8 @@ private:
         break;
       if (Left->is(LK) && Right->is(RK)) {
         deleteToken(DeleteLeft ? Left : Right);
+        for (auto *Tok = Left->Next; Tok && Tok != Right; Tok = Tok->Next)
+          deleteToken(Tok);
         // If the right token is deleted, we should keep the left token
         // unchanged and pair it with the new right token.
         if (!DeleteLeft)
@@ -1263,10 +1271,10 @@ static void sortCppIncludes(const FormatStyle &Style,
                             ArrayRef<tooling::Range> Ranges, StringRef FileName,
                             tooling::Replacements &Replaces, unsigned *Cursor) {
   unsigned IncludesBeginOffset = Includes.front().Offset;
-  unsigned IncludesBlockSize = Includes.back().Offset +
-                               Includes.back().Text.size() -
-                               IncludesBeginOffset;
-  if (!affectsRange(Ranges, IncludesBeginOffset, IncludesBlockSize))
+  unsigned IncludesEndOffset =
+      Includes.back().Offset + Includes.back().Text.size();
+  unsigned IncludesBlockSize = IncludesEndOffset - IncludesBeginOffset;
+  if (!affectsRange(Ranges, IncludesBeginOffset, IncludesEndOffset))
     return;
   SmallVector<unsigned, 16> Indices;
   for (unsigned i = 0, e = Includes.size(); i != e; ++i)
@@ -1691,8 +1699,24 @@ tooling::Replacements reformat(const FormatStyle &Style, StringRef Code,
   if (Expanded.DisableFormat)
     return tooling::Replacements();
 
-  std::unique_ptr<Environment> Env =
-      Environment::CreateVirtualEnvironment(Code, FileName, Ranges);
+  auto Env = Environment::CreateVirtualEnvironment(Code, FileName, Ranges);
+
+  if (Style.Language == FormatStyle::LK_JavaScript &&
+      Style.JavaScriptQuotes != FormatStyle::JSQS_Leave) {
+    JavaScriptRequoter Requoter(*Env, Expanded);
+    tooling::Replacements Requotes = Requoter.process();
+    if (!Requotes.empty()) {
+      auto NewCode = applyAllReplacements(Code, Requotes);
+      if (NewCode) {
+        auto NewEnv = Environment::CreateVirtualEnvironment(
+            *NewCode, FileName,
+            tooling::calculateRangesAfterReplacements(Requotes, Ranges));
+        Formatter Format(*NewEnv, Expanded, IncompleteFormat);
+        return Requotes.merge(Format.process());
+      }
+    }
+  }
+
   Formatter Format(*Env, Expanded, IncompleteFormat);
   return Format.process();
 }
