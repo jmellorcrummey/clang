@@ -581,7 +581,7 @@ llvm::Constant *CodeGenVTables::CreateVTableComponent(
     // If this is OpenMP target, check if it is legal to emit these methods.
     if (CGM.getLangOpts().OpenMP &&
         CGM.getOpenMPRuntime().emitTargetGlobal(GD))
-      return llvm::ConstantExpr::getNullValue(Int8PtrTy);
+      return llvm::ConstantExpr::getNullValue(CGM.Int8PtrTy);
 
     auto SpecialVirtualFn = [&](llvm::Constant *&Cache, StringRef Name) {
       if (!Cache) {
