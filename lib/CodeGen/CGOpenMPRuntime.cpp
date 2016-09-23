@@ -2998,10 +2998,12 @@ void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::
     Entry.setAddress(Addr);
     Entry.setType(Ty);
     Entry.setFlags(Flags);
+    Entry.setOnlyMetadataFlag(Ty.isConstQualified());
     return;
   } else {
     OffloadEntryInfoDeviceGlobalVar Entry(OffloadingOrderedEntriesNum++, Addr,
                                           Ty, Flags);
+    Entry.setOnlyMetadataFlag(Ty.isConstQualified());
     OffloadEntriesDeviceGlobalVar[MangledName] = Entry;
   }
 }
@@ -3358,10 +3360,12 @@ void CGOpenMPRuntime::createOffloadEntriesAndInfoMetadata() {
                                        OffloadEntryInfoDeviceGlobalVar>(E)) {
       assert(CE->getAddress() && "Entry Addr is invalid!");
       // The global address can be used as ID.
-      createOffloadEntry(
-          CE->getAddress(), CE->getAddress(),
-          CGM.getContext().getTypeSizeInChars(CE->getType()).getQuantity(),
-          CE->getFlags());
+      if (!CE->getOnlyMetadataFlag()){
+        createOffloadEntry(
+            CE->getAddress(), CE->getAddress(),
+            CGM.getContext().getTypeSizeInChars(CE->getType()).getQuantity(),
+            CE->getFlags());
+      }
     } else
       llvm_unreachable("Unsupported ordered entry kind.");
   }
