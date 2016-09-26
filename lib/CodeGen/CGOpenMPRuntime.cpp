@@ -2988,7 +2988,8 @@ void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::
 void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::
     registerDeviceGlobalVarEntryInfo(StringRef MangledName,
                                      llvm::Constant *Addr, QualType Ty,
-                                     llvm::ConstantInt *Flags) {
+                                     llvm::ConstantInt *Flags,
+                                     bool isExternallyVisible) {
   // If we are emitting code for a target, the entry is already initialized,
   // only has to be registered.
   if (CGM.getLangOpts().OpenMPIsDevice) {
@@ -2998,12 +2999,12 @@ void CGOpenMPRuntime::OffloadEntriesInfoManagerTy::
     Entry.setAddress(Addr);
     Entry.setType(Ty);
     Entry.setFlags(Flags);
-    Entry.setOnlyMetadataFlag(Ty.isConstQualified());
+    Entry.setOnlyMetadataFlag(!isExternallyVisible);
     return;
   } else {
     OffloadEntryInfoDeviceGlobalVar Entry(OffloadingOrderedEntriesNum++, Addr,
                                           Ty, Flags);
-    Entry.setOnlyMetadataFlag(Ty.isConstQualified());
+    Entry.setOnlyMetadataFlag(!isExternallyVisible);
     OffloadEntriesDeviceGlobalVar[MangledName] = Entry;
   }
 }
@@ -7296,7 +7297,8 @@ llvm::Function *CGOpenMPRuntime::emitRegistrationFunction() {
         // Register the variable as declare target.
         OffloadEntriesInfoManager.registerDeviceGlobalVarEntryInfo(
             II->first(), Info.VariableAddr, D->getType(),
-            llvm::ConstantInt::get(CGM.Int32Ty, Flags));
+            llvm::ConstantInt::get(CGM.Int32Ty, Flags),
+            D->isExternallyVisible());
 
         // Emit the ctor/dtor launching if required.
         if (Info.CtorDtorFunction)
