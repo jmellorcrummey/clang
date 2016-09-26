@@ -459,7 +459,8 @@ private:
     /// \brief Register device global variable entry.
     void registerDeviceGlobalVarEntryInfo(StringRef MangledName,
                                           llvm::Constant *Addr, QualType Ty,
-                                          llvm::ConstantInt *Flags);
+                                          llvm::ConstantInt *Flags,
+                                          bool isExternallyVisible);
     /// \brief Return true if a device global variable entry with the provided
     /// information exists.
     bool hasDeviceGlobalVarEntryInfo(StringRef MangledName) const;
