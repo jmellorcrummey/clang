@@ -536,11 +536,10 @@ void CodeGenFunction::GenerateCXXGlobalVarDeclInitFunc(
     EmitCXXGlobalVarDeclInit(*D, Addr, PerformInit, EmitInitOnly, EmitDtorOnly);
   }
 
-  // Generate code to launch the initializers on the device and register
-  // destructors if generating code for an OpenMP host.
+  // Register initializers and destructors for this variable.
   if (CGM.getLangOpts().OpenMP)
-    CGM.getOpenMPRuntime().emitDeviceCtorDtorLaunching(*this, *D, Addr,
-                                                       PerformInit);
+    CGM.getOpenMPRuntime().registerDeviceCtorDtorLaunching(*this, *D, Addr,
+                                                           PerformInit);
 
   FinishFunction();
 }

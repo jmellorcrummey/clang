@@ -675,9 +675,8 @@ private:
     const Decl *Variable;
     /// Address of the variable or null if there is no variable.
     llvm::Constant *VariableAddr = nullptr;
-    /// The function that implements the device Ctor/Dtor launching.
-    const CGFunctionInfo *CtorDtorFunctionInfo = nullptr;
-    llvm::Function *CtorDtorFunction = nullptr;
+    /// True if the associated variables requires Ctor or Dtor.
+    bool RequiresCtorDtor = false;
     /// True if the variable associated with this information required
     /// initialization.
     bool PerformInitialization = false;
@@ -1310,15 +1309,14 @@ public:
   virtual bool emitDeviceCtorDtor(const VarDecl &D, llvm::GlobalVariable *Addr,
                                   bool PerformInit);
 
-  /// \brief Emit the host code to launch the global initializers and
-  /// destructors in the devices.
+  /// \brief Register that a variable requires a Ctor/Dtor.
   /// \param D Global whose initializers destructors should be emitted.
   /// \param Addr Address of the global being initialized/destroyed.
   /// \param PerformInit True if the initializer should be emitted.
-  virtual void emitDeviceCtorDtorLaunching(CodeGenFunction &CGF,
-                                           const VarDecl &D,
-                                           llvm::GlobalVariable *Addr,
-                                           bool PerformInit);
+  virtual void registerDeviceCtorDtorLaunching(CodeGenFunction &CGF,
+                                               const VarDecl &D,
+                                               llvm::GlobalVariable *Addr,
+                                               bool PerformInit);
 
   /// \brief Check whether the function definition in \a GD must be emitted for
   /// the device or not.
