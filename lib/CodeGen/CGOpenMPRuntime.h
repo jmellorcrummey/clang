@@ -425,7 +425,7 @@ private:
       // \brief Type of the global variable.
       QualType Ty;
       // \brief Only generate metadata for this offload entry
-      bool onlyMetadataFlag = false;
+      bool OnlyMetadataFlag = false;
 
     public:
       OffloadEntryInfoDeviceGlobalVar()
@@ -447,8 +447,8 @@ private:
       }
       QualType getType() const { return Ty; }
       void setType(QualType QTy) { Ty = QTy; }
-      bool getOnlyMetadataFlag(){ return onlyMetadataFlag; }
-      void setOnlyMetadataFlag(bool b){ onlyMetadataFlag = b; }
+      bool getOnlyMetadataFlag(){ return OnlyMetadataFlag; }
+      void setOnlyMetadataFlag(bool B){ OnlyMetadataFlag = B; }
       static bool classof(const OffloadEntryInfo *Info) {
         return Info->getKind() == OFFLOAD_ENTRY_INFO_DEVICE_GLOBAL_VAR;
       }
