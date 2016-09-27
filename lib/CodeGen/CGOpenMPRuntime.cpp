@@ -7840,4 +7840,3 @@ void CGOpenMPRuntime::registerTrackedFunction() {
   for (auto &GD : TrackedDecls)
     registerTargetFunctionDefinition(GD.second);
 }
-
