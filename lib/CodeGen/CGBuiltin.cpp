@@ -14,6 +14,7 @@
 #include "CodeGenFunction.h"
 #include "CGCXXABI.h"
 #include "CGObjCRuntime.h"
+#include "CGOpenCLRuntime.h"
 #include "CodeGenModule.h"
 #include "TargetInfo.h"
 #include "clang/AST/ASTContext.h"
@@ -2139,6 +2140,9 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
   case Builtin::BIwrite_pipe: {
     Value *Arg0 = EmitScalarExpr(E->getArg(0)),
           *Arg1 = EmitScalarExpr(E->getArg(1));
+    CGOpenCLRuntime OpenCLRT(CGM);
+    Value *PacketSize = OpenCLRT.getPipeElemSize(E->getArg(0));
+    Value *PacketAlign = OpenCLRT.getPipeElemAlign(E->getArg(0));
 
     // Type of the generic packet parameter.
     unsigned GenericAS =
@@ -2152,19 +2156,21 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
                                                              : "__write_pipe_2";
       // Creating a generic function type to be able to call with any builtin or
       // user defined type.
-      llvm::Type *ArgTys[] = {Arg0->getType(), I8PTy};
+      llvm::Type *ArgTys[] = {Arg0->getType(), I8PTy, Int32Ty, Int32Ty};
       llvm::FunctionType *FTy = llvm::FunctionType::get(
           Int32Ty, llvm::ArrayRef<llvm::Type *>(ArgTys), false);
       Value *BCast = Builder.CreatePointerCast(Arg1, I8PTy);
-      return RValue::get(Builder.CreateCall(
-          CGM.CreateRuntimeFunction(FTy, Name), {Arg0, BCast}));
+      return RValue::get(
+          Builder.CreateCall(CGM.CreateRuntimeFunction(FTy, Name),
+                             {Arg0, BCast, PacketSize, PacketAlign}));
     } else {
       assert(4 == E->getNumArgs() &&
              "Illegal number of parameters to pipe function");
       const char *Name = (BuiltinID == Builtin::BIread_pipe) ? "__read_pipe_4"
                                                              : "__write_pipe_4";
 
-      llvm::Type *ArgTys[] = {Arg0->getType(), Arg1->getType(), Int32Ty, I8PTy};
+      llvm::Type *ArgTys[] = {Arg0->getType(), Arg1->getType(), Int32Ty, I8PTy,
+                              Int32Ty, Int32Ty};
       Value *Arg2 = EmitScalarExpr(E->getArg(2)),
             *Arg3 = EmitScalarExpr(E->getArg(3));
       llvm::FunctionType *FTy = llvm::FunctionType::get(
@@ -2175,7 +2181,8 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
       if (Arg2->getType() != Int32Ty)
         Arg2 = Builder.CreateZExtOrTrunc(Arg2, Int32Ty);
       return RValue::get(Builder.CreateCall(
-          CGM.CreateRuntimeFunction(FTy, Name), {Arg0, Arg1, Arg2, BCast}));
+          CGM.CreateRuntimeFunction(FTy, Name),
+          {Arg0, Arg1, Arg2, BCast, PacketSize, PacketAlign}));
     }
   }
   // OpenCL v2.0 s6.13.16 ,s9.17.3.5 - Built-in pipe reserve read and write
@@ -2204,9 +2211,12 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
     Value *Arg0 = EmitScalarExpr(E->getArg(0)),
           *Arg1 = EmitScalarExpr(E->getArg(1));
     llvm::Type *ReservedIDTy = ConvertType(getContext().OCLReserveIDTy);
+    CGOpenCLRuntime OpenCLRT(CGM);
+    Value *PacketSize = OpenCLRT.getPipeElemSize(E->getArg(0));
+    Value *PacketAlign = OpenCLRT.getPipeElemAlign(E->getArg(0));
 
     // Building the generic function prototype.
-    llvm::Type *ArgTys[] = {Arg0->getType(), Int32Ty};
+    llvm::Type *ArgTys[] = {Arg0->getType(), Int32Ty, Int32Ty, Int32Ty};
     llvm::FunctionType *FTy = llvm::FunctionType::get(
         ReservedIDTy, llvm::ArrayRef<llvm::Type *>(ArgTys), false);
     // We know the second argument is an integer type, but we may need to cast
@@ -2214,7 +2224,8 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
     if (Arg1->getType() != Int32Ty)
       Arg1 = Builder.CreateZExtOrTrunc(Arg1, Int32Ty);
     return RValue::get(
-        Builder.CreateCall(CGM.CreateRuntimeFunction(FTy, Name), {Arg0, Arg1}));
+        Builder.CreateCall(CGM.CreateRuntimeFunction(FTy, Name),
+                           {Arg0, Arg1, PacketSize, PacketAlign}));
   }
   // OpenCL v2.0 s6.13.16, s9.17.3.5 - Built-in pipe commit read and write
   // functions
@@ -2240,15 +2251,19 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
 
     Value *Arg0 = EmitScalarExpr(E->getArg(0)),
           *Arg1 = EmitScalarExpr(E->getArg(1));
+    CGOpenCLRuntime OpenCLRT(CGM);
+    Value *PacketSize = OpenCLRT.getPipeElemSize(E->getArg(0));
+    Value *PacketAlign = OpenCLRT.getPipeElemAlign(E->getArg(0));
 
     // Building the generic function prototype.
-    llvm::Type *ArgTys[] = {Arg0->getType(), Arg1->getType()};
+    llvm::Type *ArgTys[] = {Arg0->getType(), Arg1->getType(), Int32Ty, Int32Ty};
     llvm::FunctionType *FTy =
         llvm::FunctionType::get(llvm::Type::getVoidTy(getLLVMContext()),
                                 llvm::ArrayRef<llvm::Type *>(ArgTys), false);
 
     return RValue::get(
-        Builder.CreateCall(CGM.CreateRuntimeFunction(FTy, Name), {Arg0, Arg1}));
+        Builder.CreateCall(CGM.CreateRuntimeFunction(FTy, Name),
+                           {Arg0, Arg1, PacketSize, PacketAlign}));
   }
   // OpenCL v2.0 s6.13.16.4 Built-in pipe query functions
   case Builtin::BIget_pipe_num_packets:
@@ -2261,12 +2276,15 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
 
     // Building the generic function prototype.
     Value *Arg0 = EmitScalarExpr(E->getArg(0));
-    llvm::Type *ArgTys[] = {Arg0->getType()};
+    CGOpenCLRuntime OpenCLRT(CGM);
+    Value *PacketSize = OpenCLRT.getPipeElemSize(E->getArg(0));
+    Value *PacketAlign = OpenCLRT.getPipeElemAlign(E->getArg(0));
+    llvm::Type *ArgTys[] = {Arg0->getType(), Int32Ty, Int32Ty};
     llvm::FunctionType *FTy = llvm::FunctionType::get(
         Int32Ty, llvm::ArrayRef<llvm::Type *>(ArgTys), false);
 
-    return RValue::get(
-        Builder.CreateCall(CGM.CreateRuntimeFunction(FTy, Name), {Arg0}));
+    return RValue::get(Builder.CreateCall(CGM.CreateRuntimeFunction(FTy, Name),
+                                          {Arg0, PacketSize, PacketAlign}));
   }
 
   // OpenCL v2.0 s6.13.9 - Address space qualifier functions.
@@ -7619,6 +7637,25 @@ Value *CodeGenFunction::EmitPPCBuiltinExpr(unsigned BuiltinID,
     Function *F = CGM.getIntrinsic(Intrinsic::ctlz, ResultType);
     return Builder.CreateCall(F, {X, Undef});
   }
+  case PPC::BI__builtin_altivec_vctzb:
+  case PPC::BI__builtin_altivec_vctzh:
+  case PPC::BI__builtin_altivec_vctzw:
+  case PPC::BI__builtin_altivec_vctzd: {
+    llvm::Type *ResultType = ConvertType(E->getType());
+    Value *X = EmitScalarExpr(E->getArg(0));
+    Value *Undef = ConstantInt::get(Builder.getInt1Ty(), false);
+    Function *F = CGM.getIntrinsic(Intrinsic::cttz, ResultType);
+    return Builder.CreateCall(F, {X, Undef});
+  }
+  case PPC::BI__builtin_altivec_vpopcntb:
+  case PPC::BI__builtin_altivec_vpopcnth:
+  case PPC::BI__builtin_altivec_vpopcntw:
+  case PPC::BI__builtin_altivec_vpopcntd: {
+    llvm::Type *ResultType = ConvertType(E->getType());
+    Value *X = EmitScalarExpr(E->getArg(0));
+    llvm::Function *F = CGM.getIntrinsic(Intrinsic::ctpop, ResultType);
+    return Builder.CreateCall(F, X);
+  }
   // Copy sign
   case PPC::BI__builtin_vsx_xvcpsgnsp:
   case PPC::BI__builtin_vsx_xvcpsgndp: {
@@ -8087,7 +8124,13 @@ Value *CodeGenFunction::EmitNVPTXBuiltinExpr(unsigned BuiltinID,
                                        Ptr->getType()}),
         {Ptr, ConstantInt::get(Builder.getInt32Ty(), Align.getQuantity())});
   };
-
+  auto MakeScopedAtomic = [&](unsigned IntrinsicID) {
+    Value *Ptr = EmitScalarExpr(E->getArg(0));
+    return Builder.CreateCall(
+        CGM.getIntrinsic(IntrinsicID, {Ptr->getType()->getPointerElementType(),
+                                       Ptr->getType()}),
+        {Ptr, EmitScalarExpr(E->getArg(1))});
+  };
   switch (BuiltinID) {
   case NVPTX::BI__nvvm_atom_add_gen_i:
   case NVPTX::BI__nvvm_atom_add_gen_l:
@@ -8206,6 +8249,109 @@ Value *CodeGenFunction::EmitNVPTXBuiltinExpr(unsigned BuiltinID,
   case NVPTX::BI__nvvm_ldg_d:
   case NVPTX::BI__nvvm_ldg_d2:
     return MakeLdg(Intrinsic::nvvm_ldg_global_f);
+
+  case NVPTX::BI__nvvm_atom_cta_add_gen_i:
+  case NVPTX::BI__nvvm_atom_cta_add_gen_l:
+  case NVPTX::BI__nvvm_atom_cta_add_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_add_gen_i:
+  case NVPTX::BI__nvvm_atom_sys_add_gen_l:
+  case NVPTX::BI__nvvm_atom_sys_add_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_add_gen_f:
+  case NVPTX::BI__nvvm_atom_cta_add_gen_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_f_cta);
+  case NVPTX::BI__nvvm_atom_sys_add_gen_f:
+  case NVPTX::BI__nvvm_atom_sys_add_gen_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_f_sys);
+  case NVPTX::BI__nvvm_atom_cta_xchg_gen_i:
+  case NVPTX::BI__nvvm_atom_cta_xchg_gen_l:
+  case NVPTX::BI__nvvm_atom_cta_xchg_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_gen_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_xchg_gen_i:
+  case NVPTX::BI__nvvm_atom_sys_xchg_gen_l:
+  case NVPTX::BI__nvvm_atom_sys_xchg_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_gen_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_max_gen_i:
+  case NVPTX::BI__nvvm_atom_cta_max_gen_ui:
+  case NVPTX::BI__nvvm_atom_cta_max_gen_l:
+  case NVPTX::BI__nvvm_atom_cta_max_gen_ul:
+  case NVPTX::BI__nvvm_atom_cta_max_gen_ll:
+  case NVPTX::BI__nvvm_atom_cta_max_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_max_gen_i:
+  case NVPTX::BI__nvvm_atom_sys_max_gen_ui:
+  case NVPTX::BI__nvvm_atom_sys_max_gen_l:
+  case NVPTX::BI__nvvm_atom_sys_max_gen_ul:
+  case NVPTX::BI__nvvm_atom_sys_max_gen_ll:
+  case NVPTX::BI__nvvm_atom_sys_max_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_min_gen_i:
+  case NVPTX::BI__nvvm_atom_cta_min_gen_ui:
+  case NVPTX::BI__nvvm_atom_cta_min_gen_l:
+  case NVPTX::BI__nvvm_atom_cta_min_gen_ul:
+  case NVPTX::BI__nvvm_atom_cta_min_gen_ll:
+  case NVPTX::BI__nvvm_atom_cta_min_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_min_gen_i:
+  case NVPTX::BI__nvvm_atom_sys_min_gen_ui:
+  case NVPTX::BI__nvvm_atom_sys_min_gen_l:
+  case NVPTX::BI__nvvm_atom_sys_min_gen_ul:
+  case NVPTX::BI__nvvm_atom_sys_min_gen_ll:
+  case NVPTX::BI__nvvm_atom_sys_min_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_inc_gen_ui:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_gen_i_cta);
+  case NVPTX::BI__nvvm_atom_cta_dec_gen_ui:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_gen_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_inc_gen_ui:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_gen_i_sys);
+  case NVPTX::BI__nvvm_atom_sys_dec_gen_ui:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_gen_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_and_gen_i:
+  case NVPTX::BI__nvvm_atom_cta_and_gen_l:
+  case NVPTX::BI__nvvm_atom_cta_and_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_gen_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_and_gen_i:
+  case NVPTX::BI__nvvm_atom_sys_and_gen_l:
+  case NVPTX::BI__nvvm_atom_sys_and_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_gen_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_or_gen_i:
+  case NVPTX::BI__nvvm_atom_cta_or_gen_l:
+  case NVPTX::BI__nvvm_atom_cta_or_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_gen_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_or_gen_i:
+  case NVPTX::BI__nvvm_atom_sys_or_gen_l:
+  case NVPTX::BI__nvvm_atom_sys_or_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_gen_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_xor_gen_i:
+  case NVPTX::BI__nvvm_atom_cta_xor_gen_l:
+  case NVPTX::BI__nvvm_atom_cta_xor_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_gen_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_xor_gen_i:
+  case NVPTX::BI__nvvm_atom_sys_xor_gen_l:
+  case NVPTX::BI__nvvm_atom_sys_xor_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_gen_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_cas_gen_i:
+  case NVPTX::BI__nvvm_atom_cta_cas_gen_l:
+  case NVPTX::BI__nvvm_atom_cta_cas_gen_ll: {
+    Value *Ptr = EmitScalarExpr(E->getArg(0));
+    return Builder.CreateCall(
+        CGM.getIntrinsic(
+            Intrinsic::nvvm_atomic_cas_gen_i_cta,
+            {Ptr->getType()->getPointerElementType(), Ptr->getType()}),
+        {Ptr, EmitScalarExpr(E->getArg(1)), EmitScalarExpr(E->getArg(2))});
+  }
+  case NVPTX::BI__nvvm_atom_sys_cas_gen_i:
+  case NVPTX::BI__nvvm_atom_sys_cas_gen_l:
+  case NVPTX::BI__nvvm_atom_sys_cas_gen_ll: {
+    Value *Ptr = EmitScalarExpr(E->getArg(0));
+    return Builder.CreateCall(
+        CGM.getIntrinsic(
+            Intrinsic::nvvm_atomic_cas_gen_i_sys,
+            {Ptr->getType()->getPointerElementType(), Ptr->getType()}),
+        {Ptr, EmitScalarExpr(E->getArg(1)), EmitScalarExpr(E->getArg(2))});
+  }
   default:
     return nullptr;
   }
