@@ -721,6 +721,10 @@ public:
   /// standard library.
   LazyDeclPtr StdBadAlloc;
 
+  /// \brief The C++ "std::align_val_t" enum class, which is defined by the C++
+  /// standard library.
+  LazyDeclPtr StdAlignValT;
+
   /// \brief The C++ "std::initializer_list" template, which is defined in
   /// \<initializer_list>.
   ClassTemplateDecl *StdInitializerList;
@@ -4237,6 +4241,7 @@ public:
   NamespaceDecl *getOrCreateStdNamespace();
 
   CXXRecordDecl *getStdBadAlloc() const;
+  EnumDecl *getStdAlignValT() const;
 
   /// \brief Tests whether Ty is an instance of std::initializer_list and, if
   /// it is and Element is not NULL, assigns the element type to Element.
@@ -4838,8 +4843,7 @@ public:
                               bool Diagnose = true);
   void DeclareGlobalNewDelete();
   void DeclareGlobalAllocationFunction(DeclarationName Name, QualType Return,
-                                       QualType Param1,
-                                       QualType Param2 = QualType());
+                                       ArrayRef<QualType> Params);
 
   bool FindDeallocationFunction(SourceLocation StartLoc, CXXRecordDecl *RD,
                                 DeclarationName Name, FunctionDecl* &Operator,
@@ -9245,6 +9249,18 @@ public:
   /// Otherwise, returns true without emitting any diagnostics.
   bool CheckCUDACall(SourceLocation Loc, FunctionDecl *Callee);
 
+  /// Check whether a 'try' or 'throw' expression is allowed within the current
+  /// context, and raise an error or create a deferred error, as appropriate.
+  ///
+  /// 'try' and 'throw' are never allowed in CUDA __device__ functions, and are
+  /// allowed in __host__ __device__ functions only if those functions are never
+  /// codegen'ed for the device.
+  ///
+  /// ExprTy should be the string "try" or "throw", as appropriate.
+  bool CheckCUDAExceptionExpr(SourceLocation Loc, StringRef ExprTy);
+
+  bool CheckCUDAVLA(SourceLocation Loc);
+
   /// Finds a function in \p Matches with highest calling priority
   /// from \p Caller context and erases all functions with lower
   /// calling priority.
@@ -9482,6 +9498,7 @@ private:
   bool CheckAArch64BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall);
   bool CheckMipsBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall);
   bool CheckSystemZBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall);
+  bool CheckX86BuiltinRoundingOrSAE(unsigned BuiltinID, CallExpr *TheCall);
   bool CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall);
   bool CheckPPCBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall);
 
