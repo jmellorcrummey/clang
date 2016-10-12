@@ -2242,6 +2242,7 @@ void ASTStmtWriter::VisitOMPLoopDirective(OMPLoopDirective *D) {
     Record.AddStmt(D->getDistCond());
     Record.AddStmt(D->getDistInc());
     Record.AddStmt(D->getPrevEnsureUpperBound());
+    Record.AddStmt(D->getInnermostIterationVariable());
     Record.AddStmt(D->getNumIterations());
   }
   for (auto I : D->counters()) {

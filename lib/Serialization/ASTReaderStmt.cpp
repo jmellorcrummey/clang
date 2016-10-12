@@ -2614,6 +2614,7 @@ void ASTStmtReader::VisitOMPLoopDirective(OMPLoopDirective *D) {
     D->setDistCond(Reader.ReadSubExpr());
     D->setDistInc(Reader.ReadSubExpr());
     D->setPrevEnsureUpperBound(Reader.ReadSubExpr());
+    D->setInnermostIterationVariable(Reader.ReadSubExpr());
     D->setNumIterations(Reader.ReadSubExpr());
   }
   SmallVector<Expr *, 4> Sub;
