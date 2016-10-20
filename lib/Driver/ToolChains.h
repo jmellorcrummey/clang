@@ -312,13 +312,13 @@ public:
   /// @name ToolChain Implementation
   /// {
 
-  types::ID LookupTypeForExtension(const char *Ext) const override;
+  types::ID LookupTypeForExtension(StringRef Ext) const override;
 
   bool HasNativeLLVMSupport() const override;
 
   llvm::opt::DerivedArgList *
   TranslateArgs(const llvm::opt::DerivedArgList &Args,
-                const char *BoundArch) const override;
+                StringRef BoundArch) const override;
 
   bool IsBlocksDefault() const override {
     // Always allow blocks on Apple; users interested in versioning are
@@ -523,7 +523,7 @@ public:
 
   llvm::opt::DerivedArgList *
   TranslateArgs(const llvm::opt::DerivedArgList &Args,
-                const char *BoundArch) const override;
+                StringRef BoundArch) const override;
 
   CXXStdlibType GetDefaultCXXStdlibType() const override;
   ObjCRuntime getDefaultObjCRuntime(bool isNonFragile) const override;
@@ -585,7 +585,7 @@ public:
   void AddLinkARCArgs(const llvm::opt::ArgList &Args,
                       llvm::opt::ArgStringList &CmdArgs) const override;
 
-  unsigned GetDefaultDwarfVersion() const override { return 4; }
+  unsigned GetDefaultDwarfVersion() const override;
   // Until dtrace (via CTF) and LLDB can deal with distributed debug info,
   // Darwin defaults to standalone/full debug info.
   bool GetDefaultStandaloneDebug() const override { return true; }
@@ -856,7 +856,7 @@ public:
 
   llvm::opt::DerivedArgList *
   TranslateArgs(const llvm::opt::DerivedArgList &Args,
-                const char *BoundArch) const override;
+                StringRef BoundArch) const override;
   void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
                              llvm::opt::ArgStringList &CC1Args) const override;
 
@@ -1008,6 +1008,39 @@ private:
   std::string NaClArmMacrosPath;
 };
 
+class LLVM_LIBRARY_VISIBILITY Fuchsia : public Generic_ELF {
+public:
+  Fuchsia(const Driver &D, const llvm::Triple &Triple,
+          const llvm::opt::ArgList &Args);
+
+  bool isPIEDefault() const override { return true; }
+  bool HasNativeLLVMSupport() const override { return true; }
+  bool IsIntegratedAssemblerDefault() const override { return true; }
+  llvm::DebuggerKind getDefaultDebuggerTuning() const override {
+    return llvm::DebuggerKind::GDB;
+  }
+
+  RuntimeLibType
+  GetRuntimeLibType(const llvm::opt::ArgList &Args) const override;
+  CXXStdlibType
+  GetCXXStdlibType(const llvm::opt::ArgList &Args) const override;
+
+  void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
+                             llvm::opt::ArgStringList &CC1Args) const override;
+  void
+  AddClangSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,
+                            llvm::opt::ArgStringList &CC1Args) const override;
+  void AddClangCXXStdlibIncludeArgs(
+      const llvm::opt::ArgList &DriverArgs,
+      llvm::opt::ArgStringList &CC1Args) const override;
+  void AddCXXStdlibLibArgs(const llvm::opt::ArgList &Args,
+                           llvm::opt::ArgStringList &CmdArgs) const override;
+
+protected:
+  Tool *buildAssembler() const override;
+  Tool *buildLinker() const override;
+};
+
 /// TCEToolChain - A tool chain using the llvm bitcode tools to perform
 /// all subcommands. See http://tce.cs.tut.fi for our peculiar target.
 class LLVM_LIBRARY_VISIBILITY TCEToolChain : public ToolChain {
@@ -1029,7 +1062,7 @@ public:
 
   llvm::opt::DerivedArgList *
   TranslateArgs(const llvm::opt::DerivedArgList &Args,
-                const char *BoundArch) const override;
+                StringRef BoundArch) const override;
 
   bool IsIntegratedAssemblerDefault() const override;
   bool IsUnwindTablesDefault() const override;
@@ -1214,6 +1247,14 @@ public:
 protected:
   Tool *buildAssembler() const override;
   Tool *buildLinker() const override;
+};
+
+class LLVM_LIBRARY_VISIBILITY Contiki : public Generic_ELF {
+public:
+  Contiki(const Driver &D, const llvm::Triple &Triple,
+          const llvm::opt::ArgList &Args);
+
+  SanitizerMask getSupportedSanitizers() const override;
 };
 
 } // end namespace toolchains

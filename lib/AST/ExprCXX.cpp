@@ -25,6 +25,22 @@ using namespace clang;
 //  Child Iterators for iterating over subexpressions/substatements
 //===----------------------------------------------------------------------===//
 
+bool CXXOperatorCallExpr::isInfixBinaryOp() const {
+  // An infix binary operator is any operator with two arguments other than
+  // operator() and operator[]. Note that none of these operators can have
+  // default arguments, so it suffices to check the number of argument
+  // expressions.
+  if (getNumArgs() != 2)
+    return false;
+
+  switch (getOperator()) {
+  case OO_Call: case OO_Subscript:
+    return false;
+  default:
+    return true;
+  }
+}
+
 bool CXXTypeidExpr::isPotentiallyEvaluated() const {
   if (isTypeOperand())
     return false;
@@ -62,7 +78,7 @@ SourceLocation CXXScalarValueInitExpr::getLocStart() const {
 // CXXNewExpr
 CXXNewExpr::CXXNewExpr(const ASTContext &C, bool globalNew,
                        FunctionDecl *operatorNew, FunctionDecl *operatorDelete,
-                       bool usualArrayDeleteWantsSize,
+                       bool PassAlignment, bool usualArrayDeleteWantsSize,
                        ArrayRef<Expr*> placementArgs,
                        SourceRange typeIdParens, Expr *arraySize,
                        InitializationStyle initializationStyle,
@@ -76,7 +92,8 @@ CXXNewExpr::CXXNewExpr(const ASTContext &C, bool globalNew,
     SubExprs(nullptr), OperatorNew(operatorNew), OperatorDelete(operatorDelete),
     AllocatedTypeInfo(allocatedTypeInfo), TypeIdParens(typeIdParens),
     Range(Range), DirectInitRange(directInitRange),
-    GlobalNew(globalNew), UsualArrayDeleteWantsSize(usualArrayDeleteWantsSize) {
+    GlobalNew(globalNew), PassAlignment(PassAlignment),
+    UsualArrayDeleteWantsSize(usualArrayDeleteWantsSize) {
   assert((initializer != nullptr || initializationStyle == NoInit) &&
          "Only NoInit can have no initializer.");
   StoredInitializationStyle = initializer ? initializationStyle + 1 : 0;
