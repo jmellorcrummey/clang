@@ -3044,10 +3044,14 @@ static void handleTransparentUnionAttr(Sema &S, Decl *D,
     return;
   }
 
+  if (FirstType->isIncompleteType())
+    return;
   uint64_t FirstSize = S.Context.getTypeSize(FirstType);
   uint64_t FirstAlign = S.Context.getTypeAlign(FirstType);
   for (; Field != FieldEnd; ++Field) {
     QualType FieldType = Field->getType();
+    if (FieldType->isIncompleteType())
+      return;
     // FIXME: this isn't fully correct; we also need to test whether the
     // members of the union would all have the same calling convention as the
     // first member of the union. Checking just the size and alignment isn't
@@ -3694,6 +3698,38 @@ static void handleOptimizeNoneAttr(Sema &S, Decl *D,
   if (OptimizeNoneAttr *Optnone = S.mergeOptimizeNoneAttr(
           D, Attr.getRange(), Attr.getAttributeSpellingListIndex()))
     D->addAttr(Optnone);
+}
+
+static void handleConstantAttr(Sema &S, Decl *D, const AttributeList &Attr) {
+  if (checkAttrMutualExclusion<CUDASharedAttr>(S, D, Attr.getRange(),
+                                               Attr.getName()))
+    return;
+  auto *VD = cast<VarDecl>(D);
+  if (!VD->hasGlobalStorage()) {
+    S.Diag(Attr.getLoc(), diag::err_cuda_nonglobal_constant);
+    return;
+  }
+  D->addAttr(::new (S.Context) CUDAConstantAttr(
+      Attr.getRange(), S.Context, Attr.getAttributeSpellingListIndex()));
+}
+
+static void handleSharedAttr(Sema &S, Decl *D, const AttributeList &Attr) {
+  if (checkAttrMutualExclusion<CUDAConstantAttr>(S, D, Attr.getRange(),
+                                                 Attr.getName()))
+    return;
+  auto *VD = cast<VarDecl>(D);
+  // extern __shared__ is only allowed on arrays with no length (e.g.
+  // "int x[]").
+  if (VD->hasExternalStorage() && !isa<IncompleteArrayType>(VD->getType())) {
+    S.Diag(Attr.getLoc(), diag::err_cuda_extern_shared) << VD;
+    return;
+  }
+  if (S.getLangOpts().CUDA && VD->hasLocalStorage() &&
+      S.CUDADiagIfHostCode(Attr.getLoc(), diag::err_cuda_host_shared)
+          << S.CurrentCUDATarget())
+    return;
+  D->addAttr(::new (S.Context) CUDASharedAttr(
+      Attr.getRange(), S.Context, Attr.getAttributeSpellingListIndex()));
 }
 
 static void handleGlobalAttr(Sema &S, Decl *D, const AttributeList &Attr) {
@@ -5277,9 +5313,15 @@ static void handleDeprecatedAttr(Sema &S, Decl *D, const AttributeList &Attr) {
         !(Attr.hasScope() && Attr.getScopeName()->isStr("gnu")))
       S.Diag(Attr.getLoc(), diag::ext_cxx14_attr) << Attr.getName();
 
-  D->addAttr(::new (S.Context) DeprecatedAttr(Attr.getRange(), S.Context, Str,
-                                   Replacement,
-                                   Attr.getAttributeSpellingListIndex()));
+  D->addAttr(::new (S.Context)
+                 DeprecatedAttr(Attr.getRange(), S.Context, Str, Replacement,
+                                Attr.getAttributeSpellingListIndex()));
+}
+
+static bool isGlobalVar(const Decl *D) {
+  if (const auto *S = dyn_cast<VarDecl>(D))
+    return S->hasGlobalStorage();
+  return false;
 }
 
 static void handleNoSanitizeAttr(Sema &S, Decl *D, const AttributeList &Attr) {
@@ -5297,7 +5339,9 @@ static void handleNoSanitizeAttr(Sema &S, Decl *D, const AttributeList &Attr) {
 
     if (parseSanitizerValue(SanitizerName, /*AllowGroups=*/true) == 0)
       S.Diag(LiteralLoc, diag::warn_unknown_sanitizer_ignored) << SanitizerName;
-
+    else if (isGlobalVar(D) && SanitizerName != "address")
+      S.Diag(D->getLocation(), diag::err_attribute_wrong_decl_type)
+          << Attr.getName() << ExpectedFunctionOrMethod;
     Sanitizers.push_back(SanitizerName);
   }
 
@@ -5310,12 +5354,14 @@ static void handleNoSanitizeSpecificAttr(Sema &S, Decl *D,
                                          const AttributeList &Attr) {
   StringRef AttrName = Attr.getName()->getName();
   normalizeName(AttrName);
-  StringRef SanitizerName =
-      llvm::StringSwitch<StringRef>(AttrName)
-          .Case("no_address_safety_analysis", "address")
-          .Case("no_sanitize_address", "address")
-          .Case("no_sanitize_thread", "thread")
-          .Case("no_sanitize_memory", "memory");
+  StringRef SanitizerName = llvm::StringSwitch<StringRef>(AttrName)
+                                .Case("no_address_safety_analysis", "address")
+                                .Case("no_sanitize_address", "address")
+                                .Case("no_sanitize_thread", "thread")
+                                .Case("no_sanitize_memory", "memory");
+  if (isGlobalVar(D) && SanitizerName != "address")
+    S.Diag(D->getLocation(), diag::err_attribute_wrong_decl_type)
+        << Attr.getName() << ExpectedFunction;
   D->addAttr(::new (S.Context)
                  NoSanitizeAttr(Attr.getRange(), S.Context, &SanitizerName, 1,
                                 Attr.getAttributeSpellingListIndex()));
@@ -5528,8 +5574,7 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     handleCommonAttr(S, D, Attr);
     break;
   case AttributeList::AT_CUDAConstant:
-    handleSimpleAttributeWithExclusions<CUDAConstantAttr, CUDASharedAttr>(S, D,
-                                                                          Attr);
+    handleConstantAttr(S, D, Attr);
     break;
   case AttributeList::AT_PassObjectSize:
     handlePassObjectSizeAttr(S, D, Attr);
@@ -5639,8 +5684,7 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     handleSimpleAttribute<NoThrowAttr>(S, D, Attr);
     break;
   case AttributeList::AT_CUDAShared:
-    handleSimpleAttributeWithExclusions<CUDASharedAttr, CUDAConstantAttr>(S, D,
-                                                                          Attr);
+    handleSharedAttr(S, D, Attr);
     break;
   case AttributeList::AT_VecReturn:
     handleVecReturnAttr(S, D, Attr);
