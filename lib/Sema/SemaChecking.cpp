@@ -2167,8 +2167,6 @@ bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
     break;
   case X86::BI__builtin_ia32_palignr128:
   case X86::BI__builtin_ia32_palignr256:
-  case X86::BI__builtin_ia32_palignr128_mask:
-  case X86::BI__builtin_ia32_palignr256_mask:
   case X86::BI__builtin_ia32_palignr512_mask:
   case X86::BI__builtin_ia32_alignq512_mask:
   case X86::BI__builtin_ia32_alignd512_mask:
@@ -4476,6 +4474,20 @@ checkFormatStringExpr(Sema &S, const Expr *E, ArrayRef<const Expr *> Args,
                                        InFunctionCall, CheckedVarArgs,
                                        UncoveredArg, Offset);
         }
+      }
+    }
+
+    return SLCT_NotALiteral;
+  }
+  case Stmt::ObjCMessageExprClass: {
+    const auto *ME = cast<ObjCMessageExpr>(E);
+    if (const auto *ND = ME->getMethodDecl()) {
+      if (const auto *FA = ND->getAttr<FormatArgAttr>()) {
+        unsigned ArgIndex = FA->getFormatIdx();
+        const Expr *Arg = ME->getArg(ArgIndex - 1);
+        return checkFormatStringExpr(
+            S, Arg, Args, HasVAListArg, format_idx, firstDataArg, Type,
+            CallType, InFunctionCall, CheckedVarArgs, UncoveredArg, Offset);
       }
     }
 
