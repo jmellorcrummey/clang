@@ -197,7 +197,7 @@ public:
   /// \param DeviceOffloadKind - The device offload kind used for the
   /// translation.
   virtual llvm::opt::DerivedArgList *
-  TranslateArgs(const llvm::opt::DerivedArgList &Args, const char *BoundArch,
+  TranslateArgs(const llvm::opt::DerivedArgList &Args, StringRef BoundArch,
                 Action::OffloadKind DeviceOffloadKind) const {
     return nullptr;
   }

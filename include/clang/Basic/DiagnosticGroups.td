@@ -62,7 +62,6 @@ def NullConversion : DiagGroup<"null-conversion">;
 def ImplicitConversionFloatingPointToBool :
   DiagGroup<"implicit-conversion-floating-point-to-bool">;
 def ObjCLiteralConversion : DiagGroup<"objc-literal-conversion">;
-def BadArrayNewLength : DiagGroup<"bad-array-new-length">;
 def MacroRedefined : DiagGroup<"macro-redefined">;
 def BuiltinMacroRedefined : DiagGroup<"builtin-macro-redefined">;
 def BuiltinRequiresHeader : DiagGroup<"builtin-requires-header">;
@@ -621,6 +620,8 @@ def Format2 : DiagGroup<"format=2",
                         [FormatNonLiteral, FormatSecurity, FormatY2K]>;
 
 def TypeSafety : DiagGroup<"type-safety">;
+
+def IncompatibleExceptionSpec : DiagGroup<"incompatible-exception-spec">;
 
 def IntToVoidPointerCast : DiagGroup<"int-to-void-pointer-cast">;
 def IntToPointerCast : DiagGroup<"int-to-pointer-cast",
