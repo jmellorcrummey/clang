@@ -5527,9 +5527,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     llvm::sys::fs::file_status Status;
     if (llvm::sys::fs::status(A->getValue(), Status))
       D.Diag(diag::err_drv_no_such_file) << A->getValue();
-    CmdArgs.push_back(Args.MakeArgString(
-        "-fbuild-session-timestamp=" +
-        Twine((uint64_t)Status.getLastModificationTime().toEpochTime())));
+    CmdArgs.push_back(
+        Args.MakeArgString("-fbuild-session-timestamp=" +
+                           Twine((uint64_t)Status.getLastModificationTime()
+                                     .time_since_epoch()
+                                     .count())));
   }
 
   if (Args.getLastArg(options::OPT_fmodules_validate_once_per_build_session)) {
@@ -7833,6 +7835,29 @@ bool darwin::Linker::NeedsTempPath(const InputInfoList &Inputs) const {
   return false;
 }
 
+/// \brief Pass -no_deduplicate to ld64 under certain conditions:
+///
+/// - Either -O0 or -O1 is explicitly specified
+/// - No -O option is specified *and* this is a compile+link (implicit -O0)
+///
+/// Also do *not* add -no_deduplicate when no -O option is specified and this
+/// is just a link (we can't imply -O0)
+static bool shouldLinkerNotDedup(bool IsLinkerOnlyAction, const ArgList &Args) {
+  if (Arg *A = Args.getLastArg(options::OPT_O_Group)) {
+    if (A->getOption().matches(options::OPT_O0))
+      return true;
+    if (A->getOption().matches(options::OPT_O))
+      return llvm::StringSwitch<bool>(A->getValue())
+                    .Case("1", true)
+                    .Default(false);
+    return false; // OPT_Ofast & OPT_O4
+  }
+
+  if (!IsLinkerOnlyAction) // Implicit -O0 for compile+linker only.
+    return true;
+  return false;
+}
+
 void darwin::Linker::AddLinkArgs(Compilation &C, const ArgList &Args,
                                  ArgStringList &CmdArgs,
                                  const InputInfoList &Inputs) const {
@@ -7888,6 +7913,10 @@ void darwin::Linker::AddLinkArgs(Compilation &C, const ArgList &Args,
       }
     }
   }
+
+  // ld64 version 262 and above run the deduplicate pass by default.
+  if (Version[0] >= 262 && shouldLinkerNotDedup(C.getJobs().empty(), Args))
+    CmdArgs.push_back("-no_deduplicate");
 
   // Derived from the "link" spec.
   Args.AddAllArgs(CmdArgs, options::OPT_static);

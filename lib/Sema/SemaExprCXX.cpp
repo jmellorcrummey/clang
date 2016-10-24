@@ -2593,28 +2593,39 @@ void Sema::DeclareGlobalAllocationFunction(DeclarationName Name,
         getLangOpts().CPlusPlus11 ? EST_BasicNoexcept : EST_DynamicNone;
   }
 
-  QualType FnType = Context.getFunctionType(Return, Params, EPI);
-  FunctionDecl *Alloc =
-    FunctionDecl::Create(Context, GlobalCtx, SourceLocation(),
-                         SourceLocation(), Name,
-                         FnType, /*TInfo=*/nullptr, SC_None, false, true);
-  Alloc->setImplicit();
+  auto CreateAllocationFunctionDecl = [&](Attr *ExtraAttr) {
+    QualType FnType = Context.getFunctionType(Return, Params, EPI);
+    FunctionDecl *Alloc = FunctionDecl::Create(
+        Context, GlobalCtx, SourceLocation(), SourceLocation(), Name,
+        FnType, /*TInfo=*/nullptr, SC_None, false, true);
+    Alloc->setImplicit();
 
-  // Implicit sized deallocation functions always have default visibility.
-  Alloc->addAttr(VisibilityAttr::CreateImplicit(Context,
-                                                VisibilityAttr::Default));
+    // Implicit sized deallocation functions always have default visibility.
+    Alloc->addAttr(
+        VisibilityAttr::CreateImplicit(Context, VisibilityAttr::Default));
 
-  llvm::SmallVector<ParmVarDecl*, 3> ParamDecls;
-  for (QualType T : Params) {
-    ParamDecls.push_back(
-        ParmVarDecl::Create(Context, Alloc, SourceLocation(), SourceLocation(),
-                            nullptr, T, /*TInfo=*/nullptr, SC_None, nullptr));
-    ParamDecls.back()->setImplicit();
+    llvm::SmallVector<ParmVarDecl *, 3> ParamDecls;
+    for (QualType T : Params) {
+      ParamDecls.push_back(ParmVarDecl::Create(
+          Context, Alloc, SourceLocation(), SourceLocation(), nullptr, T,
+          /*TInfo=*/nullptr, SC_None, nullptr));
+      ParamDecls.back()->setImplicit();
+    }
+    Alloc->setParams(ParamDecls);
+    if (ExtraAttr)
+      Alloc->addAttr(ExtraAttr);
+    Context.getTranslationUnitDecl()->addDecl(Alloc);
+    IdResolver.tryAddTopLevelDecl(Alloc, Name);
+  };
+
+  if (!LangOpts.CUDA)
+    CreateAllocationFunctionDecl(nullptr);
+  else {
+    // Host and device get their own declaration so each can be
+    // defined or re-declared independently.
+    CreateAllocationFunctionDecl(CUDAHostAttr::CreateImplicit(Context));
+    CreateAllocationFunctionDecl(CUDADeviceAttr::CreateImplicit(Context));
   }
-  Alloc->setParams(ParamDecls);
-
-  Context.getTranslationUnitDecl()->addDecl(Alloc);
-  IdResolver.tryAddTopLevelDecl(Alloc, Name);
 }
 
 FunctionDecl *Sema::FindUsualDeallocationFunction(SourceLocation StartLoc,
@@ -3610,16 +3621,6 @@ Sema::PerformImplicitConversion(Expr *From, QualType ToType,
     // Nothing else to do.
     break;
 
-  case ICK_Function_Conversion:
-    // If both sides are functions (or pointers/references to them), there could
-    // be incompatible exception declarations.
-    if (CheckExceptionSpecCompatibility(From, ToType))
-      return ExprError();
-
-    From = ImpCastExprToType(From, ToType, CK_NoOp,
-                             VK_RValue, /*BasePath=*/nullptr, CCK).get();
-    break;
-
   case ICK_Integral_Promotion:
   case ICK_Integral_Conversion:
     if (ToType->isBooleanType()) {
@@ -3866,6 +3867,7 @@ Sema::PerformImplicitConversion(Expr *From, QualType ToType,
   case ICK_Lvalue_To_Rvalue:
   case ICK_Array_To_Pointer:
   case ICK_Function_To_Pointer:
+  case ICK_Function_Conversion:
   case ICK_Qualification:
   case ICK_Num_Conversion_Kinds:
   case ICK_C_Only_Conversion:
@@ -3876,6 +3878,16 @@ Sema::PerformImplicitConversion(Expr *From, QualType ToType,
   switch (SCS.Third) {
   case ICK_Identity:
     // Nothing to do.
+    break;
+
+  case ICK_Function_Conversion:
+    // If both sides are functions (or pointers/references to them), there could
+    // be incompatible exception declarations.
+    if (CheckExceptionSpecCompatibility(From, ToType))
+      return ExprError();
+
+    From = ImpCastExprToType(From, ToType, CK_NoOp,
+                             VK_RValue, /*BasePath=*/nullptr, CCK).get();
     break;
 
   case ICK_Qualification: {
@@ -5358,23 +5370,29 @@ QualType Sema::CXXCheckConditionalOperands(ExprResult &Cond, ExprResult &LHS,
   //   if both are glvalues of the same value category and the same type except
   //   for cv-qualification, an attempt is made to convert each of those
   //   operands to the type of the other.
+  // FIXME:
+  //   Resolving a defect in P0012R1: we extend this to cover all cases where
+  //   one of the operands is reference-compatible with the other, in order
+  //   to support conditionals between functions differing in noexcept.
   ExprValueKind LVK = LHS.get()->getValueKind();
   ExprValueKind RVK = RHS.get()->getValueKind();
   if (!Context.hasSameType(LTy, RTy) &&
-      Context.hasSameUnqualifiedType(LTy, RTy) &&
       LVK == RVK && LVK != VK_RValue) {
-    // Since the unqualified types are reference-related and we require the
-    // result to be as if a reference bound directly, the only conversion
-    // we can perform is to add cv-qualifiers.
-    Qualifiers LCVR = Qualifiers::fromCVRMask(LTy.getCVRQualifiers());
-    Qualifiers RCVR = Qualifiers::fromCVRMask(RTy.getCVRQualifiers());
-    if (RCVR.isStrictSupersetOf(LCVR)) {
-      LHS = ImpCastExprToType(LHS.get(), RTy, CK_NoOp, LVK);
-      LTy = LHS.get()->getType();
-    }
-    else if (LCVR.isStrictSupersetOf(RCVR)) {
+    // DerivedToBase was already handled by the class-specific case above.
+    // FIXME: Should we allow ObjC conversions here?
+    bool DerivedToBase, ObjCConversion, ObjCLifetimeConversion;
+    if (CompareReferenceRelationship(
+            QuestionLoc, LTy, RTy, DerivedToBase,
+            ObjCConversion, ObjCLifetimeConversion) == Ref_Compatible &&
+        !DerivedToBase && !ObjCConversion && !ObjCLifetimeConversion) {
       RHS = ImpCastExprToType(RHS.get(), LTy, CK_NoOp, RVK);
       RTy = RHS.get()->getType();
+    } else if (CompareReferenceRelationship(
+                   QuestionLoc, RTy, LTy, DerivedToBase,
+                   ObjCConversion, ObjCLifetimeConversion) == Ref_Compatible &&
+               !DerivedToBase && !ObjCConversion && !ObjCLifetimeConversion) {
+      LHS = ImpCastExprToType(LHS.get(), RTy, CK_NoOp, LVK);
+      LTy = LHS.get()->getType();
     }
   }
 
@@ -5393,6 +5411,20 @@ QualType Sema::CXXCheckConditionalOperands(ExprResult &Cond, ExprResult &LHS,
     if (LHS.get()->getObjectKind() == OK_BitField ||
         RHS.get()->getObjectKind() == OK_BitField)
       OK = OK_BitField;
+
+    // If we have function pointer types, unify them anyway to unify their
+    // exception specifications, if any.
+    if (LTy->isFunctionPointerType() || LTy->isMemberFunctionPointerType()) {
+      Qualifiers Qs = LTy.getQualifiers();
+      LTy = FindCompositePointerType(QuestionLoc, LHS, RHS,
+                                     /*ConvertArgs*/false);
+      LTy = Context.getQualifiedType(LTy, Qs);
+
+      assert(!LTy.isNull() && "failed to find composite pointer type for "
+                              "canonically equivalent function ptr types");
+      assert(Context.hasSameType(LTy, RTy) && "bad composite pointer type");
+    }
+
     return LTy;
   }
 
@@ -5447,6 +5479,14 @@ QualType Sema::CXXCheckConditionalOperands(ExprResult &Cond, ExprResult &LHS,
       RHS = RHSCopy;
     }
 
+    // If we have function pointer types, unify them anyway to unify their
+    // exception specifications, if any.
+    if (LTy->isFunctionPointerType() || LTy->isMemberFunctionPointerType()) {
+      LTy = FindCompositePointerType(QuestionLoc, LHS, RHS);
+      assert(!LTy.isNull() && "failed to find composite pointer type for "
+                              "canonically equivalent function ptr types");
+    }
+
     return LTy;
   }
 
@@ -5488,19 +5528,9 @@ QualType Sema::CXXCheckConditionalOperands(ExprResult &Cond, ExprResult &LHS,
   //      performed to bring them to a common type, whose cv-qualification
   //      shall match the cv-qualification of either the second or the third
   //      operand. The result is of the common type.
-  bool NonStandardCompositeType = false;
-  QualType Composite = FindCompositePointerType(QuestionLoc, LHS, RHS,
-                                 isSFINAEContext() ? nullptr
-                                                   : &NonStandardCompositeType);
-  if (!Composite.isNull()) {
-    if (NonStandardCompositeType)
-      Diag(QuestionLoc,
-           diag::ext_typecheck_cond_incompatible_operands_nonstandard)
-        << LTy << RTy << Composite
-        << LHS.get()->getSourceRange() << RHS.get()->getSourceRange();
-
+  QualType Composite = FindCompositePointerType(QuestionLoc, LHS, RHS);
+  if (!Composite.isNull())
     return Composite;
-  }
 
   // Similarly, attempt to find composite type of two objective-c pointers.
   Composite = FindCompositeObjCPointerType(LHS, RHS, QuestionLoc);
@@ -5517,6 +5547,78 @@ QualType Sema::CXXCheckConditionalOperands(ExprResult &Cond, ExprResult &LHS,
   return QualType();
 }
 
+static FunctionProtoType::ExceptionSpecInfo
+mergeExceptionSpecs(Sema &S, FunctionProtoType::ExceptionSpecInfo ESI1,
+                    FunctionProtoType::ExceptionSpecInfo ESI2,
+                    SmallVectorImpl<QualType> &ExceptionTypeStorage) {
+  ExceptionSpecificationType EST1 = ESI1.Type;
+  ExceptionSpecificationType EST2 = ESI2.Type;
+
+  // If either of them can throw anything, that is the result.
+  if (EST1 == EST_None) return ESI1;
+  if (EST2 == EST_None) return ESI2;
+  if (EST1 == EST_MSAny) return ESI1;
+  if (EST2 == EST_MSAny) return ESI2;
+
+  // If either of them is non-throwing, the result is the other.
+  if (EST1 == EST_DynamicNone) return ESI2;
+  if (EST2 == EST_DynamicNone) return ESI1;
+  if (EST1 == EST_BasicNoexcept) return ESI2;
+  if (EST2 == EST_BasicNoexcept) return ESI1;
+
+  // If either of them is a non-value-dependent computed noexcept, that
+  // determines the result.
+  if (EST2 == EST_ComputedNoexcept && ESI2.NoexceptExpr &&
+      !ESI2.NoexceptExpr->isValueDependent())
+    return !ESI2.NoexceptExpr->EvaluateKnownConstInt(S.Context) ? ESI2 : ESI1;
+  if (EST1 == EST_ComputedNoexcept && ESI1.NoexceptExpr &&
+      !ESI1.NoexceptExpr->isValueDependent())
+    return !ESI1.NoexceptExpr->EvaluateKnownConstInt(S.Context) ? ESI1 : ESI2;
+  // If we're left with value-dependent computed noexcept expressions, we're
+  // stuck. Before C++17, we can just drop the exception specification entirely,
+  // since it's not actually part of the canonical type. And this should never
+  // happen in C++17, because it would mean we were computing the composite
+  // pointer type of dependent types, which should never happen.
+  if (EST1 == EST_ComputedNoexcept || EST2 == EST_ComputedNoexcept) {
+    assert(!S.getLangOpts().CPlusPlus1z &&
+           "computing composite pointer type of dependent types");
+    return FunctionProtoType::ExceptionSpecInfo();
+  }
+
+  // Switch over the possibilities so that people adding new values know to
+  // update this function.
+  switch (EST1) {
+  case EST_None:
+  case EST_DynamicNone:
+  case EST_MSAny:
+  case EST_BasicNoexcept:
+  case EST_ComputedNoexcept:
+    llvm_unreachable("handled above");
+
+  case EST_Dynamic: {
+    // This is the fun case: both exception specifications are dynamic. Form
+    // the union of the two lists.
+    assert(EST2 == EST_Dynamic && "other cases should already be handled");
+    llvm::SmallPtrSet<QualType, 8> Found;
+    for (auto &Exceptions : {ESI1.Exceptions, ESI2.Exceptions})
+      for (QualType E : Exceptions)
+        if (Found.insert(S.Context.getCanonicalType(E)).second)
+          ExceptionTypeStorage.push_back(E);
+
+    FunctionProtoType::ExceptionSpecInfo Result(EST_Dynamic);
+    Result.Exceptions = ExceptionTypeStorage;
+    return Result;
+  }
+
+  case EST_Unevaluated:
+  case EST_Uninstantiated:
+  case EST_Unparsed:
+    llvm_unreachable("shouldn't see unresolved exception specifications here");
+  }
+
+  llvm_unreachable("invalid ExceptionSpecificationType");
+}
+
 /// \brief Find a merged pointer type and convert the two expressions to it.
 ///
 /// This finds the composite pointer type (or member pointer type) for @p E1
@@ -5527,16 +5629,10 @@ QualType Sema::CXXCheckConditionalOperands(ExprResult &Cond, ExprResult &LHS,
 /// \param Loc The location of the operator requiring these two expressions to
 /// be converted to the composite pointer type.
 ///
-/// If \p NonStandardCompositeType is non-NULL, then we are permitted to find
-/// a non-standard (but still sane) composite type to which both expressions
-/// can be converted. When such a type is chosen, \c *NonStandardCompositeType
-/// will be set true.
+/// \param ConvertArgs If \c false, do not convert E1 and E2 to the target type.
 QualType Sema::FindCompositePointerType(SourceLocation Loc,
                                         Expr *&E1, Expr *&E2,
-                                        bool *NonStandardCompositeType) {
-  if (NonStandardCompositeType)
-    *NonStandardCompositeType = false;
-
+                                        bool ConvertArgs) {
   assert(getLangOpts().CPlusPlus && "This function assumes C++");
 
   // C++1z [expr]p14:
@@ -5560,16 +5656,18 @@ QualType Sema::FindCompositePointerType(SourceLocation Loc,
   //   - if either p1 or p2 is a null pointer constant, T2 or T1, respectively;
   if (T1IsPointerLike &&
       E2->isNullPointerConstant(Context, Expr::NPC_ValueDependentIsNull)) {
-    E2 = ImpCastExprToType(E2, T1, T1->isMemberPointerType()
-                                       ? CK_NullToMemberPointer
-                                       : CK_NullToPointer).get();
+    if (ConvertArgs)
+      E2 = ImpCastExprToType(E2, T1, T1->isMemberPointerType()
+                                         ? CK_NullToMemberPointer
+                                         : CK_NullToPointer).get();
     return T1;
   }
   if (T2IsPointerLike &&
       E1->isNullPointerConstant(Context, Expr::NPC_ValueDependentIsNull)) {
-    E1 = ImpCastExprToType(E1, T2, T2->isMemberPointerType()
-                                       ? CK_NullToMemberPointer
-                                       : CK_NullToPointer).get();
+    if (ConvertArgs)
+      E1 = ImpCastExprToType(E1, T2, T2->isMemberPointerType()
+                                         ? CK_NullToMemberPointer
+                                         : CK_NullToPointer).get();
     return T2;
   }
 
@@ -5615,8 +5713,8 @@ QualType Sema::FindCompositePointerType(SourceLocation Loc,
   // exists.
   SmallVector<unsigned, 4> QualifierUnion;
   SmallVector<std::pair<const Type *, const Type *>, 4> MemberOfClass;
-  QualType Composite1 = Context.getCanonicalType(T1);
-  QualType Composite2 = Context.getCanonicalType(T2);
+  QualType Composite1 = T1;
+  QualType Composite2 = T2;
   unsigned NeedConstBefore = 0;
   while (true) {
     const PointerType *Ptr1, *Ptr2;
@@ -5627,8 +5725,7 @@ QualType Sema::FindCompositePointerType(SourceLocation Loc,
 
       // If we're allowed to create a non-standard composite type, keep track
       // of where we need to fill in additional 'const' qualifiers.
-      if (NonStandardCompositeType &&
-          Composite1.getCVRQualifiers() != Composite2.getCVRQualifiers())
+      if (Composite1.getCVRQualifiers() != Composite2.getCVRQualifiers())
         NeedConstBefore = QualifierUnion.size();
 
       QualifierUnion.push_back(
@@ -5645,8 +5742,7 @@ QualType Sema::FindCompositePointerType(SourceLocation Loc,
 
       // If we're allowed to create a non-standard composite type, keep track
       // of where we need to fill in additional 'const' qualifiers.
-      if (NonStandardCompositeType &&
-          Composite1.getCVRQualifiers() != Composite2.getCVRQualifiers())
+      if (Composite1.getCVRQualifiers() != Composite2.getCVRQualifiers())
         NeedConstBefore = QualifierUnion.size();
 
       QualifierUnion.push_back(
@@ -5662,16 +5758,48 @@ QualType Sema::FindCompositePointerType(SourceLocation Loc,
     break;
   }
 
-  if (NeedConstBefore && NonStandardCompositeType) {
+  // Apply the function pointer conversion to unify the types. We've already
+  // unwrapped down to the function types, and we want to merge rather than
+  // just convert, so do this ourselves rather than calling
+  // IsFunctionConversion.
+  //
+  // FIXME: In order to match the standard wording as closely as possible, we
+  // currently only do this under a single level of pointers. Ideally, we would
+  // allow this in general, and set NeedConstBefore to the relevant depth on
+  // the side(s) where we changed anything.
+  if (QualifierUnion.size() == 1) {
+    if (auto *FPT1 = Composite1->getAs<FunctionProtoType>()) {
+      if (auto *FPT2 = Composite2->getAs<FunctionProtoType>()) {
+        FunctionProtoType::ExtProtoInfo EPI1 = FPT1->getExtProtoInfo();
+        FunctionProtoType::ExtProtoInfo EPI2 = FPT2->getExtProtoInfo();
+
+        // The result is noreturn if both operands are.
+        bool Noreturn =
+            EPI1.ExtInfo.getNoReturn() && EPI2.ExtInfo.getNoReturn();
+        EPI1.ExtInfo = EPI1.ExtInfo.withNoReturn(Noreturn);
+        EPI2.ExtInfo = EPI2.ExtInfo.withNoReturn(Noreturn);
+
+        // The result is nothrow if both operands are.
+        SmallVector<QualType, 8> ExceptionTypeStorage;
+        EPI1.ExceptionSpec = EPI2.ExceptionSpec =
+            mergeExceptionSpecs(*this, EPI1.ExceptionSpec, EPI2.ExceptionSpec,
+                                ExceptionTypeStorage);
+
+        Composite1 = Context.getFunctionType(FPT1->getReturnType(),
+                                             FPT1->getParamTypes(), EPI1);
+        Composite2 = Context.getFunctionType(FPT2->getReturnType(),
+                                             FPT2->getParamTypes(), EPI2);
+      }
+    }
+  }
+
+  if (NeedConstBefore) {
     // Extension: Add 'const' to qualifiers that come before the first qualifier
     // mismatch, so that our (non-standard!) composite type meets the
     // requirements of C++ [conv.qual]p4 bullet 3.
-    for (unsigned I = 0; I != NeedConstBefore; ++I) {
-      if ((QualifierUnion[I] & Qualifiers::Const) == 0) {
+    for (unsigned I = 0; I != NeedConstBefore; ++I)
+      if ((QualifierUnion[I] & Qualifiers::Const) == 0)
         QualifierUnion[I] = QualifierUnion[I] | Qualifiers::Const;
-        *NonStandardCompositeType = true;
-      }
-    }
   }
 
   // Rewrap the composites as pointers or member pointers with the union CVRs.
@@ -5711,25 +5839,28 @@ QualType Sema::FindCompositePointerType(SourceLocation Loc,
           E1ToC(S, Entity, Kind, E1), E2ToC(S, Entity, Kind, E2),
           Viable(E1ToC && E2ToC) {}
 
-    QualType perform() {
+    bool perform() {
       ExprResult E1Result = E1ToC.Perform(S, Entity, Kind, E1);
       if (E1Result.isInvalid())
-        return QualType();
+        return true;
       E1 = E1Result.getAs<Expr>();
 
       ExprResult E2Result = E2ToC.Perform(S, Entity, Kind, E2);
       if (E2Result.isInvalid())
-        return QualType();
+        return true;
       E2 = E2Result.getAs<Expr>();
 
-      return Composite;
+      return false;
     }
   };
 
   // Try to convert to each composite pointer type.
   Conversion C1(*this, Loc, E1, E2, Composite1);
-  if (C1.Viable && Context.hasSameType(Composite1, Composite2))
-    return C1.perform();
+  if (C1.Viable && Context.hasSameType(Composite1, Composite2)) {
+    if (ConvertArgs && C1.perform())
+      return QualType();
+    return C1.Composite;
+  }
   Conversion C2(*this, Loc, E1, E2, Composite2);
 
   if (C1.Viable == C2.Viable) {
@@ -5740,7 +5871,10 @@ QualType Sema::FindCompositePointerType(SourceLocation Loc,
   }
 
   // Convert to the chosen type.
-  return (C1.Viable ? C1 : C2).perform();
+  if (ConvertArgs && (C1.Viable ? C1 : C2).perform())
+    return QualType();
+
+  return C1.Viable ? C1.Composite : C2.Composite;
 }
 
 ExprResult Sema::MaybeBindToTemporary(Expr *E) {
