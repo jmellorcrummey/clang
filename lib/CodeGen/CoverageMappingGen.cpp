@@ -136,7 +136,7 @@ public:
 
   /// \brief Return true if \c Loc is a location in a built-in macro.
   bool isInBuiltin(SourceLocation Loc) {
-    return strcmp(SM.getBufferName(SM.getSpellingLoc(Loc)), "<built-in>") == 0;
+    return SM.getBufferName(SM.getSpellingLoc(Loc)) == "<built-in>";
   }
 
   /// \brief Check whether \c Loc is included or expanded from \c Parent.
@@ -813,6 +813,8 @@ struct CounterCoverageMappingBuilder
 
   void VisitSwitchStmt(const SwitchStmt *S) {
     extendRegion(S);
+    if (S->getInit())
+      Visit(S->getInit());
     Visit(S->getCond());
 
     BreakContinueStack.push_back(BreakContinue());
@@ -873,6 +875,9 @@ struct CounterCoverageMappingBuilder
 
   void VisitIfStmt(const IfStmt *S) {
     extendRegion(S);
+    if (S->getInit())
+      Visit(S->getInit());
+
     // Extend into the condition before we propagate through it below - this is
     // needed to handle macros that generate the "if" but not the condition.
     extendRegion(S->getCond());

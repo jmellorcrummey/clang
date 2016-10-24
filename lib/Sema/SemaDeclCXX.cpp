@@ -659,9 +659,6 @@ bool Sema::MergeCXXFunctionDecl(FunctionDecl *New, FunctionDecl *Old,
     Invalid = true;
   }
 
-  if (CheckEquivalentExceptionSpec(Old, New))
-    Invalid = true;
-
   return Invalid;
 }
 
@@ -1282,7 +1279,9 @@ static bool checkMemberDecomposition(Sema &S, ArrayRef<BindingDecl*> Bindings,
                                                  DecompType.getQualifiers());
 
   auto DiagnoseBadNumberOfBindings = [&]() -> bool {
-    unsigned NumFields = std::distance(RD->field_begin(), RD->field_end());
+    unsigned NumFields =
+        std::count_if(RD->field_begin(), RD->field_end(),
+                      [](FieldDecl *FD) { return !FD->isUnnamedBitfield(); });
     assert(Bindings.size() != NumFields);
     S.Diag(Src->getLocation(), diag::err_decomp_decl_wrong_number_bindings)
         << DecompType << (unsigned)Bindings.size() << NumFields
@@ -5546,7 +5545,8 @@ void Sema::checkClassLevelDLLAttribute(CXXRecordDecl *Class) {
 
       if (MD->isInlined()) {
         // MinGW does not import or export inline methods.
-        if (!Context.getTargetInfo().getCXXABI().isMicrosoft())
+        if (!Context.getTargetInfo().getCXXABI().isMicrosoft() &&
+            !Context.getTargetInfo().getTriple().isWindowsItaniumEnvironment())
           continue;
 
         // MSVC versions before 2015 don't export the move assignment operators
@@ -6755,7 +6755,7 @@ bool Sema::ShouldDeleteSpecialMember(CXXMethodDecl *MD, CXXSpecialMember CSM,
     DeclarationName Name =
       Context.DeclarationNames.getCXXOperatorName(OO_Delete);
     if (FindDeallocationFunction(MD->getLocation(), MD->getParent(), Name,
-                                 OperatorDelete, false)) {
+                                 OperatorDelete, /*Diagnose*/false)) {
       if (Diagnose)
         Diag(RD->getLocation(), diag::note_deleted_dtor_no_operator_delete);
       return true;
@@ -7695,19 +7695,11 @@ bool Sema::CheckDestructor(CXXDestructorDecl *Destructor) {
       Loc = RD->getLocation();
     
     // If we have a virtual destructor, look up the deallocation function
-    FunctionDecl *OperatorDelete = nullptr;
-    DeclarationName Name = 
-    Context.DeclarationNames.getCXXOperatorName(OO_Delete);
-    if (FindDeallocationFunction(Loc, RD, Name, OperatorDelete))
-      return true;
-    // If there's no class-specific operator delete, look up the global
-    // non-array delete.
-    if (!OperatorDelete)
-      OperatorDelete = FindUsualDeallocationFunction(Loc, true, Name);
-
-    MarkFunctionReferenced(Loc, OperatorDelete);
-    
-    Destructor->setOperatorDelete(OperatorDelete);
+    if (FunctionDecl *OperatorDelete =
+            FindDeallocationFunctionForDestructor(Loc, RD)) {
+      MarkFunctionReferenced(Loc, OperatorDelete);
+      Destructor->setOperatorDelete(OperatorDelete);
+    }
   }
   
   return false;
@@ -8089,7 +8081,7 @@ static void DiagnoseNamespaceInlineMismatch(Sema &S, SourceLocation KeywordLoc,
     S.Diag(Loc, diag::warn_inline_namespace_reopened_noninline)
       << FixItHint::CreateInsertion(KeywordLoc, "inline ");
   else
-    S.Diag(Loc, diag::err_inline_namespace_mismatch) << *IsInline;
+    S.Diag(Loc, diag::err_inline_namespace_mismatch);
 
   S.Diag(PrevNS->getLocation(), diag::note_previous_definition);
   *IsInline = PrevNS->isInline();
@@ -8273,6 +8265,20 @@ EnumDecl *Sema::getStdAlignValT() const {
 NamespaceDecl *Sema::getStdNamespace() const {
   return cast_or_null<NamespaceDecl>(
                                  StdNamespace.get(Context.getExternalSource()));
+}
+
+NamespaceDecl *Sema::lookupStdExperimentalNamespace() {
+  if (!StdExperimentalNamespaceCache) {
+    if (auto Std = getStdNamespace()) {
+      LookupResult Result(*this, &PP.getIdentifierTable().get("experimental"),
+                          SourceLocation(), LookupNamespaceName);
+      if (!LookupQualifiedName(Result, Std) ||
+          !(StdExperimentalNamespaceCache =
+                Result.getAsSingle<NamespaceDecl>()))
+        Result.suppressDiagnostics();
+    }
+  }
+  return StdExperimentalNamespaceCache;
 }
 
 /// \brief Retrieve the special "std" namespace, which may require us to 
@@ -9456,11 +9462,13 @@ bool Sema::CheckUsingDeclQualifier(SourceLocation UsingLoc,
         return true;
       }
 
-      Diag(SS.getRange().getBegin(),
-           diag::err_using_decl_nested_name_specifier_is_not_base_class)
-        << SS.getScopeRep()
-        << cast<CXXRecordDecl>(CurContext)
-        << SS.getRange();
+      if (!cast<CXXRecordDecl>(NamedContext)->isInvalidDecl()) {
+        Diag(SS.getRange().getBegin(),
+             diag::err_using_decl_nested_name_specifier_is_not_base_class)
+          << SS.getScopeRep()
+          << cast<CXXRecordDecl>(CurContext)
+          << SS.getRange();
+      }
       return true;
     }
 
@@ -10266,7 +10274,11 @@ CXXDestructorDecl *Sema::DeclareImplicitDestructor(CXXRecordDecl *ClassDecl) {
   Scope *S = getScopeForContext(ClassDecl);
   CheckImplicitSpecialMemberDeclaration(S, Destructor);
 
-  if (ShouldDeleteSpecialMember(Destructor, CXXDestructor))
+  // We can't check whether an implicit destructor is deleted before we complete
+  // the definition of the class, because its validity depends on the alignment
+  // of the class. We'll check this from ActOnFields once the class is complete.
+  if (ClassDecl->isCompleteDefinition() &&
+      ShouldDeleteSpecialMember(Destructor, CXXDestructor))
     SetDeclDeleted(Destructor, ClassLoc);
 
   // Introduce this destructor into its scope.
@@ -13772,9 +13784,13 @@ NamedDecl *Sema::ActOnFriendFunctionDecl(Scope *S, Declarator &D,
     // and shall be the only declaration of the function or function
     // template in the translation unit.
     if (functionDeclHasDefaultArgument(FD)) {
-      if (FunctionDecl *OldFD = FD->getPreviousDecl()) {
+      // We can't look at FD->getPreviousDecl() because it may not have been set
+      // if we're in a dependent context. If the function is known to be a
+      // redeclaration, we will have narrowed Previous down to the right decl.
+      if (D.isRedeclaration()) {
         Diag(FD->getLocation(), diag::err_friend_decl_with_def_arg_redeclared);
-        Diag(OldFD->getLocation(), diag::note_previous_declaration);
+        Diag(Previous.getRepresentativeDecl()->getLocation(),
+             diag::note_previous_declaration);
       } else if (!D.isFunctionDefinition())
         Diag(FD->getLocation(), diag::err_friend_decl_with_def_arg_must_be_def);
     }

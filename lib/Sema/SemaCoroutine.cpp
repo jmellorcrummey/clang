@@ -26,15 +26,15 @@ using namespace sema;
 static QualType lookupPromiseType(Sema &S, const FunctionProtoType *FnType,
                                   SourceLocation Loc) {
   // FIXME: Cache std::coroutine_traits once we've found it.
-  NamespaceDecl *Std = S.getStdNamespace();
-  if (!Std) {
+  NamespaceDecl *StdExp = S.lookupStdExperimentalNamespace();
+  if (!StdExp) {
     S.Diag(Loc, diag::err_implied_std_coroutine_traits_not_found);
     return QualType();
   }
 
   LookupResult Result(S, &S.PP.getIdentifierTable().get("coroutine_traits"),
                       Loc, Sema::LookupOrdinaryName);
-  if (!S.LookupQualifiedName(Result, Std)) {
+  if (!S.LookupQualifiedName(Result, StdExp)) {
     S.Diag(Loc, diag::err_implied_std_coroutine_traits_not_found);
     return QualType();
   }
@@ -86,7 +86,7 @@ static QualType lookupPromiseType(Sema &S, const FunctionProtoType *FnType,
   QualType PromiseType = S.Context.getTypeDeclType(Promise);
   if (!PromiseType->getAsCXXRecordDecl()) {
     // Use the fully-qualified name of the type.
-    auto *NNS = NestedNameSpecifier::Create(S.Context, nullptr, Std);
+    auto *NNS = NestedNameSpecifier::Create(S.Context, nullptr, StdExp);
     NNS = NestedNameSpecifier::Create(S.Context, NNS, false,
                                       CoroTrait.getTypePtr());
     PromiseType = S.Context.getElaboratedType(ETK_None, NNS, PromiseType);
@@ -127,6 +127,11 @@ checkCoroutineContext(Sema &S, SourceLocation Loc, StringRef Keyword) {
     S.Diag(Loc, diag::err_coroutine_constexpr) << Keyword;
   } else if (FD->isVariadic()) {
     S.Diag(Loc, diag::err_coroutine_varargs) << Keyword;
+  } else if (FD->isMain()) {
+    S.Diag(FD->getLocStart(), diag::err_coroutine_main);
+    S.Diag(Loc, diag::note_declared_coroutine_here)
+      << (Keyword == "co_await" ? 0 :
+          Keyword == "co_yield" ? 1 : 2);
   } else {
     auto *ScopeInfo = S.getCurFunction();
     assert(ScopeInfo && "missing function scope for function");
@@ -340,6 +345,7 @@ StmtResult Sema::ActOnCoreturnStmt(SourceLocation Loc, Expr *E) {
   }
   return BuildCoreturnStmt(Loc, E);
 }
+
 StmtResult Sema::BuildCoreturnStmt(SourceLocation Loc, Expr *E) {
   auto *Coroutine = checkCoroutineContext(*this, Loc, "co_return");
   if (!Coroutine)
@@ -356,7 +362,7 @@ StmtResult Sema::BuildCoreturnStmt(SourceLocation Loc, Expr *E) {
   // of scope, we should treat the operand as an xvalue for this overload
   // resolution.
   ExprResult PC;
-  if (E && !E->getType()->isVoidType()) {
+  if (E && (isa<InitListExpr>(E) || !E->getType()->isVoidType())) {
     PC = buildPromiseCall(*this, Coroutine, Loc, "return_value", E);
   } else {
     E = MakeFullDiscardedValueExpr(E).get();

@@ -392,6 +392,15 @@ static void InitializeStandardPredefinedMacros(const TargetInfo &TI,
     //   C++ translation unit.
     else
       Builder.defineMacro("__cplusplus", "199711L");
+
+    // C++1z [cpp.predefined]p1:
+    //   An integer literal of type std::size_t whose value is the alignment
+    //   guaranteed by a call to operator new(std::size_t)
+    //
+    // We provide this in all language modes, since it seems generally useful.
+    Builder.defineMacro("__STDCPP_DEFAULT_NEW_ALIGNMENT__",
+                        Twine(TI.getNewAlign() / TI.getCharWidth()) +
+                            TI.getTypeConstantSuffix(TI.getSizeType()));
   }
 
   // In C11 these are environment macros. In C++11 they are only defined
@@ -501,7 +510,6 @@ static void InitializeCPlusPlusFeatureTestMacros(const LangOptions &LangOpts,
   if (LangOpts.CPlusPlus1z) {
     Builder.defineMacro("__cpp_hex_float", "201603");
     Builder.defineMacro("__cpp_inline_variables", "201606");
-    //Builder.defineMacro("__cpp_aligned_new", "201606");
     //Builder.defineMacro("__cpp_noexcept_function_type", "201510");
     Builder.defineMacro("__cpp_capture_star_this", "201603");
     Builder.defineMacro("__cpp_if_constexpr", "201606");
@@ -513,11 +521,13 @@ static void InitializeCPlusPlusFeatureTestMacros(const LangOptions &LangOpts,
     Builder.defineMacro("__cpp_nontype_template_args", "201411");
     Builder.defineMacro("__cpp_fold_expressions", "201603");
   }
+  if (LangOpts.AlignedAllocation)
+    Builder.defineMacro("__cpp_aligned_new", "201606");
 
   // TS features.
   if (LangOpts.ConceptsTS)
     Builder.defineMacro("__cpp_experimental_concepts", "1");
-  if (LangOpts.Coroutines)
+  if (LangOpts.CoroutinesTS)
     Builder.defineMacro("__cpp_coroutines", "1");
 }
 
