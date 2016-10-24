@@ -176,6 +176,8 @@ class Replacements {
   ///   - are insertions at the same offset and applying them in either order
   ///     has the same effect, i.e. X + Y = Y + X when inserting X and Y
   ///     respectively.
+  ///   - are identical replacements, i.e. applying the same replacement twice
+  ///     is equivalent to applying it once.
   /// Examples:
   /// 1. Replacement A(0, 0, "a") and B(0, 0, "aa") are order-independent since
   ///    applying them in either order gives replacement (0, 0, "aaa").
@@ -186,6 +188,8 @@ class Replacements {
   ///    since applying them in either order gives (0, 2, "123").
   /// 3. Replacement A(0, 3, "123") and B(2, 3, "321") are order-independent
   ///    since either order gives (0, 5, "12321").
+  /// 4. Replacement A(0, 3, "ab") and B(0, 3, "ab") are order-independent since
+  ///    applying the same replacement twice is equivalent to applying it once.
   /// Replacements with offset UINT_MAX are special - we do not detect conflicts
   /// for such replacements since users may add them intentionally as a special
   /// category of replacements.
@@ -225,8 +229,6 @@ class Replacements {
 private:
   Replacements(const_iterator Begin, const_iterator End)
       : Replaces(Begin, End) {}
-
-  Replacements mergeReplacements(const ReplacementsImpl &Second) const;
 
   // Returns `R` with new range that refers to code after `Replaces` being
   // applied.
@@ -290,10 +292,11 @@ std::vector<Range>
 calculateRangesAfterReplacements(const Replacements &Replaces,
                                  const std::vector<Range> &Ranges);
 
-/// \brief Groups a random set of replacements by file path. Replacements
-/// related to the same file entry are put into the same vector.
-std::map<std::string, Replacements>
-groupReplacementsByFile(const Replacements &Replaces);
+/// \brief If there are multiple <File, Replacements> pairs with the same file
+/// path after removing dots, we only keep one pair (with path after dots being
+/// removed) and discard the rest.
+std::map<std::string, Replacements> groupReplacementsByFile(
+    const std::map<std::string, Replacements> &FileToReplaces);
 
 template <typename Node>
 Replacement::Replacement(const SourceManager &Sources,

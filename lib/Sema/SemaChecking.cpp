@@ -1455,8 +1455,17 @@ bool Sema::CheckAArch64BuiltinFunctionCall(unsigned BuiltinID,
   return SemaBuiltinConstantArgRange(TheCall, i, l, u + l);
 }
 
+// CheckMipsBuiltinFunctionCall - Checks the constant value passed to the
+// intrinsic is correct. The switch statement is ordered by DSP, MSA. The
+// ordering for DSP is unspecified. MSA is ordered by the data format used
+// by the underlying instruction i.e., df/m, df/n and then by size.
+//
+// FIXME: The size tests here should instead be tablegen'd along with the
+//        definitions from include/clang/Basic/BuiltinsMips.def.
+// FIXME: GCC is strict on signedness for some of these intrinsics, we should
+//        be too.
 bool Sema::CheckMipsBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
-  unsigned i = 0, l = 0, u = 0;
+  unsigned i = 0, l = 0, u = 0, m = 0;
   switch (BuiltinID) {
   default: return false;
   case Mips::BI__builtin_mips_wrdsp: i = 1; l = 0; u = 63; break;
@@ -1466,9 +1475,168 @@ bool Sema::CheckMipsBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
   case Mips::BI__builtin_mips_precr_sra_ph_w: i = 2; l = 0; u = 31; break;
   case Mips::BI__builtin_mips_precr_sra_r_ph_w: i = 2; l = 0; u = 31; break;
   case Mips::BI__builtin_mips_prepend: i = 2; l = 0; u = 31; break;
+  // MSA instrinsics. Instructions (which the intrinsics maps to) which use the
+  // df/m field.
+  // These intrinsics take an unsigned 3 bit immediate.
+  case Mips::BI__builtin_msa_bclri_b:
+  case Mips::BI__builtin_msa_bnegi_b:
+  case Mips::BI__builtin_msa_bseti_b:
+  case Mips::BI__builtin_msa_sat_s_b:
+  case Mips::BI__builtin_msa_sat_u_b:
+  case Mips::BI__builtin_msa_slli_b:
+  case Mips::BI__builtin_msa_srai_b:
+  case Mips::BI__builtin_msa_srari_b:
+  case Mips::BI__builtin_msa_srli_b:
+  case Mips::BI__builtin_msa_srlri_b: i = 1; l = 0; u = 7; break;
+  case Mips::BI__builtin_msa_binsli_b:
+  case Mips::BI__builtin_msa_binsri_b: i = 2; l = 0; u = 7; break;
+  // These intrinsics take an unsigned 4 bit immediate.
+  case Mips::BI__builtin_msa_bclri_h:
+  case Mips::BI__builtin_msa_bnegi_h:
+  case Mips::BI__builtin_msa_bseti_h:
+  case Mips::BI__builtin_msa_sat_s_h:
+  case Mips::BI__builtin_msa_sat_u_h:
+  case Mips::BI__builtin_msa_slli_h:
+  case Mips::BI__builtin_msa_srai_h:
+  case Mips::BI__builtin_msa_srari_h:
+  case Mips::BI__builtin_msa_srli_h:
+  case Mips::BI__builtin_msa_srlri_h: i = 1; l = 0; u = 15; break;
+  case Mips::BI__builtin_msa_binsli_h:
+  case Mips::BI__builtin_msa_binsri_h: i = 2; l = 0; u = 15; break;
+  // These intrinsics take an unsigned 5 bit immedate.
+  // The first block of intrinsics actually have an unsigned 5 bit field,
+  // not a df/n field.
+  case Mips::BI__builtin_msa_clei_u_b:
+  case Mips::BI__builtin_msa_clei_u_h:
+  case Mips::BI__builtin_msa_clei_u_w:
+  case Mips::BI__builtin_msa_clei_u_d:
+  case Mips::BI__builtin_msa_clti_u_b:
+  case Mips::BI__builtin_msa_clti_u_h:
+  case Mips::BI__builtin_msa_clti_u_w:
+  case Mips::BI__builtin_msa_clti_u_d:
+  case Mips::BI__builtin_msa_maxi_u_b:
+  case Mips::BI__builtin_msa_maxi_u_h:
+  case Mips::BI__builtin_msa_maxi_u_w:
+  case Mips::BI__builtin_msa_maxi_u_d:
+  case Mips::BI__builtin_msa_mini_u_b:
+  case Mips::BI__builtin_msa_mini_u_h:
+  case Mips::BI__builtin_msa_mini_u_w:
+  case Mips::BI__builtin_msa_mini_u_d:
+  case Mips::BI__builtin_msa_addvi_b:
+  case Mips::BI__builtin_msa_addvi_h:
+  case Mips::BI__builtin_msa_addvi_w:
+  case Mips::BI__builtin_msa_addvi_d:
+  case Mips::BI__builtin_msa_bclri_w:
+  case Mips::BI__builtin_msa_bnegi_w:
+  case Mips::BI__builtin_msa_bseti_w:
+  case Mips::BI__builtin_msa_sat_s_w:
+  case Mips::BI__builtin_msa_sat_u_w:
+  case Mips::BI__builtin_msa_slli_w:
+  case Mips::BI__builtin_msa_srai_w:
+  case Mips::BI__builtin_msa_srari_w:
+  case Mips::BI__builtin_msa_srli_w:
+  case Mips::BI__builtin_msa_srlri_w:
+  case Mips::BI__builtin_msa_subvi_b:
+  case Mips::BI__builtin_msa_subvi_h:
+  case Mips::BI__builtin_msa_subvi_w:
+  case Mips::BI__builtin_msa_subvi_d: i = 1; l = 0; u = 31; break;
+  case Mips::BI__builtin_msa_binsli_w:
+  case Mips::BI__builtin_msa_binsri_w: i = 2; l = 0; u = 31; break;
+  // These intrinsics take an unsigned 6 bit immediate.
+  case Mips::BI__builtin_msa_bclri_d:
+  case Mips::BI__builtin_msa_bnegi_d:
+  case Mips::BI__builtin_msa_bseti_d:
+  case Mips::BI__builtin_msa_sat_s_d:
+  case Mips::BI__builtin_msa_sat_u_d:
+  case Mips::BI__builtin_msa_slli_d:
+  case Mips::BI__builtin_msa_srai_d:
+  case Mips::BI__builtin_msa_srari_d:
+  case Mips::BI__builtin_msa_srli_d:
+  case Mips::BI__builtin_msa_srlri_d: i = 1; l = 0; u = 63; break;
+  case Mips::BI__builtin_msa_binsli_d:
+  case Mips::BI__builtin_msa_binsri_d: i = 2; l = 0; u = 63; break;
+  // These intrinsics take a signed 5 bit immediate.
+  case Mips::BI__builtin_msa_ceqi_b:
+  case Mips::BI__builtin_msa_ceqi_h:
+  case Mips::BI__builtin_msa_ceqi_w:
+  case Mips::BI__builtin_msa_ceqi_d:
+  case Mips::BI__builtin_msa_clti_s_b:
+  case Mips::BI__builtin_msa_clti_s_h:
+  case Mips::BI__builtin_msa_clti_s_w:
+  case Mips::BI__builtin_msa_clti_s_d:
+  case Mips::BI__builtin_msa_clei_s_b:
+  case Mips::BI__builtin_msa_clei_s_h:
+  case Mips::BI__builtin_msa_clei_s_w:
+  case Mips::BI__builtin_msa_clei_s_d:
+  case Mips::BI__builtin_msa_maxi_s_b:
+  case Mips::BI__builtin_msa_maxi_s_h:
+  case Mips::BI__builtin_msa_maxi_s_w:
+  case Mips::BI__builtin_msa_maxi_s_d:
+  case Mips::BI__builtin_msa_mini_s_b:
+  case Mips::BI__builtin_msa_mini_s_h:
+  case Mips::BI__builtin_msa_mini_s_w:
+  case Mips::BI__builtin_msa_mini_s_d: i = 1; l = -16; u = 15; break;
+  // These intrinsics take an unsigned 8 bit immediate.
+  case Mips::BI__builtin_msa_andi_b:
+  case Mips::BI__builtin_msa_nori_b:
+  case Mips::BI__builtin_msa_ori_b:
+  case Mips::BI__builtin_msa_shf_b:
+  case Mips::BI__builtin_msa_shf_h:
+  case Mips::BI__builtin_msa_shf_w:
+  case Mips::BI__builtin_msa_xori_b: i = 1; l = 0; u = 255; break;
+  case Mips::BI__builtin_msa_bseli_b:
+  case Mips::BI__builtin_msa_bmnzi_b:
+  case Mips::BI__builtin_msa_bmzi_b: i = 2; l = 0; u = 255; break;
+  // df/n format
+  // These intrinsics take an unsigned 4 bit immediate.
+  case Mips::BI__builtin_msa_copy_s_b:
+  case Mips::BI__builtin_msa_copy_u_b:
+  case Mips::BI__builtin_msa_insve_b:
+  case Mips::BI__builtin_msa_splati_b: i = 1; l = 0; u = 15; break;
+  case Mips::BI__builtin_msa_sld_b:
+  case Mips::BI__builtin_msa_sldi_b: i = 2; l = 0; u = 15; break;
+  // These intrinsics take an unsigned 3 bit immediate.
+  case Mips::BI__builtin_msa_copy_s_h:
+  case Mips::BI__builtin_msa_copy_u_h:
+  case Mips::BI__builtin_msa_insve_h:
+  case Mips::BI__builtin_msa_splati_h: i = 1; l = 0; u = 7; break;
+  case Mips::BI__builtin_msa_sld_h:
+  case Mips::BI__builtin_msa_sldi_h: i = 2; l = 0; u = 7; break;
+  // These intrinsics take an unsigned 2 bit immediate.
+  case Mips::BI__builtin_msa_copy_s_w:
+  case Mips::BI__builtin_msa_copy_u_w:
+  case Mips::BI__builtin_msa_insve_w:
+  case Mips::BI__builtin_msa_splati_w: i = 1; l = 0; u = 3; break;
+  case Mips::BI__builtin_msa_sld_w:
+  case Mips::BI__builtin_msa_sldi_w: i = 2; l = 0; u = 3; break;
+  // These intrinsics take an unsigned 1 bit immediate.
+  case Mips::BI__builtin_msa_copy_s_d:
+  case Mips::BI__builtin_msa_copy_u_d:
+  case Mips::BI__builtin_msa_insve_d:
+  case Mips::BI__builtin_msa_splati_d: i = 1; l = 0; u = 1; break;
+  case Mips::BI__builtin_msa_sld_d:
+  case Mips::BI__builtin_msa_sldi_d: i = 2; l = 0; u = 1; break;
+  // Memory offsets and immediate loads.
+  // These intrinsics take a signed 10 bit immediate.
+  case Mips::BI__builtin_msa_ldi_b: i = 0; l = -128; u = 127; break;
+  case Mips::BI__builtin_msa_ldi_h:
+  case Mips::BI__builtin_msa_ldi_w:
+  case Mips::BI__builtin_msa_ldi_d: i = 0; l = -512; u = 511; break;
+  case Mips::BI__builtin_msa_ld_b: i = 1; l = -512; u = 511; m = 16; break;
+  case Mips::BI__builtin_msa_ld_h: i = 1; l = -1024; u = 1022; m = 16; break;
+  case Mips::BI__builtin_msa_ld_w: i = 1; l = -2048; u = 2044; m = 16; break;
+  case Mips::BI__builtin_msa_ld_d: i = 1; l = -4096; u = 4088; m = 16; break;
+  case Mips::BI__builtin_msa_st_b: i = 2; l = -512; u = 511; m = 16; break;
+  case Mips::BI__builtin_msa_st_h: i = 2; l = -1024; u = 1022; m = 16; break;
+  case Mips::BI__builtin_msa_st_w: i = 2; l = -2048; u = 2044; m = 16; break;
+  case Mips::BI__builtin_msa_st_d: i = 2; l = -4096; u = 4088; m = 16; break;
   }
 
-  return SemaBuiltinConstantArgRange(TheCall, i, l, u);
+  if (!m)
+    return SemaBuiltinConstantArgRange(TheCall, i, l, u);
+
+  return SemaBuiltinConstantArgRange(TheCall, i, l, u) ||
+         SemaBuiltinConstantArgMultiple(TheCall, i, m);
 }
 
 bool Sema::CheckPPCBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
@@ -1590,58 +1758,6 @@ static bool SemaBuiltinCpuSupports(Sema &S, CallExpr *TheCall) {
   return false;
 }
 
-static bool isX86_64Builtin(unsigned BuiltinID) {
-  // These builtins only work on x86-64 targets.
-  switch (BuiltinID) {
-  case X86::BI__builtin_ia32_addcarryx_u64:
-  case X86::BI__builtin_ia32_addcarry_u64:
-  case X86::BI__builtin_ia32_subborrow_u64:
-  case X86::BI__builtin_ia32_readeflags_u64:
-  case X86::BI__builtin_ia32_writeeflags_u64:
-  case X86::BI__builtin_ia32_bextr_u64:
-  case X86::BI__builtin_ia32_bextri_u64:
-  case X86::BI__builtin_ia32_bzhi_di:
-  case X86::BI__builtin_ia32_pdep_di:
-  case X86::BI__builtin_ia32_pext_di:
-  case X86::BI__builtin_ia32_crc32di:
-  case X86::BI__builtin_ia32_fxsave64:
-  case X86::BI__builtin_ia32_fxrstor64:
-  case X86::BI__builtin_ia32_xsave64:
-  case X86::BI__builtin_ia32_xrstor64:
-  case X86::BI__builtin_ia32_xsaveopt64:
-  case X86::BI__builtin_ia32_xrstors64:
-  case X86::BI__builtin_ia32_xsavec64:
-  case X86::BI__builtin_ia32_xsaves64:
-  case X86::BI__builtin_ia32_rdfsbase64:
-  case X86::BI__builtin_ia32_rdgsbase64:
-  case X86::BI__builtin_ia32_wrfsbase64:
-  case X86::BI__builtin_ia32_wrgsbase64:
-  case X86::BI__builtin_ia32_pbroadcastq512_gpr_mask:
-  case X86::BI__builtin_ia32_pbroadcastq256_gpr_mask:
-  case X86::BI__builtin_ia32_pbroadcastq128_gpr_mask:
-  case X86::BI__builtin_ia32_vcvtsd2si64:
-  case X86::BI__builtin_ia32_vcvtsd2usi64:
-  case X86::BI__builtin_ia32_vcvtss2si64:
-  case X86::BI__builtin_ia32_vcvtss2usi64:
-  case X86::BI__builtin_ia32_vcvttsd2si64:
-  case X86::BI__builtin_ia32_vcvttsd2usi64:
-  case X86::BI__builtin_ia32_vcvttss2si64:
-  case X86::BI__builtin_ia32_vcvttss2usi64:
-  case X86::BI__builtin_ia32_cvtss2si64:
-  case X86::BI__builtin_ia32_cvttss2si64:
-  case X86::BI__builtin_ia32_cvtsd2si64:
-  case X86::BI__builtin_ia32_cvttsd2si64:
-  case X86::BI__builtin_ia32_cvtsi2sd64:
-  case X86::BI__builtin_ia32_cvtsi2ss64:
-  case X86::BI__builtin_ia32_cvtusi2sd64:
-  case X86::BI__builtin_ia32_cvtusi2ss64:
-  case X86::BI__builtin_ia32_rdseed64_step:
-    return true;
-  }
-
-  return false;
-}
-
 // Check if the rounding mode is legal.
 bool Sema::CheckX86BuiltinRoundingOrSAE(unsigned BuiltinID, CallExpr *TheCall) {
   // Indicates if this instruction has rounding control or just SAE.
@@ -1700,9 +1816,13 @@ bool Sema::CheckX86BuiltinRoundingOrSAE(unsigned BuiltinID, CallExpr *TheCall) {
     ArgNum = 4;
     break;
   case X86::BI__builtin_ia32_fixupimmpd512_mask:
+  case X86::BI__builtin_ia32_fixupimmpd512_maskz:
   case X86::BI__builtin_ia32_fixupimmps512_mask:
+  case X86::BI__builtin_ia32_fixupimmps512_maskz:
   case X86::BI__builtin_ia32_fixupimmsd_mask:
+  case X86::BI__builtin_ia32_fixupimmsd_maskz:
   case X86::BI__builtin_ia32_fixupimmss_mask:
+  case X86::BI__builtin_ia32_fixupimmss_maskz:
   case X86::BI__builtin_ia32_rangepd512_mask:
   case X86::BI__builtin_ia32_rangeps512_mask:
   case X86::BI__builtin_ia32_rangesd128_round_mask:
@@ -1712,6 +1832,95 @@ bool Sema::CheckX86BuiltinRoundingOrSAE(unsigned BuiltinID, CallExpr *TheCall) {
   case X86::BI__builtin_ia32_rndscalesd_round_mask:
   case X86::BI__builtin_ia32_rndscaless_round_mask:
     ArgNum = 5;
+    break;
+  case X86::BI__builtin_ia32_vcvtsd2si64:
+  case X86::BI__builtin_ia32_vcvtsd2si32:
+  case X86::BI__builtin_ia32_vcvtsd2usi32:
+  case X86::BI__builtin_ia32_vcvtsd2usi64:
+  case X86::BI__builtin_ia32_vcvtss2si32:
+  case X86::BI__builtin_ia32_vcvtss2si64:
+  case X86::BI__builtin_ia32_vcvtss2usi32:
+  case X86::BI__builtin_ia32_vcvtss2usi64:
+    ArgNum = 1;
+    HasRC = true;
+    break;
+  case X86::BI__builtin_ia32_cvtusi2sd64:
+  case X86::BI__builtin_ia32_cvtusi2ss32:
+  case X86::BI__builtin_ia32_cvtusi2ss64:
+    ArgNum = 2;
+    HasRC = true;
+    break;
+  case X86::BI__builtin_ia32_cvtdq2ps512_mask:
+  case X86::BI__builtin_ia32_cvtudq2ps512_mask:
+  case X86::BI__builtin_ia32_cvtpd2ps512_mask:
+  case X86::BI__builtin_ia32_cvtpd2qq512_mask:
+  case X86::BI__builtin_ia32_cvtpd2uqq512_mask:
+  case X86::BI__builtin_ia32_cvtps2qq512_mask:
+  case X86::BI__builtin_ia32_cvtps2uqq512_mask:
+  case X86::BI__builtin_ia32_cvtqq2pd512_mask:
+  case X86::BI__builtin_ia32_cvtqq2ps512_mask:
+  case X86::BI__builtin_ia32_cvtuqq2pd512_mask:
+  case X86::BI__builtin_ia32_cvtuqq2ps512_mask:
+    ArgNum = 3;
+    HasRC = true;
+    break;
+  case X86::BI__builtin_ia32_addpd512_mask:
+  case X86::BI__builtin_ia32_addps512_mask:
+  case X86::BI__builtin_ia32_divpd512_mask:
+  case X86::BI__builtin_ia32_divps512_mask:
+  case X86::BI__builtin_ia32_mulpd512_mask:
+  case X86::BI__builtin_ia32_mulps512_mask:
+  case X86::BI__builtin_ia32_subpd512_mask:
+  case X86::BI__builtin_ia32_subps512_mask:
+  case X86::BI__builtin_ia32_addss_round_mask:
+  case X86::BI__builtin_ia32_addsd_round_mask:
+  case X86::BI__builtin_ia32_divss_round_mask:
+  case X86::BI__builtin_ia32_divsd_round_mask:
+  case X86::BI__builtin_ia32_mulss_round_mask:
+  case X86::BI__builtin_ia32_mulsd_round_mask:
+  case X86::BI__builtin_ia32_subss_round_mask:
+  case X86::BI__builtin_ia32_subsd_round_mask:
+  case X86::BI__builtin_ia32_scalefpd512_mask:
+  case X86::BI__builtin_ia32_scalefps512_mask:
+  case X86::BI__builtin_ia32_scalefsd_round_mask:
+  case X86::BI__builtin_ia32_scalefss_round_mask:
+  case X86::BI__builtin_ia32_getmantpd512_mask:
+  case X86::BI__builtin_ia32_getmantps512_mask:
+  case X86::BI__builtin_ia32_vfmaddpd512_mask:
+  case X86::BI__builtin_ia32_vfmaddpd512_mask3:
+  case X86::BI__builtin_ia32_vfmaddpd512_maskz:
+  case X86::BI__builtin_ia32_vfmaddps512_mask:
+  case X86::BI__builtin_ia32_vfmaddps512_mask3:
+  case X86::BI__builtin_ia32_vfmaddps512_maskz:
+  case X86::BI__builtin_ia32_vfmaddsubpd512_mask:
+  case X86::BI__builtin_ia32_vfmaddsubpd512_mask3:
+  case X86::BI__builtin_ia32_vfmaddsubpd512_maskz:
+  case X86::BI__builtin_ia32_vfmaddsubps512_mask:
+  case X86::BI__builtin_ia32_vfmaddsubps512_mask3:
+  case X86::BI__builtin_ia32_vfmaddsubps512_maskz:
+  case X86::BI__builtin_ia32_vfmsubpd512_mask3:
+  case X86::BI__builtin_ia32_vfmsubps512_mask3:
+  case X86::BI__builtin_ia32_vfmsubaddpd512_mask3:
+  case X86::BI__builtin_ia32_vfmsubaddps512_mask3:
+  case X86::BI__builtin_ia32_vfnmaddpd512_mask:
+  case X86::BI__builtin_ia32_vfnmaddps512_mask:
+  case X86::BI__builtin_ia32_vfnmsubpd512_mask:
+  case X86::BI__builtin_ia32_vfnmsubpd512_mask3:
+  case X86::BI__builtin_ia32_vfnmsubps512_mask:
+  case X86::BI__builtin_ia32_vfnmsubps512_mask3:
+  case X86::BI__builtin_ia32_vfmaddsd3_mask:
+  case X86::BI__builtin_ia32_vfmaddsd3_maskz:
+  case X86::BI__builtin_ia32_vfmaddsd3_mask3:
+  case X86::BI__builtin_ia32_vfmaddss3_mask:
+  case X86::BI__builtin_ia32_vfmaddss3_maskz:
+  case X86::BI__builtin_ia32_vfmaddss3_mask3:
+    ArgNum = 4;
+    HasRC = true;
+    break;
+  case X86::BI__builtin_ia32_getmantsd_round_mask:
+  case X86::BI__builtin_ia32_getmantss_round_mask:
+    ArgNum = 5;
+    HasRC = true;
     break;
   }
 
@@ -1744,12 +1953,6 @@ bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
 
   if (BuiltinID == X86::BI__builtin_ms_va_start)
     return SemaBuiltinMSVAStart(TheCall);
-
-  // Check for 64-bit only builtins on a 32-bit target.
-  const llvm::Triple &TT = Context.getTargetInfo().getTriple();
-  if (TT.getArch() != llvm::Triple::x86_64 && isX86_64Builtin(BuiltinID))
-    return Diag(TheCall->getCallee()->getLocStart(),
-                diag::err_x86_builtin_32_bit_tgt);
 
   // If the intrinsic has rounding or SAE make sure its valid.
   if (CheckX86BuiltinRoundingOrSAE(BuiltinID, TheCall))
@@ -1964,8 +2167,6 @@ bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
     break;
   case X86::BI__builtin_ia32_palignr128:
   case X86::BI__builtin_ia32_palignr256:
-  case X86::BI__builtin_ia32_palignr128_mask:
-  case X86::BI__builtin_ia32_palignr256_mask:
   case X86::BI__builtin_ia32_palignr512_mask:
   case X86::BI__builtin_ia32_alignq512_mask:
   case X86::BI__builtin_ia32_alignd512_mask:
@@ -3777,6 +3978,28 @@ bool Sema::SemaBuiltinConstantArgRange(CallExpr *TheCall, int ArgNum,
   return false;
 }
 
+/// SemaBuiltinConstantArgMultiple - Handle a check if argument ArgNum of CallExpr
+/// TheCall is a constant expression is a multiple of Num..
+bool Sema::SemaBuiltinConstantArgMultiple(CallExpr *TheCall, int ArgNum,
+                                          unsigned Num) {
+  llvm::APSInt Result;
+
+  // We can't check the value of a dependent argument.
+  Expr *Arg = TheCall->getArg(ArgNum);
+  if (Arg->isTypeDependent() || Arg->isValueDependent())
+    return false;
+
+  // Check constant-ness first.
+  if (SemaBuiltinConstantArg(TheCall, ArgNum, Result))
+    return true;
+
+  if (Result.getSExtValue() % Num != 0)
+    return Diag(TheCall->getLocStart(), diag::err_argument_not_multiple)
+      << Num << Arg->getSourceRange();
+
+  return false;
+}
+
 /// SemaBuiltinARMSpecialReg - Handle a check if argument ArgNum of CallExpr
 /// TheCall is an ARM/AArch64 special register string literal.
 bool Sema::SemaBuiltinARMSpecialReg(unsigned BuiltinID, CallExpr *TheCall,
@@ -4251,6 +4474,20 @@ checkFormatStringExpr(Sema &S, const Expr *E, ArrayRef<const Expr *> Args,
                                        InFunctionCall, CheckedVarArgs,
                                        UncoveredArg, Offset);
         }
+      }
+    }
+
+    return SLCT_NotALiteral;
+  }
+  case Stmt::ObjCMessageExprClass: {
+    const auto *ME = cast<ObjCMessageExpr>(E);
+    if (const auto *ND = ME->getMethodDecl()) {
+      if (const auto *FA = ND->getAttr<FormatArgAttr>()) {
+        unsigned ArgIndex = FA->getFormatIdx();
+        const Expr *Arg = ME->getArg(ArgIndex - 1);
+        return checkFormatStringExpr(
+            S, Arg, Args, HasVAListArg, format_idx, firstDataArg, Type,
+            CallType, InFunctionCall, CheckedVarArgs, UncoveredArg, Offset);
       }
     }
 
@@ -11279,8 +11516,13 @@ void Sema::AddPotentialMisalignedMembers(Expr *E, RecordDecl *RD, ValueDecl *MD,
 
 void Sema::DiagnoseMisalignedMembers() {
   for (MisalignedMember &m : MisalignedMembers) {
+    const NamedDecl *ND = m.RD;
+    if (ND->getName().empty()) {
+      if (const TypedefNameDecl *TD = m.RD->getTypedefNameForAnonDecl())
+        ND = TD;
+    }
     Diag(m.E->getLocStart(), diag::warn_taking_address_of_packed_member)
-        << m.MD << m.RD << m.E->getSourceRange();
+        << m.MD << ND << m.E->getSourceRange();
   }
   MisalignedMembers.clear();
 }
