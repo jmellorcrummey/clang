@@ -263,7 +263,7 @@ static Address castValueFromUintptr(CodeGenFunction &CGF, QualType DstType,
     auto *RefVal = TmpAddr.getPointer();
     TmpAddr = CGF.CreateMemTemp(RefType, Twine(Name) + ".ref");
     auto TmpLVal = CGF.MakeAddrLValue(TmpAddr, RefType);
-    CGF.EmitScalarInit(RefVal, TmpLVal);
+    CGF.EmitStoreOfScalar(RefVal,TmpLVal);
   }
 
   return TmpAddr;
