@@ -5023,8 +5023,7 @@ void CudaToolChain::AddCudaIncludeArgs(const ArgList &DriverArgs,
 
 llvm::opt::DerivedArgList *
 CudaToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
-                             StringRef BoundArch,
-                             Action::OffloadKind) const {
+                             StringRef BoundArch, Action::OffloadKind) const {
   DerivedArgList *DAL = new DerivedArgList(Args.getBaseArgs());
   const OptTable &Opts = getDriver().getOpts();
 
