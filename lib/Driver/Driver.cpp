@@ -1073,7 +1073,15 @@ bool Driver::HandleImmediateArgs(const Compilation &C) {
   }
 
   if (C.getArgs().hasArg(options::OPT_print_libgcc_file_name)) {
-    llvm::outs() << GetFilePath("libgcc.a", TC) << "\n";
+    ToolChain::RuntimeLibType RLT = TC.GetRuntimeLibType(C.getArgs());
+    switch (RLT) {
+    case ToolChain::RLT_CompilerRT:
+      llvm::outs() << TC.getCompilerRT(C.getArgs(), "builtins") << "\n";
+      break;
+    case ToolChain::RLT_Libgcc:
+      llvm::outs() << GetFilePath("libgcc.a", TC) << "\n";
+      break;
+    }
     return false;
   }
 
@@ -2557,7 +2565,7 @@ void Driver::BuildJobs(Compilation &C) const {
     }
 
     BuildJobsForAction(C, A, &C.getDefaultToolChain(),
-                       /*BoundArch*/ nullptr,
+                       /*BoundArch*/ StringRef(),
                        /*AtTopLevel*/ true,
                        /*MultipleArchs*/ ArchNames.size() > 1,
                        /*LinkingOutput*/ LinkingOutput, CachedResults,
@@ -2900,7 +2908,7 @@ public:
 }
 
 InputInfo Driver::BuildJobsForAction(
-    Compilation &C, const Action *A, const ToolChain *TC, const char *BoundArch,
+    Compilation &C, const Action *A, const ToolChain *TC, StringRef BoundArch,
     bool AtTopLevel, bool MultipleArchs, const char *LinkingOutput,
     std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults,
     bool BuildForOffloadDevice) const {
@@ -2910,7 +2918,7 @@ InputInfo Driver::BuildJobsForAction(
   // same tool chain can be used for host and device for some programming
   // models, e.g. OpenMP.
   std::string TriplePlusArch = TC->getTriple().normalize();
-  if (BoundArch) {
+  if (!BoundArch.empty()) {
     TriplePlusArch += "-";
     TriplePlusArch += BoundArch;
   }
@@ -2929,7 +2937,7 @@ InputInfo Driver::BuildJobsForAction(
 }
 
 InputInfo Driver::BuildJobsForActionNoCache(
-    Compilation &C, const Action *A, const ToolChain *TC, const char *BoundArch,
+    Compilation &C, const Action *A, const ToolChain *TC, StringRef BoundArch,
     bool AtTopLevel, bool MultipleArchs, const char *LinkingOutput,
     std::map<std::pair<const Action *, std::string>, InputInfo> &CachedResults,
     bool BuildForOffloadDevice) const {
@@ -3006,9 +3014,9 @@ InputInfo Driver::BuildJobsForActionNoCache(
 
   if (const BindArchAction *BAA = dyn_cast<BindArchAction>(A)) {
     const ToolChain *TC;
-    const char *ArchName = BAA->getArchName();
+    StringRef ArchName = BAA->getArchName();
 
-    if (ArchName)
+    if (!ArchName.empty())
       TC = &getToolChain(C.getArgs(),
                          computeTargetTriple(*this, DefaultTargetTriple,
                                              C.getArgs(), ArchName));
@@ -3153,7 +3161,7 @@ static const char *MakeCLOutputFilename(const ArgList &Args, StringRef ArgValue,
 
 const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
                                        const char *BaseInput,
-                                       const char *BoundArch, bool AtTopLevel,
+                                       StringRef BoundArch, bool AtTopLevel,
                                        bool MultipleArchs,
                                        StringRef NormalizedTriple) const {
   llvm::PrettyStackTraceString CrashInfo("Computing output path");
@@ -3215,7 +3223,7 @@ const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
   // Determine what the derived output name should be.
   const char *NamedOutput;
 
-  if (JA.getType() == types::TY_Object &&
+  if ((JA.getType() == types::TY_Object || JA.getType() == types::TY_LTO_BC) &&
       C.getArgs().hasArg(options::OPT__SLASH_Fo, options::OPT__SLASH_o)) {
     // The /Fo or /o flag decides the object filename.
     StringRef Val =
@@ -3242,7 +3250,7 @@ const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
     } else {
       SmallString<128> Output(getDefaultImageName());
       Output += JA.getOffloadingFileNamePrefix(NormalizedTriple);
-      if (MultipleArchs && BoundArch) {
+      if (MultipleArchs && !BoundArch.empty()) {
         Output += "-";
         Output.append(BoundArch);
       }
@@ -3259,7 +3267,7 @@ const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
       End = BaseName.rfind('.');
     SmallString<128> Suffixed(BaseName.substr(0, End));
     Suffixed += JA.getOffloadingFileNamePrefix(NormalizedTriple);
-    if (MultipleArchs && BoundArch) {
+    if (MultipleArchs && !BoundArch.empty()) {
       Suffixed += "-";
       Suffixed.append(BoundArch);
     }
@@ -3316,7 +3324,7 @@ const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
   }
 }
 
-std::string Driver::GetFilePath(const char *Name, const ToolChain &TC) const {
+std::string Driver::GetFilePath(StringRef Name, const ToolChain &TC) const {
   // Respect a limited subset of the '-Bprefix' functionality in GCC by
   // attempting to use this prefix when looking for file paths.
   for (const std::string &Dir : PrefixDirs) {
@@ -3346,16 +3354,16 @@ std::string Driver::GetFilePath(const char *Name, const ToolChain &TC) const {
 }
 
 void Driver::generatePrefixedToolNames(
-    const char *Tool, const ToolChain &TC,
+    StringRef Tool, const ToolChain &TC,
     SmallVectorImpl<std::string> &Names) const {
   // FIXME: Needs a better variable than DefaultTargetTriple
-  Names.emplace_back(DefaultTargetTriple + "-" + Tool);
+  Names.emplace_back((DefaultTargetTriple + "-" + Tool).str());
   Names.emplace_back(Tool);
 
   // Allow the discovery of tools prefixed with LLVM's default target triple.
   std::string LLVMDefaultTargetTriple = llvm::sys::getDefaultTargetTriple();
   if (LLVMDefaultTargetTriple != DefaultTargetTriple)
-    Names.emplace_back(LLVMDefaultTargetTriple + "-" + Tool);
+    Names.emplace_back((LLVMDefaultTargetTriple + "-" + Tool).str());
 }
 
 static bool ScanDirForExecutable(SmallString<128> &Dir,
@@ -3369,8 +3377,7 @@ static bool ScanDirForExecutable(SmallString<128> &Dir,
   return false;
 }
 
-std::string Driver::GetProgramPath(const char *Name,
-                                   const ToolChain &TC) const {
+std::string Driver::GetProgramPath(StringRef Name, const ToolChain &TC) const {
   SmallVector<std::string, 2> TargetSpecificExecutables;
   generatePrefixedToolNames(Name, TC, TargetSpecificExecutables);
 
@@ -3382,7 +3389,7 @@ std::string Driver::GetProgramPath(const char *Name,
       if (ScanDirForExecutable(P, TargetSpecificExecutables))
         return P.str();
     } else {
-      SmallString<128> P(PrefixDir + Name);
+      SmallString<128> P((PrefixDir + Name).str());
       if (llvm::sys::fs::can_execute(Twine(P)))
         return P.str();
     }
@@ -3404,8 +3411,7 @@ std::string Driver::GetProgramPath(const char *Name,
   return Name;
 }
 
-std::string Driver::GetTemporaryPath(StringRef Prefix,
-                                     const char *Suffix) const {
+std::string Driver::GetTemporaryPath(StringRef Prefix, StringRef Suffix) const {
   SmallString<128> Path;
   std::error_code EC = llvm::sys::fs::createTemporaryFile(Prefix, Suffix, Path);
   if (EC) {
@@ -3485,6 +3491,9 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
     case llvm::Triple::NaCl:
       TC = new toolchains::NaClToolChain(*this, Target, Args);
       break;
+    case llvm::Triple::Fuchsia:
+      TC = new toolchains::Fuchsia(*this, Target, Args);
+      break;
     case llvm::Triple::Solaris:
       TC = new toolchains::Solaris(*this, Target, Args);
       break;
@@ -3518,6 +3527,9 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
       break;
     case llvm::Triple::PS4:
       TC = new toolchains::PS4CPU(*this, Target, Args);
+      break;
+    case llvm::Triple::Contiki:
+      TC = new toolchains::Contiki(*this, Target, Args);
       break;
     default:
       // Of these targets, Hexagon is the only one that might have
@@ -3573,36 +3585,35 @@ bool Driver::ShouldUseClangCompiler(const JobAction &JA) const {
 ///
 /// \return True if the entire string was parsed (9.2), or all groups were
 /// parsed (10.3.5extrastuff).
-bool Driver::GetReleaseVersion(const char *Str, unsigned &Major,
-                               unsigned &Minor, unsigned &Micro,
-                               bool &HadExtra) {
+bool Driver::GetReleaseVersion(StringRef Str, unsigned &Major, unsigned &Minor,
+                               unsigned &Micro, bool &HadExtra) {
   HadExtra = false;
 
   Major = Minor = Micro = 0;
-  if (*Str == '\0')
+  if (Str.empty())
     return false;
 
-  char *End;
-  Major = (unsigned)strtol(Str, &End, 10);
-  if (*Str != '\0' && *End == '\0')
+  if (Str.consumeInteger(10, Major))
+    return false;
+  if (Str.empty())
     return true;
-  if (*End != '.')
+  if (Str[0] != '.')
     return false;
 
-  Str = End + 1;
-  Minor = (unsigned)strtol(Str, &End, 10);
-  if (*Str != '\0' && *End == '\0')
-    return true;
-  if (*End != '.')
-    return false;
+  Str = Str.drop_front(1);
 
-  Str = End + 1;
-  Micro = (unsigned)strtol(Str, &End, 10);
-  if (*Str != '\0' && *End == '\0')
-    return true;
-  if (Str == End)
+  if (Str.consumeInteger(10, Minor))
     return false;
-  HadExtra = true;
+  if (Str.empty())
+    return true;
+  if (Str[0] != '.')
+    return false;
+  Str = Str.drop_front(1);
+
+  if (Str.consumeInteger(10, Micro))
+    return false;
+  if (!Str.empty())
+    HadExtra = true;
   return true;
 }
 
@@ -3612,21 +3623,22 @@ bool Driver::GetReleaseVersion(const char *Str, unsigned &Major,
 ///
 /// \return True if the entire string was parsed and there are
 /// no extra characters remaining at the end.
-bool Driver::GetReleaseVersion(const char *Str,
+bool Driver::GetReleaseVersion(StringRef Str,
                                MutableArrayRef<unsigned> Digits) {
-  if (*Str == '\0')
+  if (Str.empty())
     return false;
 
-  char *End;
   unsigned CurDigit = 0;
   while (CurDigit < Digits.size()) {
-    unsigned Digit = (unsigned)strtol(Str, &End, 10);
-    Digits[CurDigit] = Digit;
-    if (*Str != '\0' && *End == '\0')
-      return true;
-    if (*End != '.' || Str == End)
+    unsigned Digit;
+    if (Str.consumeInteger(10, Digit))
       return false;
-    Str = End + 1;
+    Digits[CurDigit] = Digit;
+    if (Str.empty())
+      return true;
+    if (Str[0] != '.')
+      return false;
+    Str = Str.drop_front(1);
     CurDigit++;
   }
 
