@@ -8264,7 +8264,7 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
   ProcessDeclAttributes(S, NewFD, D);
 
   if (getLangOpts().CUDA)
-    maybeAddCUDAHostDeviceAttrs(S, NewFD, Previous);
+    maybeAddCUDAHostDeviceAttrs(NewFD, Previous);
 
   if (getLangOpts().OpenCL) {
     // OpenCL v1.1 s6.5: Using an address space qualifier in a function return
@@ -8445,7 +8445,7 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
                                 ? cast<NamedDecl>(FunctionTemplate)
                                 : NewFD);
 
-    if (isFriend && D.isRedeclaration()) {
+    if (isFriend && NewFD->getPreviousDecl()) {
       AccessSpecifier Access = AS_public;
       if (!NewFD->isInvalidDecl())
         Access = NewFD->getPreviousDecl()->getAccess();
@@ -8901,8 +8901,6 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
         NewFD->setPreviousDeclaration(cast<FunctionDecl>(OldDecl));
         if (isa<CXXMethodDecl>(NewFD))
           NewFD->setAccess(OldDecl->getAccess());
-      } else {
-        Redeclaration = false;
       }
     }
   }
@@ -10126,9 +10124,6 @@ void Sema::ActOnUninitializedDecl(Decl *RealDecl,
     // member.
     if (Var->isConstexpr() && !Var->isThisDeclarationADefinition() &&
         !Var->isThisDeclarationADemotedDefinition()) {
-      assert((!Var->isThisDeclarationADemotedDefinition() ||
-              getLangOpts().Modules) &&
-             "Demoting decls is only in the contest of modules!");
       if (Var->isStaticDataMember()) {
         // C++1z removes the relevant rule; the in-class declaration is always
         // a definition there.
