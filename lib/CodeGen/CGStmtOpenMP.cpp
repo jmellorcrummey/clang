@@ -323,9 +323,15 @@ llvm::Function *CodeGenFunction::GenerateOpenMPCapturedStmtFunction(
       assert(I->capturesVariableArrayType());
       II = &getContext().Idents.get("vla");
     }
-    if (ArgType->isVariablyModifiedType())
-      ArgType = getContext().getVariableArrayDecayedType(ArgType);
-    // Add restrict to all target pointers if flag is provided.
+    if (ArgType->isVariablyModifiedType()) {
+      bool IsReference = ArgType->isLValueReferenceType();
+      ArgType =
+          getContext().getCanonicalParamType(ArgType.getNonReferenceType());
+      if (IsReference && !ArgType->isPointerType()) {
+        ArgType = getContext().getLValueReferenceType(
+            ArgType, /*SpelledAsLValue=*/false);
+      }
+    }
     if (NonAliasedMaps && ArgType->isAnyPointerType())
       ArgType = ArgType.withRestrict();
     Args.push_back(ImplicitParamDecl::Create(getContext(), nullptr,
@@ -403,8 +409,14 @@ llvm::Function *CodeGenFunction::GenerateOpenMPCapturedStmtFunction(
       QualType VarTy = Var->getType();
       Address ArgAddr = ArgLVal.getAddress();
       if (!VarTy->isReferenceType()) {
-        ArgAddr = EmitLoadOfReference(
-            ArgAddr, ArgLVal.getType()->castAs<ReferenceType>());
+        if (ArgLVal.getType()->isLValueReferenceType()) {
+          ArgAddr = EmitLoadOfReference(
+              ArgAddr, ArgLVal.getType()->castAs<ReferenceType>());
+        } else {
+          assert(ArgLVal.getType()->isPointerType());
+          ArgAddr = EmitLoadOfPointer(
+              ArgAddr, ArgLVal.getType()->castAs<PointerType>());
+        }
       }
       setAddrOfLocalVar(
           Var, Address(ArgAddr.getPointer(), getContext().getDeclAlign(Var)));
@@ -2588,7 +2600,7 @@ static LValue createSectionLVal(CodeGenFunction &CGF, QualType Ty,
                                 llvm::Value *Init = nullptr) {
   auto LVal = CGF.MakeAddrLValue(CGF.CreateMemTemp(Ty, Name), Ty);
   if (Init)
-    CGF.EmitScalarInit(Init, LVal);
+    CGF.EmitStoreThroughLValue(RValue::get(Init), LVal, /*isInit*/ true);
   return LVal;
 }
 
