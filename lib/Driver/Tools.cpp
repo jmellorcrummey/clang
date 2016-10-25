@@ -7138,15 +7138,15 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
   // Get the targets.
   SmallString<128> Triples;
   Triples += "-targets=";
-  auto DepInfo = UA.getDependingActionsInfo();
+  auto DepInfo = UA.getDependentActionsInfo();
   for (unsigned I = 0; I < DepInfo.size(); ++I) {
     if (I)
       Triples += ',';
 
     auto &Dep = DepInfo[I];
-    Triples += Action::GetOffloadKindName(Dep.DependingOffloadKind);
+    Triples += Action::GetOffloadKindName(Dep.DependentOffloadKind);
     Triples += '-';
-    Triples += Dep.DependingToolChain->getTriple().normalize();
+    Triples += Dep.DependentToolChain->getTriple().normalize();
   }
 
   CmdArgs.push_back(TCArgs.MakeArgString(Triples));

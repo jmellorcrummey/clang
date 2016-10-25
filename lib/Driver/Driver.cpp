@@ -3130,8 +3130,8 @@ InputInfo Driver::BuildJobsForActionNoCache(
     // If we have an unbundling job, we need to create results for all the
     // outputs. We also update the results cache so that other actions using
     // this unbundling action can get the right results.
-    for (auto &UI : UA->getDependingActionsInfo()) {
-      assert(UI.DependingOffloadKind != Action::OFK_None &&
+    for (auto &UI : UA->getDependentActionsInfo()) {
+      assert(UI.DependentOffloadKind != Action::OFK_None &&
              "Unbundling with no offloading??");
 
       // Unbundling actions are never at the top level. When we generate the
@@ -3139,11 +3139,11 @@ InputInfo Driver::BuildJobsForActionNoCache(
       // unbundling action does not change the type of the output which can
       // cause a overwrite.
       std::string OffloadingPrefix = Action::GetOffloadingFileNamePrefix(
-          UI.DependingOffloadKind,
-          UI.DependingToolChain->getTriple().normalize(),
+          UI.DependentOffloadKind,
+          UI.DependentToolChain->getTriple().normalize(),
           /*CreatePrefixForHost=*/true);
       auto CurI = InputInfo(
-          UA, GetNamedOutputPath(C, *UA, BaseInput, UI.DependingBoundArch,
+          UA, GetNamedOutputPath(C, *UA, BaseInput, UI.DependentBoundArch,
                                  /*AtTopLevel=*/false, MultipleArchs,
                                  OffloadingPrefix),
           BaseInput);
@@ -3153,8 +3153,8 @@ InputInfo Driver::BuildJobsForActionNoCache(
       // Get the unique string identifier for this dependence and cache the
       // result.
       CachedResults[{A, GetTriplePlusArchString(
-                            UI.DependingToolChain, UI.DependingBoundArch,
-                            UI.DependingOffloadKind)}] = CurI;
+                            UI.DependentToolChain, UI.DependentBoundArch,
+                            UI.DependentOffloadKind)}] = CurI;
     }
 
     // Now that we have all the results generated, select the one that should be
