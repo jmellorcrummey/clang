@@ -2837,15 +2837,15 @@ Generic_GCC::TranslateArgs(const llvm::opt::DerivedArgList &Args, StringRef,
                            Action::OffloadKind DeviceOffloadKind) const {
 
   // If this tool chain is used for an OpenMP offloading device we have to make
-  // sure we always generate a shared library regardless the commands the user
-  // passed to the host. This is required because the runtime library requires
-  // to load the device image dynamically at run time.
+  // sure we always generate a shared library regardless of the commands the
+  // user passed to the host. This is required because the runtime library
+  // is required to load the device image dynamically at run time.
   if (DeviceOffloadKind == Action::OFK_OpenMP) {
     DerivedArgList *DAL = new DerivedArgList(Args.getBaseArgs());
     const OptTable &Opts = getDriver().getOpts();
 
-    // Request the shared library. Given that these option are decided
-    // implicitelly, they do not refer to any base argument.
+    // Request the shared library. Given that these options are decided
+    // implicitly, they do not refer to any base argument.
     DAL->AddFlagArg(/*BaseArg=*/nullptr, Opts.getOption(options::OPT_shared));
     DAL->AddFlagArg(/*BaseArg=*/nullptr, Opts.getOption(options::OPT_fPIC));
 
@@ -2857,6 +2857,7 @@ Generic_GCC::TranslateArgs(const llvm::opt::DerivedArgList &Args, StringRef,
         DAL->append(A);
         break;
       case options::OPT_shared:
+      case options::OPT_dynamic:
       case options::OPT_static:
       case options::OPT_fPIC:
       case options::OPT_fno_PIC:
