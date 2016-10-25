@@ -81,8 +81,8 @@ namespace types {
   bool isObjC(ID Id);
 
   /// isSrcFile - Is this a source file, i.e. something that still has to be
-  /// preprocessed. The logic behind this is the same that decides the first
-  /// compilation phase is a preprocessor one.
+  /// preprocessed. The logic behind this is the same that decides if the first
+  /// compilation phase is a preprocessing one.
   bool isSrcFile(ID Id);
 
   /// lookupTypeForExtension - Lookup the type to use for the file
