@@ -2468,39 +2468,41 @@ class ToolSelector final {
   bool SaveTemps;
   bool EmbedBitcode;
 
-  /// Get dependence action or null if that does not exist. If \a CanBeCollapsed
-  /// is false, that action must be legal to collapse or null will be returned.
-  const JobAction *getDependenceAction(const ActionList &Inputs,
-                                       ActionList &SavedOffloadAction,
-                                       bool CanBeCollapsed = true) {
+  /// Get previous dependent action or null if that does not exist. If
+  /// \a CanBeCollapsed is false, that action must be legal to collapse or
+  /// null will be returned.
+  const JobAction *getPrevDependentAction(const ActionList &Inputs,
+                                          ActionList &SavedOffloadAction,
+                                          bool CanBeCollapsed = true) {
     // An option can be collapsed only if it has a single input.
     if (Inputs.size() != 1)
       return nullptr;
 
     Action *CurAction = *Inputs.begin();
-    if (!CurAction->isCollapsingWithDependingActionLegal() && CanBeCollapsed)
+    if (CanBeCollapsed &&
+        !CurAction->isCollapsingWithNextDependentActionLegal())
       return nullptr;
 
     // If the input action is an offload action. Look through it and save any
     // offload action that can be dropped in the event of a collapse.
     if (auto *OA = dyn_cast<OffloadAction>(CurAction)) {
-      // If the depending action is a device action, we will attempt to collapse
+      // If the dependent action is a device action, we will attempt to collapse
       // only with other device actions. Otherwise, we would do the same but
       // with host actions only.
       if (!IsHostSelector) {
         if (OA->hasSingleDeviceDependence(/*DoNotConsiderHostActions=*/true)) {
           CurAction =
               OA->getSingleDeviceDependence(/*DoNotConsiderHostActions=*/true);
-          if (!CurAction->isCollapsingWithDependingActionLegal() &&
-              CanBeCollapsed)
+          if (CanBeCollapsed &&
+              !CurAction->isCollapsingWithNextDependentActionLegal())
             return nullptr;
           SavedOffloadAction.push_back(OA);
           return dyn_cast<JobAction>(CurAction);
         }
       } else if (OA->hasHostDependence()) {
         CurAction = OA->getHostDependence();
-        if (!CurAction->isCollapsingWithDependingActionLegal() &&
-            CanBeCollapsed)
+        if (CanBeCollapsed &&
+            !CurAction->isCollapsingWithNextDependentActionLegal())
           return nullptr;
         SavedOffloadAction.push_back(OA);
         return dyn_cast<JobAction>(CurAction);
@@ -2528,7 +2530,7 @@ class ToolSelector final {
 
   /// Struct that relates an action with the offload actions that would be
   /// collapsed with it.
-  struct JobActionInfoTy final {
+  struct JobActionInfo final {
     /// The action this info refers to.
     const JobAction *JA = nullptr;
     /// The offload actions we need to take care off if this action is
@@ -2538,10 +2540,9 @@ class ToolSelector final {
 
   /// Append collapsed offload actions from the give nnumber of elements in the
   /// action info array.
-  static void
-  AppendCollapsedOffloadAction(ActionList &CollapsedOffloadAction,
-                               ArrayRef<JobActionInfoTy> &ActionInfo,
-                               unsigned ElementNum) {
+  static void AppendCollapsedOffloadAction(ActionList &CollapsedOffloadAction,
+                                           ArrayRef<JobActionInfo> &ActionInfo,
+                                           unsigned ElementNum) {
     assert(ElementNum <= ActionInfo.size() && "Invalid number of elements.");
     for (unsigned I = 0; I < ElementNum; ++I)
       CollapsedOffloadAction.append(ActionInfo[I].SavedOffloadAction.begin(),
@@ -2558,9 +2559,9 @@ class ToolSelector final {
   ///  - Assemble + Backend ;
   ///  - Backend + Compile.
   const Tool *
-  attemptCombineAssembleBackendCompile(ArrayRef<JobActionInfoTy> ActionInfo,
-                                       const ActionList *&Inputs,
-                                       ActionList &CollapsedOffloadAction) {
+  combineAssembleBackendCompile(ArrayRef<JobActionInfo> ActionInfo,
+                                const ActionList *&Inputs,
+                                ActionList &CollapsedOffloadAction) {
     if (ActionInfo.size() < 3 || !canCollapseAssembleAction())
       return nullptr;
     auto *AJ = dyn_cast<AssembleJobAction>(ActionInfo[0].JA);
@@ -2590,10 +2591,9 @@ class ToolSelector final {
                                  /*NumElements=*/3);
     return T;
   }
-  const Tool *
-  attemptCombineAssembleBackend(ArrayRef<JobActionInfoTy> ActionInfo,
-                                const ActionList *&Inputs,
-                                ActionList &CollapsedOffloadAction) {
+  const Tool *combineAssembleBackend(ArrayRef<JobActionInfo> ActionInfo,
+                                     const ActionList *&Inputs,
+                                     ActionList &CollapsedOffloadAction) {
     if (ActionInfo.size() < 2 || !canCollapseAssembleAction())
       return nullptr;
     auto *AJ = dyn_cast<AssembleJobAction>(ActionInfo[0].JA);
@@ -2603,8 +2603,8 @@ class ToolSelector final {
 
     // Retrieve the compile job, backend action must always be preceded by one.
     ActionList CompileJobOffloadActions;
-    auto *CJ = getDependenceAction(BJ->getInputs(), CompileJobOffloadActions,
-                                   /*CanBeCollapsed=*/false);
+    auto *CJ = getPrevDependentAction(BJ->getInputs(), CompileJobOffloadActions,
+                                      /*CanBeCollapsed=*/false);
     if (!AJ || !BJ || !CJ)
       return nullptr;
 
@@ -2624,9 +2624,9 @@ class ToolSelector final {
                                  /*NumElements=*/2);
     return T;
   }
-  const Tool *attemptCombineBackendCompile(ArrayRef<JobActionInfoTy> ActionInfo,
-                                           const ActionList *&Inputs,
-                                           ActionList &CollapsedOffloadAction) {
+  const Tool *combineBackendCompile(ArrayRef<JobActionInfo> ActionInfo,
+                                    const ActionList *&Inputs,
+                                    ActionList &CollapsedOffloadAction) {
     if (ActionInfo.size() < 2 || !canCollapsePreprocessorAction())
       return nullptr;
     auto *BJ = dyn_cast<BackendJobAction>(ActionInfo[0].JA);
@@ -2652,14 +2652,14 @@ class ToolSelector final {
   /// preprocessor action, and the current input is indeed a preprocessor
   /// action. If combining results in the collapse of offloading actions, those
   /// are appended to \a CollapsedOffloadAction.
-  void attemptCombineWithPreprocess(const Tool *T, const ActionList *&Inputs,
-                                    ActionList &CollapsedOffloadAction) {
+  void combineWithPreprocessor(const Tool *T, const ActionList *&Inputs,
+                               ActionList &CollapsedOffloadAction) {
     if (!T || !canCollapsePreprocessorAction() || !T->hasIntegratedCPP())
       return;
 
     // Attempt to get a preprocessor action dependence.
     ActionList PreprocessJobOffloadActions;
-    auto *PJ = getDependenceAction(*Inputs, PreprocessJobOffloadActions);
+    auto *PJ = getPrevDependentAction(*Inputs, PreprocessJobOffloadActions);
     if (!PJ || !isa<PreprocessJobAction>(PJ))
       return;
 
@@ -2679,7 +2679,7 @@ public:
     IsHostSelector = BaseAction->getOffloadingDeviceKind() == Action::OFK_None;
   }
 
-  /// Check if a chain of action can be combined and return the tool that can
+  /// Check if a chain of actions can be combined and return the tool that can
   /// handle the combination of actions. The pointer to the current inputs \a
   /// Inputs and the list of offload actions \a CollapsedOffloadActions
   /// connected to collapsed actions are updated accordingly. The latter enables
@@ -2691,18 +2691,18 @@ public:
     // Get the largest chain of actions that we could combine.
     //
 
-    SmallVector<JobActionInfoTy, 5> ActionChain(1);
+    SmallVector<JobActionInfo, 5> ActionChain(1);
     ActionChain.back().JA = BaseAction;
     while (ActionChain.back().JA) {
       const Action *CurAction = ActionChain.back().JA;
 
       // Grow the chain by one element.
       ActionChain.resize(ActionChain.size() + 1);
-      JobActionInfoTy &AI = ActionChain.back();
+      JobActionInfo &AI = ActionChain.back();
 
       // Attempt to fill it with the
       AI.JA =
-          getDependenceAction(CurAction->getInputs(), AI.SavedOffloadAction);
+          getPrevDependentAction(CurAction->getInputs(), AI.SavedOffloadAction);
     }
 
     // Pop the last action info as it could not be filled.
@@ -2714,23 +2714,18 @@ public:
     // action with any preprocessor action it may depend on.
     //
 
-    const Tool *T = nullptr;
-
+    const Tool *T = combineAssembleBackendCompile(ActionChain, Inputs,
+                                                  CollapsedOffloadAction);
     if (!T)
-      T = attemptCombineAssembleBackendCompile(ActionChain, Inputs,
-                                               CollapsedOffloadAction);
+      T = combineAssembleBackend(ActionChain, Inputs, CollapsedOffloadAction);
     if (!T)
-      T = attemptCombineAssembleBackend(ActionChain, Inputs,
-                                        CollapsedOffloadAction);
-    if (!T)
-      T = attemptCombineBackendCompile(ActionChain, Inputs,
-                                       CollapsedOffloadAction);
+      T = combineBackendCompile(ActionChain, Inputs, CollapsedOffloadAction);
     if (!T) {
       Inputs = &BaseAction->getInputs();
       T = TC.SelectTool(*BaseAction);
     }
 
-    attemptCombineWithPreprocess(T, Inputs, CollapsedOffloadAction);
+    combineWithPreprocessor(T, Inputs, CollapsedOffloadAction);
     return T;
   }
 };
@@ -2778,7 +2773,7 @@ InputInfo Driver::BuildJobsForActionNoCache(
     // b) Set a toolchain/architecture/kind for a device action;
     //    Device Action 1 -> OffloadAction -> Device Action 2
     //
-    // c) Specify a device dependences to a host action;
+    // c) Specify a device dependence to a host action;
     //    Device Action 1  _
     //                      \
     //      Host Action 1  ---> OffloadAction -> Host Action 2
