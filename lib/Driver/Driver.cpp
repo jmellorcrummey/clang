@@ -1547,8 +1547,9 @@ class OffloadingActionBuilder final {
     /// added to the provided host action \a HostAction. By default it is
     /// inactive.
     virtual ActionBuilderReturnCode
-    getDeviceDepences(OffloadAction::DeviceDependences &DA, phases::ID CurPhase,
-                      phases::ID FinalPhase, PhasesTy &Phases) {
+    getDeviceDependences(OffloadAction::DeviceDependences &DA,
+                         phases::ID CurPhase, phases::ID FinalPhase,
+                         PhasesTy &Phases) {
       return ABRT_Inactive;
     }
 
@@ -1606,8 +1607,9 @@ class OffloadingActionBuilder final {
         : DeviceActionBuilder(C, Args, Inputs, Action::OFK_Cuda) {}
 
     ActionBuilderReturnCode
-    getDeviceDepences(OffloadAction::DeviceDependences &DA, phases::ID CurPhase,
-                      phases::ID FinalPhase, PhasesTy &Phases) override {
+    getDeviceDependences(OffloadAction::DeviceDependences &DA,
+                         phases::ID CurPhase, phases::ID FinalPhase,
+                         PhasesTy &Phases) override {
       if (!IsActive)
         return ABRT_Inactive;
 
@@ -1841,8 +1843,9 @@ class OffloadingActionBuilder final {
         : DeviceActionBuilder(C, Args, Inputs, Action::OFK_OpenMP) {}
 
     ActionBuilderReturnCode
-    getDeviceDepences(OffloadAction::DeviceDependences &DA, phases::ID CurPhase,
-                      phases::ID FinalPhase, PhasesTy &Phases) override {
+    getDeviceDependences(OffloadAction::DeviceDependences &DA,
+                         phases::ID CurPhase, phases::ID FinalPhase,
+                         PhasesTy &Phases) override {
 
       // We should always have an action for each input.
       assert(OpenMPDeviceActions.size() == ToolChains.size() &&
@@ -1859,7 +1862,7 @@ class OffloadingActionBuilder final {
           ++LI;
         }
 
-        // We passed the device action to a host dependence, so we don't need to
+        // We passed the device action as a host dependence, so we don't need to
         // do anything else with them.
         OpenMPDeviceActions.clear();
         return ABRT_Success;
@@ -1884,11 +1887,11 @@ class OffloadingActionBuilder final {
       }
 
       // When generating code for OpenMP we use the host compile phase result as
-      // dependence to the device compile phase so that it can learn what
-      // declaration should be emitted. However, this is not the only use for
-      // the host action, so we have prevent it from being collapsed.
+      // a dependence to the device compile phase so that it can learn what
+      // declarations should be emitted. However, this is not the only use for
+      // the host action, so we prevent it from being collapsed.
       if (isa<CompileJobAction>(HostAction)) {
-        HostAction->setCannotBeCollapsedWithDependingAction();
+        HostAction->setCannotBeCollapsedWithNextDependentAction();
         assert(ToolChains.size() == OpenMPDeviceActions.size() &&
                "Toolchains and device action sizes do not match.");
         OffloadAction::HostDependence HDep(
@@ -1923,7 +1926,7 @@ class OffloadingActionBuilder final {
 
     bool initialize() override {
       // Get the OpenMP toolchains. If we don't get any, the action builder will
-      // know there is nothing to do related with OpenMP offloading.
+      // know there is nothing to do related to OpenMP offloading.
       auto OpenMPTCRange = C.getOffloadToolChains<Action::OFK_OpenMP>();
       for (auto TI = OpenMPTCRange.first, TE = OpenMPTCRange.second; TI != TE;
            ++TI)
@@ -1997,7 +2000,8 @@ public:
         continue;
       }
 
-      auto RetCode = SB->getDeviceDepences(DDeps, CurPhase, FinalPhase, Phases);
+      auto RetCode =
+          SB->getDeviceDependences(DDeps, CurPhase, FinalPhase, Phases);
 
       // If the builder explicitly says the host action should be ignored,
       // we need to increment the variable that tracks the builders that request
