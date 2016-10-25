@@ -1894,8 +1894,8 @@ class OffloadingActionBuilder final {
         OpenMPDeviceActions.clear();
         for (unsigned I = 0; I < ToolChains.size(); ++I) {
           OpenMPDeviceActions.push_back(UA);
-          UA->registerDependingActionInfo(ToolChains[I], /*BoundArch=*/nullptr,
-                                          Action::OFK_OpenMP);
+          UA->registerDependentActionInfo(
+              ToolChains[I], /*BoundArch=*/StringRef(), Action::OFK_OpenMP);
         }
         return ABRT_Success;
       }
@@ -2103,9 +2103,9 @@ public:
         !types::isSrcFile(HostAction->getType())) {
       auto UnbundlingHostAction =
           C.MakeAction<OffloadUnbundlingJobAction>(HostAction);
-      UnbundlingHostAction->registerDependingActionInfo(
+      UnbundlingHostAction->registerDependentActionInfo(
           C.getSingleOffloadToolChain<Action::OFK_Host>(),
-          /*BoundArch=*/nullptr, Action::OFK_Host);
+          /*BoundArch=*/StringRef(), Action::OFK_Host);
       HostAction = UnbundlingHostAction;
     }
 
