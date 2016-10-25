@@ -97,7 +97,7 @@ private:
   /// actions that depend on it. This is true by default and set to false when
   /// the action is used by two different tool chains, which is enabled by the
   /// offloading support implementation.
-  bool CanBeCollapsedWithDependingAction = true;
+  bool CanBeCollapsedWithNextDependentAction = true;
 
 protected:
   ///
@@ -144,12 +144,12 @@ public:
   }
 
   /// Mark this action as not legal to collapse.
-  void setCannotBeCollapsedWithDependingAction() {
-    CanBeCollapsedWithDependingAction = false;
+  void setCannotBeCollapsedWithNextDependentAction() {
+    CanBeCollapsedWithNextDependentAction = false;
   }
   /// Return true if this function can be collapsed with others.
-  bool isCollapsingWithDependingActionLegal() const {
-    return CanBeCollapsedWithDependingAction;
+  bool isCollapsingWithNextDependentActionLegal() const {
+    return CanBeCollapsedWithNextDependentAction;
   }
 
   /// Return a string containing the offload kind of the action.
