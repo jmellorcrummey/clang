@@ -5527,6 +5527,8 @@ public:
     OMP_MAP_PRIVATE_PTR = 0x80,
     /// \brief Pass the element to the device by value.
     OMP_MAP_PRIVATE_VAL = 0x100,
+    /// \brief States the map is implicit.
+    OMP_MAP_IMPLICIT = 0x200,
   };
 
   /// Class that associates information with a base pointer to be passed to the
@@ -6252,6 +6254,9 @@ public:
     // Every default map produces a single argument, so, it is always the
     // first one.
     CurMapTypes.back() |= OMP_MAP_FIRST_REF;
+
+    // Add flag stating this is an implicit map.
+    CurMapTypes.back() |= OMP_MAP_IMPLICIT;
   }
 };
 
