@@ -27,7 +27,7 @@
 // RUN:   | FileCheck -check-prefix=CHK-NO-FOPENMP %s
 // RUN:   %clang -### -fopenmp=libgomp -fopenmp-targets=powerpc64le-ibm-linux-gnu  %s 2>&1 \
 // RUN:   | FileCheck -check-prefix=CHK-NO-FOPENMP %s
-// CHK-NO-FOPENMP: error: The option -fopenmp-targets must be used in conjunction with a -fopenmp option compatible with offloading.
+// CHK-NO-FOPENMP: error: The option -fopenmp-targets must be used in conjunction with a -fopenmp option compatible with offloading, please use -fopenmp=libomp or -fopenmp=libiomp5.
 
 /// ###########################################################################
 
