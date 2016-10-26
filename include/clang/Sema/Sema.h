@@ -8365,6 +8365,12 @@ public:
       ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
       SourceLocation EndLoc,
       llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA);
+  /// Called on well-formed '\#pragma omp teams distribute simd' after parsing
+  /// of the associated statement.
+  StmtResult ActOnOpenMPTeamsDistributeSimdDirective(
+      ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
+      SourceLocation EndLoc,
+      llvm::DenseMap<ValueDecl *, Expr *> &VarsWithImplicitDSA);
 
   /// Checks correctness of linear modifiers.
   bool CheckOpenMPLinearModifier(OpenMPLinearClauseKind LinKind,
@@ -9679,6 +9685,7 @@ private:
                  VariadicCallType CallType);
 
   bool CheckObjCString(Expr *Arg);
+  ExprResult CheckOSLogFormatStringArg(Expr *Arg);
 
   ExprResult CheckBuiltinFunctionCall(FunctionDecl *FDecl,
                                       unsigned BuiltinID, CallExpr *TheCall);
@@ -9701,6 +9708,7 @@ private:
   bool SemaBuiltinVAStartARM(CallExpr *Call);
   bool SemaBuiltinUnorderedCompare(CallExpr *TheCall);
   bool SemaBuiltinFPClassification(CallExpr *TheCall, unsigned NumArgs);
+  bool SemaBuiltinOSLogFormat(CallExpr *TheCall);
 
 public:
   // Used by C++ template instantiation.
@@ -9738,6 +9746,7 @@ public:
     FST_Kprintf,
     FST_FreeBSDKPrintf,
     FST_OSTrace,
+    FST_OSLog,
     FST_Unknown
   };
   static FormatStringType GetFormatStringType(const FormatAttr *Format);
@@ -9900,23 +9909,16 @@ public:
     return OriginalLexicalContext ? OriginalLexicalContext : CurContext;
   }
 
-  AvailabilityResult getCurContextAvailability() const;
-
-  /// \brief Get the verison that this context implies.
-  /// For instance, a method in an interface that is annotated with an
-  /// availability attribuite effectively has the availability of the interface.
-  VersionTuple getVersionForDecl(const Decl *Ctx) const;
-
   /// \brief The diagnostic we should emit for \c D, or \c AR_Available.
   ///
   /// \param D The declaration to check. Note that this may be altered to point
   /// to another declaration that \c D gets it's availability from. i.e., we
   /// walk the list of typedefs to find an availability attribute.
   ///
-  /// \param ContextVersion The version to compare availability against.
-  AvailabilityResult
-  ShouldDiagnoseAvailabilityOfDecl(NamedDecl *&D, VersionTuple ContextVersion,
-                                   std::string *Message);
+  /// \param Message If non-null, this will be populated with the message from
+  /// the availability attribute that is selected.
+  AvailabilityResult ShouldDiagnoseAvailabilityOfDecl(NamedDecl *&D,
+                                                      std::string *Message);
 
   const DeclContext *getCurObjCLexicalContext() const {
     const DeclContext *DC = getCurLexicalContext();
