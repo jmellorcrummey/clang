@@ -481,6 +481,9 @@ def warn_deprecated_copy_operation : Warning<
   "for %0 is deprecated because it has a user-declared "
   "%select{copy %select{assignment operator|constructor}1|destructor}2">,
   InGroup<Deprecated>, DefaultIgnore;
+def warn_cxx1z_compat_exception_spec_in_signature : Warning<
+  "mangled name of %0 will change in C++17 due to non-throwing exception "
+  "specification in function signature">, InGroup<CXX1zCompat>;
 
 def warn_global_constructor : Warning<
   "declaration requires a global constructor">,
@@ -5077,6 +5080,16 @@ def err_arc_inconsistent_property_ownership : Error<
 
 } // end "ARC and @properties" category
 
+def warn_block_capture_autoreleasing : Warning<
+  "block captures an autoreleasing out-parameter, which may result in "
+  "use-after-free bugs">,
+  InGroup<BlockCaptureAutoReleasing>, DefaultIgnore;
+def note_declare_parameter_autoreleasing : Note<
+  "declare the parameter __autoreleasing explicitly to suppress this warning">;
+def note_declare_parameter_strong : Note<
+  "declare the parameter __strong or capture a __block __strong variable to "
+  "keep values alive across autorelease pools">;
+
 def err_arc_atomic_ownership : Error<
   "cannot perform atomic operation on a pointer to type %0: type has "
   "non-trivial ownership">;
@@ -7413,6 +7426,12 @@ def warn_format_non_standard: Warning<
 def warn_format_non_standard_conversion_spec: Warning<
   "using length modifier '%0' with conversion specifier '%1' is not supported by ISO C">,
   InGroup<FormatNonStandard>, DefaultIgnore;
+def warn_format_invalid_annotation : Warning<
+  "using '%0' format specifier annotation outside of os_log()/os_trace()">,
+  InGroup<Format>;
+def warn_format_P_no_precision : Warning<
+  "using '%%P' format specifier without precision">,
+  InGroup<Format>;
 def warn_printf_ignored_flag: Warning<
   "flag '%0' is ignored when flag '%1' is present">,
   InGroup<Format>;
@@ -7548,6 +7567,15 @@ def warn_cfstring_truncated : Warning<
   "input conversion stopped due to an input byte that does not "
   "belong to the input codeset UTF-8">,
   InGroup<DiagGroup<"CFString-literal">>;
+
+// os_log checking
+// TODO: separate diagnostic for os_trace()
+def err_os_log_format_not_string_constant : Error<
+  "os_log() format argument is not a string constant">;
+def err_os_log_argument_too_big : Error<
+  "os_log() argument %0 is too big (%1 bytes, max %2)">;
+def warn_os_log_format_narg : Error<
+ "os_log() '%%n' format specifier is not allowed">, DefaultError;
 
 // Statements.
 def err_continue_not_in_loop : Error<
