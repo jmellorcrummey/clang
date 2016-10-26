@@ -1076,7 +1076,7 @@ bool Sema::IsOpenMPCapturedByRef(ValueDecl *D, unsigned Level) {
                       OpenMPClauseKind WhereFoundClauseKind) {
           // Only the map clause information influences how a variable is
           // captured. E.g. is_device_ptr does not require changing the default
-          // behaviour.
+          // behavior.
           if (WhereFoundClauseKind != OMPC_map)
             return false;
 
@@ -1113,9 +1113,7 @@ bool Sema::IsOpenMPCapturedByRef(ValueDecl *D, unsigned Level) {
       IsByRef =
           !Ty->isScalarType() || DSAStack->isDefaultMapToFromAtLevel(Level);
     }
-  }
-
-  if (IsByRef && Ty.getNonReferenceType()->isScalarType()) {
+  } else if (Ty.getNonReferenceType()->isScalarType()) {
     IsByRef = !DSAStack->hasExplicitDSA(
         D, [](OpenMPClauseKind K) -> bool { return K == OMPC_firstprivate; },
         Level, /*NotLastprivate=*/true);
