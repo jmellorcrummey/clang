@@ -4792,6 +4792,15 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
                           ParentRegion == OMPD_master ||
                           ParentRegion == OMPD_critical ||
                           ParentRegion == OMPD_ordered;
+    } else if (isOpenMPTeamsDirective(CurrentRegion) &&
+               !isOpenMPTargetExecutionDirective(CurrentRegion)) {
+      // OpenMP [2.16, Nesting of Regions]
+      // If specified, a teams construct must be contained within a target
+      // construct.
+      NestingProhibited = ParentRegion != OMPD_target;
+      OrphanSeen = ParentRegion == OMPD_unknown;
+      Recommend = ShouldBeInTargetRegion;
+      Stack->setParentTeamsRegionLoc(Stack->getConstructLoc());
     } else if (isOpenMPWorksharingDirective(CurrentRegion) &&
                !isOpenMPParallelDirective(CurrentRegion)) {
       // OpenMP [2.16, Nesting of Regions]
@@ -4817,15 +4826,6 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
                           !(isOpenMPSimdDirective(ParentRegion) ||
                             Stack->isParentOrderedRegion());
       Recommend = ShouldBeInOrderedRegion;
-    } else if (isOpenMPTeamsDirective(CurrentRegion) &&
-               !isOpenMPTargetExecutionDirective(CurrentRegion)) {
-      // OpenMP [2.16, Nesting of Regions]
-      // If specified, a teams construct must be contained within a target
-      // construct.
-      NestingProhibited = ParentRegion != OMPD_target;
-      OrphanSeen = ParentRegion == OMPD_unknown;
-      Recommend = ShouldBeInTargetRegion;
-      Stack->setParentTeamsRegionLoc(Stack->getConstructLoc());
     }
     if (!NestingProhibited && ParentRegion == OMPD_teams) {
       // OpenMP [2.16, Nesting of Regions]
