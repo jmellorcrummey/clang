@@ -1497,9 +1497,6 @@ class OffloadingActionBuilder final {
   /// The compilation that is using this builder.
   Compilation &C;
 
-  /// The derived arguments associated with this builder.
-  DerivedArgList &Args;
-
   /// Map between an input argument and the offload kinds used to process it.
   std::map<const Arg *, unsigned> InputArgToOffloadKindMap;
 
@@ -1695,6 +1692,11 @@ class OffloadingActionBuilder final {
 
         // We avoid creating host action in device-only mode.
         return CompileDeviceOnly ? ABRT_Ignore_Host : ABRT_Success;
+      } else if (CurPhase > phases::Backend) {
+        // If we are past the backend phase and still have a device action, we
+        // don't have to do anything as this action is already a device
+        // top-level action.
+        return ABRT_Success;
       }
 
       assert(CurPhase < phases::Backend && "Generating single CUDA "
@@ -1989,7 +1991,7 @@ class OffloadingActionBuilder final {
 public:
   OffloadingActionBuilder(Compilation &C, DerivedArgList &Args,
                           const Driver::InputList &Inputs)
-      : C(C), Args(Args) {
+      : C(C) {
     // Create a specialized builder for each device toolchain.
 
     IsValid = true;
@@ -2097,7 +2099,10 @@ public:
 
     // If we are supporting bundling/unbundling and the current action is an
     // input action of non-source file, we replace the host action by the
-    // unbundling action.
+    // unbundling action. The bundler tool has the logic to detect if an input
+    // is a bundle or not and if the input is not a bundle it assumes it is a
+    // host file. Therefore it is safe to create an unbundling action even if
+    // the input is not a bundle.
     if (CanUseBundler && isa<InputAction>(HostAction) &&
         InputArg->getOption().getKind() == llvm::opt::Option::InputClass &&
         !types::isSrcFile(HostAction->getType())) {
@@ -2165,16 +2170,6 @@ public:
     if (HostAction)
       HostAction->propagateHostOffloadInfo(InputArgToOffloadKindMap[InputArg],
                                            /*BoundArch=*/nullptr);
-
-    // If any action is added by the builders, -o is ambiguous if we have more
-    // than one top-level action. If a bundler is used, there is no ambiguity.
-    if (!CanUseBundler && !OffloadAL.empty() && Args.hasArg(options::OPT_o) &&
-        AL.size() > 1) {
-      C.getDriver().Diag(
-          clang::diag::err_drv_output_argument_with_multiple_files);
-      return true;
-    }
-
     return false;
   }
 
