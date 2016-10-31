@@ -2275,7 +2275,9 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
               cast<DeclRefExpr>(OD->getInit()->IgnoreImpCasts())->getDecl());
 
         // If the variable does not have local storage it is always a reference.
-        if (!OrigVD->hasLocalStorage()) {
+        // If the variable is a parameter reference, we also share it as is,
+        // i.e., consider it a reference to something that can be shared.
+        if (!OrigVD->hasLocalStorage() || (isa<ParmVarDecl>(OrigVD) && OrigVD->getType()->isReferenceType())) {
           DST = DataSharingInfo::DST_Ref;
         } else {
           // If we have an alloca for this variable, then we need to share the
@@ -2684,7 +2686,7 @@ void CGOpenMPRuntimeNVPTX::createDataSharingPerFunctionInfrastructure(
     if (const VarDecl *VD = DSI.CapturesValues[i].first) {
       DeclRefExpr DRE(const_cast<VarDecl *>(VD),
                       /*RefersToEnclosingVariableOrCapture=*/false,
-                      VD->getType(), VK_LValue, SourceLocation());
+                      VD->getType().getNonReferenceType(), VK_LValue, SourceLocation());
       Address OriginalAddr = EnclosingCGF.EmitOMPHelperVar(&DRE).getAddress();
       OriginalVal = OriginalAddr.getPointer();
     } else
