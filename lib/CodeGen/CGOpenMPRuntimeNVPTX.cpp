@@ -2288,10 +2288,9 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
           // and should be treated as such.
           else if (isa<llvm::BitCastInst>(Val))
             DST = DataSharingInfo::DST_Cast;
-          // If the variable is a parameter reference, we also share it as is,
+          // If the variable is a reference, we also share it as is,
           // i.e., consider it a reference to something that can be shared.
-          else if (isa<ParmVarDecl>(OrigVD) &&
-                   OrigVD->getType()->isReferenceType())
+          else if (OrigVD->getType()->isReferenceType())
             DST = DataSharingInfo::DST_Ref;
         }
       }
