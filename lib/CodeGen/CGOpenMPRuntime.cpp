@@ -3225,6 +3225,10 @@ void CGOpenMPRuntime::createOffloadEntry(llvm::Constant *ID,
   Str->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   llvm::Constant *StrPtr = llvm::ConstantExpr::getBitCast(Str, CGM.Int8PtrTy);
 
+  // Decide linkage type of the entry struct by looking at the linkage type of
+  // the variable. By default the linkage is external.
+  auto EntryLinkage = llvm::GlobalValue::ExternalLinkage;
+
   // Create the entry struct. Its name has to be unique, so we append the name
   // of the related function or global to make sure that happen.
   llvm::Constant *EntryInit = llvm::ConstantStruct::get(
@@ -3233,8 +3237,8 @@ void CGOpenMPRuntime::createOffloadEntry(llvm::Constant *ID,
       Flags ? Flags : llvm::Constant::getNullValue(CGM.Int32Ty),
       llvm::Constant::getNullValue(CGM.Int32Ty), nullptr);
   llvm::GlobalVariable *Entry = new llvm::GlobalVariable(
-      M, TgtOffloadEntryType, true, llvm::GlobalValue::ExternalLinkage,
-      EntryInit, Twine(".omp_offloading.entry.") + Name);
+      M, TgtOffloadEntryType, true, EntryLinkage, EntryInit,
+      Twine(".omp_offloading.entry.") + Name);
 
   // The entry has to be created in the section the linker expects it to be.
   Entry->setSection(".omp_offloading.entries");

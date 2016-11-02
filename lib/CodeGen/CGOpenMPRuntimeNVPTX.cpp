@@ -3645,6 +3645,7 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
     // Find the last alloca and the last replacement that is not an alloca.
     llvm::Instruction *LastAlloca = nullptr;
     llvm::Instruction *LastNonAllocaReplacement = nullptr;
+    llvm::Instruction *LastNonAllocaNonRefReplacement = nullptr;
 
     for (auto &I : HeaderBB) {
       if (isa<llvm::AllocaInst>(I)) {
@@ -3659,6 +3660,9 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
         continue;
 
       LastNonAllocaReplacement = cast<llvm::Instruction>(It->first);
+
+      if (!It->second)
+        LastNonAllocaNonRefReplacement = LastNonAllocaReplacement;
     }
 
     // We will start inserting after the first alloca or at the beginning of the
@@ -3737,6 +3741,11 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
       InitArgs.push_back(Replacement);
     }
 
+    // Save the insertion point of the initialization call.
+    auto InitializationInsertPtr = InsertPtr;
+    if (LastNonAllocaNonRefReplacement)
+      InitializationInsertPtr = LastNonAllocaNonRefReplacement->getNextNode();
+
     // We now need to insert the sharing calls. We insert after the last value
     // to be replaced or after the alloca.
     if (LastNonAllocaReplacement)
@@ -3780,9 +3789,17 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
       InsertPtr = To;
     }
 
+    // Move the initialization insert point if it is before the the current
+    // initialization insert point.
+    for (auto *I = InsertPtr; I; I = I->getNextNode())
+      if (I == InitializationInsertPtr) {
+        InitializationInsertPtr = InsertPtr;
+        break;
+      }
+
     // If this is an entry point, we have to initialize the data sharing first.
     if (DSI.IsEntryPoint)
-      InitializeEntryPoint(InsertPtr);
+      InitializeEntryPoint(InitializationInsertPtr);
 
     // Adjust address spaces in the function arguments.
     auto FArg = DSI.InitializationFunction->arg_begin();
