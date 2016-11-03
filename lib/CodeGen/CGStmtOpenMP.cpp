@@ -332,7 +332,8 @@ llvm::Function *CodeGenFunction::GenerateOpenMPCapturedStmtFunction(
             ArgType, /*SpelledAsLValue=*/false);
       }
     }
-    if (NonAliasedMaps && ArgType->isAnyPointerType())
+    if (NonAliasedMaps &&
+        (ArgType->isAnyPointerType() || ArgType->isReferenceType()))
       ArgType = ArgType.withRestrict();
     Args.push_back(ImplicitParamDecl::Create(getContext(), nullptr,
                                              FD->getLocation(), II, ArgType));
