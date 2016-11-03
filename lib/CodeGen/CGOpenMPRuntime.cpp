@@ -3226,8 +3226,8 @@ void CGOpenMPRuntime::createOffloadEntry(llvm::Constant *ID,
   llvm::Constant *StrPtr = llvm::ConstantExpr::getBitCast(Str, CGM.Int8PtrTy);
 
   // Decide linkage type of the entry struct by looking at the linkage type of
-  // the variable. By default the linkage is external.
-  auto EntryLinkage = llvm::GlobalValue::ExternalLinkage;
+  // the variable. By default the linkage is Link-Once.
+  auto EntryLinkage = llvm::GlobalValue::WeakAnyLinkage;
 
   // Create the entry struct. Its name has to be unique, so we append the name
   // of the related function or global to make sure that happen.
@@ -5241,12 +5241,13 @@ void CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(
 
   if (CGM.getLangOpts().OpenMPIsDevice) {
     OutlinedFnID = llvm::ConstantExpr::getBitCast(OutlinedFn, CGM.Int8PtrTy);
-    OutlinedFn->setLinkage(llvm::GlobalValue::ExternalLinkage);
+    OutlinedFn->setLinkage(llvm::GlobalValue::WeakAnyLinkage);
   } else
     OutlinedFnID = new llvm::GlobalVariable(
         CGM.getModule(), CGM.Int8Ty, /*isConstant=*/true,
-        llvm::GlobalValue::PrivateLinkage,
-        llvm::Constant::getNullValue(CGM.Int8Ty), ".omp_offload.region_id");
+        llvm::GlobalValue::WeakAnyLinkage,
+        llvm::Constant::getNullValue(CGM.Int8Ty),
+        Twine(EntryFnName) + ".region_id");
 
   // Register the information for the entry associated with this target region.
   OffloadEntriesInfoManager.registerTargetRegionEntryInfo(
