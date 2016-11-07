@@ -42,22 +42,22 @@
 // CHECK-DAG: [[SIZET6:@.+]] = private unnamed_addr constant [4 x i[[SZ]]] [i[[SZ]] 4, i[[SZ]] 2, i[[SZ]] 1, i[[SZ]] 40]
 // CHECK-DAG: [[MAPT6:@.+]] = private unnamed_addr constant [4 x i32] [i32 800, i32 800, i32 800, i32 547]
 // CHECK-DAG: [[MAPT7:@.+]] = private unnamed_addr constant [5 x i32] [i32 547, i32 800, i32 288, i32 288, i32 547]
-// CHECK-DAG: @{{.*}} = private constant i8 0
-// CHECK-DAG: @{{.*}} = private constant i8 0
-// CHECK-DAG: @{{.*}} = private constant i8 0
-// CHECK-DAG: @{{.*}} = private constant i8 0
-// CHECK-DAG: @{{.*}} = private constant i8 0
-// CHECK-DAG: @{{.*}} = private constant i8 0
-// CHECK-DAG: @{{.*}} = private constant i8 0
+// CHECK-DAG: @{{.*}} = {{.*}}constant i8 0
+// CHECK-DAG: @{{.*}} = {{.*}}constant i8 0
+// CHECK-DAG: @{{.*}} = {{.*}}constant i8 0
+// CHECK-DAG: @{{.*}} = {{.*}}constant i8 0
+// CHECK-DAG: @{{.*}} = {{.*}}constant i8 0
+// CHECK-DAG: @{{.*}} = {{.*}}constant i8 0
+// CHECK-DAG: @{{.*}} = {{.*}}constant i8 0
 
-// TCHECK: @{{.+}} = constant [[ENTTY]]
-// TCHECK: @{{.+}} = constant [[ENTTY]]
-// TCHECK: @{{.+}} = constant [[ENTTY]]
-// TCHECK: @{{.+}} = constant [[ENTTY]]
-// TCHECK: @{{.+}} = constant [[ENTTY]]
-// TCHECK: @{{.+}} = constant [[ENTTY]]
-// TCHECK: @{{.+}} = constant [[ENTTY]]
-// TCHECK-NOT: @{{.+}} = constant [[ENTTY]]
+// TCHECK: @{{.+}} = {{.*}}constant [[ENTTY]]
+// TCHECK: @{{.+}} = {{.*}}constant [[ENTTY]]
+// TCHECK: @{{.+}} = {{.*}}constant [[ENTTY]]
+// TCHECK: @{{.+}} = {{.*}}constant [[ENTTY]]
+// TCHECK: @{{.+}} = {{.*}}constant [[ENTTY]]
+// TCHECK: @{{.+}} = {{.*}}constant [[ENTTY]]
+// TCHECK: @{{.+}} = {{.*}}constant [[ENTTY]]
+// TCHECK-NOT: @{{.+}} = {{.*}}constant [[ENTTY]]
 
 // Check if offloading descriptor is created.
 // CHECK: [[ENTBEGIN:@.+]] = external constant [[ENTTY]]
