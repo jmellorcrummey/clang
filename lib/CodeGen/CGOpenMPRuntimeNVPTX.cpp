@@ -2961,9 +2961,10 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
     }
   });
 
+  auto CapInfo = DSI.CapturesValues.begin();
   auto FI = DSI.MasterRecordType->getAs<RecordType>()->getDecl()->field_begin();
   auto CI = CS.capture_begin();
-  for (unsigned i = 0; i < CS.capture_size(); ++i, ++FI, ++CI) {
+  for (unsigned i = 0; i < CS.capture_size(); ++i, ++FI, ++CI, ++CapInfo) {
     auto *Arg = CGF.EmitLoadOfScalar(ArgsAddresses[i], /*Volatile=*/false,
                                      Ctx.getPointerType(FI->getType()),
                                      SourceLocation());
@@ -2971,10 +2972,18 @@ llvm::Function *CGOpenMPRuntimeNVPTX::createDataSharingParallelWrapper(
     // If this is a capture by value, we need to load the data. Additionally, if
     // its not a pointer we may need to cast it to uintptr.
     if (CI->capturesVariableByCopy()) {
-      auto LV = CGF.MakeNaturalAlignAddrLValue(Arg, FI->getType());
+      auto *CapturedVar = CI->getCapturedVar();
+      auto CapturedTy = FI->getType();
+      auto LV = CGF.MakeNaturalAlignAddrLValue(Arg, CapturedTy);
 
-      auto CastLV = castValueToUintptr(CGF, FI->getType(),
-                                       CI->getCapturedVar()->getName(), LV);
+      // If this is a value captured by reference in the outermost scope, we
+      // have to load the address first.
+      assert(CapInfo->first == CapturedVar && "Using info of wrong declaration.");
+      if (CapInfo->second == DataSharingInfo::DST_Ref)
+        CapturedTy = CapturedVar->getType();
+
+      auto CastLV = castValueToUintptr(CGF, CapturedTy,
+                                       CapturedVar->getName(), LV);
 
       Arg = CGF.EmitLoadOfScalar(CastLV, SourceLocation());
     }
