@@ -5572,7 +5572,7 @@ Sema::BuildCompoundLiteralExpr(SourceLocation LParenLoc, TypeSourceInfo *TInfo,
     return ExprError();
   LiteralExpr = Result.get();
 
-  bool isFileScope = getCurFunctionOrMethodDecl() == nullptr;
+  bool isFileScope = !CurContext->isFunctionOrMethod();
   if (isFileScope &&
       !LiteralExpr->isTypeDependent() &&
       !LiteralExpr->isValueDependent() &&
@@ -9880,15 +9880,14 @@ static void DiagnoseConstAssignment(Sema &S, const Expr *E,
   // a note to the error.
   bool DiagnosticEmitted = false;
 
-  // Track if the current expression is the result of a derefence, and if the
-  // next checked expression is the result of a derefence.
+  // Track if the current expression is the result of a dereference, and if the
+  // next checked expression is the result of a dereference.
   bool IsDereference = false;
   bool NextIsDereference = false;
 
   // Loop to process MemberExpr chains.
   while (true) {
     IsDereference = NextIsDereference;
-    NextIsDereference = false;
 
     E = E->IgnoreParenImpCasts();
     if (const MemberExpr *ME = dyn_cast<MemberExpr>(E)) {
@@ -14080,7 +14079,8 @@ static void DoMarkVarDeclReferenced(Sema &SemaRef, SourceLocation Loc,
         (SemaRef.CurContext != Var->getDeclContext() &&
          Var->getDeclContext()->isFunctionOrMethod() && Var->hasLocalStorage());
     if (RefersToEnclosingScope) {
-      if (LambdaScopeInfo *const LSI = SemaRef.getCurLambda()) {
+      if (LambdaScopeInfo *const LSI =
+              SemaRef.getCurLambda(/*IgnoreCapturedRegions=*/true)) {
         // If a variable could potentially be odr-used, defer marking it so
         // until we finish analyzing the full expression for any
         // lvalue-to-rvalue

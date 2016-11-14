@@ -1142,11 +1142,26 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
     const TargetInfo &TI = getContext().getTargetInfo();
     // The alignment of the alloca should correspond to __BIGGEST_ALIGNMENT__.
     unsigned SuitableAlignmentInBytes =
-        TI.getSuitableAlign() / TI.getCharWidth();
+        CGM.getContext()
+            .toCharUnitsFromBits(TI.getSuitableAlign())
+            .getQuantity();
     AllocaInst *AI = Builder.CreateAlloca(Builder.getInt8Ty(), Size);
     AI->setAlignment(SuitableAlignmentInBytes);
     return RValue::get(AI);
   }
+
+  case Builtin::BI__builtin_alloca_with_align: {
+    Value *Size = EmitScalarExpr(E->getArg(0));
+    Value *AlignmentInBitsValue = EmitScalarExpr(E->getArg(1));
+    auto *AlignmentInBitsCI = cast<ConstantInt>(AlignmentInBitsValue);
+    unsigned AlignmentInBits = AlignmentInBitsCI->getZExtValue();
+    unsigned AlignmentInBytes =
+        CGM.getContext().toCharUnitsFromBits(AlignmentInBits).getQuantity();
+    AllocaInst *AI = Builder.CreateAlloca(Builder.getInt8Ty(), Size);
+    AI->setAlignment(AlignmentInBytes);
+    return RValue::get(AI);
+  }
+
   case Builtin::BIbzero:
   case Builtin::BI__builtin_bzero: {
     Address Dest = EmitPointerWithAlignment(E->getArg(0));
@@ -7374,6 +7389,10 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
   case X86::BI__builtin_ia32_storeups512_mask:
     return EmitX86MaskedStore(*this, Ops, 1);
 
+  case X86::BI__builtin_ia32_storess128_mask:
+  case X86::BI__builtin_ia32_storesd128_mask: {
+    return EmitX86MaskedStore(*this, Ops, 16);
+  }
   case X86::BI__builtin_ia32_movdqa32store128_mask:
   case X86::BI__builtin_ia32_movdqa64store128_mask:
   case X86::BI__builtin_ia32_storeaps128_mask:
@@ -7409,6 +7428,10 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
   case X86::BI__builtin_ia32_loaddqudi256_mask:
   case X86::BI__builtin_ia32_loaddqudi512_mask:
     return EmitX86MaskedLoad(*this, Ops, 1);
+
+  case X86::BI__builtin_ia32_loadss128_mask:
+  case X86::BI__builtin_ia32_loadsd128_mask:
+    return EmitX86MaskedLoad(*this, Ops, 16);
 
   case X86::BI__builtin_ia32_loadaps128_mask:
   case X86::BI__builtin_ia32_loadaps256_mask:
@@ -7494,36 +7517,26 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
   }
 
   case X86::BI__builtin_ia32_movnti:
-  case X86::BI__builtin_ia32_movnti64: {
-    llvm::MDNode *Node = llvm::MDNode::get(
-        getLLVMContext(), llvm::ConstantAsMetadata::get(Builder.getInt32(1)));
-
-    // Convert the type of the pointer to a pointer to the stored type.
-    Value *BC = Builder.CreateBitCast(Ops[0],
-                                llvm::PointerType::getUnqual(Ops[1]->getType()),
-                                      "cast");
-    StoreInst *SI = Builder.CreateDefaultAlignedStore(Ops[1], BC);
-    SI->setMetadata(CGM.getModule().getMDKindID("nontemporal"), Node);
-
-    // No alignment for scalar intrinsic store.
-    SI->setAlignment(1);
-    return SI;
-  }
+  case X86::BI__builtin_ia32_movnti64:
   case X86::BI__builtin_ia32_movntsd:
   case X86::BI__builtin_ia32_movntss: {
     llvm::MDNode *Node = llvm::MDNode::get(
         getLLVMContext(), llvm::ConstantAsMetadata::get(Builder.getInt32(1)));
 
+    Value *Ptr = Ops[0];
+    Value *Src = Ops[1];
+
     // Extract the 0'th element of the source vector.
-    Value *Scl = Builder.CreateExtractElement(Ops[1], (uint64_t)0, "extract");
+    if (BuiltinID == X86::BI__builtin_ia32_movntsd ||
+        BuiltinID == X86::BI__builtin_ia32_movntss)
+      Src = Builder.CreateExtractElement(Src, (uint64_t)0, "extract");
 
     // Convert the type of the pointer to a pointer to the stored type.
-    Value *BC = Builder.CreateBitCast(Ops[0],
-                                llvm::PointerType::getUnqual(Scl->getType()),
-                                      "cast");
+    Value *BC = Builder.CreateBitCast(
+        Ptr, llvm::PointerType::getUnqual(Src->getType()), "cast");
 
     // Unaligned nontemporal store of the scalar value.
-    StoreInst *SI = Builder.CreateDefaultAlignedStore(Scl, BC);
+    StoreInst *SI = Builder.CreateDefaultAlignedStore(Src, BC);
     SI->setMetadata(CGM.getModule().getMDKindID("nontemporal"), Node);
     SI->setAlignment(1);
     return SI;
@@ -8180,38 +8193,45 @@ Value *CodeGenFunction::EmitAMDGPUBuiltinExpr(unsigned BuiltinID,
     return emitBinaryBuiltin(*this, E, Intrinsic::amdgcn_ds_swizzle);
   case AMDGPU::BI__builtin_amdgcn_div_fixup:
   case AMDGPU::BI__builtin_amdgcn_div_fixupf:
+  case AMDGPU::BI__builtin_amdgcn_div_fixuph:
     return emitTernaryBuiltin(*this, E, Intrinsic::amdgcn_div_fixup);
   case AMDGPU::BI__builtin_amdgcn_trig_preop:
   case AMDGPU::BI__builtin_amdgcn_trig_preopf:
     return emitFPIntBuiltin(*this, E, Intrinsic::amdgcn_trig_preop);
   case AMDGPU::BI__builtin_amdgcn_rcp:
   case AMDGPU::BI__builtin_amdgcn_rcpf:
+  case AMDGPU::BI__builtin_amdgcn_rcph:
     return emitUnaryBuiltin(*this, E, Intrinsic::amdgcn_rcp);
   case AMDGPU::BI__builtin_amdgcn_rsq:
   case AMDGPU::BI__builtin_amdgcn_rsqf:
+  case AMDGPU::BI__builtin_amdgcn_rsqh:
     return emitUnaryBuiltin(*this, E, Intrinsic::amdgcn_rsq);
   case AMDGPU::BI__builtin_amdgcn_rsq_clamp:
   case AMDGPU::BI__builtin_amdgcn_rsq_clampf:
     return emitUnaryBuiltin(*this, E, Intrinsic::amdgcn_rsq_clamp);
   case AMDGPU::BI__builtin_amdgcn_sinf:
+  case AMDGPU::BI__builtin_amdgcn_sinh:
     return emitUnaryBuiltin(*this, E, Intrinsic::amdgcn_sin);
   case AMDGPU::BI__builtin_amdgcn_cosf:
+  case AMDGPU::BI__builtin_amdgcn_cosh:
     return emitUnaryBuiltin(*this, E, Intrinsic::amdgcn_cos);
   case AMDGPU::BI__builtin_amdgcn_log_clampf:
     return emitUnaryBuiltin(*this, E, Intrinsic::amdgcn_log_clamp);
   case AMDGPU::BI__builtin_amdgcn_ldexp:
   case AMDGPU::BI__builtin_amdgcn_ldexpf:
+  case AMDGPU::BI__builtin_amdgcn_ldexph:
     return emitFPIntBuiltin(*this, E, Intrinsic::amdgcn_ldexp);
   case AMDGPU::BI__builtin_amdgcn_frexp_mant:
-  case AMDGPU::BI__builtin_amdgcn_frexp_mantf: {
+  case AMDGPU::BI__builtin_amdgcn_frexp_mantf:
+  case AMDGPU::BI__builtin_amdgcn_frexp_manth:
     return emitUnaryBuiltin(*this, E, Intrinsic::amdgcn_frexp_mant);
-  }
   case AMDGPU::BI__builtin_amdgcn_frexp_exp:
-  case AMDGPU::BI__builtin_amdgcn_frexp_expf: {
+  case AMDGPU::BI__builtin_amdgcn_frexp_expf:
+  case AMDGPU::BI__builtin_amdgcn_frexp_exph:
     return emitUnaryBuiltin(*this, E, Intrinsic::amdgcn_frexp_exp);
-  }
   case AMDGPU::BI__builtin_amdgcn_fract:
   case AMDGPU::BI__builtin_amdgcn_fractf:
+  case AMDGPU::BI__builtin_amdgcn_fracth:
     return emitUnaryBuiltin(*this, E, Intrinsic::amdgcn_fract);
   case AMDGPU::BI__builtin_amdgcn_lerp:
     return emitTernaryBuiltin(*this, E, Intrinsic::amdgcn_lerp);
@@ -8225,6 +8245,7 @@ Value *CodeGenFunction::EmitAMDGPUBuiltinExpr(unsigned BuiltinID,
     return emitTernaryBuiltin(*this, E, Intrinsic::amdgcn_fcmp);
   case AMDGPU::BI__builtin_amdgcn_class:
   case AMDGPU::BI__builtin_amdgcn_classf:
+  case AMDGPU::BI__builtin_amdgcn_classh:
     return emitFPIntBuiltin(*this, E, Intrinsic::amdgcn_class);
 
   case AMDGPU::BI__builtin_amdgcn_read_exec: {

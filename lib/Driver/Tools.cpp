@@ -5663,6 +5663,18 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // definitions.
   Args.AddAllArgs(CmdArgs, options::OPT_fmodule_map_file);
 
+  // -fbuiltin-module-map can be used to load the clang
+  // builtin headers modulemap file.
+  if (Args.hasArg(options::OPT_fbuiltin_module_map)) {
+    SmallString<128> BuiltinModuleMap(getToolChain().getDriver().ResourceDir);
+    llvm::sys::path::append(BuiltinModuleMap, "include");
+    llvm::sys::path::append(BuiltinModuleMap, "module.modulemap");
+    if (llvm::sys::fs::exists(BuiltinModuleMap)) {
+      CmdArgs.push_back(Args.MakeArgString("-fmodule-map-file=" +
+                                           BuiltinModuleMap));
+    }
+  }
+
   // -fmodule-file can be used to specify files containing precompiled modules.
   if (HaveAnyModules)
     Args.AddAllArgs(CmdArgs, options::OPT_fmodule_file);
@@ -7171,11 +7183,10 @@ void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs, None));
 }
 
-void OffloadBundler::ConstructJob(Compilation &C, const JobAction &JA,
-                                  const InputInfoList &Outputs,
-                                  const InputInfoList &Inputs,
-                                  const llvm::opt::ArgList &TCArgs,
-                                  const char *LinkingOutput) const {
+void OffloadBundler::ConstructJobMultipleOutputs(
+    Compilation &C, const JobAction &JA, const InputInfoList &Outputs,
+    const InputInfoList &Inputs, const llvm::opt::ArgList &TCArgs,
+    const char *LinkingOutput) const {
   // The version with multiple outputs is expected to refer to a unbundling job.
   auto &UA = cast<OffloadUnbundlingJobAction>(JA);
 
@@ -8258,7 +8269,7 @@ void darwin::Linker::AddLinkArgs(Compilation &C, const ArgList &Args,
   // and 'ld' will use its default mechanism to search for libLTO.dylib.
   if (Version[0] >= 133) {
     // Search for libLTO in <InstalledDir>/../lib/libLTO.dylib
-    StringRef P = llvm::sys::path::parent_path(D.getInstalledDir());
+    StringRef P = llvm::sys::path::parent_path(D.Dir);
     SmallString<128> LibLTOPath(P);
     llvm::sys::path::append(LibLTOPath, "lib");
     llvm::sys::path::append(LibLTOPath, "libLTO.dylib");
@@ -10791,14 +10802,14 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
         std::string UniversalCRTLibPath;
         if (MSVC.getUniversalCRTLibraryPath(UniversalCRTLibPath))
           CmdArgs.push_back(Args.MakeArgString(std::string("-libpath:") +
-                                               UniversalCRTLibPath.c_str()));
+                                               UniversalCRTLibPath));
       }
     }
 
     std::string WindowsSdkLibPath;
     if (MSVC.getWindowsSDKLibraryPath(WindowsSdkLibPath))
-      CmdArgs.push_back(Args.MakeArgString(std::string("-libpath:") +
-                                           WindowsSdkLibPath.c_str()));
+      CmdArgs.push_back(
+          Args.MakeArgString(std::string("-libpath:") + WindowsSdkLibPath));
   }
 
   if (!C.getDriver().IsCLMode() && Args.hasArg(options::OPT_L))
@@ -10824,7 +10835,8 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   if (TC.getSanitizerArgs().needsAsanRt()) {
     CmdArgs.push_back(Args.MakeArgString("-debug"));
     CmdArgs.push_back(Args.MakeArgString("-incremental:no"));
-    if (Args.hasArg(options::OPT__SLASH_MD, options::OPT__SLASH_MDd)) {
+    if (TC.getSanitizerArgs().needsSharedAsanRt() ||
+        Args.hasArg(options::OPT__SLASH_MD, options::OPT__SLASH_MDd)) {
       for (const auto &Lib : {"asan_dynamic", "asan_dynamic_runtime_thunk"})
         CmdArgs.push_back(TC.getCompilerRTArgString(Args, Lib));
       // Make sure the dynamic runtime thunk is not optimized out at link time
@@ -11015,6 +11027,14 @@ std::unique_ptr<Command> visualstudio::Compiler::GetCommand(
   if (Arg *A = Args.getLastArg(options::OPT__SLASH_MD, options::OPT__SLASH_MDd,
                                options::OPT__SLASH_MT, options::OPT__SLASH_MTd))
     A->render(Args, CmdArgs);
+
+  // Use MSVC's default threadsafe statics behaviour unless there was a flag.
+  if (Arg *A = Args.getLastArg(options::OPT_fthreadsafe_statics,
+                               options::OPT_fno_threadsafe_statics)) {
+    CmdArgs.push_back(A->getOption().getID() == options::OPT_fthreadsafe_statics
+                          ? "/Zc:threadSafeInit"
+                          : "/Zc:threadSafeInit-");
+  }
 
   // Pass through all unknown arguments so that the fallback command can see
   // them too.

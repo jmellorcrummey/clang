@@ -20,7 +20,7 @@
 #include "clang/AST/StmtOpenMP.h"
 #include "clang/AST/EvaluatedExprVisitor.h"
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/Bitcode/ReaderWriter.h"
+#include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/GlobalValue.h"
@@ -3393,7 +3393,8 @@ void CGOpenMPRuntime::loadOffloadInfoMetadata() {
     return;
 
   llvm::LLVMContext C;
-  auto ME = llvm::parseBitcodeFile(Buf.get()->getMemBufferRef(), C);
+  auto ME = expectedToErrorOrAndEmitErrors(
+      C, llvm::parseBitcodeFile(Buf.get()->getMemBufferRef(), C));
 
   if (ME.getError())
     return;

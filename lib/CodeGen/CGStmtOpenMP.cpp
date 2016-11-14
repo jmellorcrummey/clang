@@ -413,7 +413,7 @@ llvm::Function *CodeGenFunction::GenerateOpenMPCapturedStmtFunction(
         if (ArgLVal.getType()->isLValueReferenceType()) {
           ArgAddr = EmitLoadOfReference(
               ArgAddr, ArgLVal.getType()->castAs<ReferenceType>());
-        } else {
+        } else if (!VarTy->isVariablyModifiedType() || !VarTy->isPointerType()) {
           assert(ArgLVal.getType()->isPointerType());
           ArgAddr = EmitLoadOfPointer(
               ArgAddr, ArgLVal.getType()->castAs<PointerType>());
@@ -1430,7 +1430,9 @@ void CodeGenFunction::EmitOMPInnerLoop(
   // Start the loop with a block that tests the condition.
   auto CondBlock = createBasicBlock("omp.inner.for.cond");
   EmitBlock(CondBlock);
-  LoopStack.push(CondBlock, Builder.getCurrentDebugLocation());
+  const SourceRange &R = S.getSourceRange();
+  LoopStack.push(CondBlock, SourceLocToDebugLoc(R.getBegin()),
+                 SourceLocToDebugLoc(R.getEnd()));
 
   // If there are any cleanups between here and the loop-exit scope,
   // create a block to stage a loop exit along.
@@ -1925,7 +1927,9 @@ void CodeGenFunction::EmitOMPOuterLoop(
   // Start the loop with a block that tests the condition.
   auto CondBlock = createBasicBlock("omp.dispatch.cond");
   EmitBlock(CondBlock);
-  LoopStack.push(CondBlock, Builder.getCurrentDebugLocation());
+  const SourceRange &R = S.getSourceRange();
+  LoopStack.push(CondBlock, SourceLocToDebugLoc(R.getBegin()),
+                 SourceLocToDebugLoc(R.getEnd()));
 
   llvm::Value *BoolCondVal = nullptr;
   if (!DynamicOrOrdered) {

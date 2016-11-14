@@ -382,7 +382,7 @@ def Alias : Attr {
   let Spellings = [GCC<"alias">];
   let Args = [StringArgument<"Aliasee">];
   let Subjects = SubjectList<[Function, GlobalVar], ErrorDiag,
-                             "ExpectedFunctionGlobalVarMethodOrProperty">;
+                             "ExpectedFunctionOrGlobalVar">;
   let Documentation = [Undocumented];
 }
 
@@ -810,6 +810,11 @@ def FastCall : InheritableAttr {
   let Documentation = [FastCallDocs];
 }
 
+def RegCall : InheritableAttr {
+  let Spellings = [GCC<"regcall">, Keyword<"__regcall">];
+  let Documentation = [RegCallDocs];
+}
+
 def Final : InheritableAttr {
   let Spellings = [Keyword<"final">, Keyword<"sealed">];
   let Accessors = [Accessor<"isSpelledAsSealed", [Keyword<"sealed">]>];
@@ -1024,6 +1029,12 @@ def NoDuplicate : InheritableAttr {
   let Spellings = [GNU<"noduplicate">, CXX11<"clang", "noduplicate">];
   let Subjects = SubjectList<[Function]>;
   let Documentation = [NoDuplicateDocs];
+}
+
+def Convergent : InheritableAttr {
+  let Spellings = [GNU<"convergent">, CXX11<"clang", "convergent">];
+  let Subjects = SubjectList<[Function]>;
+  let Documentation = [ConvergentDocs];
 }
 
 def NoInline : InheritableAttr {
@@ -1735,7 +1746,7 @@ def NoSanitizeSpecific : InheritableAttr {
                    GCC<"no_sanitize_thread">,
                    GNU<"no_sanitize_memory">];
   let Subjects = SubjectList<[Function, GlobalVar], ErrorDiag,
-        "ExpectedFunctionGlobalVarMethodOrProperty">;
+        "ExpectedFunctionOrGlobalVar">;
   let Documentation = [NoSanitizeAddressDocs, NoSanitizeThreadDocs,
                        NoSanitizeMemoryDocs];
   let ASTNode = 0;

@@ -357,6 +357,9 @@ def warn_decl_shadow :
           "static data member of %2|"
           "field of %2}1">,
   InGroup<Shadow>, DefaultIgnore;
+def warn_decl_shadow_uncaptured_local :
+  Warning<warn_decl_shadow.Text>,
+  InGroup<ShadowUncapturedLocal>, DefaultIgnore;
 def warn_ctor_parm_shadows_field:
   Warning<"constructor parameter %0 shadows the field %1 of %2">,
   InGroup<ShadowFieldInConstructor>, DefaultIgnore;
@@ -739,7 +742,9 @@ def err_recursive_superclass : Error<
   "trying to recursively use %0 as superclass of %1">;
 def err_conflicting_aliasing_type : Error<"conflicting types for alias %0">;
 def warn_undef_interface : Warning<"cannot find interface declaration for %0">;
-def warn_duplicate_protocol_def : Warning<"duplicate protocol definition of %0 is ignored">;
+def warn_duplicate_protocol_def : Warning<
+  "duplicate protocol definition of %0 is ignored">,
+  InGroup<DiagGroup<"duplicate-protocol">>;
 def err_protocol_has_circular_dependency : Error<
   "protocol has circular dependency">;
 def err_undeclared_protocol : Error<"cannot find protocol declaration for %0">;
@@ -1775,6 +1780,8 @@ def note_uninit_fixit_remove_cond : Note<
   "remove the %select{'%1' if its condition|condition if it}0 "
   "is always %select{false|true}2">;
 def err_init_incomplete_type : Error<"initialization of incomplete type %0">;
+def err_list_init_in_parens : Error<"list-initializer for non-class type %0 "
+  "must not be parenthesized">;
 
 def warn_unsequenced_mod_mod : Warning<
   "multiple unsequenced modifications to %0">, InGroup<Unsequenced>;
@@ -2440,6 +2447,14 @@ def err_no_accessor_for_property : Error<
 def error_cannot_find_suitable_accessor : Error<
   "cannot find suitable %select{getter|setter}0 for property %1">;
 
+def warn_alloca_align_alignof : Warning<
+  "second argument to __builtin_alloca_with_align is supposed to be in bits">,
+  InGroup<DiagGroup<"alloca-with-align-alignof">>;
+
+def err_alignment_too_small : Error<
+  "requested alignment must be %0 or greater">;
+def err_alignment_too_big : Error<
+  "requested alignment must be %0 or smaller">;
 def err_alignment_not_power_of_two : Error<
   "requested alignment is not a power of 2">;
 def err_alignment_dependent_typedef_name : Error<
@@ -2586,6 +2601,7 @@ def warn_attribute_wrong_decl_type : Warning<
   "functions"
   "|unions"
   "|variables and functions"
+  "|functions and global variables"
   "|functions, variables, and Objective-C interfaces"
   "|functions and methods"
   "|parameters"
@@ -2616,7 +2632,7 @@ def warn_attribute_wrong_decl_type : Warning<
   "|functions, variables, classes, and Objective-C interfaces"
   "|Objective-C protocols"
   "|variables with static or thread storage duration"
-  "|functions and global variables"
+  "|functions, methods, properties, and global variables"
   "|structs, unions, and typedefs"
   "|structs and typedefs"
   "|interface or protocol declarations"
@@ -4494,6 +4510,8 @@ def err_extern_c_global_conflict : Error<
   "conflicts with declaration %select{in global scope|with C language linkage}0">;
 def note_extern_c_global_conflict : Note<
   "declared %select{in global scope|with C language linkage}0 here">;
+def note_extern_c_begins_here : Note<
+  "extern \"C\" language linkage specification begins here">;
 def warn_weak_import : Warning <
   "an already-declared variable is made a weak_import declaration %0">;
 def ext_static_non_static : Extension<
@@ -5934,6 +5952,9 @@ def err_bad_cxx_cast_vector_to_vector_different_size : Error<
 def err_bad_lvalue_to_rvalue_cast : Error<
   "cannot cast from lvalue of type %1 to rvalue reference type %2; types are "
   "not compatible">;
+def err_bad_rvalue_to_rvalue_cast : Error<
+  "cannot cast from rvalue of type %1 to rvalue reference type %2; types are "
+  "not compatible">;
 def err_bad_static_cast_pointer_nonpointer : Error<
   "cannot cast from type %1 to pointer type %2">;
 def err_bad_static_cast_member_pointer_nonmp : Error<
@@ -6217,6 +6238,8 @@ let CategoryName = "Lambda Issue" in {
   def note_lambda_to_block_conv : Note<
     "implicit capture of lambda object due to conversion to block pointer "
     "here">;
+  def note_var_explicitly_captured_here : Note<"variable %0 is"
+    "%select{| explicitly}1 captured here">;
 
   // C++14 lambda init-captures.
   def warn_cxx11_compat_init_capture : Warning<
@@ -8597,8 +8620,6 @@ def ext_module_import_in_extern_c : ExtWarn<
   "import of C++ module '%0' appears within extern \"C\" language linkage "
   "specification">, DefaultError,
   InGroup<DiagGroup<"module-import-in-extern-c">>;
-def note_module_import_in_extern_c : Note<
-  "extern \"C\" language linkage specification begins here">;
 def err_module_import_not_at_top_level_fatal : Error<
   "import of module '%0' appears within %1">, DefaultFatal;
 def ext_module_import_not_at_top_level_noop : ExtWarn<
@@ -8714,6 +8735,15 @@ def warn_nullability_missing : Warning<
   "%select{pointer|block pointer|member pointer}0 is missing a nullability "
   "type specifier (_Nonnull, _Nullable, or _Null_unspecified)">,
   InGroup<NullabilityCompleteness>;
+def warn_nullability_missing_array : Warning<
+  "array parameter is missing a nullability type specifier (_Nonnull, "
+  "_Nullable, or _Null_unspecified)">,
+  InGroup<NullabilityCompletenessOnArrays>;
+
+def warn_nullability_inferred_on_nested_type : Warning<
+  "inferring '_Nonnull' for pointer type within %select{array|reference}0 is "
+  "deprecated">,
+  InGroup<NullabilityInferredOnNestedType>;
 
 def err_objc_type_arg_explicit_nullability : Error<
   "type argument %0 cannot explicitly specify nullability">;
