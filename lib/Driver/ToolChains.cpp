@@ -4963,6 +4963,25 @@ Tool *DragonFly::buildLinker() const {
 /// which isn't properly a linker but nonetheless performs the step of stitching
 /// together object files from the assembler into a single blob.
 
+// Define the default compute capability for OpenMP and create a stringification
+// macro for it. Also, select the default PTX version to be used. We use 4.2 for
+// compute capabilities older than 6.0 and 5.0 otherwise.
+#ifndef OPENMP_NVPTX_COMPUTE_CAPABILITY
+#define OPENMP_NVPTX_COMPUTE_CAPABILITY 35
+#endif
+
+#if OPENMP_NVPTX_COMPUTE_CAPABILITY < 60
+#define OPENMP_NVPTX_PTX_VERSION_STR "ptx42"
+#else
+#define OPENMP_NVPTX_PTX_VERSION_STR "ptx50"
+#endif
+
+#define OPENMP_NVPTX_COMPUTE_CAPABILITY_STRT1(X) #X
+#define OPENMP_NVPTX_COMPUTE_CAPABILITY_STRT2(X)                               \
+  OPENMP_NVPTX_COMPUTE_CAPABILITY_STRT1(X)
+#define OPENMP_NVPTX_COMPUTE_CAPABILITY_STR                                    \
+  "sm_" OPENMP_NVPTX_COMPUTE_CAPABILITY_STRT2(OPENMP_NVPTX_COMPUTE_CAPABILITY)
+
 CudaToolChain::CudaToolChain(const Driver &D, const llvm::Triple &Triple,
                              const ArgList &Args)
     : Linux(D, Triple, Args) {
@@ -5014,6 +5033,9 @@ void CudaToolChain::addClangTargetOptions(
   CC1Args.push_back("+ptx42");
 
   if (DeviceOffloadingKind == Action::OFK_OpenMP) {
+    // Override the default ptx version by the version that should be used for
+    // OpenMP codes.
+    CC1Args.back() = "+" OPENMP_NVPTX_PTX_VERSION_STR;
     SmallVector<std::string, 8> LibraryPaths;
     if (char *env = ::getenv("LIBRARY_PATH")) {
       StringRef CompilerPath = env;
@@ -5062,17 +5084,10 @@ CudaToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
   if (DeviceOffloadingKind == Action::OFK_OpenMP) {
     for (Arg *A : Args)
       DAL->append(A);
-// FIXME: get the right arch from the offloading arguments.
-#ifdef OPENMP_NVPTX_COMPUTE_CAPABILITY
-#define OPENMP_NVPTX_COMPUTE_CAPABILITY_STR2(X) #X
-#define OPENMP_NVPTX_COMPUTE_CAPABILITY_STR(X)                                 \
-  OPENMP_NVPTX_COMPUTE_CAPABILITY_STR2(X)
+
+    // FIXME: get the right arch from the offloading arguments.
     DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_march_EQ),
-                      "sm_" OPENMP_NVPTX_COMPUTE_CAPABILITY_STR(
-                          OPENMP_NVPTX_COMPUTE_CAPABILITY));
-#else
-    DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_march_EQ), "sm_35");
-#endif
+                      OPENMP_NVPTX_COMPUTE_CAPABILITY_STR);
     return DAL;
   }
 
