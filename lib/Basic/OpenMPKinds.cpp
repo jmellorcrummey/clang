@@ -831,8 +831,7 @@ bool clang::isOpenMPNestingDistributeDirective(OpenMPDirectiveKind Kind) {
 
 bool clang::isOpenMPDistributeDirective(OpenMPDirectiveKind Kind) {
   return isOpenMPNestingDistributeDirective(Kind) ||
-         Kind == OMPD_teams_distribute ||
-         Kind == OMPD_teams_distribute_simd ||
+         Kind == OMPD_teams_distribute || Kind == OMPD_teams_distribute_simd ||
          Kind == OMPD_target_teams_distribute ||
          Kind == OMPD_target_teams_distribute_simd ||
          Kind == OMPD_teams_distribute_parallel_for_simd;

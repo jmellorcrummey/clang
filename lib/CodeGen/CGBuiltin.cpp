@@ -2517,17 +2517,11 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
       std::vector<llvm::Type *> ArgTys = {QueueTy, IntTy, RangeTy, Int8PtrTy,
                                           IntTy};
 
-      // Add the variadics.
-      for (unsigned I = 4; I < NumArgs; ++I) {
-        llvm::Value *ArgSize = EmitScalarExpr(E->getArg(I));
-        unsigned TypeSizeInBytes =
-            getContext()
-                .getTypeSizeInChars(E->getArg(I)->getType())
-                .getQuantity();
-        Args.push_back(TypeSizeInBytes < 4
-                           ? Builder.CreateZExt(ArgSize, Int32Ty)
-                           : ArgSize);
-      }
+      // Each of the following arguments specifies the size of the corresponding
+      // argument passed to the enqueued block.
+      for (unsigned I = 4/*Position of the first size arg*/; I < NumArgs; ++I)
+        Args.push_back(
+            Builder.CreateZExtOrTrunc(EmitScalarExpr(E->getArg(I)), SizeTy));
 
       llvm::FunctionType *FTy = llvm::FunctionType::get(
           Int32Ty, llvm::ArrayRef<llvm::Type *>(ArgTys), true);
@@ -2538,29 +2532,26 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
     // Any calls now have event arguments passed.
     if (NumArgs >= 7) {
       llvm::Type *EventTy = ConvertType(getContext().OCLClkEventTy);
-      unsigned AS4 =
-          E->getArg(4)->getType()->isArrayType()
-              ? E->getArg(4)->getType().getAddressSpace()
-              : E->getArg(4)->getType()->getPointeeType().getAddressSpace();
-      llvm::Type *EventPtrAS4Ty =
-          EventTy->getPointerTo(CGM.getContext().getTargetAddressSpace(AS4));
-      unsigned AS5 =
-          E->getArg(5)->getType()->getPointeeType().getAddressSpace();
-      llvm::Type *EventPtrAS5Ty =
-          EventTy->getPointerTo(CGM.getContext().getTargetAddressSpace(AS5));
+      llvm::Type *EventPtrTy = EventTy->getPointerTo(
+          CGM.getContext().getTargetAddressSpace(LangAS::opencl_generic));
 
-      llvm::Value *NumEvents = EmitScalarExpr(E->getArg(3));
+      llvm::Value *NumEvents =
+          Builder.CreateZExtOrTrunc(EmitScalarExpr(E->getArg(3)), Int32Ty);
       llvm::Value *EventList =
           E->getArg(4)->getType()->isArrayType()
               ? EmitArrayToPointerDecay(E->getArg(4)).getPointer()
               : EmitScalarExpr(E->getArg(4));
       llvm::Value *ClkEvent = EmitScalarExpr(E->getArg(5));
+      // Convert to generic address space.
+      EventList = Builder.CreatePointerCast(EventList, EventPtrTy);
+      ClkEvent = Builder.CreatePointerCast(ClkEvent, EventPtrTy);
       llvm::Value *Block =
           Builder.CreateBitCast(EmitScalarExpr(E->getArg(6)), Int8PtrTy);
 
-      std::vector<llvm::Type *> ArgTys = {
-          QueueTy,       Int32Ty,       RangeTy,  Int32Ty,
-          EventPtrAS4Ty, EventPtrAS5Ty, Int8PtrTy};
+      std::vector<llvm::Type *> ArgTys = {QueueTy,  Int32Ty,    RangeTy,
+                                          Int32Ty,  EventPtrTy, EventPtrTy,
+                                          Int8PtrTy};
+
       std::vector<llvm::Value *> Args = {Queue,     Flags,    Range, NumEvents,
                                          EventList, ClkEvent, Block};
 
@@ -2579,17 +2570,12 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
       ArgTys.push_back(Int32Ty);
       Name = "__enqueue_kernel_events_vaargs";
 
-      // Add the variadics.
-      for (unsigned I = 7; I < NumArgs; ++I) {
-        llvm::Value *ArgSize = EmitScalarExpr(E->getArg(I));
-        unsigned TypeSizeInBytes =
-            getContext()
-                .getTypeSizeInChars(E->getArg(I)->getType())
-                .getQuantity();
-        Args.push_back(TypeSizeInBytes < 4
-                           ? Builder.CreateZExt(ArgSize, Int32Ty)
-                           : ArgSize);
-      }
+      // Each of the following arguments specifies the size of the corresponding
+      // argument passed to the enqueued block.
+      for (unsigned I = 7/*Position of the first size arg*/; I < NumArgs; ++I)
+        Args.push_back(
+            Builder.CreateZExtOrTrunc(EmitScalarExpr(E->getArg(I)), SizeTy));
+
       llvm::FunctionType *FTy = llvm::FunctionType::get(
           Int32Ty, llvm::ArrayRef<llvm::Type *>(ArgTys), true);
       return RValue::get(
@@ -7928,7 +7914,7 @@ Value *CodeGenFunction::EmitPPCBuiltinExpr(unsigned BuiltinID,
   case PPC::BI__builtin_ppc_get_timebase:
     return Builder.CreateCall(CGM.getIntrinsic(Intrinsic::readcyclecounter));
 
-  // vec_ld, vec_lvsl, vec_lvsr
+  // vec_ld, vec_xl_be, vec_lvsl, vec_lvsr
   case PPC::BI__builtin_altivec_lvx:
   case PPC::BI__builtin_altivec_lvxl:
   case PPC::BI__builtin_altivec_lvebx:
@@ -7938,11 +7924,19 @@ Value *CodeGenFunction::EmitPPCBuiltinExpr(unsigned BuiltinID,
   case PPC::BI__builtin_altivec_lvsr:
   case PPC::BI__builtin_vsx_lxvd2x:
   case PPC::BI__builtin_vsx_lxvw4x:
+  case PPC::BI__builtin_vsx_lxvd2x_be:
+  case PPC::BI__builtin_vsx_lxvw4x_be:
+  case PPC::BI__builtin_vsx_lxvl:
+  case PPC::BI__builtin_vsx_lxvll:
   {
-    Ops[1] = Builder.CreateBitCast(Ops[1], Int8PtrTy);
-
-    Ops[0] = Builder.CreateGEP(Ops[1], Ops[0]);
-    Ops.pop_back();
+    if(BuiltinID == PPC::BI__builtin_vsx_lxvl ||
+       BuiltinID == PPC::BI__builtin_vsx_lxvll){
+      Ops[0] = Builder.CreateBitCast(Ops[0], Int8PtrTy);
+    }else {
+      Ops[1] = Builder.CreateBitCast(Ops[1], Int8PtrTy);
+      Ops[0] = Builder.CreateGEP(Ops[1], Ops[0]);
+      Ops.pop_back();
+    }
 
     switch (BuiltinID) {
     default: llvm_unreachable("Unsupported ld/lvsl/lvsr intrinsic!");
@@ -7973,12 +7967,24 @@ Value *CodeGenFunction::EmitPPCBuiltinExpr(unsigned BuiltinID,
     case PPC::BI__builtin_vsx_lxvw4x:
       ID = Intrinsic::ppc_vsx_lxvw4x;
       break;
+    case PPC::BI__builtin_vsx_lxvd2x_be:
+      ID = Intrinsic::ppc_vsx_lxvd2x_be;
+      break;
+    case PPC::BI__builtin_vsx_lxvw4x_be:
+      ID = Intrinsic::ppc_vsx_lxvw4x_be;
+      break;
+    case PPC::BI__builtin_vsx_lxvl:
+      ID = Intrinsic::ppc_vsx_lxvl;
+      break;
+    case PPC::BI__builtin_vsx_lxvll:
+      ID = Intrinsic::ppc_vsx_lxvll;
+      break;
     }
     llvm::Function *F = CGM.getIntrinsic(ID);
     return Builder.CreateCall(F, Ops, "");
   }
 
-  // vec_st
+  // vec_st, vec_xst_be
   case PPC::BI__builtin_altivec_stvx:
   case PPC::BI__builtin_altivec_stvxl:
   case PPC::BI__builtin_altivec_stvebx:
@@ -7986,10 +7992,19 @@ Value *CodeGenFunction::EmitPPCBuiltinExpr(unsigned BuiltinID,
   case PPC::BI__builtin_altivec_stvewx:
   case PPC::BI__builtin_vsx_stxvd2x:
   case PPC::BI__builtin_vsx_stxvw4x:
+  case PPC::BI__builtin_vsx_stxvd2x_be:
+  case PPC::BI__builtin_vsx_stxvw4x_be:
+  case PPC::BI__builtin_vsx_stxvl:
+  case PPC::BI__builtin_vsx_stxvll:
   {
-    Ops[2] = Builder.CreateBitCast(Ops[2], Int8PtrTy);
-    Ops[1] = Builder.CreateGEP(Ops[2], Ops[1]);
-    Ops.pop_back();
+    if(BuiltinID == PPC::BI__builtin_vsx_stxvl ||
+      BuiltinID == PPC::BI__builtin_vsx_stxvll ){
+      Ops[1] = Builder.CreateBitCast(Ops[1], Int8PtrTy);
+    }else {
+      Ops[2] = Builder.CreateBitCast(Ops[2], Int8PtrTy);
+      Ops[1] = Builder.CreateGEP(Ops[2], Ops[1]);
+      Ops.pop_back();
+    }
 
     switch (BuiltinID) {
     default: llvm_unreachable("Unsupported st intrinsic!");
@@ -8013,6 +8028,18 @@ Value *CodeGenFunction::EmitPPCBuiltinExpr(unsigned BuiltinID,
       break;
     case PPC::BI__builtin_vsx_stxvw4x:
       ID = Intrinsic::ppc_vsx_stxvw4x;
+      break;
+    case PPC::BI__builtin_vsx_stxvd2x_be:
+      ID = Intrinsic::ppc_vsx_stxvd2x_be;
+      break;
+    case PPC::BI__builtin_vsx_stxvw4x_be:
+      ID = Intrinsic::ppc_vsx_stxvw4x_be;
+      break;
+    case PPC::BI__builtin_vsx_stxvl:
+      ID = Intrinsic::ppc_vsx_stxvl;
+      break;
+    case PPC::BI__builtin_vsx_stxvll:
+      ID = Intrinsic::ppc_vsx_stxvll;
       break;
     }
     llvm::Function *F = CGM.getIntrinsic(ID);
@@ -8226,9 +8253,18 @@ Value *CodeGenFunction::EmitAMDGPUBuiltinExpr(unsigned BuiltinID,
   case AMDGPU::BI__builtin_amdgcn_frexp_manth:
     return emitUnaryBuiltin(*this, E, Intrinsic::amdgcn_frexp_mant);
   case AMDGPU::BI__builtin_amdgcn_frexp_exp:
-  case AMDGPU::BI__builtin_amdgcn_frexp_expf:
-  case AMDGPU::BI__builtin_amdgcn_frexp_exph:
-    return emitUnaryBuiltin(*this, E, Intrinsic::amdgcn_frexp_exp);
+  case AMDGPU::BI__builtin_amdgcn_frexp_expf: {
+    Value *Src0 = EmitScalarExpr(E->getArg(0));
+    Value *F = CGM.getIntrinsic(Intrinsic::amdgcn_frexp_exp,
+                                { Builder.getInt32Ty(), Src0->getType() });
+    return Builder.CreateCall(F, Src0);
+  }
+  case AMDGPU::BI__builtin_amdgcn_frexp_exph: {
+    Value *Src0 = EmitScalarExpr(E->getArg(0));
+    Value *F = CGM.getIntrinsic(Intrinsic::amdgcn_frexp_exp,
+                                { Builder.getInt16Ty(), Src0->getType() });
+    return Builder.CreateCall(F, Src0);
+  }
   case AMDGPU::BI__builtin_amdgcn_fract:
   case AMDGPU::BI__builtin_amdgcn_fractf:
   case AMDGPU::BI__builtin_amdgcn_fracth:

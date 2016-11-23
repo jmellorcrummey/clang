@@ -830,25 +830,32 @@ MicrosoftCXXABI::getRecordArgABI(const CXXRecordDecl *RD) const {
         getContext().getTypeSize(RD->getTypeForDecl()) > 64)
       return RAA_Indirect;
 
-    // We have a trivial copy constructor or no copy constructors, but we have
-    // to make sure it isn't deleted.
-    bool CopyDeleted = false;
+    // If this is true, the implicit copy constructor that Sema would have
+    // created would not be deleted. FIXME: We should provide a more direct way
+    // for CodeGen to ask whether the constructor was deleted.
+    if (!RD->hasUserDeclaredCopyConstructor() &&
+        !RD->hasUserDeclaredMoveConstructor() &&
+        !RD->needsOverloadResolutionForMoveConstructor() &&
+        !RD->hasUserDeclaredMoveAssignment() &&
+        !RD->needsOverloadResolutionForMoveAssignment())
+      return RAA_Default;
+
+    // Otherwise, Sema should have created an implicit copy constructor if
+    // needed.
+    assert(!RD->needsImplicitCopyConstructor());
+
+    // We have to make sure the trivial copy constructor isn't deleted.
     for (const CXXConstructorDecl *CD : RD->ctors()) {
       if (CD->isCopyConstructor()) {
         assert(CD->isTrivial());
         // We had at least one undeleted trivial copy ctor.  Return directly.
         if (!CD->isDeleted())
           return RAA_Default;
-        CopyDeleted = true;
       }
     }
 
     // The trivial copy constructor was deleted.  Return indirectly.
-    if (CopyDeleted)
-      return RAA_Indirect;
-
-    // There were no copy ctors.  Return in RAX.
-    return RAA_Default;
+    return RAA_Indirect;
   }
 
   llvm_unreachable("invalid enum");
@@ -3844,8 +3851,11 @@ MicrosoftCXXABI::getAddrOfCXXCtorClosure(const CXXConstructorDecl *CD,
     FunctionArgs.push_back(&IsMostDerived);
 
   // Start defining the function.
+  auto NL = ApplyDebugLocation::CreateEmpty(CGF);
   CGF.StartFunction(GlobalDecl(), FnInfo.getReturnType(), ThunkFn, FnInfo,
                     FunctionArgs, CD->getLocation(), SourceLocation());
+  // Create a scope with an artificial location for the body of this function.
+  auto AL = ApplyDebugLocation::CreateArtificial(CGF);
   EmitThisParam(CGF);
   llvm::Value *This = getThisValue(CGF);
 

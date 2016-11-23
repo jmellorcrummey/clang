@@ -1484,7 +1484,7 @@ OMPTeamsDistributeSimdDirective *OMPTeamsDistributeSimdDirective::CreateEmpty(
     const ASTContext &C, unsigned NumClauses, unsigned CollapsedNum,
     EmptyShell) {
   unsigned Size = llvm::alignTo(sizeof(OMPTeamsDistributeSimdDirective),
-      alignof(OMPClause *));
+                                alignof(OMPClause *));
   void *Mem =
       C.Allocate(Size + sizeof(OMPClause *) * NumClauses +
                  sizeof(Stmt *) *
@@ -1495,8 +1495,8 @@ OMPTeamsDistributeSimdDirective *OMPTeamsDistributeSimdDirective::CreateEmpty(
 OMPTargetTeamsDirective *OMPTargetTeamsDirective::Create(
     const ASTContext &C, SourceLocation StartLoc, SourceLocation EndLoc,
     ArrayRef<OMPClause *> Clauses, Stmt *AssociatedStmt) {
-  unsigned Size = llvm::alignTo(sizeof(OMPTargetTeamsDirective),
-      alignof(OMPClause *));
+  unsigned Size =
+      llvm::alignTo(sizeof(OMPTargetTeamsDirective), alignof(OMPClause *));
   void *Mem =
       C.Allocate(Size + sizeof(OMPClause *) * Clauses.size() + sizeof(Stmt *));
   OMPTargetTeamsDirective *Dir =
@@ -1509,8 +1509,8 @@ OMPTargetTeamsDirective *OMPTargetTeamsDirective::Create(
 OMPTargetTeamsDirective *
 OMPTargetTeamsDirective::CreateEmpty(const ASTContext &C, unsigned NumClauses,
                                      EmptyShell) {
-  unsigned Size = llvm::alignTo(sizeof(OMPTargetTeamsDirective),
-      alignof(OMPClause *));
+  unsigned Size =
+      llvm::alignTo(sizeof(OMPTargetTeamsDirective), alignof(OMPClause *));
   void *Mem =
       C.Allocate(Size + sizeof(OMPClause *) * NumClauses + sizeof(Stmt *));
   return new (Mem) OMPTargetTeamsDirective(NumClauses);
@@ -1779,7 +1779,7 @@ OMPTargetTeamsDistributeSimdDirective::Create(
     unsigned CollapsedNum, ArrayRef<OMPClause *> Clauses, Stmt *AssociatedStmt,
     const HelperExprs &Exprs) {
   unsigned Size = llvm::alignTo(sizeof(OMPTargetTeamsDistributeSimdDirective),
-      alignof(OMPClause *));
+                                alignof(OMPClause *));
   void *Mem = C.Allocate(
       Size + sizeof(OMPClause *) * Clauses.size() +
       sizeof(Stmt *) *
@@ -1827,7 +1827,7 @@ OMPTargetTeamsDistributeSimdDirective::CreateEmpty(const ASTContext &C,
                                                    unsigned CollapsedNum,
                                                    EmptyShell) {
   unsigned Size = llvm::alignTo(sizeof(OMPTargetTeamsDistributeSimdDirective),
-      alignof(OMPClause *));
+                                alignof(OMPClause *));
   void *Mem = C.Allocate(
       Size + sizeof(OMPClause *) * NumClauses +
       sizeof(Stmt *) *
@@ -1841,9 +1841,8 @@ OMPTeamsDistributeParallelForSimdDirective::Create(
     const ASTContext &C, SourceLocation StartLoc, SourceLocation EndLoc,
     unsigned CollapsedNum, ArrayRef<OMPClause *> Clauses, Stmt *AssociatedStmt,
     const HelperExprs &Exprs) {
-  unsigned Size =
-      llvm::alignTo(sizeof(OMPTeamsDistributeParallelForSimdDirective),
-          alignof(OMPClause *));
+  unsigned Size = llvm::alignTo(
+      sizeof(OMPTeamsDistributeParallelForSimdDirective), alignof(OMPClause *));
   void *Mem =
       C.Allocate(Size + sizeof(OMPClause *) * Clauses.size() +
                  sizeof(Stmt *) *
@@ -1891,9 +1890,8 @@ OMPTeamsDistributeParallelForSimdDirective::CreateEmpty(const ASTContext &C,
                                                         unsigned NumClauses,
                                                         unsigned CollapsedNum,
                                                         EmptyShell) {
-  unsigned Size =
-      llvm::alignTo(sizeof(OMPTeamsDistributeParallelForSimdDirective),
-          alignof(OMPClause *));
+  unsigned Size = llvm::alignTo(
+      sizeof(OMPTeamsDistributeParallelForSimdDirective), alignof(OMPClause *));
   void *Mem =
       C.Allocate(Size + sizeof(OMPClause *) * NumClauses +
                  sizeof(Stmt *) *

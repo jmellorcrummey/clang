@@ -4842,8 +4842,8 @@ static bool CheckNestingOfRegions(Sema &SemaRef, DSAStackTy *Stack,
       // OpenMP 4.5 [2.17 Nesting of Regions]
       // The region associated with the distribute construct must be strictly
       // nested inside a teams region
-      NestingProhibited = (ParentRegion != OMPD_teams) &&
-          (ParentRegion != OMPD_target_teams);
+      NestingProhibited =
+          (ParentRegion != OMPD_teams) && (ParentRegion != OMPD_target_teams);
       Recommend = ShouldBeInTeamsRegion;
     }
     if (!NestingProhibited &&
@@ -9117,11 +9117,10 @@ StmtResult Sema::ActOnOpenMPTeamsDistributeSimdDirective(
   OMPLoopDirective::HelperExprs B;
   // In presence of clause 'collapse' with number of loops, it will
   // define the nested loops number.
-  unsigned NestedLoopCount =
-      CheckOpenMPLoop(OMPD_teams_distribute_simd,
-                      getCollapseNumberExpr(Clauses),
-                      nullptr /*ordered not a clause on distribute*/, AStmt,
-                      *this, *DSAStack, VarsWithImplicitDSA, B);
+  unsigned NestedLoopCount = CheckOpenMPLoop(
+      OMPD_teams_distribute_simd, getCollapseNumberExpr(Clauses),
+      nullptr /*ordered not a clause on distribute*/, AStmt, *this, *DSAStack,
+      VarsWithImplicitDSA, B);
 
   if (NestedLoopCount == 0)
     return StmtError();
