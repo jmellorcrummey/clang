@@ -173,9 +173,9 @@ void fooz()
   // CK3:    %bar = alloca %class.anon.0, align 1
   // CK3:    store %class.anon* %plugh, %class.anon** %plugh.addr, align 8
   // CK3:    call void @"_{{.+}}funky{{.+}}fooz{{.+}}
-  // CK3:    call void @_{{.+}}funky
+  // CK3:    call void @"_{{.+}}funky
   // CK3:    define {{.*}}void @"_{{.+}}funky{{.+}}fooz
-  // CK3:    define {{.*}}void @_{{.+}}funky
+  // CK3:    define {{.*}}void @"_{{.+}}funky
 
 }
 
