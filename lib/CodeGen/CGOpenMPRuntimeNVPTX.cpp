@@ -3814,6 +3814,16 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
     auto FArg = DSI.InitializationFunction->arg_begin();
     for (auto &Arg : InitArgs) {
 
+      // If the argument is not in the header of the function (usually because
+      // it is after the scheduling of an outermost loop), create a clone
+      // in there and use it instead.
+      if (auto *I = dyn_cast<llvm::Instruction>(Arg))
+        if (I->getParent() != &Fn->front()) {
+          auto *CI = I->clone();
+          Arg = CI;
+          CI->insertBefore(InsertPtr);
+        }
+
       // Types match, nothing to do.
       if (FArg->getType() == Arg->getType()) {
         ++FArg;
