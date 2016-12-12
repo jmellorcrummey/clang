@@ -5006,11 +5006,11 @@ Tool *DragonFly::buildLinker() const {
 #define OPENMP_NVPTX_COMPUTE_CAPABILITY 35
 #endif
 
-#if OPENMP_NVPTX_COMPUTE_CAPABILITY < 60
+//#if OPENMP_NVPTX_COMPUTE_CAPABILITY < 60
 #define OPENMP_NVPTX_PTX_VERSION_STR "ptx42"
-#else
-#define OPENMP_NVPTX_PTX_VERSION_STR "ptx50"
-#endif
+//#else
+//#define OPENMP_NVPTX_PTX_VERSION_STR "ptx50"
+//#endif
 
 #define OPENMP_NVPTX_COMPUTE_CAPABILITY_STRT1(X) #X
 #define OPENMP_NVPTX_COMPUTE_CAPABILITY_STRT2(X)                               \
