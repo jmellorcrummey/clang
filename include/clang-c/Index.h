@@ -2346,35 +2346,35 @@ enum CXCursorKind {
    */
   CXCursor_OMPTeamsDistributeSimdDirective = 272,
 
+  /** \brief OpenMP teams distribute parallel for simd directive.
+   */
+  CXCursor_OMPTeamsDistributeParallelForSimdDirective = 273,
+
   /** \brief OpenMP target teams directive.
    */
-  CXCursor_OMPTargetTeamsDirective = 273,
+  CXCursor_OMPTargetTeamsDirective = 274,
 
   /** \brief OpenMP teams distribute parallel for directive.
    */
-  CXCursor_OMPTeamsDistributeParallelForDirective = 274,
+  CXCursor_OMPTeamsDistributeParallelForDirective = 275,
 
   /** \brief OpenMP target teams distribute parallel for directive.
    */
-  CXCursor_OMPTargetTeamsDistributeParallelForDirective = 275,
+  CXCursor_OMPTargetTeamsDistributeParallelForDirective = 276,
 
   /** \brief OpenMP target teams distribute parallel for simd directive.
    */
-  CXCursor_OMPTargetTeamsDistributeParallelForSimdDirective = 276,
+  CXCursor_OMPTargetTeamsDistributeParallelForSimdDirective = 277,
 
   /** \brief OpenMP target teams distribute directive.
    */
-  CXCursor_OMPTargetTeamsDistributeDirective = 277,
+  CXCursor_OMPTargetTeamsDistributeDirective = 278,
 
   /** \brief OpenMP target teams distribute directive.
    */
-  CXCursor_OMPTargetTeamsDistributeSimdDirective = 278,
+  CXCursor_OMPTargetTeamsDistributeSimdDirective = 279,
 
-  /** \brief OpenMP teams distribute parallel for simd
-   */
-  CXCursor_OMPTeamsDistributeParallelForSimdDirective = 279,
-
-  CXCursor_LastStmt     = CXCursor_OMPTeamsDistributeParallelForSimdDirective,
+  CXCursor_LastStmt = CXCursor_OMPTargetTeamsDistributeSimdDirective,
 
   /**
    * \brief Cursor that represents the translation unit itself.

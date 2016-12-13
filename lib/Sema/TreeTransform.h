@@ -7701,6 +7701,17 @@ StmtResult TreeTransform<Derived>::TransformOMPTeamsDistributeSimdDirective(
 }
 
 template <typename Derived>
+StmtResult TreeTransform<Derived>::TransformOMPTeamsDistributeParallelForSimdDirective(
+    OMPTeamsDistributeParallelForSimdDirective *D) {
+  DeclarationNameInfo DirName;
+  getDerived().getSema().StartOpenMPDSABlock(
+      OMPD_teams_distribute_parallel_for_simd, DirName, nullptr, D->getLocStart());
+  StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
+  getDerived().getSema().EndOpenMPDSABlock(Res.get());
+  return Res;
+}
+
+template <typename Derived>
 StmtResult TreeTransform<Derived>::TransformOMPTargetTeamsDirective(
     OMPTargetTeamsDirective *D) {
   DeclarationNameInfo DirName;
@@ -7767,19 +7778,6 @@ TreeTransform<Derived>::TransformOMPTargetTeamsDistributeSimdDirective(
   DeclarationNameInfo DirName;
   getDerived().getSema().StartOpenMPDSABlock(
       OMPD_target_teams_distribute_simd, DirName, nullptr, D->getLocStart());
-  StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
-  getDerived().getSema().EndOpenMPDSABlock(Res.get());
-  return Res;
-}
-
-template <typename Derived>
-StmtResult
-TreeTransform<Derived>::TransformOMPTeamsDistributeParallelForSimdDirective(
-    OMPTeamsDistributeParallelForSimdDirective *D) {
-  DeclarationNameInfo DirName;
-  getDerived().getSema().StartOpenMPDSABlock(
-      OMPD_teams_distribute_parallel_for_simd, DirName, nullptr,
-      D->getLocStart());
   StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
   getDerived().getSema().EndOpenMPDSABlock(Res.get());
   return Res;

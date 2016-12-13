@@ -2630,6 +2630,9 @@ DEF_TRAVERSE_STMT(OMPTeamsDistributeDirective,
 DEF_TRAVERSE_STMT(OMPTeamsDistributeSimdDirective,
                   { TRY_TO(TraverseOMPExecutableDirective(S)); })
 
+DEF_TRAVERSE_STMT(OMPTeamsDistributeParallelForSimdDirective,
+                  { TRY_TO(TraverseOMPExecutableDirective(S)); })
+
 DEF_TRAVERSE_STMT(OMPTargetTeamsDirective,
                   { TRY_TO(TraverseOMPExecutableDirective(S)); })
 
@@ -2646,9 +2649,6 @@ DEF_TRAVERSE_STMT(OMPTargetTeamsDistributeDirective,
                   { TRY_TO(TraverseOMPExecutableDirective(S)); })
 
 DEF_TRAVERSE_STMT(OMPTargetTeamsDistributeSimdDirective,
-                  { TRY_TO(TraverseOMPExecutableDirective(S)); })
-
-DEF_TRAVERSE_STMT(OMPTeamsDistributeParallelForSimdDirective,
                   { TRY_TO(TraverseOMPExecutableDirective(S)); })
 
 // OpenMP clauses.

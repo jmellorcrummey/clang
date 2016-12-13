@@ -2884,6 +2884,11 @@ void ASTStmtReader::VisitOMPTeamsDistributeSimdDirective(
   VisitOMPLoopDirective(D);
 }
 
+void ASTStmtReader::VisitOMPTeamsDistributeParallelForSimdDirective(
+    OMPTeamsDistributeParallelForSimdDirective *D) {
+  VisitOMPLoopDirective(D);
+}
+
 void ASTStmtReader::VisitOMPTargetTeamsDirective(OMPTargetTeamsDirective *D) {
   VisitStmt(D);
   // The NumClauses field was read in ReadStmtFromStream.
@@ -2913,11 +2918,6 @@ void ASTStmtReader::VisitOMPTargetTeamsDistributeDirective(
 
 void ASTStmtReader::VisitOMPTargetTeamsDistributeSimdDirective(
     OMPTargetTeamsDistributeSimdDirective *D) {
-  VisitOMPLoopDirective(D);
-}
-
-void ASTStmtReader::VisitOMPTeamsDistributeParallelForSimdDirective(
-    OMPTeamsDistributeParallelForSimdDirective *D) {
   VisitOMPLoopDirective(D);
 }
 
@@ -3656,6 +3656,14 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       break;
     }
 
+    case STMT_OMP_TEAMS_DISTRIBUTE_PARALLEL_FOR_SIMD_DIRECTIVE: {
+      auto NumClauses = Record[ASTStmtReader::NumStmtFields];
+      auto CollapsedNum = Record[ASTStmtReader::NumStmtFields + 1];
+      S = OMPTeamsDistributeParallelForSimdDirective::CreateEmpty(
+          Context, NumClauses, CollapsedNum, Empty);
+      break;
+    }
+
     case STMT_OMP_TARGET_TEAMS_DIRECTIVE:
       S = OMPTargetTeamsDirective::CreateEmpty(
           Context, Record[ASTStmtReader::NumStmtFields], Empty);
@@ -3697,14 +3705,6 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       unsigned NumClauses = Record[ASTStmtReader::NumStmtFields];
       unsigned CollapsedNum = Record[ASTStmtReader::NumStmtFields + 1];
       S = OMPTargetTeamsDistributeSimdDirective::CreateEmpty(
-          Context, NumClauses, CollapsedNum, Empty);
-      break;
-    }
-
-    case STMT_OMP_TEAMS_DISTRIBUTE_PARALLEL_FOR_SIMD_DIRECTIVE: {
-      unsigned NumClauses = Record[ASTStmtReader::NumStmtFields];
-      unsigned CollapsedNum = Record[ASTStmtReader::NumStmtFields + 1];
-      S = OMPTeamsDistributeParallelForSimdDirective::CreateEmpty(
           Context, NumClauses, CollapsedNum, Empty);
       break;
     }

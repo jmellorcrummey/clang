@@ -2640,6 +2640,8 @@ public:
   void EmitOMPTeamsDistributeDirective(const OMPTeamsDistributeDirective &S);
   void
   EmitOMPTeamsDistributeSimdDirective(const OMPTeamsDistributeSimdDirective &S);
+  void EmitOMPTeamsDistributeParallelForSimdDirective(
+      const OMPTeamsDistributeParallelForSimdDirective &S);
   void EmitOMPTargetTeamsDirective(const OMPTargetTeamsDirective &S);
   void EmitOMPTeamsDistributeParallelForDirective(
       const OMPTeamsDistributeParallelForDirective &S);
@@ -2651,9 +2653,7 @@ public:
       const OMPTargetTeamsDistributeDirective &S);
   void EmitOMPTargetTeamsDistributeSimdDirective(
       const OMPTargetTeamsDistributeSimdDirective &S);
-  void EmitOMPTeamsDistributeParallelForSimdDirective(
-      const OMPTeamsDistributeParallelForSimdDirective &S);
-
+  
   /// Emit device code for the target directive.
   static void EmitOMPTargetDeviceFunction(CodeGenModule &CGM,
                                           StringRef ParentName,

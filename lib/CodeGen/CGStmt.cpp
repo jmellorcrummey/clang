@@ -307,6 +307,10 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
     EmitOMPTeamsDistributeSimdDirective(
         cast<OMPTeamsDistributeSimdDirective>(*S));
     break;
+  case Stmt::OMPTeamsDistributeParallelForSimdDirectiveClass:
+    EmitOMPTeamsDistributeParallelForSimdDirective(
+        cast<OMPTeamsDistributeParallelForSimdDirective>(*S));
+    break;
   case Stmt::OMPTargetTeamsDirectiveClass:
     EmitOMPTargetTeamsDirective(cast<OMPTargetTeamsDirective>(*S));
     break;
@@ -329,10 +333,6 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
   case Stmt::OMPTargetTeamsDistributeSimdDirectiveClass:
     EmitOMPTargetTeamsDistributeSimdDirective(
         cast<OMPTargetTeamsDistributeSimdDirective>(*S));
-    break;
-  case Stmt::OMPTeamsDistributeParallelForSimdDirectiveClass:
-    EmitOMPTeamsDistributeParallelForSimdDirective(
-        cast<OMPTeamsDistributeParallelForSimdDirective>(*S));
     break;
   }
 }
@@ -2129,15 +2129,6 @@ void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {
   llvm::CallInst *Result = Builder.CreateCall(IA, Args);
   Result->addAttribute(llvm::AttributeSet::FunctionIndex,
                        llvm::Attribute::NoUnwind);
-
-  if (isa<MSAsmStmt>(&S)) {
-    // If the assembly contains any labels, mark the call noduplicate to prevent
-    // defining the same ASM label twice (PR23715). This is pretty hacky, but it
-    // works.
-    if (AsmString.find("__MSASMLABEL_") != std::string::npos)
-      Result->addAttribute(llvm::AttributeSet::FunctionIndex,
-                           llvm::Attribute::NoDuplicate);
-  }
 
   // Attach readnone and readonly attributes.
   if (!HasSideEffect) {
