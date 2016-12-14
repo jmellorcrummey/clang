@@ -5014,7 +5014,7 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
   case CXCursor_OMPTeamsDistributeParallelForDirective:
     return cxstring::createRef("OMPTeamsDistributeParallelForDirective");
   case CXCursor_OMPTargetTeamsDirective:
-    return cxstring::createRef("OMPTargetTeamsDirective")
+    return cxstring::createRef("OMPTargetTeamsDirective");
   case CXCursor_OMPTargetTeamsDistributeParallelForDirective:
     return cxstring::createRef("OMPTargetTeamsDistributeParallelForDirective");
   case CXCursor_OMPTargetTeamsDistributeParallelForSimdDirective:
