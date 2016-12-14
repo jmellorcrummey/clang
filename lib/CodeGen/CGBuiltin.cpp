@@ -959,8 +959,8 @@ RValue CodeGenFunction::EmitBuiltinExpr(const FunctionDecl *FD,
       SanitizerScope SanScope(this);
       EmitCheck(std::make_pair(static_cast<llvm::Value *>(Builder.getFalse()),
                                SanitizerKind::Unreachable),
-                "builtin_unreachable", EmitCheckSourceLocation(E->getExprLoc()),
-                None);
+                SanitizerHandler::BuiltinUnreachable,
+                EmitCheckSourceLocation(E->getExprLoc()), None);
     } else
       Builder.CreateUnreachable();
 
@@ -4192,7 +4192,7 @@ static Value *EmitSpecialRegisterBuiltin(CodeGenFunction &CGF,
 
   if (SysReg.empty()) {
     const Expr *SysRegStrExpr = E->getArg(0)->IgnoreParenCasts();
-    SysReg = cast<StringLiteral>(SysRegStrExpr)->getString();
+    SysReg = cast<clang::StringLiteral>(SysRegStrExpr)->getString();
   }
 
   llvm::Metadata *Ops[] = { llvm::MDString::get(Context, SysReg) };
@@ -4441,19 +4441,21 @@ Value *CodeGenFunction::EmitARMBuiltinExpr(unsigned BuiltinID,
 
     QualType Ty = E->getType();
     llvm::Type *RealResTy = ConvertType(Ty);
-    llvm::Type *IntResTy = llvm::IntegerType::get(getLLVMContext(),
-                                                  getContext().getTypeSize(Ty));
-    LoadAddr = Builder.CreateBitCast(LoadAddr, IntResTy->getPointerTo());
+    llvm::Type *PtrTy = llvm::IntegerType::get(
+        getLLVMContext(), getContext().getTypeSize(Ty))->getPointerTo();
+    LoadAddr = Builder.CreateBitCast(LoadAddr, PtrTy);
 
     Function *F = CGM.getIntrinsic(BuiltinID == ARM::BI__builtin_arm_ldaex
                                        ? Intrinsic::arm_ldaex
                                        : Intrinsic::arm_ldrex,
-                                   LoadAddr->getType());
+                                   PtrTy);
     Value *Val = Builder.CreateCall(F, LoadAddr, "ldrex");
 
     if (RealResTy->isPointerTy())
       return Builder.CreateIntToPtr(Val, RealResTy);
     else {
+      llvm::Type *IntResTy = llvm::IntegerType::get(
+          getLLVMContext(), CGM.getDataLayout().getTypeSizeInBits(RealResTy));
       Val = Builder.CreateTruncOrBitCast(Val, IntResTy);
       return Builder.CreateBitCast(Val, RealResTy);
     }
@@ -4494,7 +4496,10 @@ Value *CodeGenFunction::EmitARMBuiltinExpr(unsigned BuiltinID,
     if (StoreVal->getType()->isPointerTy())
       StoreVal = Builder.CreatePtrToInt(StoreVal, Int32Ty);
     else {
-      StoreVal = Builder.CreateBitCast(StoreVal, StoreTy);
+      llvm::Type *IntTy = llvm::IntegerType::get(
+          getLLVMContext(),
+          CGM.getDataLayout().getTypeSizeInBits(StoreVal->getType()));
+      StoreVal = Builder.CreateBitCast(StoreVal, IntTy);
       StoreVal = Builder.CreateZExtOrBitCast(StoreVal, Int32Ty);
     }
 
@@ -5268,19 +5273,21 @@ Value *CodeGenFunction::EmitAArch64BuiltinExpr(unsigned BuiltinID,
 
     QualType Ty = E->getType();
     llvm::Type *RealResTy = ConvertType(Ty);
-    llvm::Type *IntResTy = llvm::IntegerType::get(getLLVMContext(),
-                                                  getContext().getTypeSize(Ty));
-    LoadAddr = Builder.CreateBitCast(LoadAddr, IntResTy->getPointerTo());
+    llvm::Type *PtrTy = llvm::IntegerType::get(
+        getLLVMContext(), getContext().getTypeSize(Ty))->getPointerTo();
+    LoadAddr = Builder.CreateBitCast(LoadAddr, PtrTy);
 
     Function *F = CGM.getIntrinsic(BuiltinID == AArch64::BI__builtin_arm_ldaex
                                        ? Intrinsic::aarch64_ldaxr
                                        : Intrinsic::aarch64_ldxr,
-                                   LoadAddr->getType());
+                                   PtrTy);
     Value *Val = Builder.CreateCall(F, LoadAddr, "ldxr");
 
     if (RealResTy->isPointerTy())
       return Builder.CreateIntToPtr(Val, RealResTy);
 
+    llvm::Type *IntResTy = llvm::IntegerType::get(
+        getLLVMContext(), CGM.getDataLayout().getTypeSizeInBits(RealResTy));
     Val = Builder.CreateTruncOrBitCast(Val, IntResTy);
     return Builder.CreateBitCast(Val, RealResTy);
   }
@@ -5319,7 +5326,10 @@ Value *CodeGenFunction::EmitAArch64BuiltinExpr(unsigned BuiltinID,
     if (StoreVal->getType()->isPointerTy())
       StoreVal = Builder.CreatePtrToInt(StoreVal, Int64Ty);
     else {
-      StoreVal = Builder.CreateBitCast(StoreVal, StoreTy);
+      llvm::Type *IntTy = llvm::IntegerType::get(
+          getLLVMContext(),
+          CGM.getDataLayout().getTypeSizeInBits(StoreVal->getType()));
+      StoreVal = Builder.CreateBitCast(StoreVal, IntTy);
       StoreVal = Builder.CreateZExtOrBitCast(StoreVal, Int64Ty);
     }
 

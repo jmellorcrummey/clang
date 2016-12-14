@@ -2006,9 +2006,9 @@ public:
       const OMPTeamsDistributeSimdDirective *D);
   void VisitOMPTeamsDistributeParallelForSimdDirective(
       const OMPTeamsDistributeParallelForSimdDirective *D);
-  void VisitOMPTargetTeamsDirective(const OMPTargetTeamsDirective *D);
   void VisitOMPTeamsDistributeParallelForDirective(
       const OMPTeamsDistributeParallelForDirective *D);
+  void VisitOMPTargetTeamsDirective(const OMPTargetTeamsDirective *D);
   void VisitOMPTargetTeamsDistributeParallelForDirective(
         const OMPTargetTeamsDistributeParallelForDirective *D);
   void VisitOMPTargetTeamsDistributeDirective(
@@ -2821,14 +2821,14 @@ void EnqueueVisitor::VisitOMPTeamsDistributeParallelForSimdDirective(
   VisitOMPLoopDirective(D);
 }
 
-void EnqueueVisitor::VisitOMPTargetTeamsDirective(
-    const OMPTargetTeamsDirective *D) {
-  VisitOMPExecutableDirective(D);
-}
-
 void EnqueueVisitor::VisitOMPTeamsDistributeParallelForDirective(
     const OMPTeamsDistributeParallelForDirective *D) {
   VisitOMPLoopDirective(D);
+}
+
+void EnqueueVisitor::VisitOMPTargetTeamsDirective(
+    const OMPTargetTeamsDirective *D) {
+  VisitOMPExecutableDirective(D);
 }
 
 void EnqueueVisitor::VisitOMPTargetTeamsDistributeParallelForDirective(
@@ -3559,10 +3559,12 @@ static StringLiteral* getCFSTR_value(CallExpr *callExpr) {
 struct ExprEvalResult {
   CXEvalResultKind EvalType;
   union {
-    int intVal;
+    unsigned long long unsignedVal;
+    long long intVal;
     double floatVal;
     char *stringVal;
   } EvalData;
+  bool IsUnsignedInt;
   ~ExprEvalResult() {
     if (EvalType != CXEval_UnExposed && EvalType != CXEval_Float &&
         EvalType != CXEval_Int) {
@@ -3583,10 +3585,32 @@ CXEvalResultKind clang_EvalResult_getKind(CXEvalResult E) {
 }
 
 int clang_EvalResult_getAsInt(CXEvalResult E) {
+  return clang_EvalResult_getAsLongLong(E);
+}
+
+long long clang_EvalResult_getAsLongLong(CXEvalResult E) {
   if (!E) {
     return 0;
   }
-  return ((ExprEvalResult *)E)->EvalData.intVal;
+  ExprEvalResult *Result = (ExprEvalResult*)E;
+  if (Result->IsUnsignedInt)
+    return Result->EvalData.unsignedVal;
+  return Result->EvalData.intVal;
+}
+
+unsigned clang_EvalResult_isUnsignedInt(CXEvalResult E) {
+  return ((ExprEvalResult *)E)->IsUnsignedInt;
+}
+
+unsigned long long clang_EvalResult_getAsUnsigned(CXEvalResult E) {
+  if (!E) {
+    return 0;
+  }
+
+  ExprEvalResult *Result = (ExprEvalResult*)E;
+  if (Result->IsUnsignedInt)
+    return Result->EvalData.unsignedVal;
+  return Result->EvalData.intVal;
 }
 
 double clang_EvalResult_getAsDouble(CXEvalResult E) {
@@ -3617,10 +3641,19 @@ static const ExprEvalResult* evaluateExpr(Expr *expr, CXCursor C) {
   CallExpr *callExpr;
   auto result = llvm::make_unique<ExprEvalResult>();
   result->EvalType = CXEval_UnExposed;
+  result->IsUnsignedInt = false;
 
   if (ER.Val.isInt()) {
     result->EvalType = CXEval_Int;
-    result->EvalData.intVal = ER.Val.getInt().getExtValue();
+
+    auto& val = ER.Val.getInt();
+    if (val.isUnsigned()) {
+      result->IsUnsignedInt = true;
+      result->EvalData.unsignedVal = val.getZExtValue();
+    } else {
+      result->EvalData.intVal = val.getExtValue();
+    }
+
     return result.release();
   }
 
@@ -4978,10 +5011,10 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
     return cxstring::createRef("OMPTeamsDistributeSimdDirective");
   case CXCursor_OMPTeamsDistributeParallelForSimdDirective:
     return cxstring::createRef("OMPTeamsDistributeParallelForSimdDirective");
-  case CXCursor_OMPTargetTeamsDirective:
-    return cxstring::createRef("OMPTargetTeamsDirective");
   case CXCursor_OMPTeamsDistributeParallelForDirective:
     return cxstring::createRef("OMPTeamsDistributeParallelForDirective");
+  case CXCursor_OMPTargetTeamsDirective:
+    return cxstring::createRef("OMPTargetTeamsDirective")
   case CXCursor_OMPTargetTeamsDistributeParallelForDirective:
     return cxstring::createRef("OMPTargetTeamsDistributeParallelForDirective");
   case CXCursor_OMPTargetTeamsDistributeParallelForSimdDirective:

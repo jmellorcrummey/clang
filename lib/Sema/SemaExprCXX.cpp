@@ -520,17 +520,17 @@ getUuidAttrOfType(Sema &SemaRef, QualType QT,
   else if (QT->isArrayType())
     Ty = Ty->getBaseElementTypeUnsafe();
 
-  const auto *RD = Ty->getAsCXXRecordDecl();
-  if (!RD)
+  const auto *TD = Ty->getAsTagDecl();
+  if (!TD)
     return;
 
-  if (const auto *Uuid = RD->getMostRecentDecl()->getAttr<UuidAttr>()) {
+  if (const auto *Uuid = TD->getMostRecentDecl()->getAttr<UuidAttr>()) {
     UuidAttrs.insert(Uuid);
     return;
   }
 
   // __uuidof can grab UUIDs from template arguments.
-  if (const auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(RD)) {
+  if (const auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(TD)) {
     const TemplateArgumentList &TAL = CTSD->getTemplateArgs();
     for (const TemplateArgument &TA : TAL.asArray()) {
       const UuidAttr *UuidForTA = nullptr;
@@ -4986,11 +4986,14 @@ QualType Sema::CheckPointerToMemberOperands(ExprResult &LHS, ExprResult &RHS,
          !RHS.get()->getType()->isPlaceholderType() &&
          "placeholders should have been weeded out by now");
 
-  // The LHS undergoes lvalue conversions if this is ->*.
-  if (isIndirect) {
+  // The LHS undergoes lvalue conversions if this is ->*, and undergoes the
+  // temporary materialization conversion otherwise.
+  if (isIndirect)
     LHS = DefaultLvalueConversion(LHS.get());
-    if (LHS.isInvalid()) return QualType();
-  }
+  else if (LHS.get()->isRValue())
+    LHS = TemporaryMaterializationConversion(LHS.get());
+  if (LHS.isInvalid())
+    return QualType();
 
   // The RHS always undergoes lvalue conversions.
   RHS = DefaultLvalueConversion(RHS.get());
@@ -5410,13 +5413,19 @@ QualType Sema::CXXCheckConditionalOperands(ExprResult &Cond, ExprResult &LHS,
     if (CompareReferenceRelationship(
             QuestionLoc, LTy, RTy, DerivedToBase,
             ObjCConversion, ObjCLifetimeConversion) == Ref_Compatible &&
-        !DerivedToBase && !ObjCConversion && !ObjCLifetimeConversion) {
+        !DerivedToBase && !ObjCConversion && !ObjCLifetimeConversion &&
+        // [...] subject to the constraint that the reference must bind
+        // directly [...]
+        !RHS.get()->refersToBitField() &&
+        !RHS.get()->refersToVectorElement()) {
       RHS = ImpCastExprToType(RHS.get(), LTy, CK_NoOp, RVK);
       RTy = RHS.get()->getType();
     } else if (CompareReferenceRelationship(
                    QuestionLoc, RTy, LTy, DerivedToBase,
                    ObjCConversion, ObjCLifetimeConversion) == Ref_Compatible &&
-               !DerivedToBase && !ObjCConversion && !ObjCLifetimeConversion) {
+               !DerivedToBase && !ObjCConversion && !ObjCLifetimeConversion &&
+               !LHS.get()->refersToBitField() &&
+               !LHS.get()->refersToVectorElement()) {
       LHS = ImpCastExprToType(LHS.get(), RTy, CK_NoOp, LVK);
       LTy = LHS.get()->getType();
     }
@@ -6835,6 +6844,16 @@ ExprResult Sema::IgnoredValueConversions(Expr *E) {
         return E;
       E = Res.get();
     }
+
+    // C++1z:
+    //   If the expression is a prvalue after this optional conversion, the
+    //   temporary materialization conversion is applied.
+    //
+    // We skip this step: IR generation is able to synthesize the storage for
+    // itself in the aggregate case, and adding the extra node to the AST is
+    // just clutter.
+    // FIXME: We don't emit lifetime markers for the temporaries due to this.
+    // FIXME: Do any other AST consumers care about this?
     return E;
   }
 

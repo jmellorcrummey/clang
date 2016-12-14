@@ -865,8 +865,8 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Stmt::OMPTeamsDistributeDirectiveClass:
     case Stmt::OMPTeamsDistributeSimdDirectiveClass:
     case Stmt::OMPTeamsDistributeParallelForSimdDirectiveClass:
-    case Stmt::OMPTargetTeamsDirectiveClass:
     case Stmt::OMPTeamsDistributeParallelForDirectiveClass:
+    case Stmt::OMPTargetTeamsDirectiveClass:
     case Stmt::OMPTargetTeamsDistributeParallelForDirectiveClass:
     case Stmt::OMPTargetTeamsDistributeParallelForSimdDirectiveClass:
     case Stmt::OMPTargetTeamsDistributeDirectiveClass:
@@ -910,6 +910,8 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     // Cases not handled yet; but will handle some day.
     case Stmt::DesignatedInitExprClass:
     case Stmt::DesignatedInitUpdateExprClass:
+    case Stmt::ArrayInitLoopExprClass:
+    case Stmt::ArrayInitIndexExprClass:
     case Stmt::ExtVectorElementExprClass:
     case Stmt::ImaginaryLiteralClass:
     case Stmt::ObjCAtCatchStmtClass:

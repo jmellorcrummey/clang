@@ -1221,14 +1221,14 @@ void StmtPrinter::VisitOMPTeamsDistributeParallelForSimdDirective(
   PrintOMPExecutableDirective(Node);
 }
 
-void StmtPrinter::VisitOMPTargetTeamsDirective(OMPTargetTeamsDirective *Node) {
-  Indent() << "#pragma omp target teams ";
-  PrintOMPExecutableDirective(Node);
-}
-
 void StmtPrinter::VisitOMPTeamsDistributeParallelForDirective(
     OMPTeamsDistributeParallelForDirective *Node) {
   Indent() << "#pragma omp teams distribute parallel for ";
+  PrintOMPExecutableDirective(Node);
+}
+
+void StmtPrinter::VisitOMPTargetTeamsDirective(OMPTargetTeamsDirective *Node) {
+  Indent() << "#pragma omp target teams ";
   PrintOMPExecutableDirective(Node);
 }
 
@@ -1732,6 +1732,18 @@ void StmtPrinter::VisitInitListExpr(InitListExpr* Node) {
       OS << "{}";
   }
   OS << "}";
+}
+
+void StmtPrinter::VisitArrayInitLoopExpr(ArrayInitLoopExpr *Node) {
+  // There's no way to express this expression in any of our supported
+  // languages, so just emit something terse and (hopefully) clear.
+  OS << "{";
+  PrintExpr(Node->getSubExpr());
+  OS << "}";
+}
+
+void StmtPrinter::VisitArrayInitIndexExpr(ArrayInitIndexExpr *Node) {
+  OS << "*";
 }
 
 void StmtPrinter::VisitParenListExpr(ParenListExpr* Node) {

@@ -776,8 +776,8 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
   case OMPD_teams_distribute:
   case OMPD_teams_distribute_simd:
   case OMPD_teams_distribute_parallel_for_simd:
-  case OMPD_target_teams:
   case OMPD_teams_distribute_parallel_for:
+  case OMPD_target_teams:
   case OMPD_target_teams_distribute_parallel_for:
   case OMPD_target_teams_distribute_parallel_for_simd:
   case OMPD_target_teams_distribute:
@@ -818,8 +818,8 @@ Parser::DeclGroupPtrTy Parser::ParseOpenMPDeclarativeDirectiveWithExtDecl(
 ///         'target parallel for simd' | 'target simd' |
 ///         'teams distribute' | 'teams distribute simd' |
 ///         'teams distribute parallel for simd' |
-///         'target teams' |
 ///         'teams distribute parallel for' |
+///         'target teams' |
 ///         'target teams distribute parallel for' |
 ///         'target teams distribute parallel for simd' |
 ///         'target teams distribute' |
@@ -936,8 +936,8 @@ StmtResult Parser::ParseOpenMPDeclarativeOrExecutableDirective(
   case OMPD_teams_distribute:
   case OMPD_teams_distribute_simd:
   case OMPD_teams_distribute_parallel_for_simd:
-  case OMPD_target_teams:
   case OMPD_teams_distribute_parallel_for:
+  case OMPD_target_teams:
   case OMPD_target_teams_distribute_parallel_for:
   case OMPD_target_teams_distribute_parallel_for_simd:
   case OMPD_target_teams_distribute:

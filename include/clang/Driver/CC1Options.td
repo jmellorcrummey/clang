@@ -641,6 +641,12 @@ def fdefault_calling_conv_EQ : Joined<["-"], "fdefault-calling-conv=">,
 def finclude_default_header : Flag<["-"], "finclude-default-header">,
   HelpText<"Include the default header file for OpenCL">;
 
+// FIXME: Remove these entirely once functionality/tests have been excised.
+def fobjc_gc_only : Flag<["-"], "fobjc-gc-only">, Group<f_Group>,
+  HelpText<"Use GC exclusively for Objective-C related memory management">;
+def fobjc_gc : Flag<["-"], "fobjc-gc">, Group<f_Group>,
+  HelpText<"Enable Objective-C garbage collection">;
+
 //===----------------------------------------------------------------------===//
 // Header Search Options
 //===----------------------------------------------------------------------===//
@@ -743,4 +749,6 @@ def show_inst : Flag<["-"], "show-inst">,
 def dwarf_debug_producer : Separate<["-"], "dwarf-debug-producer">,
   HelpText<"The string to embed in the Dwarf debug AT_producer record.">;
 
+def defsym : Separate<["-"], "defsym">,
+  HelpText<"Define a value for a symbol">;
 } // let Flags = [CC1AsOption]

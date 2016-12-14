@@ -2590,15 +2590,15 @@ StmtResult Sema::ActOnOpenMPExecutableDirective(
         ClausesWithImplicit, AStmt, StartLoc, EndLoc, VarsWithInheritedDSA);
     AllowedNameModifiers.push_back(OMPD_parallel);
     break;
-  case OMPD_target_teams:
-    Res = ActOnOpenMPTargetTeamsDirective(ClausesWithImplicit, AStmt, StartLoc,
-                                          EndLoc);
-    AllowedNameModifiers.push_back(OMPD_target);
-    break;
   case OMPD_teams_distribute_parallel_for:
     Res = ActOnOpenMPTeamsDistributeParallelForDirective(
         ClausesWithImplicit, AStmt, StartLoc, EndLoc, VarsWithInheritedDSA);
     AllowedNameModifiers.push_back(OMPD_parallel);
+    break;
+  case OMPD_target_teams:
+    Res = ActOnOpenMPTargetTeamsDirective(ClausesWithImplicit, AStmt, StartLoc,
+                                          EndLoc);
+    AllowedNameModifiers.push_back(OMPD_target);
     break;
   case OMPD_target_teams_distribute_parallel_for:
     Res = ActOnOpenMPTargetTeamsDistributeParallelForDirective(
@@ -6501,11 +6501,10 @@ StmtResult Sema::ActOnOpenMPTeamsDistributeSimdDirective(
   OMPLoopDirective::HelperExprs B;
   // In presence of clause 'collapse' with number of loops, it will
   // define the nested loops number.
-  unsigned NestedLoopCount =
-      CheckOpenMPLoop(OMPD_teams_distribute_simd,
-                      getCollapseNumberExpr(Clauses),
-                      nullptr /*ordered not a clause on distribute*/, AStmt,
-                      *this, *DSAStack, VarsWithImplicitDSA, B);
+  unsigned NestedLoopCount = CheckOpenMPLoop(
+      OMPD_teams_distribute_simd, getCollapseNumberExpr(Clauses),
+      nullptr /*ordered not a clause on distribute*/, AStmt, *this, *DSAStack,
+      VarsWithImplicitDSA, B);
 
   if (NestedLoopCount == 0)
     return StmtError();
@@ -6586,29 +6585,6 @@ StmtResult Sema::ActOnOpenMPTeamsDistributeParallelForSimdDirective(
       Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
 }
 
-StmtResult Sema::ActOnOpenMPTargetTeamsDirective(ArrayRef<OMPClause *> Clauses,
-                                                 Stmt *AStmt,
-                                                 SourceLocation StartLoc,
-                                                 SourceLocation EndLoc) {
-  if (!AStmt)
-    return StmtError();
-
-  CapturedStmt *CS = cast<CapturedStmt>(AStmt);
-  // 1.2.2 OpenMP Language Terminology
-  // Structured block - An executable statement with a single entry at the
-  // top and a single exit at the bottom.
-  // The point of exit cannot be a branch out of the structured block.
-  // longjmp() and throw() must not violate the entry/exit criteria.
-  CS->getCapturedDecl()->setNothrow();
-
-  getCurFunction()->setHasBranchProtectedScope();
-
-  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
-
-  return OMPTargetTeamsDirective::Create(Context, StartLoc, EndLoc, Clauses,
-                                         AStmt);
-}
-
 StmtResult Sema::ActOnOpenMPTeamsDistributeParallelForDirective(
     ArrayRef<OMPClause *> Clauses, Stmt *AStmt, SourceLocation StartLoc,
     SourceLocation EndLoc,
@@ -6644,6 +6620,29 @@ StmtResult Sema::ActOnOpenMPTeamsDistributeParallelForDirective(
   getCurFunction()->setHasBranchProtectedScope();
   return OMPTeamsDistributeParallelForDirective::Create(
       Context, StartLoc, EndLoc, NestedLoopCount, Clauses, AStmt, B);
+}
+
+StmtResult Sema::ActOnOpenMPTargetTeamsDirective(ArrayRef<OMPClause *> Clauses,
+                                                 Stmt *AStmt,
+                                                 SourceLocation StartLoc,
+                                                 SourceLocation EndLoc) {
+  if (!AStmt)
+    return StmtError();
+
+  CapturedStmt *CS = cast<CapturedStmt>(AStmt);
+  // 1.2.2 OpenMP Language Terminology
+  // Structured block - An executable statement with a single entry at the
+  // top and a single exit at the bottom.
+  // The point of exit cannot be a branch out of the structured block.
+  // longjmp() and throw() must not violate the entry/exit criteria.
+  CS->getCapturedDecl()->setNothrow();
+
+  getCurFunction()->setHasBranchProtectedScope();
+
+  ImplicitDeclareTargetCheck(*this, CS->getCapturedDecl());
+
+  return OMPTargetTeamsDirective::Create(Context, StartLoc, EndLoc, Clauses,
+                                         AStmt);
 }
 
 StmtResult Sema::ActOnOpenMPTargetTeamsDistributeParallelForDirective(

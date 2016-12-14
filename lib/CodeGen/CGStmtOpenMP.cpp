@@ -2338,6 +2338,33 @@ void CodeGenFunction::EmitOMPTeamsDistributeParallelForSimdDirective(
       *this, S, [](CodeGenFunction &) -> llvm::Value * { return nullptr; });
 }
 
+void CodeGenFunction::EmitOMPTeamsDistributeParallelForDirective(
+    const OMPTeamsDistributeParallelForDirective &S) {
+  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+    OMPPrivateScope PrivateScope(CGF);
+    CGF.EmitOMPReductionClauseInit(S, PrivateScope);
+    (void)PrivateScope.Privatize();
+    auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+      auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+        auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+          CGF.EmitOMPWorksharingLoop(S);
+        };
+        emitCommonOMPParallelDirective(CGF, S, OMPD_for, CodeGen);
+      };
+      CGF.EmitOMPDistributeLoop(S, CodeGen);
+    };
+    CGF.CGM.getOpenMPRuntime().emitInlinedDirective(CGF, OMPD_distribute,
+                                                    CodeGen,
+                                                    /*HasCancel=*/false);
+    CGF.EmitOMPReductionClauseFinal(S, OMPD_teams);
+  };
+  emitCommonOMPTeamsDirective(*this, S, OMPD_teams_distribute_parallel_for,
+                              CodeGen, /*CaptureLevel=*/1,
+                              /*ImplicitParamStop=*/2);
+  emitPostUpdateForReductionClause(
+      *this, S, [](CodeGenFunction &) -> llvm::Value * { return nullptr; });
+}
+
 namespace {
   struct ScheduleKindModifiersTy {
     OpenMPScheduleClauseKind Kind;
@@ -4366,34 +4393,6 @@ void CodeGenFunction::EmitOMPTargetTeamsDistributeSimdDirective(
   };
   emitCommonOMPTargetDirective(*this, S, OMPD_target, CodeGen);
 }
-
-void CodeGenFunction::EmitOMPTeamsDistributeParallelForDirective(
-    const OMPTeamsDistributeParallelForDirective &S) {
-  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-    OMPPrivateScope PrivateScope(CGF);
-    CGF.EmitOMPReductionClauseInit(S, PrivateScope);
-    (void)PrivateScope.Privatize();
-    auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-      auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-        auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-          CGF.EmitOMPWorksharingLoop(S);
-        };
-        emitCommonOMPParallelDirective(CGF, S, OMPD_for, CodeGen);
-      };
-      CGF.EmitOMPDistributeLoop(S, CodeGen);
-    };
-    CGF.CGM.getOpenMPRuntime().emitInlinedDirective(CGF, OMPD_distribute,
-                                                    CodeGen,
-                                                    /*HasCancel=*/false);
-    CGF.EmitOMPReductionClauseFinal(S, OMPD_teams);
-  };
-  emitCommonOMPTeamsDirective(*this, S, OMPD_teams_distribute_parallel_for,
-                              CodeGen, /*CaptureLevel=*/1,
-                              /*ImplicitParamStop=*/2);
-  emitPostUpdateForReductionClause(
-      *this, S, [](CodeGenFunction &) -> llvm::Value * { return nullptr; });
-}
-
 
 void CodeGenFunction::EmitOMPCancellationPointDirective(
     const OMPCancellationPointDirective &S) {

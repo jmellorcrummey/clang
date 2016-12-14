@@ -1457,35 +1457,17 @@ void Generic_GCC::GCCInstallationDetector::init(
   // in /usr. This avoids accidentally enforcing the system GCC version
   // when using a custom toolchain.
   if (GCCToolchainDir == "" || GCCToolchainDir == D.SysRoot + "/usr") {
+    for (StringRef CandidateTriple : ExtraTripleAliases) {
+      if (ScanGentooGccConfig(TargetTriple, Args, CandidateTriple))
+        return;
+    }
     for (StringRef CandidateTriple : CandidateTripleAliases) {
-      llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> File =
-          D.getVFS().getBufferForFile(D.SysRoot + "/etc/env.d/gcc/config-" +
-                                      CandidateTriple.str());
-      if (File) {
-        SmallVector<StringRef, 2> Lines;
-        File.get()->getBuffer().split(Lines, "\n");
-        for (StringRef Line : Lines) {
-          // CURRENT=triple-version
-          if (Line.consume_front("CURRENT=")) {
-            const std::pair<StringRef, StringRef> ActiveVersion =
-              Line.rsplit('-');
-            // Note: Strictly speaking, we should be reading
-            // /etc/env.d/gcc/${CURRENT} now. However, the file doesn't
-            // contain anything new or especially useful to us.
-            const std::string GentooPath = D.SysRoot + "/usr/lib/gcc/" +
-                                           ActiveVersion.first.str() + "/" +
-                                           ActiveVersion.second.str();
-            if (D.getVFS().exists(GentooPath + "/crtbegin.o")) {
-              Version = GCCVersion::Parse(ActiveVersion.second);
-              GCCInstallPath = GentooPath;
-              GCCParentLibPath = GentooPath + "/../../..";
-              GCCTriple.setTriple(ActiveVersion.first);
-              IsValid = true;
-              return;
-            }
-          }
-        }
-      }
+      if (ScanGentooGccConfig(TargetTriple, Args, CandidateTriple))
+        return;
+    }
+    for (StringRef CandidateTriple : CandidateBiarchTripleAliases) {
+      if (ScanGentooGccConfig(TargetTriple, Args, CandidateTriple, true))
+        return;
     }
   }
 
@@ -2717,6 +2699,33 @@ void Generic_GCC::GCCInstallationDetector::scanLibDirForGCCTripleSolaris(
   }
 }
 
+bool Generic_GCC::GCCInstallationDetector::ScanGCCForMultilibs(
+    const llvm::Triple &TargetTriple, const ArgList &Args,
+    StringRef Path, bool NeedsBiarchSuffix) {
+  llvm::Triple::ArchType TargetArch = TargetTriple.getArch();
+  DetectedMultilibs Detected;
+
+  // Android standalone toolchain could have multilibs for ARM and Thumb.
+  // Debian mips multilibs behave more like the rest of the biarch ones,
+  // so handle them there
+  if (isArmOrThumbArch(TargetArch) && TargetTriple.isAndroid()) {
+    // It should also work without multilibs in a simplified toolchain.
+    findAndroidArmMultilibs(D, TargetTriple, Path, Args, Detected);
+  } else if (isMipsArch(TargetArch)) {
+    if (!findMIPSMultilibs(D, TargetTriple, Path, Args, Detected))
+      return false;
+  } else if (!findBiarchMultilibs(D, TargetTriple, Path, Args,
+                                  NeedsBiarchSuffix, Detected)) {
+    return false;
+  }
+
+  Multilibs = Detected.Multilibs;
+  SelectedMultilib = Detected.SelectedMultilib;
+  BiarchSibling = Detected.BiarchSibling;
+
+  return true;
+}
+
 void Generic_GCC::GCCInstallationDetector::ScanLibDirForGCCTriple(
     const llvm::Triple &TargetTriple, const ArgList &Args,
     const std::string &LibDir, StringRef CandidateTriple,
@@ -2772,25 +2781,10 @@ void Generic_GCC::GCCInstallationDetector::ScanLibDirForGCCTriple(
       if (CandidateVersion <= Version)
         continue;
 
-      DetectedMultilibs Detected;
-
-      // Android standalone toolchain could have multilibs for ARM and Thumb.
-      // Debian mips multilibs behave more like the rest of the biarch ones,
-      // so handle them there
-      if (isArmOrThumbArch(TargetArch) && TargetTriple.isAndroid()) {
-        // It should also work without multilibs in a simplified toolchain.
-        findAndroidArmMultilibs(D, TargetTriple, LI->getName(), Args, Detected);
-      } else if (isMipsArch(TargetArch)) {
-        if (!findMIPSMultilibs(D, TargetTriple, LI->getName(), Args, Detected))
-          continue;
-      } else if (!findBiarchMultilibs(D, TargetTriple, LI->getName(), Args,
-                                      NeedsBiarchSuffix, Detected)) {
+      if (!ScanGCCForMultilibs(TargetTriple, Args, LI->getName(),
+                               NeedsBiarchSuffix))
         continue;
-      }
 
-      Multilibs = Detected.Multilibs;
-      SelectedMultilib = Detected.SelectedMultilib;
-      BiarchSibling = Detected.BiarchSibling;
       Version = CandidateVersion;
       GCCTriple.setTriple(CandidateTriple);
       // FIXME: We hack together the directory name here instead of
@@ -2802,6 +2796,45 @@ void Generic_GCC::GCCInstallationDetector::ScanLibDirForGCCTriple(
       IsValid = true;
     }
   }
+}
+
+bool Generic_GCC::GCCInstallationDetector::ScanGentooGccConfig(
+    const llvm::Triple &TargetTriple, const ArgList &Args,
+    StringRef CandidateTriple, bool NeedsBiarchSuffix) {
+  llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> File =
+      D.getVFS().getBufferForFile(D.SysRoot + "/etc/env.d/gcc/config-" +
+                                  CandidateTriple.str());
+  if (File) {
+    SmallVector<StringRef, 2> Lines;
+    File.get()->getBuffer().split(Lines, "\n");
+    for (StringRef Line : Lines) {
+      // CURRENT=triple-version
+      if (Line.consume_front("CURRENT=")) {
+        const std::pair<StringRef, StringRef> ActiveVersion =
+          Line.rsplit('-');
+        // Note: Strictly speaking, we should be reading
+        // /etc/env.d/gcc/${CURRENT} now. However, the file doesn't
+        // contain anything new or especially useful to us.
+        const std::string GentooPath = D.SysRoot + "/usr/lib/gcc/" +
+                                       ActiveVersion.first.str() + "/" +
+                                       ActiveVersion.second.str();
+        if (D.getVFS().exists(GentooPath + "/crtbegin.o")) {
+          if (!ScanGCCForMultilibs(TargetTriple, Args, GentooPath,
+                                   NeedsBiarchSuffix))
+            return false;
+
+          Version = GCCVersion::Parse(ActiveVersion.second);
+          GCCInstallPath = GentooPath;
+          GCCParentLibPath = GentooPath + "/../../..";
+          GCCTriple.setTriple(ActiveVersion.first);
+          IsValid = true;
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
 }
 
 Generic_GCC::Generic_GCC(const Driver &D, const llvm::Triple &Triple,
@@ -5039,6 +5072,19 @@ void CudaToolChain::AddClangCXXStdlibIncludeArgs(const ArgList &Args,
 void CudaToolChain::AddIAMCUIncludeArgs(const ArgList &Args,
                                         ArgStringList &CC1Args) const {
   HostTC.AddIAMCUIncludeArgs(Args, CC1Args);
+}
+
+SanitizerMask CudaToolChain::getSupportedSanitizers() const {
+  // The CudaToolChain only supports sanitizers in the sense that it allows
+  // sanitizer arguments on the command line if they are supported by the host
+  // toolchain. The CudaToolChain will actually ignore any command line
+  // arguments for any of these "supported" sanitizers. That means that no
+  // sanitization of device code is actually supported at this time.
+  //
+  // This behavior is necessary because the host and device toolchains
+  // invocations often share the command line, so the device toolchain must
+  // tolerate flags meant only for the host toolchain.
+  return HostTC.getSupportedSanitizers();
 }
 
 /// XCore tool chain

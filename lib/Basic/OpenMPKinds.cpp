@@ -650,9 +650,9 @@ bool clang::isAllowedClauseForDirective(OpenMPDirectiveKind DKind,
       break;
     }
     break;
-  case OMPD_target_teams:
+  case OMPD_teams_distribute_parallel_for:
     switch (CKind) {
-#define OPENMP_TARGET_TEAMS_CLAUSE(Name)                                       \
+#define OPENMP_TEAMS_DISTRIBUTE_PARALLEL_FOR_CLAUSE(Name)                      \
   case OMPC_##Name:                                                            \
     return true;
 #include "clang/Basic/OpenMPKinds.def"
@@ -660,9 +660,9 @@ bool clang::isAllowedClauseForDirective(OpenMPDirectiveKind DKind,
       break;
     }
     break;
-  case OMPD_teams_distribute_parallel_for:
+  case OMPD_target_teams:
     switch (CKind) {
-#define OPENMP_TEAMS_DISTRIBUTE_PARALLEL_FOR_CLAUSE(Name)                      \
+#define OPENMP_TARGET_TEAMS_CLAUSE(Name)                                       \
   case OMPC_##Name:                                                            \
     return true;
 #include "clang/Basic/OpenMPKinds.def"
@@ -802,8 +802,8 @@ bool clang::isOpenMPTeamsDirective(OpenMPDirectiveKind DKind) {
   return DKind == OMPD_teams || DKind == OMPD_teams_distribute ||
          DKind == OMPD_teams_distribute_simd ||
          DKind == OMPD_teams_distribute_parallel_for_simd || 
-         DKind == OMPD_target_teams ||
          DKind == OMPD_teams_distribute_parallel_for ||
+         DKind == OMPD_target_teams ||
          DKind == OMPD_target_teams_distribute_parallel_for ||
          DKind == OMPD_target_teams_distribute_parallel_for_simd ||
          DKind == OMPD_target_teams_distribute ||
@@ -834,6 +834,7 @@ bool clang::isOpenMPDistributeDirective(OpenMPDirectiveKind Kind) {
   return isOpenMPNestingDistributeDirective(Kind) ||
          Kind == OMPD_teams_distribute || Kind == OMPD_teams_distribute_simd ||
          Kind == OMPD_teams_distribute_parallel_for_simd ||
+         Kind == OMPD_teams_distribute_parallel_for ||
          Kind == OMPD_target_teams_distribute ||
          Kind == OMPD_target_teams_distribute_simd;
   // TODO add next directives.

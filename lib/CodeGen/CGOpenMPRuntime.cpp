@@ -11,9 +11,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "CGOpenMPRuntime.h"
 #include "CGCXXABI.h"
 #include "CGCleanup.h"
+#include "CGOpenMPRuntime.h"
 #include "CodeGenFunction.h"
 #include "ConstantBuilder.h"
 #include "clang/AST/Decl.h"
@@ -3254,7 +3254,8 @@ void CGOpenMPRuntime::createOffloadEntry(llvm::Constant *ID,
 
 void CGOpenMPRuntime::createOffloadEntriesAndInfoMetadata() {
   // Emit the offloading entries and metadata so that the device codegen side
-  // can easily figure out what to emit. The produced metadata looks like this:
+  // can easily figure out what to emit. The produced metadata looks like
+  // this:
   //
   // !omp_offload.info = !{!1, ...}
   //

@@ -1479,7 +1479,7 @@ void ItaniumCXXABI::emitVTableDefinitions(CodeGenVTables &CGVT,
 
   // Create and set the initializer.
   ConstantInitBuilder Builder(CGM);
-  auto Components = Builder.beginArray(CGM.Int8PtrTy);
+  auto Components = Builder.beginStruct();
   CGVT.createVTableInitializer(Components, VTLayout, RTTI);
   Components.finishAndSetAsInitializer(VTable);
 
@@ -1537,17 +1537,21 @@ ItaniumCXXABI::getVTableAddressPoint(BaseSubobject Base,
                                      const CXXRecordDecl *VTableClass) {
   llvm::GlobalValue *VTable = getAddrOfVTable(VTableClass, CharUnits());
 
-  // Find the appropriate vtable within the vtable group.
-  uint64_t AddressPoint = CGM.getItaniumVTableContext()
-                              .getVTableLayout(VTableClass)
-                              .getAddressPoint(Base);
+  // Find the appropriate vtable within the vtable group, and the address point
+  // within that vtable.
+  VTableLayout::AddressPointLocation AddressPoint =
+      CGM.getItaniumVTableContext()
+          .getVTableLayout(VTableClass)
+          .getAddressPoint(Base);
   llvm::Value *Indices[] = {
     llvm::ConstantInt::get(CGM.Int32Ty, 0),
-    llvm::ConstantInt::get(CGM.Int32Ty, AddressPoint)
+    llvm::ConstantInt::get(CGM.Int32Ty, AddressPoint.VTableIndex),
+    llvm::ConstantInt::get(CGM.Int32Ty, AddressPoint.AddressPointIndex),
   };
 
-  return llvm::ConstantExpr::getInBoundsGetElementPtr(VTable->getValueType(),
-                                                      VTable, Indices);
+  return llvm::ConstantExpr::getGetElementPtr(VTable->getValueType(), VTable,
+                                              Indices, /*InBounds=*/true,
+                                              /*InRangeIndex=*/1);
 }
 
 llvm::Value *ItaniumCXXABI::getVTableAddressPointInStructorWithVTT(
@@ -1589,12 +1593,12 @@ llvm::GlobalVariable *ItaniumCXXABI::getAddrOfVTable(const CXXRecordDecl *RD,
   llvm::raw_svector_ostream Out(Name);
   getMangleContext().mangleCXXVTable(RD, Out);
 
-  ItaniumVTableContext &VTContext = CGM.getItaniumVTableContext();
-  llvm::ArrayType *ArrayType = llvm::ArrayType::get(
-      CGM.Int8PtrTy, VTContext.getVTableLayout(RD).vtable_components().size());
+  const VTableLayout &VTLayout =
+      CGM.getItaniumVTableContext().getVTableLayout(RD);
+  llvm::Type *VTableType = CGM.getVTables().getVTableType(VTLayout);
 
   VTable = CGM.CreateOrReplaceCXXRuntimeVariable(
-      Name, ArrayType, llvm::GlobalValue::ExternalLinkage);
+      Name, VTableType, llvm::GlobalValue::ExternalLinkage);
   VTable->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
 
   if (RD->hasAttr<DLLImportAttr>())
@@ -2912,16 +2916,18 @@ static llvm::GlobalVariable::LinkageTypes getTypeInfoLinkage(CodeGenModule &CGM,
 
   case VisibleNoLinkage:
   case ExternalLinkage:
-    if (!CGM.getLangOpts().RTTI) {
-      // RTTI is not enabled, which means that this type info struct is going
-      // to be used for exception handling. Give it linkonce_odr linkage.
+    // RTTI is not enabled, which means that this type info struct is going
+    // to be used for exception handling. Give it linkonce_odr linkage.
+    if (!CGM.getLangOpts().RTTI)
       return llvm::GlobalValue::LinkOnceODRLinkage;
-    }
 
     if (const RecordType *Record = dyn_cast<RecordType>(Ty)) {
       const CXXRecordDecl *RD = cast<CXXRecordDecl>(Record->getDecl());
       if (RD->hasAttr<WeakAttr>())
         return llvm::GlobalValue::WeakODRLinkage;
+      if (CGM.getTriple().isWindowsItaniumEnvironment())
+        if (RD->hasAttr<DLLImportAttr>())
+          return llvm::GlobalValue::ExternalLinkage;
       if (RD->isDynamicClass()) {
         llvm::GlobalValue::LinkageTypes LT = CGM.getVTableLinkage(RD);
         // MinGW won't export the RTTI information when there is a key function.
@@ -3123,10 +3129,26 @@ llvm::Constant *ItaniumRTTIBuilder::BuildTypeInfo(QualType Ty, bool Force,
     llvmVisibility = llvm::GlobalValue::HiddenVisibility;
   else
     llvmVisibility = CodeGenModule::GetLLVMVisibility(Ty->getVisibility());
+
   TypeName->setVisibility(llvmVisibility);
   GV->setVisibility(llvmVisibility);
-  if (DLLExport)
-    GV->setDLLStorageClass(llvm::GlobalValue::DLLExportStorageClass);
+
+  if (CGM.getTriple().isWindowsItaniumEnvironment()) {
+    auto RD = Ty->getAsCXXRecordDecl();
+    if (DLLExport || (RD && RD->hasAttr<DLLExportAttr>())) {
+      TypeName->setDLLStorageClass(llvm::GlobalValue::DLLExportStorageClass);
+      GV->setDLLStorageClass(llvm::GlobalValue::DLLExportStorageClass);
+    } else if (CGM.getLangOpts().RTTI && RD && RD->hasAttr<DLLImportAttr>()) {
+      TypeName->setDLLStorageClass(llvm::GlobalValue::DLLImportStorageClass);
+      GV->setDLLStorageClass(llvm::GlobalValue::DLLImportStorageClass);
+
+      // Because the typename and the typeinfo are DLL import, convert them to
+      // declarations rather than definitions.  The initializers still need to
+      // be constructed to calculate the type for the declarations.
+      TypeName->setInitializer(nullptr);
+      GV->setInitializer(nullptr);
+    }
+  }
 
   return llvm::ConstantExpr::getBitCast(GV, CGM.Int8PtrTy);
 }
