@@ -965,6 +965,10 @@ public:
                                      : RuntimeLibType::RLT_CompilerRT;
   }
 
+  const char *getDefaultLinker() const override {
+    return "lld";
+  }
+
 private:
   Multilib SelectedMultilib;
   std::string LibSuffix;
@@ -1095,6 +1099,10 @@ public:
   std::string findLibCxxIncludePath() const override;
   void AddCXXStdlibLibArgs(const llvm::opt::ArgList &Args,
                            llvm::opt::ArgStringList &CmdArgs) const override;
+
+  const char *getDefaultLinker() const override {
+    return "lld";
+  }
 
 protected:
   Tool *buildAssembler() const override;
@@ -1298,6 +1306,10 @@ private:
   void AddClangCXXStdlibIncludeArgs(
       const llvm::opt::ArgList &DriverArgs,
       llvm::opt::ArgStringList &CC1Args) const override;
+
+  const char *getDefaultLinker() const override {
+    return "lld";
+  }
 
   Tool *buildLinker() const override;
 };

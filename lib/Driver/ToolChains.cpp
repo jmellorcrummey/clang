@@ -3061,9 +3061,6 @@ MipsLLVMToolChain::MipsLLVMToolChain(const Driver &D,
   LibSuffix = tools::mips::getMipsABILibSuffix(Args, Triple);
   getFilePaths().clear();
   getFilePaths().push_back(computeSysRoot() + "/usr/lib" + LibSuffix);
-
-  // Use LLD by default.
-  DefaultLinker = "lld";
 }
 
 void MipsLLVMToolChain::AddClangSystemIncludeArgs(
@@ -4751,9 +4748,6 @@ Fuchsia::Fuchsia(const Driver &D, const llvm::Triple &Triple,
 
   getFilePaths().push_back(D.SysRoot + "/lib");
   getFilePaths().push_back(D.ResourceDir + "/lib/fuchsia");
-
-  // Use LLD by default.
-  DefaultLinker = "lld";
 }
 
 Tool *Fuchsia::buildAssembler() const {
@@ -5242,9 +5236,6 @@ WebAssembly::WebAssembly(const Driver &D, const llvm::Triple &Triple,
   assert(Triple.isArch32Bit() != Triple.isArch64Bit());
   getFilePaths().push_back(
       getDriver().SysRoot + "/lib" + (Triple.isArch32Bit() ? "32" : "64"));
-
-  // Use LLD by default.
-  DefaultLinker = "lld";
 }
 
 bool WebAssembly::IsMathErrnoDefault() const { return false; }
