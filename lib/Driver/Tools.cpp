@@ -40,9 +40,9 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/Program.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/TargetParser.h"
+#include "llvm/Support/YAMLParser.h"
 
 #ifdef LLVM_ON_UNIX
 #include <unistd.h> // For getuid().
@@ -2534,9 +2534,11 @@ static bool DecodeAArch64Mcpu(const Driver &D, StringRef Mcpu, StringRef &CPU,
     Features.push_back("+neon");
   } else {
     unsigned ArchKind = llvm::AArch64::parseCPUArch(CPU);
-    unsigned Extersion = llvm::AArch64::getDefaultExtensions(CPU, ArchKind);
+    if (!llvm::AArch64::getArchFeatures(ArchKind, Features))
+      return false;
 
-    if (!llvm::AArch64::getExtensionFeatures(Extersion, Features))
+    unsigned Extension = llvm::AArch64::getDefaultExtensions(CPU, ArchKind);
+    if (!llvm::AArch64::getExtensionFeatures(Extension, Features))
       return false;
    }
 
@@ -3122,6 +3124,27 @@ static void CollectArgsForIntegratedAssembler(Compilation &C,
       } else if (Value.startswith("-mcpu") || Value.startswith("-mfpu") ||
                  Value.startswith("-mhwdiv") || Value.startswith("-march")) {
         // Do nothing, we'll validate it later.
+      } else if (Value == "-defsym") {
+          if (A->getNumValues() != 2) {
+            D.Diag(diag::err_drv_defsym_invalid_format) << Value;
+            break;
+          }
+          const char *S = A->getValue(1);
+          auto Pair = StringRef(S).split('=');
+          auto Sym = Pair.first;
+          auto SVal = Pair.second;
+
+          if (Sym.empty() || SVal.empty()) {
+            D.Diag(diag::err_drv_defsym_invalid_format) << S;
+            break;
+          }
+          int64_t IVal;
+          if (SVal.getAsInteger(0, IVal)) {
+            D.Diag(diag::err_drv_defsym_invalid_symval) << SVal;
+            break;
+          }
+          CmdArgs.push_back(Value.data());
+          TakeNextArg = true;
       } else {
         D.Diag(diag::err_drv_unsupported_option_argument)
             << A->getOption().getName() << Value;
@@ -3538,19 +3561,6 @@ static void addDashXForInput(const ArgList &Args, const InputInfo &Input,
     CmdArgs.push_back(types::getTypeName(Input.getType()));
 }
 
-static VersionTuple getMSCompatibilityVersion(unsigned Version) {
-  if (Version < 100)
-    return VersionTuple(Version);
-
-  if (Version < 10000)
-    return VersionTuple(Version / 100, Version % 100);
-
-  unsigned Build = 0, Factor = 1;
-  for (; Version > 10000; Version = Version / 10, Factor = Factor * 10)
-    Build = Build + (Version % 10) * Factor;
-  return VersionTuple(Version / 100, Version % 100, Build);
-}
-
 // Claim options we don't want to warn if they are unused. We do this for
 // options that build systems might add but are unused when assembling or only
 // running the preprocessor for example.
@@ -3594,58 +3604,17 @@ static void appendUserToPath(SmallVectorImpl<char> &Result) {
   Result.append(UID.begin(), UID.end());
 }
 
-VersionTuple visualstudio::getMSVCVersion(const Driver *D, const ToolChain &TC,
-                                          const llvm::Triple &Triple,
-                                          const llvm::opt::ArgList &Args,
-                                          bool IsWindowsMSVC) {
-  if (Args.hasFlag(options::OPT_fms_extensions, options::OPT_fno_ms_extensions,
-                   IsWindowsMSVC) ||
-      Args.hasArg(options::OPT_fmsc_version) ||
-      Args.hasArg(options::OPT_fms_compatibility_version)) {
-    const Arg *MSCVersion = Args.getLastArg(options::OPT_fmsc_version);
-    const Arg *MSCompatibilityVersion =
-        Args.getLastArg(options::OPT_fms_compatibility_version);
+static Arg *getLastProfileUseArg(const ArgList &Args) {
+  auto *ProfileUseArg = Args.getLastArg(
+      options::OPT_fprofile_instr_use, options::OPT_fprofile_instr_use_EQ,
+      options::OPT_fprofile_use, options::OPT_fprofile_use_EQ,
+      options::OPT_fno_profile_instr_use);
 
-    if (MSCVersion && MSCompatibilityVersion) {
-      if (D)
-        D->Diag(diag::err_drv_argument_not_allowed_with)
-            << MSCVersion->getAsString(Args)
-            << MSCompatibilityVersion->getAsString(Args);
-      return VersionTuple();
-    }
+  if (ProfileUseArg &&
+      ProfileUseArg->getOption().matches(options::OPT_fno_profile_instr_use))
+    ProfileUseArg = nullptr;
 
-    if (MSCompatibilityVersion) {
-      VersionTuple MSVT;
-      if (MSVT.tryParse(MSCompatibilityVersion->getValue()) && D)
-        D->Diag(diag::err_drv_invalid_value)
-            << MSCompatibilityVersion->getAsString(Args)
-            << MSCompatibilityVersion->getValue();
-      return MSVT;
-    }
-
-    if (MSCVersion) {
-      unsigned Version = 0;
-      if (StringRef(MSCVersion->getValue()).getAsInteger(10, Version) && D)
-        D->Diag(diag::err_drv_invalid_value) << MSCVersion->getAsString(Args)
-                                             << MSCVersion->getValue();
-      return getMSCompatibilityVersion(Version);
-    }
-
-    unsigned Major, Minor, Micro;
-    Triple.getEnvironmentVersion(Major, Minor, Micro);
-    if (Major || Minor || Micro)
-      return VersionTuple(Major, Minor, Micro);
-
-    if (IsWindowsMSVC) {
-      VersionTuple MSVT = TC.getMSVCVersionFromExe();
-      if (!MSVT.empty())
-        return MSVT;
-
-      // FIXME: Consider bumping this to 19 (MSVC2015) soon.
-      return VersionTuple(18);
-    }
-  }
-  return VersionTuple();
+  return ProfileUseArg;
 }
 
 static void addPGOAndCoverageFlags(Compilation &C, const Driver &D,
@@ -3672,13 +3641,7 @@ static void addPGOAndCoverageFlags(Compilation &C, const Driver &D,
     D.Diag(diag::err_drv_argument_not_allowed_with)
         << PGOGenerateArg->getSpelling() << ProfileGenerateArg->getSpelling();
 
-  auto *ProfileUseArg = Args.getLastArg(
-      options::OPT_fprofile_instr_use, options::OPT_fprofile_instr_use_EQ,
-      options::OPT_fprofile_use, options::OPT_fprofile_use_EQ,
-      options::OPT_fno_profile_instr_use);
-  if (ProfileUseArg &&
-      ProfileUseArg->getOption().matches(options::OPT_fno_profile_instr_use))
-    ProfileUseArg = nullptr;
+  auto *ProfileUseArg = getLastProfileUseArg(Args);
 
   if (PGOGenerateArg && ProfileUseArg)
     D.Diag(diag::err_drv_argument_not_allowed_with)
@@ -4009,6 +3972,65 @@ static void AddAssemblerKPIC(const ToolChain &ToolChain, const ArgList &Args,
     CmdArgs.push_back("-KPIC");
 }
 
+void Clang::DumpCompilationDatabase(Compilation &C, StringRef Filename,
+                                    StringRef Target, const InputInfo &Output,
+                                    const InputInfo &Input, const ArgList &Args) const {
+  // If this is a dry run, do not create the compilation database file.
+  if (C.getArgs().hasArg(options::OPT__HASH_HASH_HASH))
+    return;
+
+  using llvm::yaml::escape;
+  const Driver &D = getToolChain().getDriver();
+
+  if (!CompilationDatabase) {
+    std::error_code EC;
+    auto File = llvm::make_unique<llvm::raw_fd_ostream>(Filename, EC, llvm::sys::fs::F_Text);
+    if (EC) {
+      D.Diag(clang::diag::err_drv_compilationdatabase) << Filename
+                                                       << EC.message();
+      return;
+    }
+    CompilationDatabase = std::move(File);
+  }
+  auto &CDB = *CompilationDatabase;
+  SmallString<128> Buf;
+  if (llvm::sys::fs::current_path(Buf))
+    Buf = ".";
+  CDB << "{ \"directory\": \"" << escape(Buf) << "\"";
+  CDB << ", \"file\": \"" << escape(Input.getFilename()) << "\"";
+  CDB << ", \"output\": \"" << escape(Output.getFilename()) << "\"";
+  CDB << ", \"arguments\": [\"" << escape(D.ClangExecutable) << "\"";
+  Buf = "-x";
+  Buf += types::getTypeName(Input.getType());
+  CDB << ", \"" << escape(Buf) << "\"";
+  if (!D.SysRoot.empty() && !Args.hasArg(options::OPT__sysroot_EQ)) {
+    Buf = "--sysroot=";
+    Buf += D.SysRoot;
+    CDB << ", \"" << escape(Buf) << "\"";
+  }
+  CDB << ", \"" << escape(Input.getFilename()) << "\"";
+  for (auto &A: Args) {
+    auto &O = A->getOption();
+    // Skip language selection, which is positional.
+    if (O.getID() == options::OPT_x)
+      continue;
+    // Skip writing dependency output and the compilation database itself.
+    if (O.getGroup().isValid() && O.getGroup().getID() == options::OPT_M_Group)
+      continue;
+    // Skip inputs.
+    if (O.getKind() == Option::InputClass)
+      continue;
+    // All other arguments are quoted and appended.
+    ArgStringList ASL;
+    A->render(Args, ASL);
+    for (auto &it: ASL)
+      CDB << ", \"" << escape(it) << "\"";
+  }
+  Buf = "--target=";
+  Buf += Target;
+  CDB << ", \"" << escape(Buf) << "\"]},\n";
+}
+
 void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                          const InputInfo &Output, const InputInfoList &Inputs,
                          const ArgList &Args, const char *LinkingOutput) const {
@@ -4052,6 +4074,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // Add the "effective" target triple.
   CmdArgs.push_back("-triple");
   CmdArgs.push_back(Args.MakeArgString(TripleStr));
+
+  if (const Arg *MJ = Args.getLastArg(options::OPT_MJ)) {
+    DumpCompilationDatabase(C, MJ->getValue(), TripleStr, Output, Input, Args);
+    Args.ClaimAllArgs(options::OPT_MJ);
+  }
 
   if (IsCuda) {
     // We have to pass the triple of the host if compiling for a CUDA device and
@@ -4179,7 +4206,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   // Embed-bitcode option.
-  if (C.getDriver().embedBitcodeEnabled() &&
+  if (C.getDriver().embedBitcodeInObject() &&
       (isa<BackendJobAction>(JA) || isa<AssembleJobAction>(JA))) {
     // Add flags implied by -fembed-bitcode.
     Args.AddLastArg(CmdArgs, options::OPT_fembed_bitcode_EQ);
@@ -4918,14 +4945,20 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.hasFlag(options::OPT_fxray_instrument,
                    options::OPT_fnoxray_instrument, false)) {
     const char *const XRayInstrumentOption = "-fxray-instrument";
-    if (Triple.getOS() == llvm::Triple::Linux &&
-        (Triple.getArch() == llvm::Triple::arm ||
-         Triple.getArch() == llvm::Triple::x86_64)) {
-      // Supported.
-    } else {
+    if (Triple.getOS() == llvm::Triple::Linux)
+      switch (Triple.getArch()) {
+      case llvm::Triple::x86_64:
+      case llvm::Triple::arm:
+      case llvm::Triple::aarch64:
+        // Supported.
+        break;
+      default:
+        D.Diag(diag::err_drv_clang_unsupported)
+            << (std::string(XRayInstrumentOption) + " on " + Triple.str());
+      }
+    else
       D.Diag(diag::err_drv_clang_unsupported)
-          << (std::string(XRayInstrumentOption) + " on " + Triple.str());
-    }
+          << (std::string(XRayInstrumentOption) + " on non-Linux target OS");
     CmdArgs.push_back(XRayInstrumentOption);
     if (const Arg *A =
             Args.getLastArg(options::OPT_fxray_instruction_threshold_,
@@ -5266,9 +5299,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddLastArg(CmdArgs, options::OPT_ftlsmodel_EQ);
 
   // -fhosted is default.
+  bool IsHosted = true;
   if (Args.hasFlag(options::OPT_ffreestanding, options::OPT_fhosted, false) ||
-      KernelOrKext)
+      KernelOrKext) {
     CmdArgs.push_back("-ffreestanding");
+    IsHosted = false;
+  }
 
   // Forward -f (flag) options which we can pass directly.
   Args.AddLastArg(CmdArgs, options::OPT_femit_all_decls);
@@ -5309,7 +5345,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
       // If the user provides the fopenmp-nonaliased-maps flag, pass it on.
       if (Args.hasFlag(options::OPT_fopenmp_nonaliased_maps,
-                       options::OPT_fnoopenmp_nonaliased_maps, /*Default=*/false))
+                       options::OPT_fnoopenmp_nonaliased_maps,
+                       /*Default=*/false))
         CmdArgs.push_back("-fopenmp-nonaliased-maps");
 
       Args.AddAllArgs(CmdArgs, options::OPT_fopenmp_version_EQ);
@@ -5410,6 +5447,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   } else {
     StackProtectorLevel =
         getToolChain().GetDefaultStackProtectorLevel(KernelOrKext);
+    // Only use a default stack protector on Darwin in case -ffreestanding
+    // is not specified.
+    if (Triple.isOSDarwin() && !IsHosted)
+      StackProtectorLevel = 0;
   }
   if (StackProtectorLevel) {
     CmdArgs.push_back("-stack-protector");
@@ -5796,9 +5837,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                                  options::OPT_fno_ms_extensions, true))))
     CmdArgs.push_back("-fms-compatibility");
 
-  // -fms-compatibility-version=18.00 is default.
-  VersionTuple MSVT = visualstudio::getMSVCVersion(
-      &D, getToolChain(), getToolChain().getTriple(), Args, IsWindowsMSVC);
+  VersionTuple MSVT =
+      getToolChain().computeMSVCVersion(&getToolChain().getDriver(), Args);
   if (!MSVT.empty())
     CmdArgs.push_back(
         Args.MakeArgString("-fms-compatibility-version=" + MSVT.getAsString()));
@@ -5934,31 +5974,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (rewriteKind != RK_None)
     CmdArgs.push_back("-fno-objc-infer-related-result-type");
 
-  // Handle -fobjc-gc and -fobjc-gc-only. They are exclusive, and -fobjc-gc-only
-  // takes precedence.
-  const Arg *GCArg = Args.getLastArg(options::OPT_fobjc_gc_only);
-  if (!GCArg)
-    GCArg = Args.getLastArg(options::OPT_fobjc_gc);
-  if (GCArg) {
-    if (ARC) {
-      D.Diag(diag::err_drv_objc_gc_arr) << GCArg->getAsString(Args);
-    } else if (getToolChain().SupportsObjCGC()) {
-      GCArg->render(Args, CmdArgs);
-    } else {
-      // FIXME: We should move this to a hard error.
-      D.Diag(diag::warn_drv_objc_gc_unsupported) << GCArg->getAsString(Args);
-    }
-  }
-
   // Pass down -fobjc-weak or -fno-objc-weak if present.
   if (types::isObjC(InputType)) {
     auto WeakArg = Args.getLastArg(options::OPT_fobjc_weak,
                                    options::OPT_fno_objc_weak);
     if (!WeakArg) {
       // nothing to do
-    } else if (GCArg) {
-      if (WeakArg->getOption().matches(options::OPT_fobjc_weak))
-        D.Diag(diag::err_objc_weak_with_gc);
     } else if (!objcRuntime.allowsWeak()) {
       if (WeakArg->getOption().matches(options::OPT_fobjc_weak))
         D.Diag(diag::err_objc_weak_unsupported);
@@ -6252,7 +6273,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                                   Args.hasArg(options::OPT_S))) {
         F = Output.getFilename();
       } else {
-        // Use the compilation directory.
+        // Use the input filename.
         F = llvm::sys::path::stem(Input.getBaseInput());
 
         // If we're compiling for an offload architecture (i.e. a CUDA device),
@@ -6379,7 +6400,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // pristine IR generated by the frontend. Ideally, a new compile action should
   // be added so both IR can be captured.
   if (C.getDriver().isSaveTempsEnabled() &&
-      !C.getDriver().embedBitcodeEnabled() && isa<CompileJobAction>(JA))
+      !C.getDriver().embedBitcodeInObject() && isa<CompileJobAction>(JA))
     CmdArgs.push_back("-disable-llvm-passes");
 
   if (Output.getType() == types::TY_Dependencies) {
@@ -8265,20 +8286,20 @@ void darwin::Linker::AddLinkArgs(Compilation &C, const ArgList &Args,
   }
 
   // Use -lto_library option to specify the libLTO.dylib path. Try to find
-  // it in clang installed libraries. If not found, the option is not used
-  // and 'ld' will use its default mechanism to search for libLTO.dylib.
+  // it in clang installed libraries. ld64 will only look at this argument
+  // when it actually uses LTO, so libLTO.dylib only needs to exist at link
+  // time if ld64 decides that it needs to use LTO.
+  // Since this is passed unconditionally, ld64 will never look for libLTO.dylib
+  // next to it. That's ok since ld64 using a libLTO.dylib not matching the
+  // clang version won't work anyways.
   if (Version[0] >= 133) {
     // Search for libLTO in <InstalledDir>/../lib/libLTO.dylib
     StringRef P = llvm::sys::path::parent_path(D.Dir);
     SmallString<128> LibLTOPath(P);
     llvm::sys::path::append(LibLTOPath, "lib");
     llvm::sys::path::append(LibLTOPath, "libLTO.dylib");
-    if (llvm::sys::fs::exists(LibLTOPath)) {
-      CmdArgs.push_back("-lto_library");
-      CmdArgs.push_back(C.getArgs().MakeArgString(LibLTOPath));
-    } else {
-      D.Diag(diag::warn_drv_lto_libpath);
-    }
+    CmdArgs.push_back("-lto_library");
+    CmdArgs.push_back(C.getArgs().MakeArgString(LibLTOPath));
   }
 
   // ld64 version 262 and above run the deduplicate pass by default.
@@ -8371,9 +8392,9 @@ void darwin::Linker::AddLinkArgs(Compilation &C, const ArgList &Args,
     else
       CmdArgs.push_back("-no_pie");
   }
+
   // for embed-bitcode, use -bitcode_bundle in linker command
-  if (C.getDriver().embedBitcodeEnabled() ||
-      C.getDriver().embedBitcodeMarkerOnly()) {
+  if (C.getDriver().embedBitcodeEnabled()) {
     // Check if the toolchain supports bitcode build flow.
     if (MachOTC.SupportsEmbeddedBitcode())
       CmdArgs.push_back("-bitcode_bundle");
@@ -8465,6 +8486,24 @@ void darwin::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   // I'm not sure why this particular decomposition exists in gcc, but
   // we follow suite for ease of comparison.
   AddLinkArgs(C, Args, CmdArgs, Inputs);
+
+  // For LTO, pass the name of the optimization record file.
+  if (Args.hasFlag(options::OPT_fsave_optimization_record,
+                   options::OPT_fno_save_optimization_record, false)) {
+    CmdArgs.push_back("-mllvm");
+    CmdArgs.push_back("-lto-pass-remarks-output");
+    CmdArgs.push_back("-mllvm");
+
+    SmallString<128> F;
+    F = Output.getFilename();
+    F += ".opt.yaml";
+    CmdArgs.push_back(Args.MakeArgString(F));
+
+    if (getLastProfileUseArg(Args)) {
+      CmdArgs.push_back("-mllvm");
+      CmdArgs.push_back("-lto-pass-remarks-with-hotness");
+    }
+  }
 
   // It seems that the 'e' option is completely ignored for dynamic executables
   // (the default), and with static executables, the last one wins, as expected.
@@ -9972,7 +10011,7 @@ static const char *getLDMOption(const llvm::Triple &T, const ArgList &Args) {
       return "elf32_x86_64";
     return "elf_x86_64";
   default:
-    llvm_unreachable("Unexpected arch");
+    return nullptr;
   }
 }
 
@@ -10045,8 +10084,13 @@ void gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("--eh-frame-hdr");
   }
 
-  CmdArgs.push_back("-m");
-  CmdArgs.push_back(getLDMOption(ToolChain.getTriple(), Args));
+  if (const char *LDMOption = getLDMOption(ToolChain.getTriple(), Args)) {
+    CmdArgs.push_back("-m");
+    CmdArgs.push_back(LDMOption);
+  } else {
+    D.Diag(diag::err_target_unknown_triple) << Triple.str();
+    return;
+  }
 
   if (Args.hasArg(options::OPT_static)) {
     if (Arch == llvm::Triple::arm || Arch == llvm::Triple::armeb ||
@@ -12043,7 +12087,7 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
 
   // Check that our installation's ptxas supports gpu_arch.
   if (!Args.hasArg(options::OPT_no_cuda_version_check)) {
-    TC.cudaInstallation().CheckCudaVersionSupportsArch(gpu_arch);
+    TC.CudaInstallation.CheckCudaVersionSupportsArch(gpu_arch);
   }
 
   ArgStringList CmdArgs;

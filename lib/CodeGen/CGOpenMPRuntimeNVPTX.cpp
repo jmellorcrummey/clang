@@ -1442,8 +1442,7 @@ void CGOpenMPRuntimeNVPTX::registerParallelContext(
 
 void CGOpenMPRuntimeNVPTX::createOffloadEntry(llvm::Constant *ID,
                                               llvm::Constant *Addr,
-                                              uint64_t Size,
-                                              llvm::ConstantInt *Flags) {
+                                              uint64_t Size, uint64_t Flags) {
   auto *F = dyn_cast<llvm::Function>(Addr);
   // TODO: Add support for global variables on the device after declare target
   // support.
@@ -2314,43 +2313,43 @@ void CGOpenMPRuntimeNVPTX::createDataSharingInfo(CodeGenFunction &CGF) {
     }
 
     // Add loop bounds if required.
-    DoOnSharedLoopBounds(
-        *Dir, [&AlreadySharedDecls, &C, &Info, &SharedMasterRD, &SharedWarpRD,
-               &Dir, &CGF](const VarDecl *LB, const VarDecl *UB) {
-          // Do not insert the same declaration twice.
-          if (AlreadySharedDecls.count(LB))
-            return;
+    DoOnSharedLoopBounds(*Dir, [&AlreadySharedDecls, &C, &Info, &SharedMasterRD,
+                                &SharedWarpRD, &Dir,
+                                &CGF](const VarDecl *LB, const VarDecl *UB) {
+      // Do not insert the same declaration twice.
+      if (AlreadySharedDecls.count(LB))
+        return;
 
-          // We assume that if the lower bound is not to be shared, the upper
-          // bound is not shared as well.
-          assert(!AlreadySharedDecls.count(UB) &&
-                 "Not expecting shared upper bound.");
+      // We assume that if the lower bound is not to be shared, the upper
+      // bound is not shared as well.
+      assert(!AlreadySharedDecls.count(UB) &&
+             "Not expecting shared upper bound.");
 
-          QualType ElemTy = LB->getType();
+      QualType ElemTy = LB->getType();
 
-          // Bounds are shared by value.
-          Info.add(LB, DataSharingInfo::DST_Val);
-          Info.add(UB, DataSharingInfo::DST_Val);
-          addFieldToRecordDecl(C, SharedMasterRD, ElemTy);
-          addFieldToRecordDecl(C, SharedMasterRD, ElemTy);
+      // Bounds are shared by value.
+      Info.add(LB, DataSharingInfo::DST_Val);
+      Info.add(UB, DataSharingInfo::DST_Val);
+      addFieldToRecordDecl(C, SharedMasterRD, ElemTy);
+      addFieldToRecordDecl(C, SharedMasterRD, ElemTy);
 
-          llvm::APInt NumElems(C.getTypeSize(C.getUIntPtrType()),
-                               DS_Max_Worker_Warp_Size);
-          auto QTy = C.getConstantArrayType(ElemTy, NumElems, ArrayType::Normal,
-                                            /*IndexTypeQuals=*/0);
-          addFieldToRecordDecl(C, SharedWarpRD, QTy);
-          addFieldToRecordDecl(C, SharedWarpRD, QTy);
+      llvm::APInt NumElems(C.getTypeSize(C.getUIntPtrType()),
+                           DS_Max_Worker_Warp_Size);
+      auto QTy = C.getConstantArrayType(ElemTy, NumElems, ArrayType::Normal,
+                                        /*IndexTypeQuals=*/0);
+      addFieldToRecordDecl(C, SharedWarpRD, QTy);
+      addFieldToRecordDecl(C, SharedWarpRD, QTy);
 
-          // Emit the preinits to make sure the initializers are properly
-          // emitted.
-          // FIXME: This is a hack - it won't work if declarations being shared
-          // appear after the first parallel region.
-          const OMPLoopDirective *L = cast<OMPLoopDirective>(Dir);
-          if (auto *PreInits = cast_or_null<DeclStmt>(L->getPreInits()))
-            for (const auto *I : PreInits->decls()) {
-              CGF.EmitOMPHelperVar(cast<VarDecl>(I));
-            }
-        });
+      // Emit the preinits to make sure the initializers are properly
+      // emitted.
+      // FIXME: This is a hack - it won't work if declarations being shared
+      // appear after the first parallel region.
+      const OMPLoopDirective *L = cast<OMPLoopDirective>(Dir);
+      if (auto *PreInits = cast_or_null<DeclStmt>(L->getPreInits()))
+        for (const auto *I : PreInits->decls()) {
+          CGF.EmitOMPHelperVar(cast<VarDecl>(I));
+        }
+    });
   }
 
   SharedMasterRD->completeDefinition();
@@ -3814,6 +3813,16 @@ llvm::Function *CGOpenMPRuntimeNVPTX::emitRegistrationFunction() {
     // Adjust address spaces in the function arguments.
     auto FArg = DSI.InitializationFunction->arg_begin();
     for (auto &Arg : InitArgs) {
+
+      // If the argument is not in the header of the function (usually because
+      // it is after the scheduling of an outermost loop), create a clone
+      // in there and use it instead.
+      if (auto *I = dyn_cast<llvm::Instruction>(Arg))
+        if (I->getParent() != &Fn->front()) {
+          auto *CI = I->clone();
+          Arg = CI;
+          CI->insertBefore(InsertPtr);
+        }
 
       // Types match, nothing to do.
       if (FArg->getType() == Arg->getType()) {

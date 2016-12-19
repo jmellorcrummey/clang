@@ -102,7 +102,7 @@ public:
                      const clang::TargetOptions &TOpts,
                      const LangOptions &LOpts, Module *M)
       : Diags(_Diags), CodeGenOpts(CGOpts), TargetOpts(TOpts), LangOpts(LOpts),
-        TheModule(M), CodeGenerationTime("Code Generation Time") {}
+        TheModule(M), CodeGenerationTime("codegen", "Code Generation Time") {}
 
   ~EmitAssemblyHelper() {
     if (CodeGenOpts.DisableFree)
@@ -298,9 +298,13 @@ void EmitAssemblyHelper::CreatePasses(legacy::PassManager &MPM,
 
   PassManagerBuilderWrapper PMBuilder(CodeGenOpts, LangOpts);
 
-  // Figure out TargetLibraryInfo.
+  // Figure out TargetLibraryInfo.  This needs to be added to MPM and FPM
+  // manually (and not via PMBuilder), since some passes (eg. InstrProfiling)
+  // are inserted before PMBuilder ones - they'd get the default-constructed
+  // TLI with an unknown target otherwise.
   Triple TargetTriple(TheModule->getTargetTriple());
-  PMBuilder.LibraryInfo = createTLII(TargetTriple, CodeGenOpts);
+  std::unique_ptr<TargetLibraryInfoImpl> TLII(
+      createTLII(TargetTriple, CodeGenOpts));
 
   switch (Inlining) {
   case CodeGenOptions::NoInlining:
@@ -332,6 +336,8 @@ void EmitAssemblyHelper::CreatePasses(legacy::PassManager &MPM,
   PMBuilder.PrepareForThinLTO = CodeGenOpts.EmitSummaryIndex;
   PMBuilder.PrepareForLTO = CodeGenOpts.PrepareForLTO;
   PMBuilder.RerollLoops = CodeGenOpts.RerollLoops;
+
+  MPM.add(new TargetLibraryInfoWrapperPass(*TLII));
 
   // Add target-specific passes that need to run as early as possible.
   if (TM)
@@ -416,6 +422,7 @@ void EmitAssemblyHelper::CreatePasses(legacy::PassManager &MPM,
   }
 
   // Set up the per-function pass manager.
+  FPM.add(new TargetLibraryInfoWrapperPass(*TLII));
   if (CodeGenOpts.VerifyModule)
     FPM.add(createVerifierPass());
 
@@ -746,7 +753,7 @@ static void runThinLTOBackend(const CodeGenOptions &CGOpts, Module *M,
                                     ImportList);
 
   std::vector<std::unique_ptr<llvm::MemoryBuffer>> OwnedImports;
-  MapVector<llvm::StringRef, llvm::MemoryBufferRef> ModuleMap;
+  MapVector<llvm::StringRef, llvm::BitcodeModule> ModuleMap;
 
   for (auto &I : ImportList) {
     ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> MBOrErr =
@@ -756,7 +763,34 @@ static void runThinLTOBackend(const CodeGenOptions &CGOpts, Module *M,
              << "': " << MBOrErr.getError().message() << "\n";
       return;
     }
-    ModuleMap[I.first()] = (*MBOrErr)->getMemBufferRef();
+
+    Expected<std::vector<BitcodeModule>> BMsOrErr =
+        getBitcodeModuleList(**MBOrErr);
+    if (!BMsOrErr) {
+      handleAllErrors(BMsOrErr.takeError(), [&](ErrorInfoBase &EIB) {
+        errs() << "Error loading imported file '" << I.first()
+               << "': " << EIB.message() << '\n';
+      });
+      return;
+    }
+
+    // The bitcode file may contain multiple modules, we want the one with a
+    // summary.
+    bool FoundModule = false;
+    for (BitcodeModule &BM : *BMsOrErr) {
+      Expected<bool> HasSummary = BM.hasSummary();
+      if (HasSummary && *HasSummary) {
+        ModuleMap.insert({I.first(), BM});
+        FoundModule = true;
+        break;
+      }
+    }
+    if (!FoundModule) {
+      errs() << "Error loading imported file '" << I.first()
+             << "': Could not find module summary\n";
+      return;
+    }
+
     OwnedImports.push_back(std::move(*MBOrErr));
   }
   auto AddStream = [&](size_t Task) {

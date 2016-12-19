@@ -4668,12 +4668,6 @@ static void handleUuidAttr(Sema &S, Decl *D, const AttributeList &Attr) {
     return;
   }
 
-  if (!isa<CXXRecordDecl>(D)) {
-    S.Diag(Attr.getLoc(), diag::warn_attribute_wrong_decl_type)
-      << Attr.getName() << ExpectedClass;
-    return;
-  }
-
   StringRef StrRef;
   SourceLocation LiteralLoc;
   if (!S.checkStringLiteralArgumentAttr(Attr, 0, StrRef, &LiteralLoc))
@@ -5692,8 +5686,9 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     handleSimpleAttribute<NoThrowAttr>(S, D, Attr);
     break;
   case AttributeList::AT_CUDAShared:
-    //handleSharedAttr(S, D, Attr);
-    handleSimpleAttributeWithExclusions<CUDASharedAttr, CUDAConstantAttr>(S, D, Attr);
+    // handleSharedAttr(S, D, Attr);
+    handleSimpleAttributeWithExclusions<CUDASharedAttr, CUDAConstantAttr>(S, D,
+                                                                          Attr);
     break;
   case AttributeList::AT_VecReturn:
     handleVecReturnAttr(S, D, Attr);

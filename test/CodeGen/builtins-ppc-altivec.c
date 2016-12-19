@@ -89,6 +89,43 @@ void test1() {
 // CHECK-NOALTIVEC: error: use of undeclared identifier 'vf'
 // CHECK-NOALTIVEC: vf = vec_abs(vf) 
 
+  vsc = vec_nabs(vsc);
+// CHECK: sub <16 x i8> zeroinitializer
+// CHECK: @llvm.ppc.altivec.vminsb
+// CHECK-LE: sub <16 x i8> zeroinitializer
+// CHECK-LE: @llvm.ppc.altivec.vminsb
+
+  vs = vec_nabs(vs);
+// CHECK: sub <8 x i16> zeroinitializer
+// CHECK: @llvm.ppc.altivec.vminsh
+// CHECK-LE: sub <8 x i16> zeroinitializer
+// CHECK-LE: @llvm.ppc.altivec.vminsh
+
+  vi = vec_nabs(vi);
+// CHECK: sub <4 x i32> zeroinitializer
+// CHECK: @llvm.ppc.altivec.vminsw
+// CHECK-LE: sub <4 x i32> zeroinitializer
+// CHECK-LE: @llvm.ppc.altivec.vminsw
+
+  res_vi = vec_neg(vi);
+// CHECK: sub <4 x i32> zeroinitializer, {{%[0-9]+}}
+// CHECK-LE: sub <4 x i32> zeroinitializer, {{%[0-9]+}}
+// CHECK-NOALTIVEC: error: use of undeclared identifier 'vi'
+// CHECK-NOALTIVEC: vi = vec_neg(vi);
+
+  res_vs = vec_neg(vs);
+// CHECK: sub <8 x i16> zeroinitializer, {{%[0-9]+}}
+// CHECK-LE: sub <8 x i16> zeroinitializer, {{%[0-9]+}}
+// CHECK-NOALTIVEC: error: use of undeclared identifier 'vs'
+// CHECK-NOALTIVEC: res_vs = vec_neg(vs);
+
+  res_vsc = vec_neg(vsc);
+// CHECK: sub <16 x i8> zeroinitializer, {{%[0-9]+}}
+// CHECK-LE: sub <16 x i8> zeroinitializer, {{%[0-9]+}}
+// CHECK-NOALTIVEC: error: use of undeclared identifier 'vsc'
+// CHECK-NOALTIVEC: res_vsc = vec_neg(vsc);
+
+
   /* vec_abs */
   vsc = vec_abss(vsc);
 // CHECK: @llvm.ppc.altivec.vsubsbs
@@ -184,6 +221,22 @@ void test1() {
   res_vf  = vec_add(vf, vf);
 // CHECK: fadd <4 x float>
 // CHECK-LE: fadd <4 x float>
+
+  res_vi  = vec_adde(vi, vi, vi);
+// CHECK: and <4 x i32>
+// CHECK: add <4 x i32>
+// CHECK: add <4 x i32>
+// CHECK-LE: and <4 x i32>
+// CHECK-LE: add <4 x i32>
+// CHECK-LE: add <4 x i32>
+
+  res_vui  = vec_adde(vui, vui, vui);
+// CHECK: and <4 x i32>
+// CHECK: add <4 x i32>
+// CHECK: add <4 x i32>
+// CHECK-LE: and <4 x i32>
+// CHECK-LE: add <4 x i32>
+// CHECK-LE: add <4 x i32>
 
   res_vsc = vec_vaddubm(vsc, vsc);
 // CHECK: add <16 x i8>
@@ -5273,6 +5326,8 @@ void test6() {
 // CHECK: fsub <4 x float>
 // CHECK-LE: fsub <4 x float>
 
+  
+
   res_vsc = vec_vsububm(vsc, vsc);
 // CHECK: sub <16 x i8>
 // CHECK-LE: sub <16 x i8>
@@ -5354,6 +5409,10 @@ void test6() {
 // CHECK: @llvm.ppc.altivec.vsubcuw
 // CHECK-LE: @llvm.ppc.altivec.vsubcuw
 
+  res_vi = vec_subc(vi, vi);
+// CHECK: @llvm.ppc.altivec.vsubcuw
+// CHECK-LE: @llvm.ppc.altivec.vsubcuw
+
   res_vui = vec_vsubcuw(vui, vui);
 // CHECK: @llvm.ppc.altivec.vsubcuw
 // CHECK-LE: @llvm.ppc.altivec.vsubcuw
@@ -5430,6 +5489,26 @@ void test6() {
   res_vui = vec_subs(vui, vbi);
 // CHECK: @llvm.ppc.altivec.vsubuws
 // CHECK-LE: @llvm.ppc.altivec.vsubuws
+
+  res_vi = vec_sube(vi, vi, vi);
+// CHECK: and <4 x i32>
+// CHECK: xor <4 x i32> {{%[0-9]+}}, <i32 -1, i32 -1, i32 -1, i32 -1>
+// CHECK: add <4 x i32>
+// CHECK: add <4 x i32>
+// CHECK-LE: and <4 x i32>
+// CHECK-LE: xor <4 x i32> {{%[0-9]+}}, <i32 -1, i32 -1, i32 -1, i32 -1>
+// CHECK-LE: add <4 x i32>
+// CHECK-LE: add <4 x i32>
+
+  res_vui = vec_sube(vui, vui, vui);
+// CHECK: and <4 x i32>
+// CHECK: xor <4 x i32> {{%[0-9]+}}, <i32 -1, i32 -1, i32 -1, i32 -1>
+// CHECK: add <4 x i32>
+// CHECK: add <4 x i32>
+// CHECK-LE: and <4 x i32>
+// CHECK-LE: xor <4 x i32> {{%[0-9]+}}, <i32 -1, i32 -1, i32 -1, i32 -1>
+// CHECK-LE: add <4 x i32>
+// CHECK-LE: add <4 x i32>
 
   res_vsc = vec_vsubsbs(vsc, vsc);
 // CHECK: @llvm.ppc.altivec.vsubsbs
@@ -9275,7 +9354,7 @@ void test9() {
   // CHECK-LE: load <4 x float>, <4 x float>* %{{[0-9]+}}, align 16
 }
 
-/* ------------------------------ vec_xst ------------------------------------ */
+/* ------------------------------ vec_xst ----------------------------------- */
 void test10() {
   // CHECK-LABEL: define void @test10
   // CHECK-LE-LABEL: define void @test10
@@ -9306,4 +9385,78 @@ void test10() {
   vec_xst(vf, param_sll, &param_f);
   // CHECK: store <4 x float> %{{[0-9]+}}, <4 x float>* %{{[0-9]+}}, align 16
   // CHECK-LE: store <4 x float> %{{[0-9]+}}, <4 x float>* %{{[0-9]+}}, align 16
+}
+
+/* ----------------------------- vec_xl_be ---------------------------------- */
+void test11() {
+  // CHECK-LABEL: define void @test11
+  // CHECK-LE-LABEL: define void @test11
+  res_vsc = vec_xl_be(param_sll, &param_sc);
+  // CHECK: load <16 x i8>, <16 x i8>* %{{[0-9]+}}, align 16
+  // CHECK-LE: call <2 x double> @llvm.ppc.vsx.lxvd2x.be(i8* %{{[0-9]+}})
+  // CHECK-LE: shufflevector <16 x i8> %{{[0-9]+}}, <16 x i8> %{{[0-9]+}}, <16 x i32> <i32 7, i32 6, i32 5, i32 4, i32 3, i32 2, i32 1, i32 0, i32 15, i32 14, i32 13, i32 12, i32 11, i32 10, i32 9, i32 8>
+
+  res_vuc = vec_xl_be(param_sll, &param_uc);
+  // CHECK: load <16 x i8>, <16 x i8>* %{{[0-9]+}}, align 16
+  // CHECK-LE: call <2 x double> @llvm.ppc.vsx.lxvd2x.be(i8* %{{[0-9]+}})
+  // CHECK-LE: shufflevector <16 x i8> %{{[0-9]+}}, <16 x i8> %{{[0-9]+}}, <16 x i32> <i32 7, i32 6, i32 5, i32 4, i32 3, i32 2, i32 1, i32 0, i32 15, i32 14, i32 13, i32 12, i32 11, i32 10, i32 9, i32 8>
+
+  res_vs = vec_xl_be(param_sll, &param_s);
+  // CHECK: load <8 x i16>, <8 x i16>* %{{[0-9]+}}, align 16
+  // CHECK-LE: call <2 x double> @llvm.ppc.vsx.lxvd2x.be(i8* %{{[0-9]+}})
+  // CHECK-LE: shufflevector <8 x i16> %{{[0-9]+}}, <8 x i16> %{{[0-9]+}}, <8 x i32> <i32 3, i32 2, i32 1, i32 0, i32 7, i32 6, i32 5, i32 4>
+
+  res_vus = vec_xl_be(param_sll, &param_us);
+  // CHECK: load <8 x i16>, <8 x i16>* %{{[0-9]+}}, align 16
+  // CHECK-LE: call <2 x double> @llvm.ppc.vsx.lxvd2x.be(i8* %{{[0-9]+}})
+  // CHECK-LE: shufflevector <8 x i16> %{{[0-9]+}}, <8 x i16> %{{[0-9]+}}, <8 x i32> <i32 3, i32 2, i32 1, i32 0, i32 7, i32 6, i32 5, i32 4>
+
+  res_vi = vec_xl_be(param_sll, &param_i);
+  // CHECK: load <4 x i32>, <4 x i32>* %{{[0-9]+}}, align 16
+  // CHECK-LE: call <4 x i32> @llvm.ppc.vsx.lxvw4x.be(i8* %{{[0-9]+}})
+
+  res_vui = vec_xl_be(param_sll, &param_ui);
+  // CHECK: load <4 x i32>, <4 x i32>* %{{[0-9]+}}, align 16
+  // CHECK-LE: call <4 x i32> @llvm.ppc.vsx.lxvw4x.be(i8* %{{[0-9]+}})
+
+  res_vf = vec_xl_be(param_sll, &param_f);
+  // CHECK: load <4 x float>, <4 x float>* %{{[0-9]+}}, align 16
+  // CHECK-LE: call <4 x i32> @llvm.ppc.vsx.lxvw4x.be(i8* %{{[0-9]+}})
+}
+
+/* ----------------------------- vec_xst_be --------------------------------- */
+void test12() {
+  // CHECK-LABEL: define void @test12
+  // CHECK-LE-LABEL: define void @test12
+  vec_xst_be(vsc, param_sll, &param_sc);
+  // CHECK: store <16 x i8> %{{[0-9]+}}, <16 x i8>* %{{[0-9]+}}, align 16
+  // CHECK-LE: shufflevector <16 x i8> %{{[0-9]+}}, <16 x i8> %{{[0-9]+}}, <16 x i32> <i32 7, i32 6, i32 5, i32 4, i32 3, i32 2, i32 1, i32 0, i32 15, i32 14, i32 13, i32 12, i32 11, i32 10, i32 9, i32 8>
+  // CHECK-LE: call void @llvm.ppc.vsx.stxvd2x.be(<2 x double> %{{[0-9]+}}, i8* %{{[0-9]+}})
+
+  vec_xst_be(vuc, param_sll, &param_uc);
+  // CHECK: store <16 x i8> %{{[0-9]+}}, <16 x i8>* %{{[0-9]+}}, align 16
+  // CHECK-LE: shufflevector <16 x i8> %{{[0-9]+}}, <16 x i8> %{{[0-9]+}}, <16 x i32> <i32 7, i32 6, i32 5, i32 4, i32 3, i32 2, i32 1, i32 0, i32 15, i32 14, i32 13, i32 12, i32 11, i32 10, i32 9, i32 8>
+  // CHECK-LE: call void @llvm.ppc.vsx.stxvd2x.be(<2 x double> %{{[0-9]+}}, i8* %{{[0-9]+}})
+
+  vec_xst_be(vs, param_sll, &param_s);
+  // CHECK: store <8 x i16> %{{[0-9]+}}, <8 x i16>* %{{[0-9]+}}, align 16
+  // CHECK-LE: shufflevector <8 x i16> %{{[0-9]+}}, <8 x i16> %{{[0-9]+}}, <8 x i32> <i32 3, i32 2, i32 1, i32 0, i32 7, i32 6, i32 5, i32 4>
+  // CHECK-LE: call void @llvm.ppc.vsx.stxvd2x.be(<2 x double> %{{[0-9]+}}, i8* %{{[0-9]+}})
+
+  vec_xst_be(vus, param_sll, &param_us);
+  // CHECK: store <8 x i16> %{{[0-9]+}}, <8 x i16>* %{{[0-9]+}}, align 16
+  // CHECK-LE: shufflevector <8 x i16> %{{[0-9]+}}, <8 x i16> %{{[0-9]+}}, <8 x i32> <i32 3, i32 2, i32 1, i32 0, i32 7, i32 6, i32 5, i32 4>
+  // CHECK-LE: call void @llvm.ppc.vsx.stxvd2x.be(<2 x double> %{{[0-9]+}}, i8* %{{[0-9]+}})
+
+  vec_xst_be(vi, param_sll, &param_i);
+  // CHECK: store <4 x i32> %{{[0-9]+}}, <4 x i32>* %{{[0-9]+}}, align 16
+  // CHECK-LE: call void @llvm.ppc.vsx.stxvw4x.be(<4 x i32> %{{[0-9]+}}, i8* %{{[0-9]+}})
+
+  vec_xst_be(vui, param_sll, &param_ui);
+  // CHECK: store <4 x i32> %{{[0-9]+}}, <4 x i32>* %{{[0-9]+}}, align 16
+  // CHECK-LE: call void @llvm.ppc.vsx.stxvw4x.be(<4 x i32> %{{[0-9]+}}, i8* %{{[0-9]+}})
+
+  vec_xst_be(vf, param_sll, &param_f);
+  // CHECK: store <4 x float> %{{[0-9]+}}, <4 x float>* %{{[0-9]+}}, align 16
+  // CHECK-LE: call void @llvm.ppc.vsx.stxvw4x.be(<4 x i32> %{{[0-9]+}}, i8* %{{[0-9]+}})
 }

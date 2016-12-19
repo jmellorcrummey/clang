@@ -1013,8 +1013,9 @@ public:
         case LookupResult::FoundOverloaded:
         case LookupResult::FoundUnresolvedValue: {
           NamedDecl *SomeDecl = Result.getRepresentativeDecl();
-          Sema::NonTagKind NTK = SemaRef.getNonTagTypeDeclKind(SomeDecl);
-          SemaRef.Diag(IdLoc, diag::err_tag_reference_non_tag) << NTK;
+          Sema::NonTagKind NTK = SemaRef.getNonTagTypeDeclKind(SomeDecl, Kind);
+          SemaRef.Diag(IdLoc, diag::err_tag_reference_non_tag) << SomeDecl
+                                                               << NTK << Kind;
           SemaRef.Diag(SomeDecl->getLocation(), diag::note_declared_at);
           break;
         }
@@ -1059,7 +1060,8 @@ public:
   QualType RebuildAtomicType(QualType ValueType, SourceLocation KWLoc);
 
   /// \brief Build a new pipe type given its value type.
-  QualType RebuildPipeType(QualType ValueType, SourceLocation KWLoc);
+  QualType RebuildPipeType(QualType ValueType, SourceLocation KWLoc,
+                           bool isReadPipe);
 
   /// \brief Build a new template name given a nested name specifier, a flag
   /// indicating whether the "template" keyword was provided, and the template
@@ -3218,6 +3220,9 @@ ExprResult TreeTransform<Derived>::TransformInitializer(Expr *Init,
 
   if (ExprWithCleanups *ExprTemp = dyn_cast<ExprWithCleanups>(Init))
     Init = ExprTemp->getSubExpr();
+
+  if (auto *AIL = dyn_cast<ArrayInitLoopExpr>(Init))
+    Init = AIL->getCommonExpr();
 
   if (MaterializeTemporaryExpr *MTE = dyn_cast<MaterializeTemporaryExpr>(Init))
     Init = MTE->GetTemporaryExpr();
@@ -5483,7 +5488,9 @@ QualType TreeTransform<Derived>::TransformPipeType(TypeLocBuilder &TLB,
 
   QualType Result = TL.getType();
   if (getDerived().AlwaysRebuild() || ValueType != TL.getValueLoc().getType()) {
-    Result = getDerived().RebuildPipeType(ValueType, TL.getKWLoc());
+    const PipeType *PT = Result->getAs<PipeType>();
+    bool isReadPipe = PT->isReadOnly();
+    Result = getDerived().RebuildPipeType(ValueType, TL.getKWLoc(), isReadPipe);
     if (Result.isNull())
       return QualType();
   }
@@ -5703,7 +5710,8 @@ TreeTransform<Derived>::TransformElaboratedType(TypeLocBuilder &TLB,
               Template.getAsTemplateDecl())) {
         SemaRef.Diag(TL.getNamedTypeLoc().getBeginLoc(),
                      diag::err_tag_reference_non_tag)
-            << Sema::NTK_TypeAliasTemplate;
+            << TAT << Sema::NTK_TypeAliasTemplate
+            << ElaboratedType::getTagTypeKindForKeyword(T->getKeyword());
         SemaRef.Diag(TAT->getLocation(), diag::note_declared_at);
       }
     }
@@ -7698,23 +7706,33 @@ StmtResult TreeTransform<Derived>::TransformOMPTeamsDistributeSimdDirective(
 }
 
 template <typename Derived>
-StmtResult TreeTransform<Derived>::TransformOMPTargetTeamsDirective(
-    OMPTargetTeamsDirective *D) {
+StmtResult TreeTransform<Derived>::TransformOMPTeamsDistributeParallelForSimdDirective(
+    OMPTeamsDistributeParallelForSimdDirective *D) {
   DeclarationNameInfo DirName;
-  getDerived().getSema().StartOpenMPDSABlock(OMPD_target_teams, DirName,
-                                             nullptr, D->getLocStart());
+  getDerived().getSema().StartOpenMPDSABlock(
+      OMPD_teams_distribute_parallel_for_simd, DirName, nullptr, D->getLocStart());
   StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
   getDerived().getSema().EndOpenMPDSABlock(Res.get());
   return Res;
 }
 
 template <typename Derived>
-StmtResult
-TreeTransform<Derived>::TransformOMPTeamsDistributeParallelForDirective(
+StmtResult TreeTransform<Derived>::TransformOMPTeamsDistributeParallelForDirective(
     OMPTeamsDistributeParallelForDirective *D) {
   DeclarationNameInfo DirName;
-  getDerived().getSema().StartOpenMPDSABlock(
-      OMPD_teams_distribute_parallel_for, DirName, nullptr, D->getLocStart());
+  getDerived().getSema().StartOpenMPDSABlock(OMPD_teams_distribute_parallel_for,
+      DirName, nullptr, D->getLocStart());
+  StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
+  getDerived().getSema().EndOpenMPDSABlock(Res.get());
+  return Res;
+}
+
+template <typename Derived>
+StmtResult TreeTransform<Derived>::TransformOMPTargetTeamsDirective(
+    OMPTargetTeamsDirective *D) {
+  DeclarationNameInfo DirName;
+  getDerived().getSema().StartOpenMPDSABlock(OMPD_target_teams, DirName,
+                                             nullptr, D->getLocStart());
   StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
   getDerived().getSema().EndOpenMPDSABlock(Res.get());
   return Res;
@@ -7764,19 +7782,6 @@ TreeTransform<Derived>::TransformOMPTargetTeamsDistributeSimdDirective(
   DeclarationNameInfo DirName;
   getDerived().getSema().StartOpenMPDSABlock(
       OMPD_target_teams_distribute_simd, DirName, nullptr, D->getLocStart());
-  StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
-  getDerived().getSema().EndOpenMPDSABlock(Res.get());
-  return Res;
-}
-
-template <typename Derived>
-StmtResult
-TreeTransform<Derived>::TransformOMPTeamsDistributeParallelForSimdDirective(
-    OMPTeamsDistributeParallelForSimdDirective *D) {
-  DeclarationNameInfo DirName;
-  getDerived().getSema().StartOpenMPDSABlock(
-      OMPD_teams_distribute_parallel_for_simd, DirName, nullptr,
-      D->getLocStart());
   StmtResult Res = getDerived().TransformOMPExecutableDirective(D);
   getDerived().getSema().EndOpenMPDSABlock(Res.get());
   return Res;
@@ -9099,6 +9104,20 @@ ExprResult
 TreeTransform<Derived>::TransformNoInitExpr(
     NoInitExpr *E) {
   llvm_unreachable("Unexpected NoInitExpr in syntactic form of initializer");
+  return ExprError();
+}
+
+template<typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformArrayInitLoopExpr(ArrayInitLoopExpr *E) {
+  llvm_unreachable("Unexpected ArrayInitLoopExpr outside of initializer");
+  return ExprError();
+}
+
+template<typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformArrayInitIndexExpr(ArrayInitIndexExpr *E) {
+  llvm_unreachable("Unexpected ArrayInitIndexExpr outside of initializer");
   return ExprError();
 }
 
@@ -11924,8 +11943,10 @@ QualType TreeTransform<Derived>::RebuildAtomicType(QualType ValueType,
 
 template<typename Derived>
 QualType TreeTransform<Derived>::RebuildPipeType(QualType ValueType,
-                                                   SourceLocation KWLoc) {
-  return SemaRef.BuildPipeType(ValueType, KWLoc);
+                                                 SourceLocation KWLoc,
+                                                 bool isReadPipe) {
+  return isReadPipe ? SemaRef.BuildReadPipeType(ValueType, KWLoc)
+                    : SemaRef.BuildWritePipeType(ValueType, KWLoc);
 }
 
 template<typename Derived>

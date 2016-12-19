@@ -395,7 +395,8 @@ void Sema::CheckExtraCXXDefaultArguments(Declarator &D) {
            ++argIdx) {
         ParmVarDecl *Param = cast<ParmVarDecl>(chunk.Fun.Params[argIdx].Param);
         if (Param->hasUnparsedDefaultArg()) {
-          CachedTokens *Toks = chunk.Fun.Params[argIdx].DefaultArgTokens;
+          std::unique_ptr<CachedTokens> Toks =
+              std::move(chunk.Fun.Params[argIdx].DefaultArgTokens);
           SourceRange SR;
           if (Toks->size() > 1)
             SR = SourceRange((*Toks)[1].getLocation(),
@@ -404,8 +405,6 @@ void Sema::CheckExtraCXXDefaultArguments(Declarator &D) {
             SR = UnparsedDefaultArgLocs[Param];
           Diag(Param->getLocation(), diag::err_param_default_argument_nonfunc)
             << SR;
-          delete Toks;
-          chunk.Fun.Params[argIdx].DefaultArgTokens = nullptr;
         } else if (Param->getDefaultArg()) {
           Diag(Param->getLocation(), diag::err_param_default_argument_nonfunc)
             << Param->getDefaultArg()->getSourceRange();
@@ -815,7 +814,7 @@ Sema::ActOnDecompositionDeclarator(Scope *S, Declarator &D,
 
 static bool checkSimpleDecomposition(
     Sema &S, ArrayRef<BindingDecl *> Bindings, ValueDecl *Src,
-    QualType DecompType, llvm::APSInt NumElems, QualType ElemType,
+    QualType DecompType, const llvm::APSInt &NumElems, QualType ElemType,
     llvm::function_ref<ExprResult(SourceLocation, Expr *, unsigned)> GetInit) {
   if ((int64_t)Bindings.size() != NumElems) {
     S.Diag(Src->getLocation(), diag::err_decomp_decl_wrong_number_bindings)
@@ -842,7 +841,7 @@ static bool checkSimpleDecomposition(
 static bool checkArrayLikeDecomposition(Sema &S,
                                         ArrayRef<BindingDecl *> Bindings,
                                         ValueDecl *Src, QualType DecompType,
-                                        llvm::APSInt NumElems,
+                                        const llvm::APSInt &NumElems,
                                         QualType ElemType) {
   return checkSimpleDecomposition(
       S, Bindings, Src, DecompType, NumElems, ElemType,
@@ -984,11 +983,8 @@ static IsTupleLike isTupleLike(Sema &S, SourceLocation Loc, QualType T,
   if (lookupStdTypeTraitMember(S, R, Loc, "tuple_size", Args, /*DiagID*/0))
     return IsTupleLike::NotTupleLike;
 
-  // FIXME: According to the standard, we're not supposed to diagnose if any
-  // of the steps below fail (or if lookup for ::value is ambiguous or otherwise
-  // results in an error), but this is subject to a pending CWG issue / NB
-  // comment, which says we do diagnose if tuple_size<T> is complete but
-  // tuple_size<T>::value is not an ICE.
+  // If we get this far, we've committed to the tuple interpretation, but
+  // we can still fail if there actually isn't a usable ::value.
 
   struct ICEDiagnoser : Sema::VerifyICEDiagnoser {
     LookupResult &R;
@@ -1065,7 +1061,7 @@ struct BindingDiagnosticTrap {
 static bool checkTupleLikeDecomposition(Sema &S,
                                         ArrayRef<BindingDecl *> Bindings,
                                         VarDecl *Src, QualType DecompType,
-                                        llvm::APSInt TupleSize) {
+                                        const llvm::APSInt &TupleSize) {
   if ((int64_t)Bindings.size() != TupleSize) {
     S.Diag(Src->getLocation(), diag::err_decomp_decl_wrong_number_bindings)
         << DecompType << (unsigned)Bindings.size() << TupleSize.toString(10)
@@ -4250,98 +4246,30 @@ BuildImplicitMemberInitializer(Sema &SemaRef, CXXConstructorDecl *Constructor,
       CtorArg = CastForMoving(SemaRef, CtorArg.get());
     }
 
-    // When the field we are copying is an array, create index variables for 
-    // each dimension of the array. We use these index variables to subscript
-    // the source array, and other clients (e.g., CodeGen) will perform the
-    // necessary iteration with these index variables.
-    SmallVector<VarDecl *, 4> IndexVariables;
-    QualType BaseType = Field->getType();
-    QualType SizeType = SemaRef.Context.getSizeType();
-    bool InitializingArray = false;
-    while (const ConstantArrayType *Array
-                          = SemaRef.Context.getAsConstantArrayType(BaseType)) {
-      InitializingArray = true;
-      // Create the iteration variable for this array index.
-      IdentifierInfo *IterationVarName = nullptr;
-      {
-        SmallString<8> Str;
-        llvm::raw_svector_ostream OS(Str);
-        OS << "__i" << IndexVariables.size();
-        IterationVarName = &SemaRef.Context.Idents.get(OS.str());
-      }
-      VarDecl *IterationVar
-        = VarDecl::Create(SemaRef.Context, SemaRef.CurContext, Loc, Loc,
-                          IterationVarName, SizeType,
-                        SemaRef.Context.getTrivialTypeSourceInfo(SizeType, Loc),
-                          SC_None);
-      IndexVariables.push_back(IterationVar);
-      
-      // Create a reference to the iteration variable.
-      ExprResult IterationVarRef
-        = SemaRef.BuildDeclRefExpr(IterationVar, SizeType, VK_LValue, Loc);
-      assert(!IterationVarRef.isInvalid() &&
-             "Reference to invented variable cannot fail!");
-      IterationVarRef = SemaRef.DefaultLvalueConversion(IterationVarRef.get());
-      assert(!IterationVarRef.isInvalid() &&
-             "Conversion of invented variable cannot fail!");
+    InitializedEntity Entity =
+        Indirect ? InitializedEntity::InitializeMember(Indirect, nullptr,
+                                                       /*Implicit*/ true)
+                 : InitializedEntity::InitializeMember(Field, nullptr,
+                                                       /*Implicit*/ true);
 
-      // Subscript the array with this iteration variable.
-      CtorArg = SemaRef.CreateBuiltinArraySubscriptExpr(CtorArg.get(), Loc,
-                                                        IterationVarRef.get(),
-                                                        Loc);
-      if (CtorArg.isInvalid())
-        return true;
-
-      BaseType = Array->getElementType();
-    }
-
-    // The array subscript expression is an lvalue, which is wrong for moving.
-    if (Moving && InitializingArray)
-      CtorArg = CastForMoving(SemaRef, CtorArg.get());
-
-    // Construct the entity that we will be initializing. For an array, this
-    // will be first element in the array, which may require several levels
-    // of array-subscript entities. 
-    SmallVector<InitializedEntity, 4> Entities;
-    Entities.reserve(1 + IndexVariables.size());
-    if (Indirect)
-      Entities.push_back(InitializedEntity::InitializeMember(Indirect));
-    else
-      Entities.push_back(InitializedEntity::InitializeMember(Field));
-    for (unsigned I = 0, N = IndexVariables.size(); I != N; ++I)
-      Entities.push_back(InitializedEntity::InitializeElement(SemaRef.Context,
-                                                              0,
-                                                              Entities.back()));
-    
     // Direct-initialize to use the copy constructor.
     InitializationKind InitKind =
       InitializationKind::CreateDirect(Loc, SourceLocation(), SourceLocation());
     
     Expr *CtorArgE = CtorArg.getAs<Expr>();
-    InitializationSequence InitSeq(SemaRef, Entities.back(), InitKind,
-                                   CtorArgE);
-
-    ExprResult MemberInit
-      = InitSeq.Perform(SemaRef, Entities.back(), InitKind, 
-                        MultiExprArg(&CtorArgE, 1));
+    InitializationSequence InitSeq(SemaRef, Entity, InitKind, CtorArgE);
+    ExprResult MemberInit =
+        InitSeq.Perform(SemaRef, Entity, InitKind, MultiExprArg(&CtorArgE, 1));
     MemberInit = SemaRef.MaybeCreateExprWithCleanups(MemberInit);
     if (MemberInit.isInvalid())
       return true;
 
-    if (Indirect) {
-      assert(IndexVariables.size() == 0 && 
-             "Indirect field improperly initialized");
-      CXXMemberInit
-        = new (SemaRef.Context) CXXCtorInitializer(SemaRef.Context, Indirect, 
-                                                   Loc, Loc, 
-                                                   MemberInit.getAs<Expr>(), 
-                                                   Loc);
-    } else
-      CXXMemberInit = CXXCtorInitializer::Create(SemaRef.Context, Field, Loc, 
-                                                 Loc, MemberInit.getAs<Expr>(), 
-                                                 Loc,
-                                                 IndexVariables.data(),
-                                                 IndexVariables.size());
+    if (Indirect)
+      CXXMemberInit = new (SemaRef.Context) CXXCtorInitializer(
+          SemaRef.Context, Indirect, Loc, Loc, MemberInit.getAs<Expr>(), Loc);
+    else
+      CXXMemberInit = new (SemaRef.Context) CXXCtorInitializer(
+          SemaRef.Context, Field, Loc, Loc, MemberInit.getAs<Expr>(), Loc);
     return false;
   }
 
@@ -4352,9 +4280,11 @@ BuildImplicitMemberInitializer(Sema &SemaRef, CXXConstructorDecl *Constructor,
     SemaRef.Context.getBaseElementType(Field->getType());
   
   if (FieldBaseElementType->isRecordType()) {
-    InitializedEntity InitEntity 
-      = Indirect? InitializedEntity::InitializeMember(Indirect)
-                : InitializedEntity::InitializeMember(Field);
+    InitializedEntity InitEntity =
+        Indirect ? InitializedEntity::InitializeMember(Indirect, nullptr,
+                                                       /*Implicit*/ true)
+                 : InitializedEntity::InitializeMember(Field, nullptr,
+                                                       /*Implicit*/ true);
     InitializationKind InitKind = 
       InitializationKind::CreateDefault(Loc);
 
@@ -6101,7 +6031,8 @@ void Sema::EvaluateImplicitExceptionSpec(SourceLocation Loc, CXXMethodDecl *MD) 
     return;
 
   // Evaluate the exception specification.
-  auto ESI = computeImplicitExceptionSpec(*this, Loc, MD).getExceptionSpec();
+  auto IES = computeImplicitExceptionSpec(*this, Loc, MD);
+  auto ESI = IES.getExceptionSpec();
 
   // Update the type of the special member to use it.
   UpdateExceptionSpec(MD, ESI);
@@ -6299,8 +6230,8 @@ void Sema::CheckExplicitlyDefaultedMemberExceptionSpec(
   CallingConv CC = Context.getDefaultCallingConvention(/*IsVariadic=*/false,
                                                        /*IsCXXMethod=*/true);
   FunctionProtoType::ExtProtoInfo EPI(CC);
-  EPI.ExceptionSpec = computeImplicitExceptionSpec(*this, MD->getLocation(), MD)
-                          .getExceptionSpec();
+  auto IES = computeImplicitExceptionSpec(*this, MD->getLocation(), MD);
+  EPI.ExceptionSpec = IES.getExceptionSpec();
   const FunctionProtoType *ImplicitType = cast<FunctionProtoType>(
     Context.getFunctionType(Context.VoidTy, None, EPI));
 
@@ -6712,10 +6643,15 @@ bool Sema::ShouldDeleteSpecialMember(CXXMethodDecl *MD, CXXSpecialMember CSM,
       (CSM == CXXCopyConstructor || CSM == CXXCopyAssignment)) {
     CXXMethodDecl *UserDeclaredMove = nullptr;
 
-    // In Microsoft mode, a user-declared move only causes the deletion of the
-    // corresponding copy operation, not both copy operations.
+    // In Microsoft mode up to MSVC 2013, a user-declared move only causes the
+    // deletion of the corresponding copy operation, not both copy operations.
+    // MSVC 2015 has adopted the standards conforming behavior.
+    bool DeletesOnlyMatchingCopy =
+        getLangOpts().MSVCCompat &&
+        !getLangOpts().isCompatibleWithMSVC(LangOptions::MSVC2015);
+
     if (RD->hasUserDeclaredMoveConstructor() &&
-        (!getLangOpts().MSVCCompat || CSM == CXXCopyConstructor)) {
+        (!DeletesOnlyMatchingCopy || CSM == CXXCopyConstructor)) {
       if (!Diagnose) return true;
 
       // Find any user-declared move constructor.
@@ -6727,7 +6663,7 @@ bool Sema::ShouldDeleteSpecialMember(CXXMethodDecl *MD, CXXSpecialMember CSM,
       }
       assert(UserDeclaredMove);
     } else if (RD->hasUserDeclaredMoveAssignment() &&
-               (!getLangOpts().MSVCCompat || CSM == CXXCopyAssignment)) {
+               (!DeletesOnlyMatchingCopy || CSM == CXXCopyAssignment)) {
       if (!Diagnose) return true;
 
       // Find any user-declared move assignment operator.
@@ -7391,6 +7327,17 @@ void Sema::AddImplicitlyDeclaredMembersToClass(CXXRecordDecl *ClassDecl) {
     // of it now.
     if (ClassDecl->needsOverloadResolutionForCopyConstructor() ||
         ClassDecl->hasInheritedConstructor())
+      DeclareImplicitCopyConstructor(ClassDecl);
+    // For the MS ABI we need to know whether the copy ctor is deleted. A
+    // prerequisite for deleting the implicit copy ctor is that the class has a
+    // move ctor or move assignment that is either user-declared or whose
+    // semantics are inherited from a subobject. FIXME: We should provide a more
+    // direct way for CodeGen to ask whether the constructor was deleted.
+    else if (Context.getTargetInfo().getCXXABI().isMicrosoft() &&
+             (ClassDecl->hasUserDeclaredMoveConstructor() ||
+              ClassDecl->needsOverloadResolutionForMoveConstructor() ||
+              ClassDecl->hasUserDeclaredMoveAssignment() ||
+              ClassDecl->needsOverloadResolutionForMoveAssignment()))
       DeclareImplicitCopyConstructor(ClassDecl);
   }
 
@@ -10350,7 +10297,7 @@ void Sema::ActOnFinishCXXMemberDecls() {
   }
 }
 
-static void getDefaultArgExprsForConstructors(Sema &S, CXXRecordDecl *Class) {
+static void checkDefaultArgExprsForConstructors(Sema &S, CXXRecordDecl *Class) {
   // Don't do anything for template patterns.
   if (Class->getDescribedClassTemplate())
     return;
@@ -10364,7 +10311,7 @@ static void getDefaultArgExprsForConstructors(Sema &S, CXXRecordDecl *Class) {
     if (!CD) {
       // Recurse on nested classes.
       if (auto *NestedRD = dyn_cast<CXXRecordDecl>(Member))
-        getDefaultArgExprsForConstructors(S, NestedRD);
+        checkDefaultArgExprsForConstructors(S, NestedRD);
       continue;
     } else if (!CD->isDefaultConstructor() || !CD->hasAttr<DLLExportAttr>()) {
       continue;
@@ -10389,14 +10336,9 @@ static void getDefaultArgExprsForConstructors(Sema &S, CXXRecordDecl *Class) {
     LastExportedDefaultCtor = CD;
 
     for (unsigned I = 0; I != NumParams; ++I) {
-      // Skip any default arguments that we've already instantiated.
-      if (S.Context.getDefaultArgExprForConstructor(CD, I))
-        continue;
-
-      Expr *DefaultArg = S.BuildCXXDefaultArgExpr(Class->getLocation(), CD,
-                                                  CD->getParamDecl(I)).get();
+      (void)S.CheckCXXDefaultArgExpr(Class->getLocation(), CD,
+                                     CD->getParamDecl(I));
       S.DiscardCleanupsInEvaluationContext();
-      S.Context.addDefaultArgExprForConstructor(CD, I, DefaultArg);
     }
   }
 }
@@ -10408,7 +10350,7 @@ void Sema::ActOnFinishCXXNonNestedClass(Decl *D) {
   // have default arguments or don't use the standard calling convention are
   // wrapped with a thunk called the default constructor closure.
   if (RD && Context.getTargetInfo().getCXXABI().isMicrosoft())
-    getDefaultArgExprsForConstructors(*this, RD);
+    checkDefaultArgExprsForConstructors(*this, RD);
 
   referenceDLLExportedClassMethods();
 }
@@ -12363,14 +12305,9 @@ ExprResult Sema::BuildCXXDefaultInitExpr(SourceLocation Loc, FieldDecl *Field) {
   // constructor before the initializer is lexically complete will ultimately
   // come here at which point we can diagnose it.
   RecordDecl *OutermostClass = ParentRD->getOuterLexicalRecordContext();
-  if (OutermostClass == ParentRD) {
-    Diag(Field->getLocEnd(), diag::err_in_class_initializer_not_yet_parsed)
-        << ParentRD << Field;
-  } else {
-    Diag(Field->getLocEnd(),
-         diag::err_in_class_initializer_not_yet_parsed_outer_class)
-        << ParentRD << OutermostClass << Field;
-  }
+  Diag(Loc, diag::err_in_class_initializer_not_yet_parsed)
+      << OutermostClass << Field;
+  Diag(Field->getLocEnd(), diag::note_in_class_initializer_not_yet_parsed);
 
   return ExprError();
 }
@@ -14275,6 +14212,8 @@ bool Sema::DefineUsedVTables() {
     CXXRecordDecl *Class = VTableUses[I].first->getDefinition();
     if (!Class)
       continue;
+    TemplateSpecializationKind ClassTSK =
+        Class->getTemplateSpecializationKind();
 
     SourceLocation Loc = VTableUses[I].second;
 
@@ -14298,9 +14237,8 @@ bool Sema::DefineUsedVTables() {
       // of an explicit instantiation declaration, suppress the
       // vtable; it will live with the explicit instantiation
       // definition.
-      bool IsExplicitInstantiationDeclaration
-        = Class->getTemplateSpecializationKind()
-                                      == TSK_ExplicitInstantiationDeclaration;
+      bool IsExplicitInstantiationDeclaration =
+          ClassTSK == TSK_ExplicitInstantiationDeclaration;
       for (auto R : Class->redecls()) {
         TemplateSpecializationKind TSK
           = cast<CXXRecordDecl>(R)->getTemplateSpecializationKind();
@@ -14333,17 +14271,20 @@ bool Sema::DefineUsedVTables() {
     if (VTablesUsed[Canonical])
       Consumer.HandleVTable(Class);
 
-    // Optionally warn if we're emitting a weak vtable.
-    if (Class->isExternallyVisible() &&
-        Class->getTemplateSpecializationKind() != TSK_ImplicitInstantiation) {
+    // Warn if we're emitting a weak vtable. The vtable will be weak if there is
+    // no key function or the key function is inlined. Don't warn in C++ ABIs
+    // that lack key functions, since the user won't be able to make one.
+    if (Context.getTargetInfo().getCXXABI().hasKeyFunctions() &&
+        Class->isExternallyVisible() && ClassTSK != TSK_ImplicitInstantiation) {
       const FunctionDecl *KeyFunctionDef = nullptr;
-      if (!KeyFunction || 
-          (KeyFunction->hasBody(KeyFunctionDef) && 
-           KeyFunctionDef->isInlined()))
-        Diag(Class->getLocation(), Class->getTemplateSpecializationKind() ==
-             TSK_ExplicitInstantiationDefinition 
-             ? diag::warn_weak_template_vtable : diag::warn_weak_vtable) 
-          << Class;
+      if (!KeyFunction || (KeyFunction->hasBody(KeyFunctionDef) &&
+                           KeyFunctionDef->isInlined())) {
+        Diag(Class->getLocation(),
+             ClassTSK == TSK_ExplicitInstantiationDefinition
+                 ? diag::warn_weak_template_vtable
+                 : diag::warn_weak_vtable)
+            << Class;
+      }
     }
   }
   VTableUses.clear();

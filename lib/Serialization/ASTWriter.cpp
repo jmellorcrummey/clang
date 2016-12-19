@@ -516,6 +516,7 @@ ASTTypeWriter::VisitAtomicType(const AtomicType *T) {
 void
 ASTTypeWriter::VisitPipeType(const PipeType *T) {
   Record.AddTypeRef(T->getElementType());
+  Record.push_back(T->isReadOnly());
   Code = TYPE_PIPE;
 }
 
@@ -5587,13 +5588,8 @@ EmitCXXCtorInitializers(ASTWriter &W,
     Writer.AddSourceLocation(Init->getLParenLoc());
     Writer.AddSourceLocation(Init->getRParenLoc());
     Writer.push_back(Init->isWritten());
-    if (Init->isWritten()) {
+    if (Init->isWritten())
       Writer.push_back(Init->getSourceOrder());
-    } else {
-      Writer.push_back(Init->getNumArrayIndices());
-      for (auto *VD : Init->getArrayIndices())
-        Writer.AddDeclRef(VD);
-    }
   }
 
   return Writer.Emit(serialization::DECL_CXX_CTOR_INITIALIZERS);

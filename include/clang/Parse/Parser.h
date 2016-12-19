@@ -74,7 +74,8 @@ class Parser : public CodeCompletionHandler {
   // a statement).
   SourceLocation PrevTokLocation;
 
-  unsigned short ParenCount, BracketCount, BraceCount;
+  unsigned short ParenCount = 0, BracketCount = 0, BraceCount = 0;
+  unsigned short MisplacedModuleBeginCount = 0;
 
   /// Actions - These are the callbacks we invoke as we parse various constructs
   /// in the file.
@@ -1017,8 +1018,8 @@ private:
   /// (C++ [class.mem]p2).
   struct LateParsedDefaultArgument {
     explicit LateParsedDefaultArgument(Decl *P,
-                                       CachedTokens *Toks = nullptr)
-      : Param(P), Toks(Toks) { }
+                                       std::unique_ptr<CachedTokens> Toks = nullptr)
+      : Param(P), Toks(std::move(Toks)) { }
 
     /// Param - The parameter declaration for this parameter.
     Decl *Param;
@@ -1027,7 +1028,7 @@ private:
     /// argument expression, not including the '=' or the terminating
     /// ')' or ','. This will be NULL for parameters that have no
     /// default argument.
-    CachedTokens *Toks;
+    std::unique_ptr<CachedTokens> Toks;
   };
 
   /// LateParsedMethodDeclaration - A method declaration inside a class that
@@ -1528,8 +1529,6 @@ private:
                                       bool *MayBePseudoDestructor = nullptr,
                                       bool IsTypename = false,
                                       IdentifierInfo **LastII = nullptr);
-
-  void CheckForLParenAfterColonColon();
 
   //===--------------------------------------------------------------------===//
   // C++0x 5.1.2: Lambda expressions

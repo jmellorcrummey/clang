@@ -718,6 +718,7 @@ static void maybeSynthesizeBlockSignature(TypeProcessingState &state,
       /*NumExceptions=*/0,
       /*NoexceptExpr=*/nullptr,
       /*ExceptionSpecTokens=*/nullptr,
+      /*DeclsInPrototype=*/None,
       loc, loc, declarator));
 
   // For consistency, make sure the state still has us as processing
@@ -1209,19 +1210,19 @@ TypeResult Sema::actOnObjCTypeArgsAndProtocolQualifiers(
   return CreateParsedType(Result, ResultTInfo);
 }
 
-static StringRef getImageAccessAttrStr(AttributeList *attrs) {
-  if (attrs) {
-
-    AttributeList *Next;
+static OpenCLAccessAttr::Spelling getImageAccess(const AttributeList *Attrs) {
+  if (Attrs) {
+    const AttributeList *Next = Attrs;
     do {
-      AttributeList &Attr = *attrs;
+      const AttributeList &Attr = *Next;
       Next = Attr.getNext();
       if (Attr.getKind() == AttributeList::AT_OpenCLAccess) {
-        return Attr.getName()->getName();
+        return static_cast<OpenCLAccessAttr::Spelling>(
+            Attr.getSemanticSpelling());
       }
     } while (Next);
   }
-  return "";
+  return OpenCLAccessAttr::Keyword_read_only;
 }
 
 /// \brief Convert the specified declspec to the appropriate type
@@ -1402,8 +1403,7 @@ static QualType ConvertDeclSpecToType(TypeProcessingState &state) {
       Result = Context.DoubleTy;
 
     if (S.getLangOpts().OpenCL &&
-        !((S.getLangOpts().OpenCLVersion >= 120) ||
-          S.getOpenCLOptions().cl_khr_fp64)) {
+        !(S.getOpenCLOptions().cl_khr_fp64)) {
       S.Diag(DS.getTypeSpecTypeLoc(), diag::err_type_requires_extension)
           << Result << "cl_khr_fp64";
       declarator.setInvalidType(true);
@@ -1619,11 +1619,14 @@ static QualType ConvertDeclSpecToType(TypeProcessingState &state) {
 
 #define GENERIC_IMAGE_TYPE(ImgType, Id) \
   case DeclSpec::TST_##ImgType##_t: \
-    Result = llvm::StringSwitch<QualType>( \
-                 getImageAccessAttrStr(DS.getAttributes().getList())) \
-                 .Cases("write_only", "__write_only", Context.Id##WOTy) \
-                 .Cases("read_write", "__read_write", Context.Id##RWTy) \
-                 .Default(Context.Id##ROTy); \
+    switch (getImageAccess(DS.getAttributes().getList())) { \
+    case OpenCLAccessAttr::Keyword_write_only: \
+      Result = Context.Id##WOTy; break; \
+    case OpenCLAccessAttr::Keyword_read_write: \
+      Result = Context.Id##RWTy; break; \
+    case OpenCLAccessAttr::Keyword_read_only: \
+      Result = Context.Id##ROTy; break; \
+    } \
     break;
 #include "clang/Basic/OpenCLImageTypes.def"
 
@@ -2037,7 +2040,7 @@ QualType Sema::BuildReferenceType(QualType T, bool SpelledAsLValue,
   return Context.getRValueReferenceType(T);
 }
 
-/// \brief Build a Pipe type.
+/// \brief Build a Read-only Pipe type.
 ///
 /// \param T The type to which we'll be building a Pipe.
 ///
@@ -2045,11 +2048,20 @@ QualType Sema::BuildReferenceType(QualType T, bool SpelledAsLValue,
 ///
 /// \returns A suitable pipe type, if there are no errors. Otherwise, returns a
 /// NULL type.
-QualType Sema::BuildPipeType(QualType T, SourceLocation Loc) {
-  assert(!T->isObjCObjectType() && "Should build ObjCObjectPointerType");
+QualType Sema::BuildReadPipeType(QualType T, SourceLocation Loc) {
+  return Context.getReadPipeType(T);
+}
 
-  // Build the pipe type.
-  return Context.getPipeType(T);
+/// \brief Build a Write-only Pipe type.
+///
+/// \param T The type to which we'll be building a Pipe.
+///
+/// \param Loc We do not use it for now.
+///
+/// \returns A suitable pipe type, if there are no errors. Otherwise, returns a
+/// NULL type.
+QualType Sema::BuildWritePipeType(QualType T, SourceLocation Loc) {
+  return Context.getWritePipeType(T);
 }
 
 /// Check whether the specified array size makes the array type a VLA.  If so,
@@ -4308,6 +4320,19 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
       if (FTI.isAmbiguous)
         warnAboutAmbiguousFunction(S, D, DeclType, T);
 
+      // GNU warning -Wstrict-prototypes
+      //   Warn if a function declaration is without a prototype.
+      //   This warning is issued for all kinds of unprototyped function
+      //   declarations (i.e. function type typedef, function pointer etc.)
+      //   C99 6.7.5.3p14:
+      //   The empty list in a function declarator that is not part of a
+      //   definition of that function specifies that no information
+      //   about the number or types of the parameters is supplied.
+      if (D.getFunctionDefinitionKind() == FDK_Declaration &&
+          FTI.NumParams == 0 && !LangOpts.CPlusPlus)
+        S.Diag(DeclType.Loc, diag::warn_strict_prototypes)
+            << 0 << FixItHint::CreateInsertion(FTI.getRParenLoc(), "void");
+
       FunctionType::ExtInfo EI(getCCForDeclaratorChunk(S, D, FTI, chunkIndex));
 
       if (!FTI.NumParams && !FTI.isVariadic && !LangOpts.CPlusPlus) {
@@ -4444,7 +4469,7 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
         if (FTI.getExceptionSpecType() == EST_Dynamic) {
           // FIXME: It's rather inefficient to have to split into two vectors
           // here.
-          unsigned N = FTI.NumExceptions;
+          unsigned N = FTI.getNumExceptions();
           DynamicExceptions.reserve(N);
           DynamicExceptionRanges.reserve(N);
           for (unsigned I = 0; I != N; ++I) {
@@ -4528,7 +4553,9 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
     }
 
     case DeclaratorChunk::Pipe: {
-      T = S.BuildPipeType(T, DeclType.Loc );
+      T = S.BuildReadPipeType(T, DeclType.Loc);
+      processTypeAttrs(state, T, TAL_DeclSpec,
+                       D.getDeclSpec().getAttributes().getList());
       break;
     }
     }
@@ -6678,6 +6705,11 @@ static void HandleOpenCLAccessAttr(QualType &CurType, const AttributeList &Attr,
 
     S.Diag(TypedefTy->getDecl()->getLocStart(),
        diag::note_opencl_typedef_access_qualifier) << PrevAccessQual;
+  } else if (CurType->isPipeType()) {
+    if (Attr.getSemanticSpelling() == OpenCLAccessAttr::Keyword_write_only) {
+      QualType ElemType = CurType->getAs<PipeType>()->getElementType();
+      CurType = S.Context.getWritePipeType(ElemType);
+    }
   }
 }
 

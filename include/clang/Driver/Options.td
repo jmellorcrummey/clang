@@ -266,6 +266,8 @@ def MF : JoinedOrSeparate<["-"], "MF">, Group<M_Group>,
     MetaVarName<"<file>">;
 def MG : Flag<["-"], "MG">, Group<M_Group>, Flags<[CC1Option]>,
     HelpText<"Add missing headers to depfile">;
+def MJ : JoinedOrSeparate<["-"], "MJ">, Group<M_Group>,
+    HelpText<"Write a compilation database entry per input">;
 def MP : Flag<["-"], "MP">, Group<M_Group>, Flags<[CC1Option]>,
     HelpText<"Create phony target for each dependency (other than main file)">;
 def MQ : JoinedOrSeparate<["-"], "MQ">, Group<M_Group>, Flags<[CC1Option]>,
@@ -412,6 +414,9 @@ def cuda_compile_host_device : Flag<["--"], "cuda-compile-host-device">,
            "effect on non-CUDA compilations.">;
 def cuda_gpu_arch_EQ : Joined<["--"], "cuda-gpu-arch=">, Flags<[DriverOption]>,
   HelpText<"CUDA GPU architecture (e.g. sm_35).  May be specified more than once.">;
+def no_cuda_gpu_arch_EQ : Joined<["--"], "no-cuda-gpu-arch=">, Flags<[DriverOption]>,
+  HelpText<"Remove GPU architecture (e.g. sm_35) from the list of GPUs to compile for. "
+           "'all' resets the list to its default value.">;
 def cuda_noopt_device_debug : Flag<["--"], "cuda-noopt-device-debug">,
   HelpText<"Enable device-side debug info generation. Disables ptxas optimizations.">;
 def no_cuda_version_check : Flag<["--"], "no-cuda-version-check">,
@@ -429,6 +434,8 @@ def fno_cuda_approx_transcendentals : Flag<["-"], "fno-cuda-approx-transcendenta
 def dA : Flag<["-"], "dA">, Group<d_Group>;
 def dD : Flag<["-"], "dD">, Group<d_Group>, Flags<[CC1Option]>,
   HelpText<"Print macro definitions in -E mode in addition to normal output">;
+def dI : Flag<["-"], "dI">, Group<d_Group>, Flags<[CC1Option]>,
+  HelpText<"Print include directives in -E mode in addition to normal output">;
 def dM : Flag<["-"], "dM">, Group<d_Group>, Flags<[CC1Option]>,
   HelpText<"Print macro definitions in -E mode instead of normal output">;
 def dead__strip : Flag<["-"], "dead_strip">;
@@ -508,15 +515,15 @@ def fprofile_sample_use_EQ : Joined<["-"], "fprofile-sample-use=">,
 def fauto_profile_EQ : Joined<["-"], "fauto-profile=">,
     Alias<fprofile_sample_use_EQ>;
 def fprofile_instr_generate : Flag<["-"], "fprofile-instr-generate">,
-    Group<f_Group>, Flags<[DriverOption]>,
+    Group<f_Group>, Flags<[CoreOption]>,
     HelpText<"Generate instrumented code to collect execution counts into default.profraw file (overriden by '=' form of option or LLVM_PROFILE_FILE env var)">;
 def fprofile_instr_generate_EQ : Joined<["-"], "fprofile-instr-generate=">,
-    Group<f_Group>, Flags<[DriverOption]>, MetaVarName<"<file>">,
+    Group<f_Group>, Flags<[CoreOption]>, MetaVarName<"<file>">,
     HelpText<"Generate instrumented code to collect execution counts into <file> (overridden by LLVM_PROFILE_FILE env var)">;
 def fprofile_instr_use : Flag<["-"], "fprofile-instr-use">, Group<f_Group>,
-    Flags<[DriverOption]>;
+    Flags<[CoreOption]>;
 def fprofile_instr_use_EQ : Joined<["-"], "fprofile-instr-use=">,
-    Group<f_Group>, Flags<[DriverOption]>,
+    Group<f_Group>, Flags<[CoreOption]>,
     HelpText<"Use instrumentation data for profile-guided optimization">;
 def fcoverage_mapping : Flag<["-"], "fcoverage-mapping">,
     Group<f_Group>, Flags<[CC1Option]>,
@@ -1088,10 +1095,6 @@ def : Flag<["-"], "faligned-new">, Alias<faligned_allocation>;
 def : Flag<["-"], "fno-aligned-new">, Alias<fno_aligned_allocation>;
 def faligned_new_EQ : Joined<["-"], "faligned-new=">;
 
-def fobjc_gc_only : Flag<["-"], "fobjc-gc-only">, Group<f_Group>, Flags<[CC1Option]>,
-  HelpText<"Use GC exclusively for Objective-C related memory management">;
-def fobjc_gc : Flag<["-"], "fobjc-gc">, Group<f_Group>, Flags<[CC1Option]>,
-  HelpText<"Enable Objective-C garbage collection">;
 def fobjc_legacy_dispatch : Flag<["-"], "fobjc-legacy-dispatch">, Group<f_Group>;
 def fobjc_new_property : Flag<["-"], "fobjc-new-property">, Group<clang_ignored_f_Group>;
 def fobjc_infer_related_result_type : Flag<["-"], "fobjc-infer-related-result-type">,
@@ -1859,7 +1862,8 @@ def mno_odd_spreg : Flag<["-"], "mno-odd-spreg">, Group<m_Group>,
   Flags<[HelpHidden]>;
 def mglibc : Flag<["-"], "mglibc">, Group<m_libc_Group>, Flags<[HelpHidden]>;
 def muclibc : Flag<["-"], "muclibc">, Group<m_libc_Group>, Flags<[HelpHidden]>;
-def module_file_info : Flag<["-"], "module-file-info">, Flags<[DriverOption,CC1Option]>, Group<Action_Group>;
+def module_file_info : Flag<["-"], "module-file-info">, Flags<[DriverOption,CC1Option]>, Group<Action_Group>,
+  HelpText<"Provide information about a particular module file">;
 def mthumb : Flag<["-"], "mthumb">, Group<m_Group>;
 def mtune_EQ : Joined<["-"], "mtune=">, Group<m_Group>;
 def multi__module : Flag<["-"], "multi_module">;
