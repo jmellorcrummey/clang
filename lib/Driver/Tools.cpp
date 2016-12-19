@@ -12149,6 +12149,9 @@ void NVPTX::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(Args.MakeArgString(gpu_arch));
 
     // add linking against library implementing OpenMP calls on NVPTX target
+    CmdArgs.push_back("-L");
+    std::string library = TC.getDriver().Dir + "/../lib" CLANG_LIBDIR_SUFFIX;
+     CmdArgs.push_back(Args.MakeArgString(library));
     CmdArgs.push_back("-lomptarget-nvptx");
 
     // nvlink relies on the extension used by the input files
